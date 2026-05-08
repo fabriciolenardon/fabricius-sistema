@@ -195,6 +195,7 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   }, [])
 
   const CATEGORIAS = {
+    bovino_mr: '🐄 Media Reses',
     bovino_corte: '🥩 Bovinos — Cortes',
     bovino_brosa: '🫀 Brosas',
     bovino_pieza: '🍖 Piezas',
