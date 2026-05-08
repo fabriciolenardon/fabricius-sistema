@@ -1,5 +1,6 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import { useState } from 'react'
 
 const navItems = [
   { to: '/admin/dashboard',   icon: '📊', label: 'Dashboard' },
@@ -12,6 +13,124 @@ const navItems = [
   { to: '/admin/gastos',      icon: '💸', label: 'Gastos' },
   { to: '/admin/cierre',      icon: '📋', label: 'Cierre' },
 ]
+
+function ChatbotFlotante() {
+  const [abierto, setAbierto] = useState(false)
+  const [msgs, setMsgs] = useState([{ rol: 'ia', texto: '¡Hola Fabricio! 🥩 Soy tu asistente. Puedo ayudarte con precios, clientes, stock, remitos y todo lo que necesites del sistema.' }])
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  async function enviar() {
+    if (!input.trim() || loading) return
+    const pregunta = input.trim()
+    setInput('')
+    setMsgs(m => [...m, { rol: 'user', texto: pregunta }])
+    setLoading(true)
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'openrouter/auto',
+          messages: [
+            { role: 'system', content: `Sos el asistente de Carnicerías Fabricius, una carnicería mayorista argentina. Respondé en español argentino, de forma amigable, directa y sin asteriscos ni markdown. Podés ayudar con:\n- Consultas sobre precios y productos\n- Información sobre clientes y cuentas corrientes\n- Estado del stock del depósito\n- Remitos y despachos\n- Gastos y cierres\n- Cualquier consulta del sistema de gestión\nSi no tenés información específica, indicá al usuario en qué sección del sistema puede encontrarla.` },
+            ...msgs.filter((_, i) => i > 0).map(m => ({ role: m.rol === 'user' ? 'user' : 'assistant', content: m.texto })),
+            { role: 'user', content: pregunta }
+          ]
+        })
+      })
+      const data = await res.json()
+      const respuesta = (data.choices?.[0]?.message?.content || 'No pude procesar tu consulta.')
+        .replace(/\*\*/g, '').replace(/\*/g, '').replace(/#/g, '').trim()
+      setMsgs(m => [...m, { rol: 'ia', texto: respuesta }])
+    } catch (err) {
+      setMsgs(m => [...m, { rol: 'ia', texto: '❌ Error: ' + err.message }])
+    }
+    setLoading(false)
+  }
+
+  return (
+    <>
+      {/* VENTANA CHAT */}
+      {abierto && (
+        <div style={{
+          position: 'fixed', bottom: 90, right: 24, width: 360, height: 480,
+          background: 'var(--surface)', border: '1px solid var(--gold)',
+          borderRadius: 16, zIndex: 1000, display: 'flex', flexDirection: 'column',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.5)'
+        }}>
+          {/* HEADER */}
+          <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface2)', borderRadius: '16px 16px 0 0' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--gold)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>🤖</div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--gold)' }}>Asistente Fabricius</div>
+                <div style={{ fontSize: 10, color: 'var(--green)' }}>● En línea</div>
+              </div>
+            </div>
+            <button onClick={() => setAbierto(false)} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 18, padding: 4 }}>✕</button>
+          </div>
+
+          {/* MENSAJES */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {msgs.map((m, i) => (
+              <div key={i} style={{ display: 'flex', justifyContent: m.rol === 'user' ? 'flex-end' : 'flex-start' }}>
+                <div style={{
+                  maxWidth: '85%', padding: '8px 12px', borderRadius: 10,
+                  background: m.rol === 'user' ? 'var(--gold)' : 'var(--surface2)',
+                  color: m.rol === 'user' ? '#000' : 'var(--text)',
+                  fontSize: 13, lineHeight: 1.5,
+                  border: m.rol === 'ia' ? '1px solid var(--border)' : 'none',
+                  whiteSpace: 'pre-wrap'
+                }}>
+                  {m.texto}
+                </div>
+              </div>
+            ))}
+            {loading && (
+              <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+                <div style={{ padding: '8px 12px', borderRadius: 10, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--muted)', fontSize: 13 }}>
+                  Pensando... ⏳
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* INPUT */}
+          <div style={{ padding: 10, borderTop: '1px solid var(--border)', display: 'flex', gap: 6 }}>
+            <input
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && enviar()}
+              placeholder="Escribí tu consulta..."
+              style={{ flex: 1, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 10px', fontSize: 13, fontFamily: "'DM Sans', sans-serif", outline: 'none' }}
+            />
+            <button onClick={enviar} disabled={loading}
+              style={{ padding: '8px 12px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>
+              ➤
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* BOTÓN FLOTANTE */}
+      <button
+        onClick={() => setAbierto(!abierto)}
+        style={{
+          position: 'fixed', bottom: 24, right: 24,
+          width: 56, height: 56, borderRadius: '50%',
+          background: abierto ? 'var(--surface2)' : 'var(--gold)',
+          border: `2px solid ${abierto ? 'var(--gold)' : 'transparent'}`,
+          cursor: 'pointer', zIndex: 1001,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 24, boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+          transition: 'all 0.2s'
+        }}>
+        {abierto ? '✕' : '🤖'}
+      </button>
+    </>
+  )
+}
 
 export default function AdminLayout() {
   const { profile, signOut } = useAuth()
@@ -75,6 +194,7 @@ export default function AdminLayout() {
           <Outlet />
         </div>
       </main>
+      <ChatbotFlotante />
     </div>
   )
 }
