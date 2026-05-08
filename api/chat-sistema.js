@@ -41,7 +41,7 @@ Sos el asistente inteligente de Carnicerías Fabricius. Tenés acceso a todos lo
 - Cerdo: ${Math.max(0, stockCerdo).toFixed(1)} kg
 
 === CLIENTES Y SALDOS ===
-${clientes.map(c => `- ${c.nombre}: saldo $${Math.round(c.saldo || 0).toLocaleString('es-AR')} ${c.saldo > 0 ? '(DEBE)' : c.saldo < 0 ? '(A FAVOR)' : '(AL DÍA)'}`).join('\n')}
+${clientes.map(c => `- ${c.nombre}: ${c.saldo > 0 ? `debe $${Math.round(c.saldo).toLocaleString('es-AR')}` : c.saldo < 0 ? `tiene saldo a favor de $${Math.round(Math.abs(c.saldo)).toLocaleString('es-AR')}` : 'está al día, saldo cero'}`).join('\n')}
 
 === PRECIOS ACTUALES ===
 ${precios.map(p => `- ${p.nombre} (${p.categoria}): Carn $${p.precio_carniceria || '—'} / May $${p.precio_mayorista || '—'} / Min $${p.precio_minorista || '—'}`).join('\n')}
