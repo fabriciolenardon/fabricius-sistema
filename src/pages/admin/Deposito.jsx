@@ -182,12 +182,16 @@ function EntradaForm({ onSaved, showAlert }) {
 }
 
 function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
-  const [form, setForm] = useState({ destino: 'MITRE', clienteNombre: '', domicilio: '', fecha: new Date().toISOString().split('T')[0], categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
+  const [form, setForm] = useState({ destino: 'MITRE', clienteId: '', clienteNombre: '', domicilio: '', fecha: new Date().toISOString().split('T')[0], categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
   const [items, setItems] = useState([])
   const [todosPrecios, setTodosPrecios] = useState([])
+  const [clientes, setClientes] = useState([])
+  const [busqueda, setBusqueda] = useState('')
+  const [mostrarClientes, setMostrarClientes] = useState(false)
 
   useEffect(() => {
     supabase.from('precios').select('*').order('nombre').then(({ data }) => setTodosPrecios(data || []))
+    supabase.from('clientes').select('*').order('nombre').then(({ data }) => setClientes(data || []))
   }, [])
 
   const CATEGORIAS = {
@@ -202,8 +206,16 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
 
   const categorias = [...new Set(todosPrecios.map(p => p.categoria))]
   const productosFiltrados = todosPrecios.filter(p => p.categoria === form.categoria)
+  const clientesFiltrados = clientes.filter(c => c.nombre.toLowerCase().includes(busqueda.toLowerCase()))
+  const esClienteExterno = ['carniceria', 'mayorista'].includes(form.destino)
 
   function getLista(dest) { return dest === 'mayorista' ? 'precio_mayorista' : 'precio_carniceria' }
+
+  function seleccionarCliente(c) {
+    setForm(f => ({ ...f, clienteId: c.id, clienteNombre: c.nombre, domicilio: c.domicilio || '' }))
+    setBusqueda(c.nombre)
+    setMostrarClientes(false)
+  }
 
   function onProductoChange(id) {
     if (!id) return
@@ -224,7 +236,7 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
       tipo: form.categoria
     }
     setItems(prev => [...prev, item])
-    setForm(f => ({ ...f, kg: '', productoId: '', precio: '' }))
+    setForm(f => ({ ...f, kg: '', productoId: '', precio: '', categoria: '' }))
   }
 
   function quitarItem(idx) { setItems(prev => prev.filter((_, i) => i !== idx)) }
@@ -233,24 +245,57 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
 
   async function guardar() {
     if (items.length === 0) { showAlert({ type: 'error', msg: 'Agregá al menos un producto' }); return }
+
+    const nombreCliente = form.clienteNombre || form.destino
+
+    // 1. Guardar salidas de depósito
     for (const item of items) {
       await supabase.from('salidas_deposito').insert({
-        fecha: form.fecha, cliente_nombre: form.clienteNombre || form.destino,
+        fecha: form.fecha, cliente_nombre: nombreCliente,
         tipo: item.tipo, descripcion: item.descripcion,
         kg: item.kg, precio_kg: item.precio,
         total: item.importe, lista: getLista(form.destino),
         cobro: form.cobro, notas: form.notas
       })
     }
+
+    // 2. Guardar remito
     const { data: remitoData } = await supabase.from('remitos').insert({
-      fecha: form.fecha, cliente_nombre: form.clienteNombre || form.destino,
-      domicilio: form.domicilio, items, total, cobro: form.cobro, notas: form.notas
+      fecha: form.fecha,
+      cliente_nombre: nombreCliente,
+      cliente_id: form.clienteId || null,
+      domicilio: form.domicilio,
+      items,
+      total,
+      cobro: form.cobro,
+      notas: form.notas
     }).select().single()
+
+    // 3. Si hay cliente vinculado, cargar en su cuenta corriente
+    if (form.clienteId) {
+      const { data: clienteActual } = await supabase.from('clientes').select('saldo').eq('id', form.clienteId).single()
+      const saldoActual = clienteActual?.saldo || 0
+      const nuevoSaldo = saldoActual + total
+
+      await supabase.from('movimientos_ctacte').insert({
+        cliente_id: form.clienteId,
+        fecha: form.fecha,
+        tipo: 'compra',
+        descripcion: `Remito N° ${String(remitoData?.numero || '').padStart(5, '0')} — ${items.map(i => i.descripcion).join(', ')}`,
+        debe: total,
+        haber: 0,
+        saldo: nuevoSaldo,
+        remito_id: remitoData?.id || null
+      })
+
+      await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', form.clienteId)
+    }
 
     showAlert({ type: 'success', msg: '✅ Despacho registrado — Remito generado' })
     onRemito(remitoData)
     setItems([])
-    setForm(f => ({ ...f, kg: '', notas: '', clienteNombre: '', domicilio: '', productoId: '', precio: '' }))
+    setBusqueda('')
+    setForm({ destino: 'MITRE', clienteId: '', clienteNombre: '', domicilio: '', fecha: new Date().toISOString().split('T')[0], categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
     onSaved()
     setTimeout(() => { showAlert(null); setTab('remitos') }, 1500)
   }
@@ -261,7 +306,7 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
         <div className="card-title">Registrar despacho</div>
         <div className="form-row">
           <div className="form-group"><label>Destino</label>
-            <select value={form.destino} onChange={e => setForm(f => ({ ...f, destino: e.target.value }))}>
+            <select value={form.destino} onChange={e => setForm(f => ({ ...f, destino: e.target.value, clienteId: '', clienteNombre: '' }))}>
               <option value="MITRE">Local Mitre</option>
               <option value="CENTRO">Centro (asociado)</option>
               <option value="MONTE CRISTO">Monte Cristo (asociado)</option>
@@ -273,14 +318,43 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
             <input type="date" value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} />
           </div>
         </div>
+
+        {esClienteExterno && (
+          <div style={{ position: 'relative', marginBottom: 12 }}>
+            <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Buscar cliente</label>
+            <input
+              value={busqueda}
+              onChange={e => { setBusqueda(e.target.value); setMostrarClientes(true); setForm(f => ({ ...f, clienteId: '', clienteNombre: e.target.value })) }}
+              onFocus={() => setMostrarClientes(true)}
+              placeholder="Escribí el nombre del cliente..."
+              style={{ background: 'var(--surface)', border: '1px solid var(--gold)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }}
+            />
+            {mostrarClientes && clientesFiltrados.length > 0 && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, zIndex: 100, maxHeight: 200, overflowY: 'auto' }}>
+                {clientesFiltrados.map(c => (
+                  <div key={c.id} onClick={() => seleccionarCliente(c)}
+                    style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between' }}
+                    onMouseOver={e => e.currentTarget.style.background = 'var(--surface2)'}
+                    onMouseOut={e => e.currentTarget.style.background = 'transparent'}>
+                    <span style={{ fontWeight: 600 }}>{c.nombre}</span>
+                    <span style={{ fontSize: 11, color: 'var(--muted)' }}>{c.tipo}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {form.clienteId && <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 4 }}>✅ Cliente vinculado — el remito se cargará en su cuenta corriente</div>}
+          </div>
+        )}
+
         <div className="form-row">
-          <div className="form-group"><label>Señor/a</label>
-            <input placeholder="Nombre del cliente" value={form.clienteNombre} onChange={e => setForm(f => ({ ...f, clienteNombre: e.target.value }))} />
+          <div className="form-group"><label>Señor/a {!esClienteExterno && '(nombre)'}</label>
+            <input placeholder="Nombre" value={form.clienteNombre} onChange={e => setForm(f => ({ ...f, clienteNombre: e.target.value }))} disabled={!!form.clienteId} style={{ opacity: form.clienteId ? 0.6 : 1 }} />
           </div>
           <div className="form-group"><label>Domicilio</label>
             <input placeholder="Dirección" value={form.domicilio} onChange={e => setForm(f => ({ ...f, domicilio: e.target.value }))} />
           </div>
         </div>
+
         <div className="form-row">
           <div className="form-group"><label>Categoría</label>
             <select value={form.categoria} onChange={e => setForm(f => ({ ...f, categoria: e.target.value, productoId: '', precio: '' }))}>
@@ -295,6 +369,7 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
             </select>
           </div>
         </div>
+
         <div className="form-row">
           <div className="form-group"><label>Kg</label>
             <input type="number" step="0.1" placeholder="0" value={form.kg} onChange={e => setForm(f => ({ ...f, kg: e.target.value }))} />
@@ -303,6 +378,7 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
             <input type="number" value={form.precio} onChange={e => setForm(f => ({ ...f, precio: e.target.value }))} style={{ borderColor: 'var(--gold)' }} />
           </div>
         </div>
+
         <button className="btn btn-ghost" onClick={agregarItem} style={{ marginBottom: 16 }}>➕ Agregar producto al remito</button>
 
         {items.length > 0 && (
@@ -364,38 +440,34 @@ function RemitosTab({ remitoActual }) {
     const win = window.open('', '_blank')
     win.document.write(`
       <html>
-      <head>
-        <title>Remito N° ${remito.numero}</title>
-        <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body { font-family: Arial, sans-serif; font-size: 12px; padding: 20px; max-width: 400px; margin: 0 auto; }
-          .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; border-bottom: 2px solid #000; padding-bottom: 12px; }
-          .logo-title { font-size: 22px; font-weight: 900; letter-spacing: 2px; }
-          .logo-sub { font-size: 9px; color: #555; }
-          .doc-no-valido { font-size: 10px; font-weight: 700; text-align: center; border: 1px solid #000; padding: 2px 6px; margin-bottom: 4px; }
-          .remito-title { font-size: 24px; font-weight: 900; font-style: italic; }
-          .nro { font-size: 13px; font-weight: 700; }
-          .direccion { font-size: 10px; color: #444; margin-bottom: 6px; }
-          .telefono { font-size: 11px; font-weight: 700; background: #000; color: #fff; padding: 3px 8px; display: inline-block; border-radius: 4px; margin-bottom: 12px; }
-          .campo { border-bottom: 1px solid #000; margin-bottom: 8px; padding-bottom: 2px; }
-          .campo label { font-size: 10px; font-weight: 700; margin-right: 6px; }
-          table { width: 100%; border-collapse: collapse; margin: 12px 0; }
-          th { border: 1px solid #000; padding: 4px; text-align: center; font-size: 10px; font-weight: 700; background: #f0f0f0; }
-          td { border: 1px solid #000; padding: 4px; text-align: center; font-size: 11px; }
-          td.desc { text-align: left; }
-          .total-row { display: flex; justify-content: flex-end; margin-top: 8px; }
-          .total-box { border: 1px solid #000; padding: 6px 12px; font-size: 13px; font-weight: 700; }
-          .firma { margin-top: 40px; border-top: 1px solid #000; padding-top: 4px; text-align: center; font-size: 10px; color: #555; }
-          @media print { body { padding: 10px; } }
-        </style>
-      </head>
+      <head><title>Remito N° ${remito.numero}</title>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; font-size: 12px; padding: 20px; max-width: 400px; margin: 0 auto; }
+        .header { display: flex; justify-content: space-between; margin-bottom: 16px; border-bottom: 2px solid #000; padding-bottom: 12px; }
+        .logo-title { font-size: 22px; font-weight: 900; letter-spacing: 2px; }
+        .logo-sub { font-size: 9px; color: #555; }
+        .doc-no-valido { font-size: 10px; font-weight: 700; border: 1px solid #000; padding: 2px 6px; margin-bottom: 4px; text-align:center; }
+        .remito-title { font-size: 24px; font-weight: 900; font-style: italic; }
+        .nro { font-size: 13px; font-weight: 700; }
+        .campo { border-bottom: 1px solid #000; margin-bottom: 8px; padding-bottom: 2px; }
+        .campo label { font-size: 10px; font-weight: 700; margin-right: 6px; }
+        table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+        th { border: 1px solid #000; padding: 4px; text-align: center; font-size: 10px; font-weight: 700; background: #f0f0f0; }
+        td { border: 1px solid #000; padding: 4px; text-align: center; font-size: 11px; }
+        td.desc { text-align: left; }
+        .total-row { display: flex; justify-content: flex-end; margin-top: 8px; }
+        .total-box { border: 1px solid #000; padding: 6px 12px; font-size: 13px; font-weight: 700; }
+        .firma { margin-top: 40px; border-top: 1px solid #000; padding-top: 4px; text-align: center; font-size: 10px; color: #555; }
+        @media print { body { padding: 10px; } }
+      </style></head>
       <body>
         <div class="header">
           <div>
             <div class="logo-title">FABRICIUS</div>
             <div class="logo-sub">CARNICERÍAS · PREMIUM QUALITY</div>
-            <div class="direccion">📍 Casa Central: Av. Mitre 670 - Río Primero, Córdoba</div>
-            <div class="telefono">📱 3574 400346</div>
+            <div style="font-size:10px;color:#444;margin-top:4px">📍 Casa Central: Av. Mitre 670 - Río Primero, Córdoba</div>
+            <div style="font-size:11px;font-weight:700;background:#000;color:#fff;padding:3px 8px;display:inline-block;border-radius:4px;margin-top:4px">📱 3574 400346</div>
           </div>
           <div style="text-align:right">
             <div class="doc-no-valido">X — DOCUMENTO NO VÁLIDO COMO FACTURA</div>
@@ -407,33 +479,26 @@ function RemitosTab({ remitoActual }) {
         <div class="campo"><label>Señor/a:</label>${remito.cliente_nombre || ''}</div>
         <div class="campo"><label>Domicilio:</label>${remito.domicilio || ''}</div>
         <table>
-          <thead>
-            <tr>
-              <th style="width:40%">DESCRIPCIÓN</th>
-              <th style="width:15%">KG</th>
-              <th style="width:22%">PRECIO UNITARIO</th>
-              <th style="width:23%">IMPORTE</th>
-            </tr>
-          </thead>
+          <thead><tr>
+            <th style="width:40%">DESCRIPCIÓN</th>
+            <th style="width:15%">KG</th>
+            <th style="width:22%">PRECIO UNITARIO</th>
+            <th style="width:23%">IMPORTE</th>
+          </tr></thead>
           <tbody>
-            ${items.map(item => `
-              <tr>
-                <td class="desc">${item.descripcion}</td>
-                <td>${item.kg}</td>
-                <td>$${Math.round(item.precio).toLocaleString('es-AR')}</td>
-                <td>$${Math.round(item.importe).toLocaleString('es-AR')}</td>
-              </tr>
-            `).join('')}
+            ${items.map(item => `<tr>
+              <td class="desc">${item.descripcion}</td>
+              <td>${item.kg}</td>
+              <td>$${Math.round(item.precio).toLocaleString('es-AR')}</td>
+              <td>$${Math.round(item.importe).toLocaleString('es-AR')}</td>
+            </tr>`).join('')}
             ${Array(Math.max(0, 10 - items.length)).fill('<tr><td>&nbsp;</td><td></td><td></td><td></td></tr>').join('')}
           </tbody>
         </table>
-        <div class="total-row">
-          <div class="total-box">TOTAL: $${Math.round(remito.total).toLocaleString('es-AR')}</div>
-        </div>
+        <div class="total-row"><div class="total-box">TOTAL: $${Math.round(remito.total).toLocaleString('es-AR')}</div></div>
         <div class="firma">Firma y aclaración: ________________________________</div>
         <script>window.onload = () => { window.print(); }</script>
-      </body>
-      </html>
+      </body></html>
     `)
     win.document.close()
   }
