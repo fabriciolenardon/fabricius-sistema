@@ -16,8 +16,10 @@ export default async function handler(req, res) {
       body: JSON.stringify(req.body)
     })
     const data = await response.json()
+    console.log('OpenRouter response:', JSON.stringify(data))
     res.status(200).json(data)
   } catch (err) {
+    console.error('Error:', err)
     res.status(500).json({ error: err.message })
   }
 }
