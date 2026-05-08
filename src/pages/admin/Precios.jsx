@@ -84,13 +84,11 @@ export default function Precios() {
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: 'openrouter/auto',
           messages: [
-            { role: 'system', content: `Sos el asistente de Carnicerías Fabricius, una carnicería mayorista argentina. Respondé siempre en español argentino, de forma amigable y directa.\n\nLISTA DE PRECIOS ACTUAL:\n${listaTexto}` },
+            { role: 'system', content: `Sos el asistente de Carnicerías Fabricius, una carnicería mayorista argentina. Respondé siempre en español argentino, de forma amigable y directa.\n\nREGLAS IMPORTANTES:\n1. NUNCA inventes precios. Solo usá los precios de la lista que te doy.\n2. Cuando te pregunten el precio de un producto, mostrá SIEMPRE los 3 precios así:\n🔴 Carnicería: $XX.XXX\n🟡 Mayorista: $XX.XXX\n🟢 Minorista: $XX.XXX\n3. Si el precio es — significa que no aplica para esa lista.\n4. Si no encontrás el producto en la lista, decilo claramente.\n\nLISTA DE PRECIOS ACTUAL (ESTOS SON LOS ÚNICOS PRECIOS VÁLIDOS):\n${listaTexto}` },
             ...chatMsgs.filter((_, i) => i > 0).map(m => ({ role: m.rol === 'user' ? 'user' : 'assistant', content: m.texto })),
             { role: 'user', content: pregunta }
           ]
