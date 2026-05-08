@@ -82,13 +82,10 @@ export default function Precios() {
       `- ${p.nombre} (${CATEGORIAS[p.categoria]}): Carn $${p.precio_carniceria ?? '—'} / May $${p.precio_mayorista ?? '—'} / Min $${p.precio_minorista ?? '—'}`
     ).join('\n')
     try {
-      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      const res = await fetch('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${import.meta.env.VITE_OPENROUTER_KEY}`,
-          'HTTP-Referer': 'https://fabricius-sistema.vercel.app',
-          'X-Title': 'Fabricius Sistema'
         },
         body: JSON.stringify({
           model: 'meta-llama/llama-3.1-8b-instruct:free',
