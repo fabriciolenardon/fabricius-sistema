@@ -1,6 +1,6 @@
 // FranquiciaDashboard.jsx
 import { useEffect, useState } from 'react'
-import { supabase } from '../../lib/supabase'
+import { supabase } from '../../supabaseClient'
 import { useAuth } from '../../context/AuthContext'
 
 function fmt(n) { return '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR') }
@@ -130,8 +130,74 @@ export function FranquiciaRemitos() {
 
   useEffect(() => {
     if (!sucursalNombre) return
-    supabase.from('salidas_deposito').select('*').ilike('cliente_nombre', `%${sucursalNombre}%`).order('fecha', { ascending: false }).then(({ data }) => setRemitos(data || []))
+    supabase.from('remitos').select('*').ilike('cliente_nombre', `%${sucursalNombre}%`).order('created_at', { ascending: false }).then(({ data }) => setRemitos(data || []))
   }, [sucursalNombre])
+
+  function imprimir(remito) {
+    const items = remito.items || []
+    const win = window.open('', '_blank')
+    win.document.write(`
+      <html><head><title>Remito N° ${remito.numero}</title>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; font-size: 12px; padding: 20px; max-width: 400px; margin: 0 auto; }
+        .header { display: flex; justify-content: space-between; margin-bottom: 16px; border-bottom: 2px solid #000; padding-bottom: 12px; }
+        .logo-title { font-size: 22px; font-weight: 900; letter-spacing: 2px; }
+        .doc-no-valido { font-size: 10px; font-weight: 700; border: 1px solid #000; padding: 2px 6px; margin-bottom: 4px; text-align:center; }
+        .remito-title { font-size: 24px; font-weight: 900; font-style: italic; }
+        .campo { border-bottom: 1px solid #000; margin-bottom: 8px; padding-bottom: 2px; }
+        .campo label { font-size: 10px; font-weight: 700; margin-right: 6px; }
+        table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+        th { border: 1px solid #000; padding: 4px; text-align: center; font-size: 10px; font-weight: 700; background: #f0f0f0; }
+        td { border: 1px solid #000; padding: 4px; text-align: center; font-size: 11px; }
+        td.desc { text-align: left; }
+        .total-box { border: 1px solid #000; padding: 6px 12px; font-size: 13px; font-weight: 700; }
+        .firma { margin-top: 40px; border-top: 1px solid #000; padding-top: 4px; text-align: center; font-size: 10px; }
+        @media print { body { padding: 10px; } }
+      </style></head>
+      <body>
+        <div class="header">
+          <div>
+            <div class="logo-title">FABRICIUS</div>
+            <div style="font-size:9px;color:#555">CARNICERÍAS · PREMIUM QUALITY</div>
+            <div style="font-size:10px;color:#444;margin-top:4px">📍 Casa Central: Av. Mitre 670 - Río Primero, Córdoba</div>
+            <div style="font-size:11px;font-weight:700;background:#000;color:#fff;padding:3px 8px;display:inline-block;border-radius:4px;margin-top:4px">📱 3574 400346</div>
+          </div>
+          <div style="text-align:right">
+            <div class="doc-no-valido">X — DOCUMENTO NO VÁLIDO COMO FACTURA</div>
+            <div class="remito-title">REMITO</div>
+            <div style="font-size:13px;font-weight:700">N° ${String(remito.numero).padStart(5, '0')}</div>
+          </div>
+        </div>
+        <div style="font-size:11px;margin-bottom:8px">Fecha: <strong>${remito.fecha}</strong></div>
+        <div class="campo"><label>Señor/a:</label>${remito.cliente_nombre || ''}</div>
+        <div class="campo"><label>Domicilio:</label>${remito.domicilio || ''}</div>
+        <table>
+          <thead><tr>
+            <th style="width:40%">DESCRIPCIÓN</th>
+            <th style="width:15%">KG</th>
+            <th style="width:22%">PRECIO UNITARIO</th>
+            <th style="width:23%">IMPORTE</th>
+          </tr></thead>
+          <tbody>
+            ${items.map(item => `<tr>
+              <td class="desc">${item.descripcion}</td>
+              <td>${item.kg}</td>
+              <td>$${Math.round(item.precio).toLocaleString('es-AR')}</td>
+              <td>$${Math.round(item.importe).toLocaleString('es-AR')}</td>
+            </tr>`).join('')}
+            ${Array(Math.max(0, 10 - items.length)).fill('<tr><td>&nbsp;</td><td></td><td></td><td></td></tr>').join('')}
+          </tbody>
+        </table>
+        <div style="display:flex;justify-content:flex-end;margin-top:8px">
+          <div class="total-box">TOTAL: $${Math.round(remito.total).toLocaleString('es-AR')}</div>
+        </div>
+        <div class="firma">Firma y aclaración: ________________________________</div>
+        <script>window.onload = () => { window.print(); }</script>
+      </body></html>
+    `)
+    win.document.close()
+  }
 
   return (
     <div>
@@ -139,63 +205,19 @@ export function FranquiciaRemitos() {
       <div className="page-sub">Despachos recibidos desde el depósito Fabricius</div>
       <div className="card">
         <table>
-          <thead><tr><th>Fecha</th><th>Producto</th><th>Descripción</th><th>Kg</th><th>Precio/kg</th><th>Total</th></tr></thead>
+          <thead><tr><th>N° Remito</th><th>Fecha</th><th>Total</th><th>Imprimir</th></tr></thead>
           <tbody>
             {remitos.map(r => (
               <tr key={r.id}>
+                <td><strong>N° {String(r.numero).padStart(5, '0')}</strong></td>
                 <td>{r.fecha}</td>
-                <td><span className="badge badge-gold">{r.tipo}</span></td>
-                <td>{r.descripcion}</td>
-                <td>{r.kg} kg</td>
-                <td style={{ color: 'var(--amber)' }}>${Math.round(r.precio_kg || 0).toLocaleString('es-AR')}</td>
                 <td style={{ color: 'var(--gold)', fontWeight: 700 }}>${Math.round(r.total || 0).toLocaleString('es-AR')}</td>
+                <td><button onClick={() => imprimir(r)} style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>🖨️</button></td>
               </tr>
             ))}
-            {remitos.length === 0 && <tr><td colSpan={6} className="empty">Sin remitos registrados aún</td></tr>}
+            {remitos.length === 0 && <tr><td colSpan={4} className="empty">Sin remitos registrados aún</td></tr>}
           </tbody>
         </table>
-      </div>
-    </div>
-  )
-}
-
-export function FranquiciaPrecios() {
-  const precios = [
-    { nombre: 'Media Res Premium (Novillito/Vaquillona)', precio: 10300 },
-    { nombre: 'Cuadril / Nalga / Peceto', precio: 17955 },
-    { nombre: 'Vacío', precio: 16150 },
-    { nombre: 'Costilla', precio: 16625 },
-    { nombre: 'Matambre', precio: 17100 },
-    { nombre: 'Tapa de Asado', precio: 16150 },
-    { nombre: 'Tapa de Nalga', precio: 14630 },
-    { nombre: 'Aguja Especial', precio: 13245 },
-    { nombre: 'Hamburguesa Bovina', precio: 14535 },
-    { nombre: 'Osobuco', precio: 8550 },
-    { nombre: 'Bondiola Cerdo', precio: 7500 },
-    { nombre: 'Chorizo Parrillero', precio: 7300 },
-    { nombre: 'Morcilla', precio: 5500 },
-    { nombre: 'Cajón Pollo INDA x 20kg', precio: 76000 },
-  ]
-  return (
-    <div>
-      <div className="page-title">LISTA DE PRECIOS</div>
-      <div className="page-sub">Precios vigentes — Lista Carnicería Fabricius</div>
-      <div className="card" style={{ borderColor: 'var(--gold)' }}>
-        <div className="card-title">🔴 Precios Carnicería — vigentes</div>
-        <table>
-          <thead><tr><th>Producto</th><th>Precio/kg</th></tr></thead>
-          <tbody>
-            {precios.map((p, i) => (
-              <tr key={i}>
-                <td style={{ fontWeight: 500 }}>{p.nombre}</td>
-                <td style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 20, color: 'var(--gold)' }}>${Math.round(p.precio).toLocaleString('es-AR')}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 16, padding: '10px 0', borderTop: '1px solid var(--border)' }}>
-          Precios actualizados por la administración central de Carnicerias Fabricius. Ante cualquier consulta contactar a Fabricio o Ariel.
-        </div>
       </div>
     </div>
   )
