@@ -88,7 +88,7 @@ export default function Precios() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'meta-llama/llama-3.1-8b-instruct:free',
+          model: 'openrouter/auto',
           messages: [
             { role: 'system', content: `Sos el asistente de Carnicerías Fabricius, una carnicería mayorista argentina. Respondé siempre en español argentino, de forma amigable y directa.\n\nLISTA DE PRECIOS ACTUAL:\n${listaTexto}` },
             ...chatMsgs.filter((_, i) => i > 0).map(m => ({ role: m.rol === 'user' ? 'user' : 'assistant', content: m.texto })),
