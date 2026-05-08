@@ -82,16 +82,25 @@ export default function Precios() {
       `- ${p.nombre} (${CATEGORIAS[p.categoria]}): Carn $${p.precio_carniceria ?? '—'} / May $${p.precio_mayorista ?? '—'} / Min $${p.precio_minorista ?? '—'}`
     ).join('\n')
     try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/models/gemini-pro:generateContent?key=${import.meta.env.VITE_GEMINI_API_KEY}`, {
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${import.meta.env.VITE_OPENROUTER_KEY}`,
+          'HTTP-Referer': 'https://fabricius-sistema.vercel.app',
+          'X-Title': 'Fabricius Sistema'
+        },
         body: JSON.stringify({
-          system_instruction: { parts: [{ text: `Sos el asistente de Carnicerías Fabricius, una carnicería mayorista argentina. Respondé siempre en español argentino, de forma amigable y directa.\n\nLISTA DE PRECIOS ACTUAL:\n${listaTexto}` }] },
-          contents: [{ role: 'user', parts: [{ text: pregunta }] }]
+          model: 'meta-llama/llama-3.1-8b-instruct:free',
+          messages: [
+            { role: 'system', content: `Sos el asistente de Carnicerías Fabricius, una carnicería mayorista argentina. Respondé siempre en español argentino, de forma amigable y directa.\n\nLISTA DE PRECIOS ACTUAL:\n${listaTexto}` },
+            ...chatMsgs.filter((_, i) => i > 0).map(m => ({ role: m.rol === 'user' ? 'user' : 'assistant', content: m.texto })),
+            { role: 'user', content: pregunta }
+          ]
         })
       })
       const data = await res.json()
-      const respuesta = data.candidates?.[0]?.content?.parts?.[0]?.text || JSON.stringify(data)
+      const respuesta = data.choices?.[0]?.message?.content || 'No pude procesar tu consulta.'
       setChatMsgs(m => [...m, { rol: 'ia', texto: respuesta }])
     } catch (err) {
       setChatMsgs(m => [...m, { rol: 'ia', texto: '❌ Error: ' + err.message }])
