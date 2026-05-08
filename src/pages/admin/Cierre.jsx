@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../../lib/supabase'
+import { supabase } from '../../supabaseClient'
 
 function fmt(n) { return '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR') }
 function fmtKg(n) { return parseFloat(n || 0).toFixed(1) + ' kg' }
@@ -31,7 +31,6 @@ export default function Cierre() {
 
   useEffect(() => {
     fetchCierres()
-    // Setear semana actual
     const hoy = new Date()
     const dia = hoy.getDay()
     const lunes = new Date(hoy)
@@ -60,16 +59,11 @@ export default function Cierre() {
     const { totalIngresos, totalEgresos, ganancia } = calcular()
     const mes = form.inicio.substring(0, 7)
     const ingresosCampos = Object.fromEntries([...camposIngresos, ...descuentos].map(c => [c.id, parseFloat(form[c.id]) || 0]))
-
     const { error } = await supabase.from('cierres_semanales').insert({
-      semana_inicio: form.inicio,
-      semana_fin: form.fin,
-      mes,
-      ventas: totalIngresos,
-      compras: parseFloat(form.compras) || 0,
+      semana_inicio: form.inicio, semana_fin: form.fin, mes,
+      ventas: totalIngresos, compras: parseFloat(form.compras) || 0,
       gastos: (parseFloat(form.gastos) || 0) + (parseFloat(form.socios) || 0),
-      sueldos: parseFloat(form.sueldos) || 0,
-      ganancia,
+      sueldos: parseFloat(form.sueldos) || 0, ganancia,
       ingresos: ingresosCampos,
       kg_carne: parseFloat(form.kgCarne) || 0,
       kg_pollo: parseFloat(form.kgPollo) || 0,
@@ -95,7 +89,6 @@ export default function Cierre() {
       <div className="page-title">CIERRE SEMANAL / MENSUAL</div>
       <div className="page-sub">Registrá los resultados financieros de cada semana</div>
 
-      {/* TABS */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
         {[{ id: 'semanal', label: '📋 Cierre semanal' }, { id: 'mensual', label: '📊 Cierre mensual' }, { id: 'historial', label: '📁 Historial' }].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
@@ -105,10 +98,13 @@ export default function Cierre() {
         ))}
       </div>
 
-      {/* ===== SEMANAL ===== */}
       {tab === 'semanal' && (
         <div>
-          {alert && <div className={`alert alert-${alert.type}`}>{alert.msg}</div>}
+          {alert && (
+            <div style={{ background: alert.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${alert.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: alert.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>
+              {alert.msg}
+            </div>
+          )}
 
           <div className="card">
             <div className="card-title">Período</div>
@@ -176,7 +172,6 @@ export default function Cierre() {
             </div>
           </div>
 
-          {/* RESULTADO */}
           <div className="card" style={{ borderColor: 'var(--gold)' }}>
             <div className="card-title">Resultado de la semana</div>
             <div className="grid4" style={{ marginBottom: 20 }}>
@@ -214,7 +209,6 @@ export default function Cierre() {
         </div>
       )}
 
-      {/* ===== MENSUAL ===== */}
       {tab === 'mensual' && (
         <div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 20 }}>
@@ -315,7 +309,6 @@ export default function Cierre() {
         </div>
       )}
 
-      {/* ===== HISTORIAL ===== */}
       {tab === 'historial' && (
         <div className="card">
           <table>
