@@ -16,7 +16,7 @@ const navItems = [
 
 function ChatbotFlotante() {
   const [abierto, setAbierto] = useState(false)
-  const [msgs, setMsgs] = useState([{ rol: 'ia', texto: '¡Hola Fabricio! 🥩 Soy tu asistente. Puedo ayudarte con precios, clientes, stock, remitos y todo lo que necesites del sistema.' }])
+  const [msgs, setMsgs] = useState([{ rol: 'ia', texto: '¡Hola Fabricio! 🥩 Soy tu asistente con acceso a todo el sistema. Preguntame sobre clientes, saldos, stock, precios, remitos o lo que necesites.' }])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -27,13 +27,11 @@ function ChatbotFlotante() {
     setMsgs(m => [...m, { rol: 'user', texto: pregunta }])
     setLoading(true)
     try {
-      const res = await fetch('/api/chat', {
+      const res = await fetch('/api/chat-sistema', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'openrouter/auto',
           messages: [
-            { role: 'system', content: `Sos el asistente de Carnicerías Fabricius, una carnicería mayorista argentina. Respondé en español argentino, de forma amigable, directa y sin asteriscos ni markdown. Podés ayudar con:\n- Consultas sobre precios y productos\n- Información sobre clientes y cuentas corrientes\n- Estado del stock del depósito\n- Remitos y despachos\n- Gastos y cierres\n- Cualquier consulta del sistema de gestión\nSi no tenés información específica, indicá al usuario en qué sección del sistema puede encontrarla.` },
             ...msgs.filter((_, i) => i > 0).map(m => ({ role: m.rol === 'user' ? 'user' : 'assistant', content: m.texto })),
             { role: 'user', content: pregunta }
           ]
@@ -51,7 +49,6 @@ function ChatbotFlotante() {
 
   return (
     <>
-      {/* VENTANA CHAT */}
       {abierto && (
         <div style={{
           position: 'fixed', bottom: 90, right: 24, width: 360, height: 480,
@@ -59,19 +56,17 @@ function ChatbotFlotante() {
           borderRadius: 16, zIndex: 1000, display: 'flex', flexDirection: 'column',
           boxShadow: '0 8px 32px rgba(0,0,0,0.5)'
         }}>
-          {/* HEADER */}
           <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface2)', borderRadius: '16px 16px 0 0' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--gold)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>🤖</div>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--gold)' }}>Asistente Fabricius</div>
-                <div style={{ fontSize: 10, color: 'var(--green)' }}>● En línea</div>
+                <div style={{ fontSize: 10, color: 'var(--green)' }}>● Acceso total al sistema</div>
               </div>
             </div>
             <button onClick={() => setAbierto(false)} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 18, padding: 4 }}>✕</button>
           </div>
 
-          {/* MENSAJES */}
           <div style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
             {msgs.map((m, i) => (
               <div key={i} style={{ display: 'flex', justifyContent: m.rol === 'user' ? 'flex-end' : 'flex-start' }}>
@@ -96,13 +91,12 @@ function ChatbotFlotante() {
             )}
           </div>
 
-          {/* INPUT */}
           <div style={{ padding: 10, borderTop: '1px solid var(--border)', display: 'flex', gap: 6 }}>
             <input
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && enviar()}
-              placeholder="Escribí tu consulta..."
+              placeholder="Preguntame sobre clientes, stock, precios..."
               style={{ flex: 1, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 10px', fontSize: 13, fontFamily: "'DM Sans', sans-serif", outline: 'none' }}
             />
             <button onClick={enviar} disabled={loading}
@@ -113,7 +107,6 @@ function ChatbotFlotante() {
         </div>
       )}
 
-      {/* BOTÓN FLOTANTE */}
       <button
         onClick={() => setAbierto(!abierto)}
         style={{
