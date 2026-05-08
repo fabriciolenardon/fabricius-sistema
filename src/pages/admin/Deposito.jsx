@@ -1,6 +1,6 @@
 // Deposito.jsx
 import { useState, useEffect } from 'react'
-import { supabase } from '../../lib/supabase'
+import { supabase } from '../../supabaseClient'
 
 export function Deposito() {
   const [tab, setTab] = useState('stock')
@@ -35,6 +35,12 @@ export function Deposito() {
     <div>
       <div className="page-title">DEPÓSITO</div>
       <div className="page-sub">Stock, entradas, despachos y proveedores</div>
+
+      {alert && (
+        <div style={{ background: alert.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${alert.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: alert.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>
+          {alert.msg}
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
         {tabs.map(t => (
@@ -242,7 +248,7 @@ function SalidaForm({ onSaved, showAlert }) {
       <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 14px', marginBottom: 14, display: 'flex', justifyContent: 'space-between' }}>
         <span style={{ fontSize: 12, color: 'var(--muted)' }}>Lista asignada</span>
         <span className={`badge ${form.destino === 'mayorista' ? 'badge-blue' : 'badge-gold'}`}>
-          {form.destino === 'mayorista' ? 'Mayorista (−10%)' : 'Carnicería'}
+          {form.destino === 'mayorista' ? 'Mayorista' : 'Carnicería'}
         </span>
       </div>
       <div className="form-row">
@@ -266,7 +272,7 @@ function SalidaForm({ onSaved, showAlert }) {
         <div className="form-group"><label>Kg</label>
           <input type="number" step="0.1" placeholder="0" value={form.kg} onChange={e => setForm(f => ({ ...f, kg: e.target.value }))} />
         </div>
-        <div className="form-group"><label>Precio/kg (auto)</label>
+        <div className="form-group"><label>Precio/kg</label>
           <input type="number" value={form.precio} onChange={e => setForm(f => ({ ...f, precio: e.target.value }))} style={{ borderColor: 'var(--gold)' }} />
         </div>
       </div>
@@ -303,7 +309,10 @@ function ProveedoresTab() {
 
   async function guardar() {
     if (!form.proveedor || !form.importe) return
-    await supabase.from('pagos_proveedores').insert({ ...form, importe: parseFloat(form.importe) })
+    await supabase.from('pagos_proveedores').insert({
+      proveedor_nombre: form.proveedor, importe: parseFloat(form.importe),
+      forma: form.forma, fecha: form.fecha, notas: form.notas
+    })
     setForm(f => ({ ...f, importe: '', notas: '' }))
     supabase.from('pagos_proveedores').select('*').order('fecha', { ascending: false }).limit(20).then(({ data }) => setPagos(data || []))
   }
