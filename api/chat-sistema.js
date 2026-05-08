@@ -6,10 +6,9 @@ export default async function handler(req, res) {
 
   try {
     const { messages } = req.body
-    const SUPABASE_URL = process.env.SUPABASE_URL
-    const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY
+    const SUPABASE_URL = process.env.VITE_SUPABASE_URL
+    const SUPABASE_KEY = process.env.VITE_SUPABASE_ANON_KEY
 
-    // Traer datos del sistema
     const headers = { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' }
 
     const [preciosRes, clientesRes, salidasRes, entradasRes, gastosRes, remitosRes] = await Promise.all([
@@ -26,7 +25,6 @@ export default async function handler(req, res) {
       entradasRes.json(), gastosRes.json(), remitosRes.json()
     ])
 
-    // Calcular stock
     const stockBovino = entradas.filter(e => e.tipo === 'bovino_mr').reduce((s, e) => s + (e.kg_real || 0), 0)
       - salidas.filter(s => s.tipo === 'bovino_mr').reduce((s, e) => s + (e.kg || 0), 0)
     const stockPollo = entradas.filter(e => e.tipo === 'pollo').reduce((s, e) => s + (e.kg || 0), 0)
@@ -34,7 +32,6 @@ export default async function handler(req, res) {
     const stockCerdo = entradas.filter(e => e.tipo === 'cerdo').reduce((s, e) => s + (e.kg || 0), 0)
       - salidas.filter(s => s.tipo === 'cerdo').reduce((s, e) => s + (e.kg || 0), 0)
 
-    // Armar contexto del sistema
     const contexto = `
 Sos el asistente inteligente de Carnicerías Fabricius. Tenés acceso a todos los datos del sistema en tiempo real. Respondé en español argentino, de forma directa y sin asteriscos ni markdown.
 
