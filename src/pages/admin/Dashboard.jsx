@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../supabaseClient'
 import { useAuth } from '../../context/AuthContext'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, CartesianGrid, Legend } from 'recharts'
 
 function fmt(n) {
   const abs = Math.abs(Math.round(n || 0))
@@ -11,18 +10,6 @@ function fmt(n) {
   return '$' + abs.toLocaleString('es-AR')
 }
 function fmtFull(n) { return '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR') }
-
-const CustomTooltip = ({ active, payload, label }) => {
-  if (!active || !payload?.length) return null
-  return (
-    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', fontSize: 12 }}>
-      <div style={{ fontWeight: 700, marginBottom: 6, color: 'var(--text2)' }}>{label}</div>
-      {payload.map((p, i) => (
-        <div key={i} style={{ color: p.color, marginBottom: 2 }}>{p.name}: {fmt(p.value)}</div>
-      ))}
-    </div>
-  )
-}
 
 export default function Dashboard() {
   const { profile } = useAuth()
@@ -84,7 +71,6 @@ export default function Dashboard() {
     return f >= hoy && f <= en15
   })
 
-  // Datos para gráficos — últimas 6 semanas ordenadas cronológicamente
   const datosGrafico = [...cierres].reverse().slice(-6).map(c => ({
     semana: new Date(c.semana_inicio + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' }),
     Ventas: c.ventas,
@@ -141,39 +127,89 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* GRÁFICOS */}
+      {/* GRÁFICOS SVG */}
       {datosGrafico.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
-          {/* BARRAS: Ventas vs Compras vs Gastos */}
+
+          {/* BARRAS */}
           <div className="card">
             <div className="card-title">📊 Ventas vs Egresos — últimas semanas</div>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={datosGrafico} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="semana" tick={{ fontSize: 10, fill: 'var(--muted)' }} />
-                <YAxis tickFormatter={v => fmt(v)} tick={{ fontSize: 9, fill: 'var(--muted)' }} width={48} />
-                <Tooltip content={<CustomTooltip />} />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Bar dataKey="Ventas" fill="#22c55e" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="Compras" fill="#ef4444" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="Gastos" fill="#f59e0b" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 160, padding: '0 4px', marginBottom: 8 }}>
+              {datosGrafico.map((d, i) => {
+                const maxVal = Math.max(...datosGrafico.flatMap(x => [x.Ventas, x.Compras, x.Gastos]), 1)
+                return (
+                  <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                    <div style={{ width: '100%', display: 'flex', gap: 2, alignItems: 'flex-end', height: 140 }}>
+                      <div title={`Ventas: ${fmt(d.Ventas)}`} style={{ flex: 1, background: '#22c55e', borderRadius: '3px 3px 0 0', height: Math.max(2, d.Ventas / maxVal * 135) + 'px', cursor: 'pointer', transition: 'opacity 0.2s' }} onMouseOver={e => e.target.style.opacity = '0.7'} onMouseOut={e => e.target.style.opacity = '1'} />
+                      <div title={`Compras: ${fmt(d.Compras)}`} style={{ flex: 1, background: '#ef4444', borderRadius: '3px 3px 0 0', height: Math.max(2, d.Compras / maxVal * 135) + 'px', cursor: 'pointer', transition: 'opacity 0.2s' }} onMouseOver={e => e.target.style.opacity = '0.7'} onMouseOut={e => e.target.style.opacity = '1'} />
+                      <div title={`Gastos: ${fmt(d.Gastos)}`} style={{ flex: 1, background: '#f59e0b', borderRadius: '3px 3px 0 0', height: Math.max(2, d.Gastos / maxVal * 135) + 'px', cursor: 'pointer', transition: 'opacity 0.2s' }} onMouseOver={e => e.target.style.opacity = '0.7'} onMouseOut={e => e.target.style.opacity = '1'} />
+                    </div>
+                    <div style={{ fontSize: 9, color: 'var(--muted)', textAlign: 'center', whiteSpace: 'nowrap' }}>{d.semana}</div>
+                  </div>
+                )
+              })}
+            </div>
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+              {[['#22c55e', 'Ventas'], ['#ef4444', 'Compras'], ['#f59e0b', 'Gastos']].map(([color, label]) => (
+                <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--muted)' }}>
+                  <div style={{ width: 10, height: 10, background: color, borderRadius: 2 }} />{label}
+                </div>
+              ))}
+            </div>
           </div>
 
-          {/* LÍNEA: Tendencia de Ganancia */}
+          {/* LÍNEA GANANCIA */}
           <div className="card">
             <div className="card-title">📈 Tendencia de ganancia semanal</div>
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={datosGrafico} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="semana" tick={{ fontSize: 10, fill: 'var(--muted)' }} />
-                <YAxis tickFormatter={v => fmt(v)} tick={{ fontSize: 9, fill: 'var(--muted)' }} width={48} />
-                <Tooltip content={<CustomTooltip />} />
-                <Line type="monotone" dataKey="Ganancia" stroke="#c9a84c" strokeWidth={2.5} dot={{ fill: '#c9a84c', r: 4 }} activeDot={{ r: 6 }} />
-                <Line type="monotone" dataKey="Ventas" stroke="#22c55e" strokeWidth={1.5} strokeDasharray="5 5" dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
+            <div style={{ position: 'relative', height: 160, marginBottom: 8 }}>
+              <svg viewBox="0 0 400 140" width="100%" height="140" style={{ overflow: 'visible' }}>
+                {(() => {
+                  const vals = datosGrafico.map(d => d.Ganancia)
+                  const minV = Math.min(...vals, 0)
+                  const maxV = Math.max(...vals, 1)
+                  const range = maxV - minV || 1
+                  const W = 380; const H = 120; const padX = 10
+
+                  const points = datosGrafico.map((d, i) => ({
+                    x: padX + (i / Math.max(datosGrafico.length - 1, 1)) * W,
+                    y: H - ((d.Ganancia - minV) / range) * H,
+                    d
+                  }))
+
+                  const zeroY = H - ((0 - minV) / range) * H
+                  const polyline = points.map(p => `${p.x},${p.y}`).join(' ')
+                  const areaPath = `M${points[0].x},${zeroY} ` + points.map(p => `L${p.x},${p.y}`).join(' ') + ` L${points[points.length - 1].x},${zeroY} Z`
+
+                  return (
+                    <>
+                      <defs>
+                        <linearGradient id="gradGanancia" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#c9a84c" stopOpacity="0.3" />
+                          <stop offset="100%" stopColor="#c9a84c" stopOpacity="0" />
+                        </linearGradient>
+                      </defs>
+                      <line x1={padX} y1={zeroY} x2={padX + W} y2={zeroY} stroke="#444" strokeDasharray="4" strokeWidth="1" />
+                      <path d={areaPath} fill="url(#gradGanancia)" />
+                      <polyline points={polyline} fill="none" stroke="#c9a84c" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+                      {points.map((p, i) => (
+                        <g key={i}>
+                          <circle cx={p.x} cy={p.y} r="5" fill="#c9a84c" stroke="var(--surface)" strokeWidth="2" />
+                          <title>{p.d.semana}: {fmt(p.d.Ganancia)}</title>
+                        </g>
+                      ))}
+                    </>
+                  )
+                })()}
+              </svg>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 4, borderTop: '1px solid var(--border)' }}>
+              {datosGrafico.map((d, i) => (
+                <div key={i} style={{ fontSize: 9, color: 'var(--muted)', textAlign: 'center', flex: 1 }}>
+                  <div>{d.semana}</div>
+                  <div style={{ color: d.Ganancia >= 0 ? '#c9a84c' : '#ef4444', fontWeight: 600, fontSize: 10 }}>{fmt(d.Ganancia)}</div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -307,9 +343,7 @@ export default function Dashboard() {
                 { label: '💳 Cuentas corrientes', path: '/admin/clientes' },
                 { label: '💸 Cargar gasto', path: '/admin/gastos' },
               ].map(a => (
-                <button key={a.label} className="btn btn-ghost"
-                  style={{ textAlign: 'left', padding: '10px 12px', width: '100%', fontSize: 12 }}
-                  onClick={() => navigate(a.path)}>
+                <button key={a.label} className="btn btn-ghost" style={{ textAlign: 'left', padding: '10px 12px', width: '100%', fontSize: 12 }} onClick={() => navigate(a.path)}>
                   {a.label}
                 </button>
               ))}
