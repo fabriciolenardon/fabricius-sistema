@@ -11,8 +11,56 @@ const EMPLEADOS_DEFAULT = [
   { id: 6, apellido: 'MANSILLA', nombre: 'PRISCILA', valor_hora: 5000, modalidad: 'hora', cbu: '' },
 ]
 
-function fmt(n) { return '$' + Math.round(n || 0).toLocaleString('es-AR') }
+// Mapeo de nombres del iVMS a IDs de empleados
+const NOMBRE_A_EMPLEADO = {
+  'alberto elias arnaudo': 2,
+  'elias arnaudo': 2,
+  'arnaudo': 2,
+  'german frontera': 1,
+  'frontera german': 1,
+  'german gabriel frontera': 1,
+  'luciano paez': 3,
+  'paez luciano': 3,
+  'camila scienza': 4,
+  'scienza camila': 4,
+  'giuliana frontera': 5,
+  'frontera giuliana': 5,
+  'priscila mansilla': 6,
+  'mansilla priscila': 6,
+}
 
+function buscarEmpleado(nombreRaw) {
+  const lower = nombreRaw.toLowerCase().trim()
+  for (const [key, id] of Object.entries(NOMBRE_A_EMPLEADO)) {
+    if (lower.includes(key) || key.includes(lower)) return id
+  }
+  return null
+}
+
+function calcularHorasTurno(fichadas) {
+  // fichadas: array de strings 'HH:MM:SS'
+  // Agrupar en turnos: mañana (antes de 15:00) y tarde (desde 15:00)
+  const manana = fichadas.filter(h => parseInt(h.split(':')[0]) < 15).sort()
+  const tarde = fichadas.filter(h => parseInt(h.split(':')[0]) >= 15).sort()
+
+  let horas = 0
+
+  function diffHoras(h1, h2) {
+    const [a, b, c] = h1.split(':').map(Number)
+    const [d, e, f] = h2.split(':').map(Number)
+    return ((d * 3600 + e * 60 + f) - (a * 3600 + b * 60 + c)) / 3600
+  }
+
+  if (manana.length >= 2) horas += diffHoras(manana[0], manana[manana.length - 1])
+  else if (manana.length === 1 && tarde.length === 0) horas += 7 // estimado si solo hay una fichada de mañana
+
+  if (tarde.length >= 2) horas += diffHoras(tarde[0], tarde[tarde.length - 1])
+  else if (tarde.length === 1 && manana.length === 0) horas += 4 // estimado si solo hay una fichada de tarde
+
+  return Math.round(horas * 2) / 2 // redondear a 0.5
+}
+
+function fmt(n) { return '$' + Math.round(n || 0).toLocaleString('es-AR') }
 const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }
 
 export default function Sueldos() {
@@ -24,6 +72,8 @@ export default function Sueldos() {
   const [boletas, setBoletas] = useState({})
   const [alert, setAlert] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [importando, setImportando] = useState(false)
+  const [detalleImport, setDetalleImport] = useState([])
 
   useEffect(() => {
     fetchLiquidaciones()
@@ -38,6 +88,75 @@ export default function Sueldos() {
   async function fetchLiquidaciones() {
     const { data } = await supabase.from('liquidaciones_sueldos').select('*').order('semana_inicio', { ascending: false }).limit(50)
     setLiquidaciones(data || [])
+  }
+
+  async function importarExcel(e) {
+    const file = e.target.files[0]
+    if (!file) return
+    setImportando(true)
+    setDetalleImport([])
+
+    try {
+      const text = await file.text()
+      const parser = new DOMParser()
+      const doc = parser.parseFromString(text, 'text/html')
+      const rows = Array.from(doc.querySelectorAll('tr'))
+
+      // Registros: { empleadoId, fecha, hora }
+      const registros = []
+      for (const row of rows) {
+        const cols = Array.from(row.querySelectorAll('td')).map(td => td.textContent.trim())
+        if (cols.length < 4) continue
+        // Columnas: ID persona, Nombre, Departamento, Hora, ...
+        const nombre = cols[1]
+        const horaStr = cols[3] // '2026-04-29 14:21:24'
+        if (!nombre || !horaStr || !horaStr.includes('-')) continue
+        const empId = buscarEmpleado(nombre)
+        if (!empId) continue
+        const [fecha, hora] = horaStr.split(' ')
+        registros.push({ empId, fecha, hora })
+      }
+
+      // Agrupar por empleado y fecha
+      const porEmpleadoFecha = {}
+      for (const r of registros) {
+        const key = `${r.empId}_${r.fecha}`
+        if (!porEmpleadoFecha[key]) porEmpleadoFecha[key] = { empId: r.empId, fecha: r.fecha, horas: [] }
+        porEmpleadoFecha[key].horas.push(r.hora)
+      }
+
+      // Calcular horas totales por empleado
+      const horasPorEmpleado = {}
+      const detalle = []
+      for (const [key, val] of Object.entries(porEmpleadoFecha)) {
+        const h = calcularHorasTurno(val.horas)
+        if (!horasPorEmpleado[val.empId]) horasPorEmpleado[val.empId] = 0
+        horasPorEmpleado[val.empId] += h
+        detalle.push({ empId: val.empId, fecha: val.fecha, horas: h, fichadas: val.horas.sort() })
+      }
+
+      // Redondear a 0.5
+      for (const id in horasPorEmpleado) {
+        horasPorEmpleado[id] = Math.round(horasPorEmpleado[id] * 2) / 2
+      }
+
+      setHoras(horasPorEmpleado)
+      setDetalleImport(detalle.sort((a, b) => a.fecha.localeCompare(b.fecha)))
+
+      // Detectar período
+      const fechas = registros.map(r => r.fecha).sort()
+      if (fechas.length > 0) {
+        setInicio(fechas[0])
+        setFin(fechas[fechas.length - 1])
+      }
+
+      setAlert({ type: 'success', msg: `✅ Importado! ${registros.length} fichadas procesadas` })
+    } catch (err) {
+      setAlert({ type: 'error', msg: '❌ Error al leer el archivo: ' + err.message })
+    }
+    setImportando(false)
+    setTimeout(() => setAlert(null), 4000)
+    e.target.value = ''
   }
 
   function getHoras(empId) { return parseFloat(horas[empId]) || 0 }
@@ -61,22 +180,17 @@ export default function Sueldos() {
     setLoading(true)
     const rows = EMPLEADOS_DEFAULT.map(emp => {
       const { bruto, neto, h, b } = calcNeto(emp)
-      return {
-        semana_inicio: inicio, semana_fin: fin,
-        empleado_nombre: `${emp.apellido}, ${emp.nombre}`,
-        horas: h, bruto, boletas: b, neto
-      }
+      return { semana_inicio: inicio, semana_fin: fin, empleado_nombre: `${emp.apellido}, ${emp.nombre}`, horas: h, bruto, boletas: b, neto }
     }).filter(r => r.horas > 0)
     const { error } = await supabase.from('liquidaciones_sueldos').insert(rows)
     setLoading(false)
     if (error) { setAlert({ type: 'error', msg: error.message }); return }
     setAlert({ type: 'success', msg: '✅ Liquidación confirmada y guardada' })
-    setHoras({}); setBoletas({})
+    setHoras({}); setBoletas({}); setDetalleImport([])
     fetchLiquidaciones()
     setTimeout(() => setAlert(null), 4000)
   }
 
-  // Agrupar historial por semana
   const semanas = [...new Set(liquidaciones.map(l => l.semana_inicio))].slice(0, 10)
 
   return (
@@ -101,6 +215,41 @@ export default function Sueldos() {
 
       {tab === 'liquidacion' && (
         <div>
+          {/* IMPORTAR iVMS */}
+          <div className="card" style={{ marginBottom: 16, borderColor: '#7c3aed' }}>
+            <div className="card-title">📂 Importar planilla iVMS</div>
+            <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>
+              Subí el archivo .xls exportado del iVMS y el sistema calculará las horas automáticamente.
+            </div>
+            <label style={{ display: 'inline-block', padding: '10px 20px', background: '#7c3aed', color: '#fff', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: "'DM Sans',sans-serif" }}>
+              {importando ? '⏳ Procesando...' : '📂 Seleccionar archivo iVMS (.xls)'}
+              <input type="file" accept=".xls,.xlsx,.html,.htm" onChange={importarExcel} style={{ display: 'none' }} disabled={importando} />
+            </label>
+
+            {detalleImport.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontSize: 12, color: 'var(--gold)', fontWeight: 700, marginBottom: 8 }}>Detalle de fichadas importadas:</div>
+                <table>
+                  <thead><tr><th>Empleado</th><th>Fecha</th><th>Entrada</th><th>Salida</th><th>Horas</th></tr></thead>
+                  <tbody>
+                    {detalleImport.map((d, i) => {
+                      const emp = EMPLEADOS_DEFAULT.find(e => e.id === parseInt(d.empId))
+                      return (
+                        <tr key={i}>
+                          <td>{emp ? `${emp.apellido}, ${emp.nombre}` : d.empId}</td>
+                          <td>{new Date(d.fecha + 'T12:00').toLocaleDateString('es-AR', { weekday: 'short', day: '2-digit', month: '2-digit' })}</td>
+                          <td style={{ color: 'var(--green)' }}>{d.fichadas[0]?.substring(0, 5)}</td>
+                          <td style={{ color: 'var(--amber)' }}>{d.fichadas[d.fichadas.length - 1]?.substring(0, 5)}</td>
+                          <td style={{ color: 'var(--gold)', fontWeight: 700 }}>{d.horas}h</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
           {/* PERÍODO */}
           <div className="card" style={{ marginBottom: 16 }}>
             <div className="card-title">Período</div>
@@ -122,7 +271,7 @@ export default function Sueldos() {
                   </div>
                   <div className="form-group" style={{ marginBottom: 8 }}>
                     <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Horas trabajadas</label>
-                    <input style={{ ...inp, borderColor: '#7c3aed' }} type="number" step="0.5" placeholder="0" value={horas[emp.id] || ''} onChange={e => setHoras(h => ({ ...h, [emp.id]: e.target.value }))} />
+                    <input style={{ ...inp, borderColor: getHoras(emp.id) > 0 ? '#7c3aed' : 'var(--border)' }} type="number" step="0.5" placeholder="0" value={horas[emp.id] || ''} onChange={e => setHoras(h => ({ ...h, [emp.id]: e.target.value }))} />
                   </div>
                   <div className="form-group" style={{ marginBottom: 10 }}>
                     <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Boletas / Descuentos ($)</label>
