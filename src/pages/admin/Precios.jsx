@@ -97,7 +97,7 @@ export default function Precios() {
         })
       })
       const data = await res.json()
-      const respuesta = data.choices?.[0]?.message?.content || 'No pude procesar tu consulta.'
+      const respuesta = data.choices?.[0]?.message?.content || JSON.stringify(data)
       setChatMsgs(m => [...m, { rol: 'ia', texto: respuesta }])
     } catch (err) {
       setChatMsgs(m => [...m, { rol: 'ia', texto: '❌ Error: ' + err.message }])
