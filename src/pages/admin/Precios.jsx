@@ -78,11 +78,9 @@ export default function Precios() {
     setChatInput('')
     setChatMsgs(m => [...m, { rol: 'user', texto: pregunta }])
     setChatLoading(true)
-
     const listaTexto = precios.map(p =>
       `- ${p.nombre} (${CATEGORIAS[p.categoria]}): Carn $${p.precio_carniceria ?? '—'} / May $${p.precio_mayorista ?? '—'} / Min $${p.precio_minorista ?? '—'}`
     ).join('\n')
-
     try {
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -90,7 +88,7 @@ export default function Precios() {
         body: JSON.stringify({
           model: 'claude-sonnet-4-20250514',
           max_tokens: 1000,
-          system: `Sos el asistente de Carnicerías Fabricius, una carnicería mayorista argentina. Respondé siempre en español argentino, de forma amigable y directa. Ayudás con consultas sobre precios y productos.\n\nLISTA DE PRECIOS ACTUAL:\n${listaTexto}`,
+          system: `Sos el asistente de Carnicerías Fabricius, una carnicería mayorista argentina. Respondé siempre en español argentino, de forma amigable y directa.\n\nLISTA DE PRECIOS ACTUAL:\n${listaTexto}`,
           messages: chatMsgs.filter((_, i) => i > 0).map(m => ({ role: m.rol === 'user' ? 'user' : 'assistant', content: m.texto })).concat([{ role: 'user', content: pregunta }])
         })
       })
@@ -113,13 +111,11 @@ export default function Precios() {
     <div>
       <div className="page-title">PRECIOS</div>
       <div className="page-sub">Consultá, administrá y usá la IA para gestionar tus precios</div>
-
       <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
         {tabBtn('ver', '📋 Ver Precios')}
         {tabBtn('admin', '✏️ Administrar')}
         {tabBtn('chat', '🤖 Asistente IA')}
       </div>
-
       {msg && <div style={{ background: '#1a2a1a', border: '1px solid #2d5a2d', borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: '#7dff7d', fontWeight: 600 }}>{msg}</div>}
 
       {tab === 'ver' && (
@@ -193,7 +189,6 @@ export default function Precios() {
               )}
             </div>
           </div>
-
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
             {Object.entries(CATEGORIAS).map(([id, label]) => (
               <button key={id} onClick={() => setFiltro(id)}
@@ -202,7 +197,6 @@ export default function Precios() {
               </button>
             ))}
           </div>
-
           <div className="card">
             <div className="card-title">{CATEGORIAS[filtro]} — {productosFiltrados.length} productos</div>
             <table>
