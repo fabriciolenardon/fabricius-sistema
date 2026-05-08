@@ -21,6 +21,116 @@ const descuentos = [
 const initialIngresos = Object.fromEntries([...camposIngresos, ...descuentos].map(c => [c.id, '']))
 const initialForm = { inicio: '', fin: '', compras: '', sueldos: '', gastos: '', socios: '', kgCarne: '', kgPollo: '', kgCerdo: '', kgMerma: '', ...initialIngresos }
 
+function exportarExcel(semanasMes, totMes, mesLabel) {
+  const rows = [
+    ['CARNICERÍAS FABRICIUS — CIERRE MENSUAL'],
+    [mesLabel.toUpperCase()],
+    [],
+    ['Período', 'Ventas', 'Compras', 'Gastos', 'Sueldos', 'Ganancia', 'Kg Carne', 'Kg Pollo', 'Kg Cerdo'],
+    ...semanasMes.map(c => [
+      `${new Date(c.semana_inicio + 'T12:00').toLocaleDateString('es-AR')} → ${new Date(c.semana_fin + 'T12:00').toLocaleDateString('es-AR')}`,
+      c.ventas, c.compras, c.gastos, c.sueldos, c.ganancia, c.kg_carne, c.kg_pollo, c.kg_cerdo
+    ]),
+    [],
+    ['TOTAL', totMes.ventas, totMes.compras, totMes.gastos, totMes.sueldos, totMes.ganancia, totMes.kgCarne, totMes.kgPollo, totMes.kgCerdo],
+    [],
+    ['Distribución socios'],
+    ['Fabricio Lenardon (85%)', totMes.ganancia * 0.85],
+    ['Ariel Garrone (15%)', totMes.ganancia * 0.15],
+  ]
+
+  const csv = rows.map(r => r.map(v => `"${v ?? ''}"`).join(',')).join('\n')
+  const bom = '\uFEFF'
+  const blob = new Blob([bom + csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `cierre_${mesLabel.replace(/ /g, '_')}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function imprimirCierreMensual(semanasMes, totMes, mesLabel) {
+  const win = window.open('', '_blank')
+  win.document.write(`
+    <html><head><title>Cierre Mensual — ${mesLabel}</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font-family: Arial, sans-serif; font-size: 12px; padding: 24px; color: #000; }
+      .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 12px; }
+      .logo { font-size: 28px; font-weight: 900; letter-spacing: 3px; }
+      .sub { font-size: 11px; color: #555; }
+      .titulo { font-size: 16px; font-weight: 700; margin: 12px 0 4px; }
+      table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+      th { background: #000; color: #fff; padding: 6px 8px; text-align: center; font-size: 10px; }
+      td { border: 1px solid #ccc; padding: 6px 8px; text-align: center; font-size: 11px; }
+      td:first-child { text-align: left; font-weight: 600; }
+      .total-row td { background: #f0f0f0; font-weight: 700; border-top: 2px solid #000; }
+      .verde { color: #1a7a1a; }
+      .rojo { color: #c0392b; }
+      .oro { color: #b8860b; font-weight: 700; }
+      .socios { display: flex; gap: 20px; margin-top: 16px; }
+      .socio { flex: 1; border: 1px solid #000; padding: 12px; text-align: center; }
+      .socio-nombre { font-weight: 700; font-size: 13px; }
+      .socio-valor { font-size: 22px; font-weight: 900; margin-top: 4px; }
+      @media print { body { padding: 10px; } }
+    </style></head>
+    <body>
+      <div class="header">
+        <div class="logo">FABRICIUS</div>
+        <div class="sub">CARNICERÍAS · PREMIUM QUALITY · Río Primero, Córdoba</div>
+        <div class="titulo">CIERRE MENSUAL — ${mesLabel.toUpperCase()}</div>
+        <div class="sub">Generado: ${new Date().toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+      </div>
+
+      <table>
+        <thead><tr>
+          <th>Período</th><th>Ventas</th><th>Compras</th><th>Gastos</th><th>Sueldos</th><th>Ganancia</th><th>Kg Carne</th><th>Kg Pollo</th><th>Kg Cerdo</th>
+        </tr></thead>
+        <tbody>
+          ${semanasMes.map(c => `<tr>
+            <td>${new Date(c.semana_inicio + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })} → ${new Date(c.semana_fin + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })}</td>
+            <td class="verde">$${Math.round(c.ventas).toLocaleString('es-AR')}</td>
+            <td class="rojo">$${Math.round(c.compras).toLocaleString('es-AR')}</td>
+            <td>$${Math.round(c.gastos).toLocaleString('es-AR')}</td>
+            <td>$${Math.round(c.sueldos).toLocaleString('es-AR')}</td>
+            <td class="${c.ganancia >= 0 ? 'oro' : 'rojo'}">$${Math.round(c.ganancia).toLocaleString('es-AR')}</td>
+            <td>${c.kg_carne?.toFixed(1)} kg</td>
+            <td>${c.kg_pollo?.toFixed(1)} kg</td>
+            <td>${c.kg_cerdo?.toFixed(1)} kg</td>
+          </tr>`).join('')}
+        </tbody>
+        <tfoot>
+          <tr class="total-row">
+            <td>TOTAL</td>
+            <td class="verde">$${Math.round(totMes.ventas).toLocaleString('es-AR')}</td>
+            <td class="rojo">$${Math.round(totMes.compras).toLocaleString('es-AR')}</td>
+            <td>$${Math.round(totMes.gastos).toLocaleString('es-AR')}</td>
+            <td>$${Math.round(totMes.sueldos).toLocaleString('es-AR')}</td>
+            <td class="${totMes.ganancia >= 0 ? 'oro' : 'rojo'}">$${Math.round(totMes.ganancia).toLocaleString('es-AR')}</td>
+            <td>${totMes.kgCarne?.toFixed(1)} kg</td>
+            <td>${totMes.kgPollo?.toFixed(1)} kg</td>
+            <td>${totMes.kgCerdo?.toFixed(1)} kg</td>
+          </tr>
+        </tfoot>
+      </table>
+
+      <div class="socios">
+        <div class="socio">
+          <div class="socio-nombre">👑 Fabricio Lenardon (85%)</div>
+          <div class="socio-valor oro">$${Math.round(totMes.ganancia * 0.85).toLocaleString('es-AR')}</div>
+        </div>
+        <div class="socio">
+          <div class="socio-nombre">🤝 Ariel Garrone (15%)</div>
+          <div class="socio-valor" style="color:#1a3a7a">$${Math.round(totMes.ganancia * 0.15).toLocaleString('es-AR')}</div>
+        </div>
+      </div>
+      <script>window.onload = () => { window.print(); }</script>
+    </body></html>
+  `)
+  win.document.close()
+}
+
 export default function Cierre() {
   const [tab, setTab] = useState('semanal')
   const [form, setForm] = useState(initialForm)
@@ -83,6 +193,7 @@ export default function Cierre() {
   const semanasMes = cierres.filter(c => c.mes === mesSelector)
   const totMes = { ventas: 0, compras: 0, gastos: 0, sueldos: 0, ganancia: 0, kgCarne: 0, kgPollo: 0, kgCerdo: 0 }
   semanasMes.forEach(c => { totMes.ventas += c.ventas; totMes.compras += c.compras; totMes.gastos += c.gastos; totMes.sueldos += c.sueldos; totMes.ganancia += c.ganancia; totMes.kgCarne += c.kg_carne; totMes.kgPollo += c.kg_pollo; totMes.kgCerdo += c.kg_cerdo })
+  const mesLabel = mesSelector ? new Date(mesSelector + '-15').toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }) : ''
 
   return (
     <div>
@@ -212,9 +323,18 @@ export default function Cierre() {
       {tab === 'mensual' && (
         <div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 20 }}>
-            <select value={mesSelector} onChange={e => setMesSelector(e.target.value)} style={{ width: 200 }}>
+            <select value={mesSelector} onChange={e => setMesSelector(e.target.value)}
+              style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14 }}>
               {meses.map(m => <option key={m} value={m}>{new Date(m + '-15').toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })}</option>)}
             </select>
+            <button onClick={() => exportarExcel(semanasMes, totMes, mesLabel)}
+              style={{ padding: '8px 16px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+              📊 Exportar Excel
+            </button>
+            <button onClick={() => imprimirCierreMensual(semanasMes, totMes, mesLabel)}
+              style={{ padding: '8px 16px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+              🖨️ Imprimir / PDF
+            </button>
           </div>
 
           <div className="grid4" style={{ marginBottom: 24 }}>
@@ -311,12 +431,15 @@ export default function Cierre() {
 
       {tab === 'historial' && (
         <div className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <div className="card-title" style={{ margin: 0 }}>Historial de cierres</div>
+          </div>
           <table>
             <thead><tr><th>Período</th><th>Ventas</th><th>Compras</th><th>Gastos</th><th>Sueldos</th><th>Ganancia</th></tr></thead>
             <tbody>
               {cierres.map(c => (
                 <tr key={c.id} style={{ background: c.ganancia < 0 ? 'rgba(192,57,43,0.05)' : undefined }}>
-                  <td style={{ fontWeight: 600, fontSize: 12 }}>{c.semana_inicio} / {c.semana_fin}</td>
+                  <td style={{ fontWeight: 600, fontSize: 12 }}>{new Date(c.semana_inicio + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })} / {new Date(c.semana_fin + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })}</td>
                   <td style={{ color: 'var(--green)' }}>{fmt(c.ventas)}</td>
                   <td style={{ color: 'var(--red-light)' }}>{fmt(c.compras)}</td>
                   <td style={{ color: 'var(--amber)' }}>{fmt(c.gastos)}</td>
