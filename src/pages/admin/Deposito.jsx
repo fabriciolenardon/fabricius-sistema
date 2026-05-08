@@ -182,51 +182,49 @@ function EntradaForm({ onSaved, showAlert }) {
 }
 
 function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
-  const [form, setForm] = useState({ destino: 'MITRE', clienteNombre: '', domicilio: '', fecha: new Date().toISOString().split('T')[0], categoria: '', productoIdx: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
+  const [form, setForm] = useState({ destino: 'MITRE', clienteNombre: '', domicilio: '', fecha: new Date().toISOString().split('T')[0], categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
   const [items, setItems] = useState([])
+  const [todosPrecios, setTodosPrecios] = useState([])
 
-  const listaPrecios = {
-    bovino_mr: [
-      { nombre: 'Media Res Premium (Novillito/Vaquillona)', carn: 10300, may: 10300 },
-      { nombre: 'Media Res Overo Chico', carn: 9800, may: 9800 },
-    ],
-    bovino_corte: [
-      { nombre: 'Cuadril / Nalga / Peceto', carn: 17955, may: 18720 },
-      { nombre: 'Vacío', carn: 16150, may: 17500 },
-      { nombre: 'Matambre', carn: 17100, may: 18900 },
-      { nombre: 'Costilla', carn: 16625, may: 17820 },
-    ],
-    cerdo_corte: [
-      { nombre: 'Bondiola x kg', carn: 7500, may: 8460 },
-      { nombre: 'Matambre cerdo x kg', carn: 10500, may: 11250 },
-    ],
-    pollo: [
-      { nombre: 'Cajón Pollo INDA x 20kg', carn: 76000, may: 81000 },
-      { nombre: 'Cajón Pata Muslo A x 20kg', carn: 71000, may: 76000 },
-    ],
+  useEffect(() => {
+    supabase.from('precios').select('*').order('nombre').then(({ data }) => setTodosPrecios(data || []))
+  }, [])
+
+  const CATEGORIAS = {
+    bovino_corte: '🥩 Bovinos — Cortes',
+    bovino_brosa: '🫀 Brosas',
+    bovino_pieza: '🍖 Piezas',
+    cerdo_corte: '🐷 Cerdo',
+    embutido: '🌭 Embutidos',
+    pollo: '🍗 Pollo Cajones',
+    rebozado: '🧊 Rebozados',
   }
 
-  function getLista(dest) { return dest === 'mayorista' ? 'may' : 'carn' }
+  const categorias = [...new Set(todosPrecios.map(p => p.categoria))]
+  const productosFiltrados = todosPrecios.filter(p => p.categoria === form.categoria)
 
-  function onProductoChange(idx) {
-    if (!form.categoria || idx === '') return
-    const prod = listaPrecios[form.categoria]?.[parseInt(idx)]
+  function getLista(dest) { return dest === 'mayorista' ? 'precio_mayorista' : 'precio_carniceria' }
+
+  function onProductoChange(id) {
+    if (!id) return
+    const prod = todosPrecios.find(p => p.id === id)
     if (!prod) return
-    setForm(f => ({ ...f, productoIdx: idx, precio: prod[getLista(f.destino)] || '' }))
+    const precio = prod[getLista(form.destino)] || prod.precio_mayorista || 0
+    setForm(f => ({ ...f, productoId: id, precio }))
   }
 
   function agregarItem() {
-    if (!form.kg || !form.precio || !form.categoria) return
-    const prod = listaPrecios[form.categoria]?.[parseInt(form.productoIdx)]
+    if (!form.kg || !form.precio || !form.productoId) { showAlert({ type: 'error', msg: 'Seleccioná producto y completá kg' }); return }
+    const prod = todosPrecios.find(p => p.id === form.productoId)
     const item = {
-      descripcion: prod?.nombre || form.categoria,
+      descripcion: prod?.nombre || '',
       kg: parseFloat(form.kg),
       precio: parseFloat(form.precio),
       importe: parseFloat(form.kg) * parseFloat(form.precio),
       tipo: form.categoria
     }
     setItems(prev => [...prev, item])
-    setForm(f => ({ ...f, kg: '', productoIdx: '', precio: '' }))
+    setForm(f => ({ ...f, kg: '', productoId: '', precio: '' }))
   }
 
   function quitarItem(idx) { setItems(prev => prev.filter((_, i) => i !== idx)) }
@@ -235,7 +233,6 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
 
   async function guardar() {
     if (items.length === 0) { showAlert({ type: 'error', msg: 'Agregá al menos un producto' }); return }
-
     for (const item of items) {
       await supabase.from('salidas_deposito').insert({
         fecha: form.fecha, cliente_nombre: form.clienteNombre || form.destino,
@@ -245,21 +242,15 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
         cobro: form.cobro, notas: form.notas
       })
     }
-
     const { data: remitoData } = await supabase.from('remitos').insert({
-      fecha: form.fecha,
-      cliente_nombre: form.clienteNombre || form.destino,
-      domicilio: form.domicilio,
-      items: items,
-      total,
-      cobro: form.cobro,
-      notas: form.notas
+      fecha: form.fecha, cliente_nombre: form.clienteNombre || form.destino,
+      domicilio: form.domicilio, items, total, cobro: form.cobro, notas: form.notas
     }).select().single()
 
     showAlert({ type: 'success', msg: '✅ Despacho registrado — Remito generado' })
     onRemito(remitoData)
     setItems([])
-    setForm(f => ({ ...f, kg: '', notas: '', clienteNombre: '', domicilio: '' }))
+    setForm(f => ({ ...f, kg: '', notas: '', clienteNombre: '', domicilio: '', productoId: '', precio: '' }))
     onSaved()
     setTimeout(() => { showAlert(null); setTab('remitos') }, 1500)
   }
@@ -292,18 +283,15 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
         </div>
         <div className="form-row">
           <div className="form-group"><label>Categoría</label>
-            <select value={form.categoria} onChange={e => setForm(f => ({ ...f, categoria: e.target.value, productoIdx: '', precio: '' }))}>
+            <select value={form.categoria} onChange={e => setForm(f => ({ ...f, categoria: e.target.value, productoId: '', precio: '' }))}>
               <option value="">— Seleccioná —</option>
-              <option value="bovino_mr">🥩 Bovino — Media Res</option>
-              <option value="bovino_corte">🥩 Bovino — Cortes</option>
-              <option value="cerdo_corte">🐷 Cerdo — Cortes</option>
-              <option value="pollo">🍗 Pollo — Cajones</option>
+              {categorias.map(c => <option key={c} value={c}>{CATEGORIAS[c] || c}</option>)}
             </select>
           </div>
           <div className="form-group"><label>Producto</label>
-            <select value={form.productoIdx} onChange={e => onProductoChange(e.target.value)} disabled={!form.categoria}>
+            <select value={form.productoId} onChange={e => onProductoChange(e.target.value)} disabled={!form.categoria}>
               <option value="">— Seleccioná producto —</option>
-              {(listaPrecios[form.categoria] || []).map((p, i) => <option key={i} value={i}>{p.nombre}</option>)}
+              {productosFiltrados.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
             </select>
           </div>
         </div>
@@ -382,14 +370,12 @@ function RemitosTab({ remitoActual }) {
           * { margin: 0; padding: 0; box-sizing: border-box; }
           body { font-family: Arial, sans-serif; font-size: 12px; padding: 20px; max-width: 400px; margin: 0 auto; }
           .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; border-bottom: 2px solid #000; padding-bottom: 12px; }
-          .logo-area { display: flex; flex-direction: column; }
           .logo-title { font-size: 22px; font-weight: 900; letter-spacing: 2px; }
           .logo-sub { font-size: 9px; color: #555; }
-          .remito-area { text-align: right; }
           .doc-no-valido { font-size: 10px; font-weight: 700; text-align: center; border: 1px solid #000; padding: 2px 6px; margin-bottom: 4px; }
           .remito-title { font-size: 24px; font-weight: 900; font-style: italic; }
           .nro { font-size: 13px; font-weight: 700; }
-          .direccion { font-size: 10px; color: #444; margin-bottom: 12px; }
+          .direccion { font-size: 10px; color: #444; margin-bottom: 6px; }
           .telefono { font-size: 11px; font-weight: 700; background: #000; color: #fff; padding: 3px 8px; display: inline-block; border-radius: 4px; margin-bottom: 12px; }
           .campo { border-bottom: 1px solid #000; margin-bottom: 8px; padding-bottom: 2px; }
           .campo label { font-size: 10px; font-weight: 700; margin-right: 6px; }
@@ -400,25 +386,24 @@ function RemitosTab({ remitoActual }) {
           .total-row { display: flex; justify-content: flex-end; margin-top: 8px; }
           .total-box { border: 1px solid #000; padding: 6px 12px; font-size: 13px; font-weight: 700; }
           .firma { margin-top: 40px; border-top: 1px solid #000; padding-top: 4px; text-align: center; font-size: 10px; color: #555; }
-          .fecha-campo { font-size: 11px; margin-bottom: 8px; }
           @media print { body { padding: 10px; } }
         </style>
       </head>
       <body>
         <div class="header">
-          <div class="logo-area">
+          <div>
             <div class="logo-title">FABRICIUS</div>
             <div class="logo-sub">CARNICERÍAS · PREMIUM QUALITY</div>
             <div class="direccion">📍 Casa Central: Av. Mitre 670 - Río Primero, Córdoba</div>
             <div class="telefono">📱 3574 400346</div>
           </div>
-          <div class="remito-area">
+          <div style="text-align:right">
             <div class="doc-no-valido">X — DOCUMENTO NO VÁLIDO COMO FACTURA</div>
             <div class="remito-title">REMITO</div>
             <div class="nro">N° ${String(remito.numero).padStart(5, '0')}</div>
           </div>
         </div>
-        <div class="fecha-campo">Fecha: <strong>${remito.fecha}</strong></div>
+        <div style="font-size:11px;margin-bottom:8px">Fecha: <strong>${remito.fecha}</strong></div>
         <div class="campo"><label>Señor/a:</label>${remito.cliente_nombre || ''}</div>
         <div class="campo"><label>Domicilio:</label>${remito.domicilio || ''}</div>
         <table>
