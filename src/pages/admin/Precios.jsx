@@ -23,7 +23,7 @@ export default function Precios() {
   const [form, setForm] = useState(VACIO)
   const [editando, setEditando] = useState(null)
   const [msg, setMsg] = useState('')
-  const [chatMsgs, setChatMsgs] = useState([{ rol: 'ia', texto: '¡Hola Fabricio! 🥩 Soy tu asistente de Carnicerías Fabricius. Podés pedirme que consulte precios, te ayude a entender la lista o lo que necesites.' }])
+  const [chatMsgs, setChatMsgs] = useState([{ rol: 'ia', texto: '¡Hola! 🥩 Soy el asistente de Carnicerías Fabricius. Consultame precios, productos o lo que necesites.' }])
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
 
@@ -88,14 +88,15 @@ export default function Precios() {
         body: JSON.stringify({
           model: 'openrouter/auto',
           messages: [
-            { role: 'system', content: `Sos el asistente de Carnicerías Fabricius, una carnicería mayorista argentina. Respondé en español argentino, de forma amigable y directa.\n\nREGLAS IMPORTANTES:\n1. NUNCA inventes precios. Solo usá los precios exactos de la lista.\n2. Cuando pregunten por un producto, respondé EXACTAMENTE así:\n"El precio de [NOMBRE PRODUCTO] es:\n🔴 Precio Carnicería: $[precio] por kg (para carnicerías revendedoras)\n🟡 Precio Mayorista: $[precio] por kg (para compradores al por mayor)\n🟢 Precio Minorista: $[precio] por kg (para consumidor final)"\n3. Si el precio es — significa que no aplica para esa lista.\n4. Si no encontrás el producto exacto, buscá el más parecido y avisá.\n\nLISTA DE PRECIOS (Carn=carnicería / May=mayorista / Min=minorista):\n${listaTexto}` },
+            { role: 'system', content: `Sos el asistente de Carnicerías Fabricius, una carnicería mayorista argentina. Respondé en español argentino, de forma amigable y directa. NUNCA uses asteriscos, negritas ni formato markdown en tus respuestas. Escribí todo en texto plano.\n\nREGLAS IMPORTANTES:\n1. NUNCA inventes precios. Solo usá los precios exactos de la lista.\n2. Cuando pregunten por un producto, respondé EXACTAMENTE en este formato:\n\nEl precio de [NOMBRE PRODUCTO] es:\n🔴 PRECIO CARNICERIA: $[precio] por kg\n🟡 PRECIO MAYORISTA: $[precio] por kg\n🟢 PRECIO MINORISTA: $[precio] por kg\n\n3. Si el precio es — significa que no aplica para esa lista.\n4. Si no encontrás el producto exacto, buscá el más parecido y avisá. Por ejemplo: si dicen "vaca" o "ternera" buscá el corte bovino más parecido.\n5. PRECIO CARNICERIA es para carnicerías revendedoras. PRECIO MAYORISTA es para compradores al por mayor. PRECIO MINORISTA es para consumidor final.\n6. NUNCA uses asteriscos ni markdown. Solo texto plano.\n\nLISTA DE PRECIOS (Carn=carnicería / May=mayorista / Min=minorista):\n${listaTexto}` },
             ...chatMsgs.filter((_, i) => i > 0).map(m => ({ role: m.rol === 'user' ? 'user' : 'assistant', content: m.texto })),
             { role: 'user', content: pregunta }
           ]
         })
       })
       const data = await res.json()
-      const respuesta = (data.choices?.[0]?.message?.content || JSON.stringify(data)).replace(/\*\*/g, '').replace(/\*/g, '')
+      const respuesta = (data.choices?.[0]?.message?.content || JSON.stringify(data))
+        .replace(/\*\*/g, '').replace(/\*/g, '').replace(/#/g, '').trim()
       setChatMsgs(m => [...m, { rol: 'ia', texto: respuesta }])
     } catch (err) {
       setChatMsgs(m => [...m, { rol: 'ia', texto: '❌ Error: ' + err.message }])
