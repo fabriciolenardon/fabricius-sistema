@@ -127,7 +127,7 @@ function EntradaForm({ onSaved, showAlert }) {
         <div className="form-group"><label>Tipo de producto</label>
           <select value={form.tipo} onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))}>
             <option value="">— Seleccioná —</option>
-            <option value="bovino_mr">🥩 Bovino — Media Res</option>
+            <option value="bovino_mr">🐄 Media Res</option>
             <option value="bovino_corte">🥩 Bovino — Corte/Caja</option>
             <option value="bovino_brosa">🫀 Bovino — Brosa</option>
             <option value="cerdo">🐷 Cerdo — Capón</option>
@@ -205,10 +205,17 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
     rebozado: '🧊 Rebozados',
   }
 
+  // Mapeo de destinos fijos a nombres de clientes
+  const DESTINOS_FRANQUICIA = {
+    'CENTRO': 'ALVEAR',
+    'MONTE CRISTO': 'MONTE CRISTO',
+  }
+
   const categorias = [...new Set(todosPrecios.map(p => p.categoria))]
   const productosFiltrados = todosPrecios.filter(p => p.categoria === form.categoria)
   const clientesFiltrados = clientes.filter(c => c.nombre.toLowerCase().includes(busqueda.toLowerCase()))
   const esClienteExterno = ['carniceria', 'mayorista'].includes(form.destino)
+  const esFranquicia = ['CENTRO', 'MONTE CRISTO'].includes(form.destino)
 
   function getLista(dest) { return dest === 'mayorista' ? 'precio_mayorista' : 'precio_carniceria' }
 
@@ -247,12 +254,25 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   async function guardar() {
     if (items.length === 0) { showAlert({ type: 'error', msg: 'Agregá al menos un producto' }); return }
 
-    const nombreCliente = form.clienteNombre || form.destino
+    let clienteId = form.clienteId
+    let clienteNombre = form.clienteNombre || form.destino
+    let domicilio = form.domicilio
+
+    // Si es franquicia, buscar el cliente automáticamente
+    if (esFranquicia) {
+      const nombreBuscar = DESTINOS_FRANQUICIA[form.destino]
+      const { data: clienteFranquicia } = await supabase.from('clientes').select('*').ilike('nombre', `%${nombreBuscar}%`).single()
+      if (clienteFranquicia) {
+        clienteId = clienteFranquicia.id
+        clienteNombre = clienteFranquicia.nombre
+        domicilio = clienteFranquicia.domicilio || form.destino
+      }
+    }
 
     // 1. Guardar salidas de depósito
     for (const item of items) {
       await supabase.from('salidas_deposito').insert({
-        fecha: form.fecha, cliente_nombre: nombreCliente,
+        fecha: form.fecha, cliente_nombre: clienteNombre,
         tipo: item.tipo, descripcion: item.descripcion,
         kg: item.kg, precio_kg: item.precio,
         total: item.importe, lista: getLista(form.destino),
@@ -263,9 +283,9 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
     // 2. Guardar remito
     const { data: remitoData } = await supabase.from('remitos').insert({
       fecha: form.fecha,
-      cliente_nombre: nombreCliente,
-      cliente_id: form.clienteId || null,
-      domicilio: form.domicilio,
+      cliente_nombre: clienteNombre,
+      cliente_id: clienteId || null,
+      domicilio,
       items,
       total,
       cobro: form.cobro,
@@ -273,13 +293,13 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
     }).select().single()
 
     // 3. Si hay cliente vinculado, cargar en su cuenta corriente
-    if (form.clienteId) {
-      const { data: clienteActual } = await supabase.from('clientes').select('saldo').eq('id', form.clienteId).single()
+    if (clienteId) {
+      const { data: clienteActual } = await supabase.from('clientes').select('saldo').eq('id', clienteId).single()
       const saldoActual = clienteActual?.saldo || 0
       const nuevoSaldo = saldoActual + total
 
       await supabase.from('movimientos_ctacte').insert({
-        cliente_id: form.clienteId,
+        cliente_id: clienteId,
         fecha: form.fecha,
         tipo: 'compra',
         descripcion: `Remito N° ${String(remitoData?.numero || '').padStart(5, '0')} — ${items.map(i => i.descripcion).join(', ')}`,
@@ -289,7 +309,7 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
         remito_id: remitoData?.id || null
       })
 
-      await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', form.clienteId)
+      await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', clienteId)
     }
 
     showAlert({ type: 'success', msg: '✅ Despacho registrado — Remito generado' })
@@ -307,10 +327,10 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
         <div className="card-title">Registrar despacho</div>
         <div className="form-row">
           <div className="form-group"><label>Destino</label>
-            <select value={form.destino} onChange={e => setForm(f => ({ ...f, destino: e.target.value, clienteId: '', clienteNombre: '' }))}>
+            <select value={form.destino} onChange={e => setForm(f => ({ ...f, destino: e.target.value, clienteId: '', clienteNombre: '', busqueda: '' }))}>
               <option value="MITRE">Local Mitre</option>
-              <option value="CENTRO">Centro (asociado)</option>
-              <option value="MONTE CRISTO">Monte Cristo (asociado)</option>
+              <option value="CENTRO">🏪 Centro — Alvear (Roxana)</option>
+              <option value="MONTE CRISTO">🏪 Monte Cristo (Agustín)</option>
               <option value="carniceria">Carnicería cliente</option>
               <option value="mayorista">Gastronómico / Mayorista</option>
             </select>
@@ -319,6 +339,12 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
             <input type="date" value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} />
           </div>
         </div>
+
+        {esFranquicia && (
+          <div style={{ background: 'var(--surface2)', border: '1px solid var(--gold)', borderRadius: 8, padding: '10px 14px', marginBottom: 12 }}>
+            <span style={{ fontSize: 12, color: 'var(--gold)', fontWeight: 600 }}>🏪 Franquicia — el remito se cargará automáticamente en su legajo</span>
+          </div>
+        )}
 
         {esClienteExterno && (
           <div style={{ position: 'relative', marginBottom: 12 }}>
@@ -343,18 +369,20 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
                 ))}
               </div>
             )}
-            {form.clienteId && <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 4 }}>✅ Cliente vinculado — el remito se cargará en su cuenta corriente</div>}
+            {form.clienteId && <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 4 }}>✅ Cliente vinculado</div>}
           </div>
         )}
 
-        <div className="form-row">
-          <div className="form-group"><label>Señor/a {!esClienteExterno && '(nombre)'}</label>
-            <input placeholder="Nombre" value={form.clienteNombre} onChange={e => setForm(f => ({ ...f, clienteNombre: e.target.value }))} disabled={!!form.clienteId} style={{ opacity: form.clienteId ? 0.6 : 1 }} />
+        {!esFranquicia && (
+          <div className="form-row">
+            <div className="form-group"><label>Señor/a</label>
+              <input placeholder="Nombre" value={form.clienteNombre} onChange={e => setForm(f => ({ ...f, clienteNombre: e.target.value }))} disabled={!!form.clienteId} style={{ opacity: form.clienteId ? 0.6 : 1 }} />
+            </div>
+            <div className="form-group"><label>Domicilio</label>
+              <input placeholder="Dirección" value={form.domicilio} onChange={e => setForm(f => ({ ...f, domicilio: e.target.value }))} />
+            </div>
           </div>
-          <div className="form-group"><label>Domicilio</label>
-            <input placeholder="Dirección" value={form.domicilio} onChange={e => setForm(f => ({ ...f, domicilio: e.target.value }))} />
-          </div>
-        </div>
+        )}
 
         <div className="form-row">
           <div className="form-group"><label>Categoría</label>
@@ -447,10 +475,8 @@ function RemitosTab({ remitoActual }) {
         body { font-family: Arial, sans-serif; font-size: 12px; padding: 20px; max-width: 400px; margin: 0 auto; }
         .header { display: flex; justify-content: space-between; margin-bottom: 16px; border-bottom: 2px solid #000; padding-bottom: 12px; }
         .logo-title { font-size: 22px; font-weight: 900; letter-spacing: 2px; }
-        .logo-sub { font-size: 9px; color: #555; }
         .doc-no-valido { font-size: 10px; font-weight: 700; border: 1px solid #000; padding: 2px 6px; margin-bottom: 4px; text-align:center; }
         .remito-title { font-size: 24px; font-weight: 900; font-style: italic; }
-        .nro { font-size: 13px; font-weight: 700; }
         .campo { border-bottom: 1px solid #000; margin-bottom: 8px; padding-bottom: 2px; }
         .campo label { font-size: 10px; font-weight: 700; margin-right: 6px; }
         table { width: 100%; border-collapse: collapse; margin: 12px 0; }
@@ -459,21 +485,21 @@ function RemitosTab({ remitoActual }) {
         td.desc { text-align: left; }
         .total-row { display: flex; justify-content: flex-end; margin-top: 8px; }
         .total-box { border: 1px solid #000; padding: 6px 12px; font-size: 13px; font-weight: 700; }
-        .firma { margin-top: 40px; border-top: 1px solid #000; padding-top: 4px; text-align: center; font-size: 10px; color: #555; }
+        .firma { margin-top: 40px; border-top: 1px solid #000; padding-top: 4px; text-align: center; font-size: 10px; }
         @media print { body { padding: 10px; } }
       </style></head>
       <body>
         <div class="header">
           <div>
             <div class="logo-title">FABRICIUS</div>
-            <div class="logo-sub">CARNICERÍAS · PREMIUM QUALITY</div>
+            <div style="font-size:9px;color:#555">CARNICERÍAS · PREMIUM QUALITY</div>
             <div style="font-size:10px;color:#444;margin-top:4px">📍 Casa Central: Av. Mitre 670 - Río Primero, Córdoba</div>
             <div style="font-size:11px;font-weight:700;background:#000;color:#fff;padding:3px 8px;display:inline-block;border-radius:4px;margin-top:4px">📱 3574 400346</div>
           </div>
           <div style="text-align:right">
             <div class="doc-no-valido">X — DOCUMENTO NO VÁLIDO COMO FACTURA</div>
             <div class="remito-title">REMITO</div>
-            <div class="nro">N° ${String(remito.numero).padStart(5, '0')}</div>
+            <div style="font-size:13px;font-weight:700">N° ${String(remito.numero).padStart(5, '0')}</div>
           </div>
         </div>
         <div style="font-size:11px;margin-bottom:8px">Fecha: <strong>${remito.fecha}</strong></div>
