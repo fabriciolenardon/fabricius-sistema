@@ -82,25 +82,23 @@ export default function Precios() {
       `- ${p.nombre} (${CATEGORIAS[p.categoria]}): Carn $${p.precio_carniceria ?? '—'} / May $${p.precio_mayorista ?? '—'} / Min $${p.precio_minorista ?? '—'}`
     ).join('\n')
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-  method: 'POST',
-  headers: { 
-    'Content-Type': 'application/json',
-    'x-api-key': import.meta.env.VITE_ANTHROPIC_API_KEY,
-    'anthropic-version': '2023-06-01',
-    'anthropic-dangerous-direct-browser-access': 'true',
-  },
+      const historial = chatMsgs.filter((_, i) => i > 0).map(m => ({
+        role: m.rol === 'user' ? 'user' : 'model',
+        parts: [{ text: m.texto }]
+      }))
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${import.meta.env.VITE_GEMINI_API_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
-          system: `Sos el asistente de Carnicerías Fabricius, una carnicería mayorista argentina. Respondé siempre en español argentino, de forma amigable y directa.\n\nLISTA DE PRECIOS ACTUAL:\n${listaTexto}`,
-          messages: chatMsgs.filter((_, i) => i > 0).map(m => ({ role: m.rol === 'user' ? 'user' : 'assistant', content: m.texto })).concat([{ role: 'user', content: pregunta }])
+          system_instruction: { parts: [{ text: `Sos el asistente de Carnicerías Fabricius, una carnicería mayorista argentina. Respondé siempre en español argentino, de forma amigable y directa.\n\nLISTA DE PRECIOS ACTUAL:\n${listaTexto}` }] },
+          contents: [...historial, { role: 'user', parts: [{ text: pregunta }] }]
         })
       })
       const data = await res.json()
-      setChatMsgs(m => [...m, { rol: 'ia', texto: data.content?.[0]?.text || 'No pude procesar tu consulta.' }])
-    } catch {
-      setChatMsgs(m => [...m, { rol: 'ia', texto: '❌ Error al conectar con la IA. Intentá de nuevo.' }])
+      const respuesta = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No pude procesar tu consulta.'
+      setChatMsgs(m => [...m, { rol: 'ia', texto: respuesta }])
+    } catch (err) {
+      setChatMsgs(m => [...m, { rol: 'ia', texto: '❌ Error: ' + err.message }])
     }
     setChatLoading(false)
   }
