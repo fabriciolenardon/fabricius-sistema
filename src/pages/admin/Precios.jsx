@@ -82,16 +82,12 @@ export default function Precios() {
       `- ${p.nombre} (${CATEGORIAS[p.categoria]}): Carn $${p.precio_carniceria ?? '—'} / May $${p.precio_mayorista ?? '—'} / Min $${p.precio_minorista ?? '—'}`
     ).join('\n')
     try {
-      const historial = chatMsgs.filter((_, i) => i > 0).map(m => ({
-        role: m.rol === 'user' ? 'user' : 'model',
-        parts: [{ text: m.texto }]
-      }))
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${import.meta.env.VITE_GEMINI_API_KEY}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           system_instruction: { parts: [{ text: `Sos el asistente de Carnicerías Fabricius, una carnicería mayorista argentina. Respondé siempre en español argentino, de forma amigable y directa.\n\nLISTA DE PRECIOS ACTUAL:\n${listaTexto}` }] },
-          contents: [...historial, { role: 'user', parts: [{ text: pregunta }] }]
+          contents: [{ role: 'user', parts: [{ text: pregunta }] }]
         })
       })
       const data = await res.json()
