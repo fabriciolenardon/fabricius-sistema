@@ -1,14 +1,12 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { supabase } from '../supabaseClient'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const [setupMsg, setSetupMsg] = useState('')
   const { signIn } = useAuth()
   const navigate = useNavigate()
 
@@ -20,36 +18,6 @@ export default function LoginPage() {
     setLoading(false)
     if (error) { setError('Email o contraseña incorrectos'); return }
     navigate('/')
-  }
-
-  async function crearAgustin() {
-    setSetupMsg('Creando usuario...')
-    // Limpiar primero
-    await supabase.from('profiles').delete().eq('nombre', 'Agustín - Monte Cristo')
-
-    // Crear con signUp
-    const { data, error } = await supabase.auth.signUp({
-      email: 'agussuarez312@gmail.com',
-      password: 'monte1234',
-      options: { emailRedirectTo: null }
-    })
-
-    if (error) {
-      // Si ya existe intentar admin
-      setSetupMsg('Error: ' + error.message)
-      return
-    }
-
-    const userId = data?.user?.id
-    if (userId) {
-      await supabase.from('profiles').upsert({
-        id: userId,
-        nombre: 'Agustín - Monte Cristo',
-        rol: 'franquicia',
-        sucursal_id: 3
-      })
-      setSetupMsg('✅ Usuario creado! ID: ' + userId)
-    }
   }
 
   return (
@@ -97,14 +65,6 @@ export default function LoginPage() {
               {loading ? 'Ingresando...' : 'Ingresar al sistema'}
             </button>
           </form>
-
-          {/* SETUP TEMPORAL - BORRAR DESPUÉS */}
-          <div style={{ marginTop: 16, textAlign: 'center' }}>
-            <button onClick={crearAgustin} style={{ fontSize: 10, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
-              setup
-            </button>
-            {setupMsg && <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 4 }}>{setupMsg}</div>}
-          </div>
 
           <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--border)' }}>
             <div style={{ fontSize: 10, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 10 }}>
