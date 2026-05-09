@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../supabaseClient'
-
 const CATEGORIAS = {
   bovino_mr: '🐄 Media Reses',
   bovino_corte: '🥩 Bovinos — Cortes',
   bovino_brosa: '🫀 Brosas',
   bovino_pieza: '🍖 Piezas',
+  bovino_caja_cb: '📦 Cajas Bovinas CB',
+  bovino_caja_pt: '📦 Cajas Bovinas PT',
   cerdo_corte: '🐷 Cerdo',
   embutido: '🌭 Embutidos',
   pollo: '🍗 Pollo Cajones',
