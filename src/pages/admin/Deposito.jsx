@@ -4,7 +4,6 @@ import { supabase } from '../../supabaseClient'
 
 const fmt = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
 
-// Hook para cargar proveedores dinámicamente desde Supabase
 function useProveedores() {
   const [proveedores, setProveedores] = useState([])
   useEffect(() => { cargar() }, [])
@@ -517,6 +516,9 @@ function ProveedoresTab() {
   const [proveedoresDB, setProveedoresDB] = useState([])
   const [alert, setAlert] = useState(null)
   const [nuevoProveedor, setNuevoProveedor] = useState('')
+  const [legajoAbierto, setLegajoAbierto] = useState(null)
+  const [editandoLegajo, setEditandoLegajo] = useState(false)
+  const [formLegajo, setFormLegajo] = useState({ contacto: '', telefono: '', cuit: '', direccion: '', producto_principal: '', notas: '' })
 
   const [formCompra, setFormCompra] = useState({ fecha: new Date().toISOString().split('T')[0], semana_inicio: '', semana_fin: '', proveedor_nombre: '', producto: '', kg: '', importe: '' })
   const [formPago, setFormPago] = useState({ fecha: new Date().toISOString().split('T')[0], semana_inicio: '', semana_fin: '', proveedor_nombre: '', importe_compra: '', percepcion: '', saldo_anterior: '', entrega: '', notas: '' })
@@ -552,6 +554,29 @@ function ProveedoresTab() {
     if (!confirm(`¿Eliminar el proveedor ${nombre}?`)) return
     await supabase.from('proveedores').update({ activo: false }).eq('id', id)
     showMsg('🗑️ Proveedor eliminado')
+    if (legajoAbierto?.id === id) setLegajoAbierto(null)
+    fetchAll()
+  }
+
+  function abrirLegajo(prov) {
+    setLegajoAbierto(prov)
+    setFormLegajo({
+      contacto: prov.contacto || '',
+      telefono: prov.telefono || '',
+      cuit: prov.cuit || '',
+      direccion: prov.direccion || '',
+      producto_principal: prov.producto_principal || '',
+      notas: prov.notas || ''
+    })
+    setEditandoLegajo(false)
+  }
+
+  async function guardarLegajo() {
+    await supabase.from('proveedores').update(formLegajo).eq('id', legajoAbierto.id)
+    showMsg('✅ Legajo actualizado')
+    setEditandoLegajo(false)
+    const updated = { ...legajoAbierto, ...formLegajo }
+    setLegajoAbierto(updated)
     fetchAll()
   }
 
@@ -583,18 +608,152 @@ function ProveedoresTab() {
 
   const proveedoresNombres = proveedoresDB.map(p => p.nombre)
 
-  const resumen = proveedoresNombres.map(prov => {
-    const comprasProv = compras.filter(c => c.proveedor_nombre?.toUpperCase().includes(prov))
-    const pagosProv = pagos.filter(p => p.proveedor_nombre?.toUpperCase().includes(prov))
+  const getResumenProv = (nombre) => {
+    const comprasProv = compras.filter(c => c.proveedor_nombre?.toUpperCase().includes(nombre))
+    const pagosProv = pagos.filter(p => p.proveedor_nombre?.toUpperCase().includes(nombre))
     const totalCompras = comprasProv.reduce((s, c) => s + (c.importe || 0), 0)
     const totalEntregado = pagosProv.reduce((s, p) => s + (p.entrega || 0), 0)
     const ultimoPago = pagosProv[0]
     const saldoAdeudado = ultimoPago?.saldo_adeudado ?? (totalCompras - totalEntregado)
-    return { prov, totalCompras, totalEntregado, saldoAdeudado }
-  }).filter(r => r.totalCompras > 0 || r.saldoAdeudado !== 0)
+    return { totalCompras, totalEntregado, saldoAdeudado, comprasProv, pagosProv }
+  }
 
-  const totalDeuda = resumen.reduce((s, r) => s + Math.max(0, r.saldoAdeudado), 0)
+  const totalDeuda = proveedoresDB.reduce((s, p) => s + Math.max(0, getResumenProv(p.nombre).saldoAdeudado), 0)
 
+  // LEGAJO ABIERTO
+  if (legajoAbierto) {
+    const { totalCompras, totalEntregado, saldoAdeudado, comprasProv, pagosProv } = getResumenProv(legajoAbierto.nombre)
+
+    return (
+      <div>
+        <button onClick={() => setLegajoAbierto(null)} className="btn btn-ghost" style={{ marginBottom: 16 }}>← Volver a proveedores</button>
+
+        {alert && (
+          <div style={{ background: alert.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${alert.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: alert.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>
+            {alert.msg}
+          </div>
+        )}
+
+        {/* HEADER */}
+        <div style={{ background: 'linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%)', border: '1px solid var(--amber)', borderRadius: 16, padding: 24, marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 32, color: 'var(--amber)', letterSpacing: 2 }}>🏭 {legajoAbierto.nombre}</div>
+              <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>Legajo de proveedor</div>
+              {legajoAbierto.producto_principal && <div style={{ fontSize: 12, color: 'var(--gold)', marginTop: 4 }}>🥩 {legajoAbierto.producto_principal}</div>}
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Saldo adeudado</div>
+              <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 36, color: saldoAdeudado > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(saldoAdeudado)}</div>
+              <div style={{ fontSize: 11, color: saldoAdeudado > 0 ? 'var(--red-light)' : 'var(--green)' }}>{saldoAdeudado > 0 ? '⚠️ Con deuda' : '✅ Al día'}</div>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginTop: 16 }}>
+            <div style={{ background: 'var(--surface)', borderRadius: 8, padding: '10px 14px', textAlign: 'center' }}>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>Total compras</div>
+              <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 22, color: 'var(--amber)' }}>{fmt(totalCompras)}</div>
+            </div>
+            <div style={{ background: 'var(--surface)', borderRadius: 8, padding: '10px 14px', textAlign: 'center' }}>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>Total pagado</div>
+              <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 22, color: 'var(--green)' }}>{fmt(totalEntregado)}</div>
+            </div>
+            <div style={{ background: 'var(--surface)', borderRadius: 8, padding: '10px 14px', textAlign: 'center' }}>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>Compras registradas</div>
+              <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 22, color: 'var(--gold)' }}>{comprasProv.length}</div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+          {/* DATOS */}
+          <div className="card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div className="card-title" style={{ margin: 0 }}>📋 Datos del proveedor</div>
+              <button onClick={() => setEditandoLegajo(!editandoLegajo)} className="btn btn-ghost btn-sm">
+                {editandoLegajo ? '✕ Cancelar' : '✏️ Editar'}
+              </button>
+            </div>
+            {editandoLegajo ? (
+              <div>
+                {[
+                  ['contacto', '👤 Contacto', 'Nombre del contacto'],
+                  ['telefono', '📱 Teléfono', 'Ej: 3574 000000'],
+                  ['cuit', '🆔 CUIT', 'XX-XXXXXXXX-X'],
+                  ['direccion', '📍 Dirección', 'Dirección del proveedor'],
+                  ['producto_principal', '🥩 Producto principal', 'Ej: Bovino Media Res'],
+                  ['notas', '📝 Notas', 'Observaciones, condiciones, etc.'],
+                ].map(([campo, label, placeholder]) => (
+                  <div key={campo} style={{ marginBottom: 10 }}>
+                    <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>{label}</label>
+                    <input value={formLegajo[campo]} onChange={e => setFormLegajo(f => ({ ...f, [campo]: e.target.value }))} placeholder={placeholder} style={inp} />
+                  </div>
+                ))}
+                <button className="btn btn-gold" onClick={guardarLegajo} style={{ width: '100%', marginTop: 8 }}>💾 Guardar legajo</button>
+              </div>
+            ) : (
+              <div>
+                {[
+                  ['👤 Contacto', legajoAbierto.contacto],
+                  ['📱 Teléfono', legajoAbierto.telefono],
+                  ['🆔 CUIT', legajoAbierto.cuit],
+                  ['📍 Dirección', legajoAbierto.direccion],
+                  ['🥩 Producto principal', legajoAbierto.producto_principal],
+                  ['📝 Notas', legajoAbierto.notas],
+                ].map(([label, valor]) => (
+                  <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                    <span style={{ fontSize: 12, color: 'var(--muted)' }}>{label}</span>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: valor ? 'var(--text)' : 'var(--muted)', fontStyle: valor ? 'normal' : 'italic' }}>
+                      {valor || 'Sin datos'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ÚLTIMOS PAGOS */}
+          <div className="card">
+            <div className="card-title">💰 Últimos pagos</div>
+            {pagosProv.length === 0 ? <div className="empty">Sin pagos registrados</div> : (
+              pagosProv.slice(0, 6).map(p => (
+                <div key={p.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                    <span style={{ fontSize: 12, color: 'var(--muted)' }}>{p.fecha}</span>
+                    <span style={{ fontSize: 12, color: p.saldo_adeudado > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 600 }}>Saldo: {fmt(p.saldo_adeudado)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)' }}>
+                    <span>Compra: {fmt(p.importe_compra)}</span>
+                    <span style={{ color: 'var(--green)' }}>Entrega: {fmt(p.entrega)}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* HISTORIAL COMPRAS */}
+        <div className="card">
+          <div className="card-title">📥 Historial de compras</div>
+          <table>
+            <thead><tr><th>Fecha</th><th>Producto</th><th>Kg</th><th>Importe</th></tr></thead>
+            <tbody>
+              {comprasProv.slice(0, 15).map(c => (
+                <tr key={c.id}>
+                  <td>{c.fecha}</td>
+                  <td>{c.producto || '—'}</td>
+                  <td>{c.kg > 0 ? c.kg + ' kg' : '—'}</td>
+                  <td style={{ color: 'var(--amber)', fontWeight: 600 }}>{fmt(c.importe)}</td>
+                </tr>
+              ))}
+              {comprasProv.length === 0 && <tr><td colSpan={4} className="empty">Sin compras registradas</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    )
+  }
+
+  // VISTA PRINCIPAL
   return (
     <div>
       {alert && (
@@ -627,18 +786,23 @@ function ProveedoresTab() {
                 <th style={{ color: 'var(--green)' }}>Total entregado</th>
                 <th style={{ color: 'var(--red-light)' }}>Saldo adeudado</th>
                 <th>Estado</th>
+                <th>Legajo</th>
               </tr></thead>
               <tbody>
-                {resumen.map(r => (
-                  <tr key={r.prov}>
-                    <td><strong>{r.prov}</strong></td>
-                    <td style={{ color: 'var(--amber)' }}>{fmt(r.totalCompras)}</td>
-                    <td style={{ color: 'var(--green)' }}>{fmt(r.totalEntregado)}</td>
-                    <td style={{ color: r.saldoAdeudado > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 700 }}>{fmt(r.saldoAdeudado)}</td>
-                    <td><span style={{ background: r.saldoAdeudado > 0 ? '#3a1a1a' : '#1a3a1a', color: r.saldoAdeudado > 0 ? 'var(--red-light)' : 'var(--green)', borderRadius: 4, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>{r.saldoAdeudado > 0 ? 'DEBE' : '✅ AL DÍA'}</span></td>
-                  </tr>
-                ))}
-                {resumen.length === 0 && <tr><td colSpan={5} className="empty">Sin compras registradas</td></tr>}
+                {proveedoresDB.map(p => {
+                  const r = getResumenProv(p.nombre)
+                  return (
+                    <tr key={p.id}>
+                      <td><strong>{p.nombre}</strong></td>
+                      <td style={{ color: 'var(--amber)' }}>{fmt(r.totalCompras)}</td>
+                      <td style={{ color: 'var(--green)' }}>{fmt(r.totalEntregado)}</td>
+                      <td style={{ color: r.saldoAdeudado > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 700 }}>{fmt(r.saldoAdeudado)}</td>
+                      <td><span style={{ background: r.saldoAdeudado > 0 ? '#3a1a1a' : '#1a3a1a', color: r.saldoAdeudado > 0 ? 'var(--red-light)' : 'var(--green)', borderRadius: 4, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>{r.saldoAdeudado > 0 ? 'DEBE' : '✅ AL DÍA'}</span></td>
+                      <td><button onClick={() => abrirLegajo(p)} style={{ background: 'var(--amber)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#fff' }}>📋 Ver legajo</button></td>
+                    </tr>
+                  )
+                })}
+                {proveedoresDB.length === 0 && <tr><td colSpan={6} className="empty">Sin proveedores registrados</td></tr>}
               </tbody>
             </table>
           </div>
@@ -770,38 +934,29 @@ function ProveedoresTab() {
 
       {subtab === 'gestionar' && (
         <div>
-          {/* AGREGAR PROVEEDOR */}
           <div className="card" style={{ marginBottom: 16 }}>
             <div className="card-title">➕ Agregar nuevo proveedor</div>
             <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
               <div style={{ flex: 1 }}>
                 <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Nombre del proveedor</label>
-                <input
-                  value={nuevoProveedor}
-                  onChange={e => setNuevoProveedor(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && agregarProveedor()}
-                  placeholder="Ej: GARCIA, SAN MARTIN..."
-                  style={{ ...inp, borderColor: 'var(--gold)', textTransform: 'uppercase' }}
-                />
+                <input value={nuevoProveedor} onChange={e => setNuevoProveedor(e.target.value)} onKeyDown={e => e.key === 'Enter' && agregarProveedor()} placeholder="Ej: GARCIA, SAN MARTIN..." style={{ ...inp, borderColor: 'var(--gold)', textTransform: 'uppercase' }} />
               </div>
-              <button onClick={agregarProveedor} className="btn btn-gold" style={{ whiteSpace: 'nowrap' }}>
-                ➕ Agregar
-              </button>
+              <button onClick={agregarProveedor} className="btn btn-gold" style={{ whiteSpace: 'nowrap' }}>➕ Agregar</button>
             </div>
           </div>
-
-          {/* LISTA DE PROVEEDORES */}
           <div className="card">
             <div className="card-title">📋 Proveedores activos ({proveedoresDB.length})</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
               {proveedoresDB.map(p => (
                 <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', border: '1px solid var(--border)' }}>
-                  <span style={{ fontWeight: 600, fontSize: 13 }}>{p.nombre}</span>
-                  <button onClick={() => eliminarProveedor(p.id, p.nombre)}
-                    style={{ background: 'none', border: 'none', color: 'var(--red-light)', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}
-                    title="Eliminar proveedor">
-                    🗑️
-                  </button>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>{p.nombre}</div>
+                    {p.producto_principal && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{p.producto_principal}</div>}
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button onClick={() => abrirLegajo(p)} style={{ background: 'var(--amber)', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#fff' }}>📋</button>
+                    <button onClick={() => eliminarProveedor(p.id, p.nombre)} style={{ background: 'none', border: 'none', color: 'var(--red-light)', cursor: 'pointer', fontSize: 16 }}>🗑️</button>
+                  </div>
                 </div>
               ))}
               {proveedoresDB.length === 0 && <div className="empty" style={{ gridColumn: '1/-1' }}>Sin proveedores registrados</div>}
