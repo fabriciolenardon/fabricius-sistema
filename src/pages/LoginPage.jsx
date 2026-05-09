@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { supabase } from '../supabaseClient'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [setupMsg, setSetupMsg] = useState('')
   const { signIn } = useAuth()
   const navigate = useNavigate()
 
@@ -20,6 +22,36 @@ export default function LoginPage() {
     navigate('/')
   }
 
+  async function crearAgustin() {
+    setSetupMsg('Creando usuario...')
+    // Limpiar primero
+    await supabase.from('profiles').delete().eq('nombre', 'Agustín - Monte Cristo')
+
+    // Crear con signUp
+    const { data, error } = await supabase.auth.signUp({
+      email: 'agussuarez312@gmail.com',
+      password: 'monte1234',
+      options: { emailRedirectTo: null }
+    })
+
+    if (error) {
+      // Si ya existe intentar admin
+      setSetupMsg('Error: ' + error.message)
+      return
+    }
+
+    const userId = data?.user?.id
+    if (userId) {
+      await supabase.from('profiles').upsert({
+        id: userId,
+        nombre: 'Agustín - Monte Cristo',
+        rol: 'franquicia',
+        sucursal_id: 3
+      })
+      setSetupMsg('✅ Usuario creado! ID: ' + userId)
+    }
+  }
+
   return (
     <div style={{
       position: 'fixed', inset: 0, background: 'var(--bg)', display: 'flex',
@@ -27,7 +59,6 @@ export default function LoginPage() {
       backgroundImage: 'radial-gradient(ellipse at 20% 50%, rgba(201,168,76,0.06) 0%, transparent 60%), radial-gradient(ellipse at 80% 20%, rgba(192,57,43,0.05) 0%, transparent 50%)'
     }}>
       <div style={{ width: 420 }} className="fade-up">
-        {/* BRAND */}
         <div style={{ textAlign: 'center', marginBottom: 40 }}>
           <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 48, color: 'var(--gold)', letterSpacing: 4, lineHeight: 1, textShadow: '0 0 40px rgba(201,168,76,0.3)' }}>
             CARNICERIAS<br />FABRICIUS
@@ -38,7 +69,6 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {/* CARD */}
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: 36, boxShadow: '0 0 60px rgba(0,0,0,0.5)' }}>
           <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 22, letterSpacing: 2, color: 'var(--text2)', marginBottom: 24 }}>
             Iniciar sesión
@@ -47,58 +77,47 @@ export default function LoginPage() {
           <form onSubmit={handleLogin}>
             <div className="form-group">
               <label>Email</label>
-              <input
-                type="email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                placeholder="tu@email.com"
-                required
-                autoFocus
-              />
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="tu@email.com" required autoFocus />
             </div>
             <div className="form-group">
               <label>Contraseña</label>
-              <input
-                type="password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                placeholder="••••••••"
-                required
-              />
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required />
             </div>
 
             {error && <div className="alert alert-error">{error}</div>}
 
-            <button
-              type="submit"
-              disabled={loading}
-              style={{
-                width: '100%', padding: 14,
-                background: 'linear-gradient(135deg, var(--gold), var(--amber))',
-                border: 'none', borderRadius: 10, color: '#000',
-                fontFamily: "'DM Sans', sans-serif", fontSize: 14, fontWeight: 700,
-                letterSpacing: 1, textTransform: 'uppercase', cursor: loading ? 'not-allowed' : 'pointer',
-                opacity: loading ? 0.7 : 1, marginTop: 8,
-                transition: 'all 0.2s'
-              }}
-            >
+            <button type="submit" disabled={loading} style={{
+              width: '100%', padding: 14,
+              background: 'linear-gradient(135deg, var(--gold), var(--amber))',
+              border: 'none', borderRadius: 10, color: '#000',
+              fontFamily: "'DM Sans', sans-serif", fontSize: 14, fontWeight: 700,
+              letterSpacing: 1, textTransform: 'uppercase', cursor: loading ? 'not-allowed' : 'pointer',
+              opacity: loading ? 0.7 : 1, marginTop: 8, transition: 'all 0.2s'
+            }}>
               {loading ? 'Ingresando...' : 'Ingresar al sistema'}
             </button>
           </form>
 
-          {/* USUARIOS HINT */}
+          {/* SETUP TEMPORAL - BORRAR DESPUÉS */}
+          <div style={{ marginTop: 16, textAlign: 'center' }}>
+            <button onClick={crearAgustin} style={{ fontSize: 10, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
+              setup
+            </button>
+            {setupMsg && <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 4 }}>{setupMsg}</div>}
+          </div>
+
           <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--border)' }}>
             <div style={{ fontSize: 10, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 10 }}>
               Usuarios del sistema
             </div>
             {[
-              { nombre: 'Fabricio Lenardon', email: 'fabricio@fabricius.com.ar', rol: 'Admin' },
-              { nombre: 'Ariel Garrone', email: 'ariel@fabricius.com.ar', rol: 'Admin' },
-              { nombre: 'Giuliana Frontera', email: 'giuliana@fabricius.com.ar', rol: 'Admin' },
-              { nombre: 'Sucursal Alvear', email: 'alvear@fabricius.com.ar', rol: 'Franquicia' },
-              { nombre: 'Sucursal Monte Cristo', email: 'montecRisto@fabricius.com.ar', rol: 'Franquicia' },
+              { nombre: 'Fabricio Lenardon', rol: 'Admin' },
+              { nombre: 'Ariel Garrone', rol: 'Admin' },
+              { nombre: 'Giuliana Frontera', rol: 'Admin' },
+              { nombre: 'Sucursal Alvear', rol: 'Franquicia' },
+              { nombre: 'Sucursal Monte Cristo', rol: 'Franquicia' },
             ].map(u => (
-              <div key={u.email} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '4px 0', color: 'var(--muted2)' }}>
+              <div key={u.nombre} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '4px 0', color: 'var(--muted2)' }}>
                 <span style={{ color: 'var(--text2)' }}>{u.nombre}</span>
                 <span className={`badge ${u.rol === 'Admin' ? 'badge-gold' : 'badge-teal'}`}>{u.rol}</span>
               </div>
