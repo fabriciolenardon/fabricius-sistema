@@ -11,13 +11,20 @@ function useProveedores() {
     const { data } = await supabase.from('proveedores').select('*').eq('activo', true).order('nombre')
     setProveedores((data || []).map(p => p.nombre))
   }
-  return { proveedores, recargar: cargar }
+  return { proveedores }
+}
+
+async function actualizarStock(tipo, kgDelta) {
+  const { data } = await supabase.from('stock_actual').select('kg_disponible').eq('tipo', tipo).maybeSingle()
+  const actual = data?.kg_disponible || 0
+  const nuevo = Math.max(0, actual + kgDelta)
+  await supabase.from('stock_actual').upsert({ tipo, kg_disponible: nuevo, ultima_actualizacion: new Date().toISOString() }, { onConflict: 'tipo' })
 }
 
 export function Deposito() {
   const [tab, setTab] = useState('stock')
   const [entradas, setEntradas] = useState([])
-  const [salidas, setSalidas] = useState([])
+  const [stock, setStock] = useState({ bovino_mr: 0, pollo: 0, cerdo: 0, bovino_corte: 0, bovino_brosa: 0, embutido: 0 })
   const [alert, setAlert] = useState(null)
   const [remitoActual, setRemitoActual] = useState(null)
   const { proveedores } = useProveedores()
@@ -33,18 +40,21 @@ export function Deposito() {
   useEffect(() => { fetchData() }, [])
 
   async function fetchData() {
-    const { data: e } = await supabase.from('entradas_deposito').select('*').order('fecha', { ascending: false }).limit(50)
-    const { data: s } = await supabase.from('salidas_deposito').select('*').order('fecha', { ascending: false }).limit(50)
+    const [{ data: e }, { data: stockData }] = await Promise.all([
+      supabase.from('entradas_deposito').select('*').order('fecha', { ascending: false }).limit(50),
+      supabase.from('stock_actual').select('*')
+    ])
     setEntradas(e || [])
-    setSalidas(s || [])
+    if (stockData) {
+      const s = {}
+      stockData.forEach(r => s[r.tipo] = r.kg_disponible)
+      setStock(prev => ({ ...prev, ...s }))
+    }
   }
 
-  const stockBovino = entradas.filter(e => e.tipo === 'bovino_mr').reduce((s, e) => s + (e.kg_real || 0), 0)
-    - salidas.filter(s => s.tipo === 'bovino_mr').reduce((s, e) => s + (e.kg || 0), 0)
-  const stockPollo = entradas.filter(e => e.tipo === 'pollo').reduce((s, e) => s + (e.kg || 0), 0)
-    - salidas.filter(s => s.tipo === 'pollo').reduce((s, e) => s + (e.kg || 0), 0)
-  const stockCerdo = entradas.filter(e => e.tipo === 'cerdo').reduce((s, e) => s + (e.kg || 0), 0)
-    - salidas.filter(s => s.tipo === 'cerdo').reduce((s, e) => s + (e.kg || 0), 0)
+  const stockBovino = Math.max(0, stock.bovino_mr || 0)
+  const stockPollo = Math.max(0, stock.pollo || 0)
+  const stockCerdo = Math.max(0, stock.cerdo || 0)
 
   return (
     <div>
@@ -70,9 +80,9 @@ export function Deposito() {
         <div>
           <div className="grid4" style={{ marginBottom: 24 }}>
             {[
-              { label: 'Bovino disponible', val: Math.max(0, stockBovino).toFixed(1) + ' kg', sub: Math.round(Math.max(0, stockBovino) / 105) + ' medias aprox', color: 'var(--gold)' },
-              { label: 'Pollo disponible', val: Math.max(0, stockPollo).toFixed(1) + ' kg', sub: Math.round(Math.max(0, stockPollo) / 20) + ' cajones aprox', color: 'var(--blue)' },
-              { label: 'Cerdo disponible', val: Math.max(0, stockCerdo).toFixed(1) + ' kg', sub: Math.round(Math.max(0, stockCerdo) / 107) + ' capones aprox', color: 'var(--amber)' },
+              { label: 'Bovino disponible', val: stockBovino.toFixed(1) + ' kg', sub: Math.round(stockBovino / 105) + ' medias aprox', color: stockBovino < 100 ? 'var(--red-light)' : 'var(--gold)' },
+              { label: 'Pollo disponible', val: stockPollo.toFixed(1) + ' kg', sub: Math.round(stockPollo / 20) + ' cajones aprox', color: stockPollo < 50 ? 'var(--red-light)' : 'var(--blue)' },
+              { label: 'Cerdo disponible', val: stockCerdo.toFixed(1) + ' kg', sub: Math.round(stockCerdo / 107) + ' capones aprox', color: stockCerdo < 50 ? 'var(--red-light)' : 'var(--amber)' },
               { label: 'Entradas semana', val: entradas.filter(e => { const d = new Date(e.fecha); const hoy = new Date(); return d >= new Date(hoy.setDate(hoy.getDate() - 7)) }).length, sub: 'últimos 7 días', color: 'var(--green)' },
             ].map(s => (
               <div key={s.label} className="stat">
@@ -82,6 +92,33 @@ export function Deposito() {
               </div>
             ))}
           </div>
+
+          {/* STOCK DETALLADO */}
+          <div className="card" style={{ marginBottom: 20 }}>
+            <div className="card-title">📦 Stock detallado por tipo</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+              {[
+                { tipo: 'bovino_mr', label: '🐄 Bovino Media Res', aprox: kg => Math.round(kg / 105) + ' medias' },
+                { tipo: 'bovino_corte', label: '🥩 Bovino Cortes', aprox: kg => kg.toFixed(1) + ' kg' },
+                { tipo: 'bovino_brosa', label: '🫀 Brosas', aprox: kg => kg.toFixed(1) + ' kg' },
+                { tipo: 'cerdo', label: '🐷 Cerdo Capones', aprox: kg => Math.round(kg / 107) + ' capones' },
+                { tipo: 'pollo', label: '🍗 Pollo Cajones', aprox: kg => Math.round(kg / 20) + ' cajones' },
+                { tipo: 'embutido', label: '🌭 Embutidos', aprox: kg => kg.toFixed(1) + ' kg' },
+              ].map(({ tipo, label, aprox }) => {
+                const kg = Math.max(0, stock[tipo] || 0)
+                const bajo = kg < 50
+                return (
+                  <div key={tipo} style={{ background: bajo ? '#3a1a1a' : 'var(--surface2)', border: `1px solid ${bajo ? 'var(--red-light)' : 'var(--border)'}`, borderRadius: 10, padding: '12px 16px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>{label}</div>
+                    <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 28, color: bajo ? 'var(--red-light)' : 'var(--gold)' }}>{kg.toFixed(1)} kg</div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>{aprox(kg)}</div>
+                    {bajo && <div style={{ fontSize: 10, color: 'var(--red-light)', fontWeight: 700, marginTop: 4 }}>⚠️ Stock bajo</div>}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
           <div className="card">
             <div className="card-title">Últimas entradas registradas</div>
             <table>
@@ -122,6 +159,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     const importe = form.tipo === 'bovino_mr'
       ? parseFloat(form.kg) * parseFloat(form.precioKg)
       : parseFloat(form.importe) || 0
+
     const { error } = await supabase.from('entradas_deposito').insert({
       fecha: form.fecha, tipo: form.tipo, proveedor_nombre: form.proveedor,
       descripcion: form.descripcion || form.tipo, kg: parseFloat(form.kg), kg_real: kgReal,
@@ -130,13 +168,18 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     })
     if (error) { showAlert({ type: 'error', msg: error.message }); return }
 
+    // Actualizar stock automáticamente
+    const kgSumar = form.tipo === 'bovino_mr' ? kgReal : parseFloat(form.kg)
+    await actualizarStock(form.tipo, kgSumar)
+
+    // Registrar en compras_proveedores
     await supabase.from('compras_proveedores').insert({
       fecha: form.fecha, proveedor_nombre: form.proveedor,
       producto: form.descripcion || form.tipo,
       kg: parseFloat(form.kg), importe
     })
 
-    showAlert({ type: 'success', msg: '✅ Entrada registrada' })
+    showAlert({ type: 'success', msg: '✅ Entrada registrada — Stock actualizado' })
     setForm(f => ({ ...f, descripcion: '', kg: '', importe: '', precioKg: '9800' }))
     onSaved()
     setTimeout(() => showAlert(null), 3000)
@@ -202,7 +245,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
         </div>
       </div>
       <div style={{ fontSize: 12, color: 'var(--green)', marginBottom: 12 }}>
-        ✅ La entrada se registrará automáticamente en Cuenta Proveedores
+        ✅ La entrada actualizará el stock y se registrará en Cuenta Proveedores
       </div>
       <button className="btn btn-gold" onClick={guardar}>✅ Registrar entrada</button>
     </div>
@@ -227,6 +270,14 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
     bovino_brosa: '🫀 Brosas', bovino_pieza: '🍖 Piezas',
     cerdo_corte: '🐷 Cerdo', embutido: '🌭 Embutidos',
     pollo: '🍗 Pollo Cajones', rebozado: '🧊 Rebozados',
+  }
+
+  // Mapeo de categorías de precios a tipos de stock
+  const CATEGORIA_A_STOCK = {
+    bovino_mr: 'bovino_mr', bovino_corte: 'bovino_corte',
+    bovino_brosa: 'bovino_brosa', bovino_pieza: 'bovino_corte',
+    cerdo_corte: 'cerdo', embutido: 'embutido',
+    pollo: 'pollo', rebozado: 'embutido',
   }
 
   const DESTINOS_FRANQUICIA = { 'CENTRO': 'ALVEAR', 'MONTE CRISTO': 'MONTE CRISTO' }
@@ -293,6 +344,16 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
       })
     }
 
+    // Descontar stock automáticamente por tipo
+    const kgPorTipo = {}
+    for (const item of items) {
+      const tipoStock = CATEGORIA_A_STOCK[item.tipo] || item.tipo
+      kgPorTipo[tipoStock] = (kgPorTipo[tipoStock] || 0) + item.kg
+    }
+    for (const [tipo, kg] of Object.entries(kgPorTipo)) {
+      await actualizarStock(tipo, -kg)
+    }
+
     const { data: remitoData } = await supabase.from('remitos').insert({
       fecha: form.fecha, cliente_nombre: clienteNombre,
       cliente_id: clienteId || null, domicilio,
@@ -310,7 +371,7 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
       await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', clienteId)
     }
 
-    showAlert({ type: 'success', msg: '✅ Despacho registrado — Remito generado' })
+    showAlert({ type: 'success', msg: '✅ Despacho registrado — Stock descontado — Remito generado' })
     onRemito(remitoData)
     setItems([])
     setBusqueda('')
@@ -560,14 +621,7 @@ function ProveedoresTab() {
 
   function abrirLegajo(prov) {
     setLegajoAbierto(prov)
-    setFormLegajo({
-      contacto: prov.contacto || '',
-      telefono: prov.telefono || '',
-      cuit: prov.cuit || '',
-      direccion: prov.direccion || '',
-      producto_principal: prov.producto_principal || '',
-      notas: prov.notas || ''
-    })
+    setFormLegajo({ contacto: prov.contacto || '', telefono: prov.telefono || '', cuit: prov.cuit || '', direccion: prov.direccion || '', producto_principal: prov.producto_principal || '', notas: prov.notas || '' })
     setEditandoLegajo(false)
   }
 
@@ -575,8 +629,7 @@ function ProveedoresTab() {
     await supabase.from('proveedores').update(formLegajo).eq('id', legajoAbierto.id)
     showMsg('✅ Legajo actualizado')
     setEditandoLegajo(false)
-    const updated = { ...legajoAbierto, ...formLegajo }
-    setLegajoAbierto(updated)
+    setLegajoAbierto({ ...legajoAbierto, ...formLegajo })
     fetchAll()
   }
 
@@ -620,21 +673,12 @@ function ProveedoresTab() {
 
   const totalDeuda = proveedoresDB.reduce((s, p) => s + Math.max(0, getResumenProv(p.nombre).saldoAdeudado), 0)
 
-  // LEGAJO ABIERTO
   if (legajoAbierto) {
     const { totalCompras, totalEntregado, saldoAdeudado, comprasProv, pagosProv } = getResumenProv(legajoAbierto.nombre)
-
     return (
       <div>
         <button onClick={() => setLegajoAbierto(null)} className="btn btn-ghost" style={{ marginBottom: 16 }}>← Volver a proveedores</button>
-
-        {alert && (
-          <div style={{ background: alert.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${alert.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: alert.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>
-            {alert.msg}
-          </div>
-        )}
-
-        {/* HEADER */}
+        {alert && <div style={{ background: alert.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${alert.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: alert.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>{alert.msg}</div>}
         <div style={{ background: 'linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%)', border: '1px solid var(--amber)', borderRadius: 16, padding: 24, marginBottom: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
@@ -663,26 +707,15 @@ function ProveedoresTab() {
             </div>
           </div>
         </div>
-
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-          {/* DATOS */}
           <div className="card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div className="card-title" style={{ margin: 0 }}>📋 Datos del proveedor</div>
-              <button onClick={() => setEditandoLegajo(!editandoLegajo)} className="btn btn-ghost btn-sm">
-                {editandoLegajo ? '✕ Cancelar' : '✏️ Editar'}
-              </button>
+              <button onClick={() => setEditandoLegajo(!editandoLegajo)} className="btn btn-ghost btn-sm">{editandoLegajo ? '✕ Cancelar' : '✏️ Editar'}</button>
             </div>
             {editandoLegajo ? (
               <div>
-                {[
-                  ['contacto', '👤 Contacto', 'Nombre del contacto'],
-                  ['telefono', '📱 Teléfono', 'Ej: 3574 000000'],
-                  ['cuit', '🆔 CUIT', 'XX-XXXXXXXX-X'],
-                  ['direccion', '📍 Dirección', 'Dirección del proveedor'],
-                  ['producto_principal', '🥩 Producto principal', 'Ej: Bovino Media Res'],
-                  ['notas', '📝 Notas', 'Observaciones, condiciones, etc.'],
-                ].map(([campo, label, placeholder]) => (
+                {[['contacto', '👤 Contacto', 'Nombre del contacto'], ['telefono', '📱 Teléfono', 'Ej: 3574 000000'], ['cuit', '🆔 CUIT', 'XX-XXXXXXXX-X'], ['direccion', '📍 Dirección', 'Dirección del proveedor'], ['producto_principal', '🥩 Producto principal', 'Ej: Bovino Media Res'], ['notas', '📝 Notas', 'Observaciones, condiciones, etc.']].map(([campo, label, placeholder]) => (
                   <div key={campo} style={{ marginBottom: 10 }}>
                     <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>{label}</label>
                     <input value={formLegajo[campo]} onChange={e => setFormLegajo(f => ({ ...f, [campo]: e.target.value }))} placeholder={placeholder} style={inp} />
@@ -692,58 +725,38 @@ function ProveedoresTab() {
               </div>
             ) : (
               <div>
-                {[
-                  ['👤 Contacto', legajoAbierto.contacto],
-                  ['📱 Teléfono', legajoAbierto.telefono],
-                  ['🆔 CUIT', legajoAbierto.cuit],
-                  ['📍 Dirección', legajoAbierto.direccion],
-                  ['🥩 Producto principal', legajoAbierto.producto_principal],
-                  ['📝 Notas', legajoAbierto.notas],
-                ].map(([label, valor]) => (
+                {[['👤 Contacto', legajoAbierto.contacto], ['📱 Teléfono', legajoAbierto.telefono], ['🆔 CUIT', legajoAbierto.cuit], ['📍 Dirección', legajoAbierto.direccion], ['🥩 Producto principal', legajoAbierto.producto_principal], ['📝 Notas', legajoAbierto.notas]].map(([label, valor]) => (
                   <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
                     <span style={{ fontSize: 12, color: 'var(--muted)' }}>{label}</span>
-                    <span style={{ fontSize: 13, fontWeight: 500, color: valor ? 'var(--text)' : 'var(--muted)', fontStyle: valor ? 'normal' : 'italic' }}>
-                      {valor || 'Sin datos'}
-                    </span>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: valor ? 'var(--text)' : 'var(--muted)', fontStyle: valor ? 'normal' : 'italic' }}>{valor || 'Sin datos'}</span>
                   </div>
                 ))}
               </div>
             )}
           </div>
-
-          {/* ÚLTIMOS PAGOS */}
           <div className="card">
             <div className="card-title">💰 Últimos pagos</div>
-            {pagosProv.length === 0 ? <div className="empty">Sin pagos registrados</div> : (
-              pagosProv.slice(0, 6).map(p => (
-                <div key={p.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-                    <span style={{ fontSize: 12, color: 'var(--muted)' }}>{p.fecha}</span>
-                    <span style={{ fontSize: 12, color: p.saldo_adeudado > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 600 }}>Saldo: {fmt(p.saldo_adeudado)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)' }}>
-                    <span>Compra: {fmt(p.importe_compra)}</span>
-                    <span style={{ color: 'var(--green)' }}>Entrega: {fmt(p.entrega)}</span>
-                  </div>
+            {pagosProv.length === 0 ? <div className="empty">Sin pagos registrados</div> : pagosProv.slice(0, 6).map(p => (
+              <div key={p.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>{p.fecha}</span>
+                  <span style={{ fontSize: 12, color: p.saldo_adeudado > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 600 }}>Saldo: {fmt(p.saldo_adeudado)}</span>
                 </div>
-              ))
-            )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)' }}>
+                  <span>Compra: {fmt(p.importe_compra)}</span>
+                  <span style={{ color: 'var(--green)' }}>Entrega: {fmt(p.entrega)}</span>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
-
-        {/* HISTORIAL COMPRAS */}
         <div className="card">
           <div className="card-title">📥 Historial de compras</div>
           <table>
             <thead><tr><th>Fecha</th><th>Producto</th><th>Kg</th><th>Importe</th></tr></thead>
             <tbody>
               {comprasProv.slice(0, 15).map(c => (
-                <tr key={c.id}>
-                  <td>{c.fecha}</td>
-                  <td>{c.producto || '—'}</td>
-                  <td>{c.kg > 0 ? c.kg + ' kg' : '—'}</td>
-                  <td style={{ color: 'var(--amber)', fontWeight: 600 }}>{fmt(c.importe)}</td>
-                </tr>
+                <tr key={c.id}><td>{c.fecha}</td><td>{c.producto || '—'}</td><td>{c.kg > 0 ? c.kg + ' kg' : '—'}</td><td style={{ color: 'var(--amber)', fontWeight: 600 }}>{fmt(c.importe)}</td></tr>
               ))}
               {comprasProv.length === 0 && <tr><td colSpan={4} className="empty">Sin compras registradas</td></tr>}
             </tbody>
@@ -753,15 +766,9 @@ function ProveedoresTab() {
     )
   }
 
-  // VISTA PRINCIPAL
   return (
     <div>
-      {alert && (
-        <div style={{ background: alert.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${alert.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: alert.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>
-          {alert.msg}
-        </div>
-      )}
-
+      {alert && <div style={{ background: alert.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${alert.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: alert.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>{alert.msg}</div>}
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
         {[{ id: 'resumen', label: '📊 Resumen' }, { id: 'compras', label: '📥 Compras' }, { id: 'pagos', label: '💰 Pagos semanales' }, { id: 'gestionar', label: '⚙️ Gestionar proveedores' }].map(t => (
           <button key={t.id} onClick={() => setSubtab(t.id)}
@@ -780,14 +787,7 @@ function ProveedoresTab() {
           <div className="card">
             <div className="card-title">Estado de cuenta por proveedor</div>
             <table>
-              <thead><tr>
-                <th>Proveedor</th>
-                <th style={{ color: 'var(--amber)' }}>Total compras</th>
-                <th style={{ color: 'var(--green)' }}>Total entregado</th>
-                <th style={{ color: 'var(--red-light)' }}>Saldo adeudado</th>
-                <th>Estado</th>
-                <th>Legajo</th>
-              </tr></thead>
+              <thead><tr><th>Proveedor</th><th style={{ color: 'var(--amber)' }}>Total compras</th><th style={{ color: 'var(--green)' }}>Total entregado</th><th style={{ color: 'var(--red-light)' }}>Saldo adeudado</th><th>Estado</th><th>Legajo</th></tr></thead>
               <tbody>
                 {proveedoresDB.map(p => {
                   const r = getResumenProv(p.nombre)
@@ -813,7 +813,7 @@ function ProveedoresTab() {
         <div>
           <div className="card" style={{ marginBottom: 16 }}>
             <div className="card-title">➕ Registrar compra manual</div>
-            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>Las entradas al depósito se registran automáticamente. Usá esto para compras adicionales.</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>Las entradas al depósito se registran automáticamente.</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
               <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Proveedor</label>
                 <select value={formCompra.proveedor_nombre} onChange={e => setFormCompra(f => ({ ...f, proveedor_nombre: e.target.value }))} style={inp}>
@@ -848,13 +848,7 @@ function ProveedoresTab() {
               <thead><tr><th>Fecha</th><th>Proveedor</th><th>Producto</th><th>Kg</th><th>Importe</th></tr></thead>
               <tbody>
                 {compras.slice(0, 20).map(c => (
-                  <tr key={c.id}>
-                    <td>{c.fecha}</td>
-                    <td><strong>{c.proveedor_nombre}</strong></td>
-                    <td>{c.producto || '—'}</td>
-                    <td>{c.kg > 0 ? c.kg + ' kg' : '—'}</td>
-                    <td style={{ color: 'var(--amber)', fontWeight: 600 }}>{fmt(c.importe)}</td>
-                  </tr>
+                  <tr key={c.id}><td>{c.fecha}</td><td><strong>{c.proveedor_nombre}</strong></td><td>{c.producto || '—'}</td><td>{c.kg > 0 ? c.kg + ' kg' : '—'}</td><td style={{ color: 'var(--amber)', fontWeight: 600 }}>{fmt(c.importe)}</td></tr>
                 ))}
                 {compras.length === 0 && <tr><td colSpan={5} className="empty">Sin compras registradas</td></tr>}
               </tbody>
@@ -916,8 +910,7 @@ function ProveedoresTab() {
               <tbody>
                 {pagos.slice(0, 20).map(p => (
                   <tr key={p.id}>
-                    <td>{p.fecha}</td>
-                    <td><strong>{p.proveedor_nombre}</strong></td>
+                    <td>{p.fecha}</td><td><strong>{p.proveedor_nombre}</strong></td>
                     <td style={{ color: 'var(--amber)' }}>{fmt(p.importe_compra)}</td>
                     <td>{p.percepcion > 0 ? fmt(p.percepcion) : '—'}</td>
                     <td>{p.saldo_anterior > 0 ? fmt(p.saldo_anterior) : '—'}</td>
