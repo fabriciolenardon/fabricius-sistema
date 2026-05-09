@@ -93,7 +93,6 @@ export function Deposito() {
             ))}
           </div>
 
-          {/* STOCK DETALLADO */}
           <div className="card" style={{ marginBottom: 20 }}>
             <div className="card-title">📦 Stock detallado por tipo</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
@@ -168,11 +167,9 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     })
     if (error) { showAlert({ type: 'error', msg: error.message }); return }
 
-    // Actualizar stock automáticamente
     const kgSumar = form.tipo === 'bovino_mr' ? kgReal : parseFloat(form.kg)
     await actualizarStock(form.tipo, kgSumar)
 
-    // Registrar en compras_proveedores
     await supabase.from('compras_proveedores').insert({
       fecha: form.fecha, proveedor_nombre: form.proveedor,
       producto: form.descripcion || form.tipo,
@@ -266,18 +263,29 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   }, [])
 
   const CATEGORIAS = {
-    bovino_mr: '🐄 Media Reses', bovino_corte: '🥩 Bovinos — Cortes',
-    bovino_brosa: '🫀 Brosas', bovino_pieza: '🍖 Piezas',
-    cerdo_corte: '🐷 Cerdo', embutido: '🌭 Embutidos',
-    pollo: '🍗 Pollo Cajones', rebozado: '🧊 Rebozados',
+    bovino_mr: '🐄 Media Reses',
+    bovino_corte: '🥩 Bovinos — Cortes',
+    bovino_brosa: '🫀 Brosas',
+    bovino_pieza: '🍖 Piezas',
+    bovino_caja_cb: '📦 Cajas Bovinas CB',
+    bovino_caja_pt: '📦 Cajas Bovinas PT',
+    cerdo_corte: '🐷 Cerdo',
+    embutido: '🌭 Embutidos',
+    pollo: '🍗 Pollo Cajones',
+    rebozado: '🧊 Rebozados',
   }
 
-  // Mapeo de categorías de precios a tipos de stock
   const CATEGORIA_A_STOCK = {
-    bovino_mr: 'bovino_mr', bovino_corte: 'bovino_corte',
-    bovino_brosa: 'bovino_brosa', bovino_pieza: 'bovino_corte',
-    cerdo_corte: 'cerdo', embutido: 'embutido',
-    pollo: 'pollo', rebozado: 'embutido',
+    bovino_mr: 'bovino_mr',
+    bovino_corte: 'bovino_corte',
+    bovino_brosa: 'bovino_brosa',
+    bovino_pieza: 'bovino_corte',
+    bovino_caja_cb: 'bovino_corte',
+    bovino_caja_pt: 'bovino_corte',
+    cerdo_corte: 'cerdo',
+    embutido: 'embutido',
+    pollo: 'pollo',
+    rebozado: 'embutido',
   }
 
   const DESTINOS_FRANQUICIA = { 'CENTRO': 'ALVEAR', 'MONTE CRISTO': 'MONTE CRISTO' }
@@ -344,7 +352,6 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
       })
     }
 
-    // Descontar stock automáticamente por tipo
     const kgPorTipo = {}
     for (const item of items) {
       const tipoStock = CATEGORIA_A_STOCK[item.tipo] || item.tipo
