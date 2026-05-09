@@ -5,7 +5,6 @@ import { useAuth } from '../../context/AuthContext'
 
 function fmt(n) { return '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR') }
 
-// Hook compartido para obtener el cliente de la franquicia
 function useClienteFranquicia() {
   const { profile } = useAuth()
   const [cliente, setCliente] = useState(null)
@@ -18,11 +17,8 @@ function useClienteFranquicia() {
 
   async function buscarCliente() {
     setLoading(true)
-    // Buscar por nombre del perfil o por nombre de sucursal
     const nombreBuscar = profile?.sucursales?.nombre || profile?.nombre || ''
-    // Extraer palabra clave del nombre (ALVEAR, MONTE CRISTO, etc)
     const palabras = nombreBuscar.toUpperCase().split(/[\s-]+/)
-
     let clienteEncontrado = null
     for (const palabra of palabras) {
       if (palabra.length < 4) continue
@@ -33,7 +29,7 @@ function useClienteFranquicia() {
     setLoading(false)
   }
 
-  return { cliente, loading, refetch: buscarCliente }
+  return { cliente, loading }
 }
 
 export function FranquiciaDashboard() {
@@ -42,27 +38,16 @@ export function FranquiciaDashboard() {
   const [movimientos, setMovimientos] = useState([])
   const [remitos, setRemitos] = useState([])
   const [notifNueva, setNotifNueva] = useState(null)
-  const [ultimoRemito, setUltimoRemito] = useState(null)
 
   useEffect(() => {
     if (!cliente) return
     cargarDatos()
-
-    // Suscripción en tiempo real a nuevos remitos
-    const canal = supabase
-      .channel('remitos-franquicia')
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'remitos',
-        filter: `cliente_id=eq.${cliente.id}`
-      }, (payload) => {
+    const canal = supabase.channel('remitos-franquicia')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'remitos', filter: `cliente_id=eq.${cliente.id}` }, (payload) => {
         setNotifNueva(payload.new)
         setTimeout(() => setNotifNueva(null), 8000)
         cargarDatos()
-      })
-      .subscribe()
-
+      }).subscribe()
     return () => supabase.removeChannel(canal)
   }, [cliente])
 
@@ -84,9 +69,8 @@ export function FranquiciaDashboard() {
 
   return (
     <div>
-      {/* NOTIFICACIÓN NUEVO REMITO */}
       {notifNueva && (
-        <div style={{ background: '#1a3a1a', border: '2px solid var(--green)', borderRadius: 12, padding: '14px 20px', marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', animation: 'fadeIn 0.3s' }}>
+        <div style={{ background: '#1a3a1a', border: '2px solid var(--green)', borderRadius: 12, padding: '14px 20px', marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--green)' }}>🧾 Nuevo remito recibido!</div>
             <div style={{ fontSize: 13, color: 'var(--text2)', marginTop: 4 }}>
@@ -97,49 +81,45 @@ export function FranquiciaDashboard() {
         </div>
       )}
 
-      {/* HEADER */}
       <div style={{ background: 'linear-gradient(135deg,#1a1408,#0a0a08)', border: '1px solid var(--gold)', borderRadius: 16, padding: 24, marginBottom: 24 }}>
-        <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 30, color: 'var(--gold)', letterSpacing: 2 }}>
-          🏪 {profile?.nombre || 'Franquicia'}
-        </div>
+        <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 30, color: 'var(--gold)', letterSpacing: 2 }}>🏪 {profile?.nombre || 'Franquicia'}</div>
         <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>Franquicia Carnicerías Fabricius</div>
         <span style={{ display: 'inline-block', marginTop: 10, background: 'var(--gold)', color: '#000', borderRadius: 6, padding: '3px 12px', fontSize: 11, fontWeight: 700 }}>FRANQUICIADO</span>
       </div>
 
-      {/* STATS */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 24 }}>
         <div style={{ background: saldo > 0 ? '#3a1a1a' : '#1a3a27', border: `2px solid ${saldo > 0 ? 'var(--red-light)' : 'var(--green)'}`, borderRadius: 12, padding: 20, textAlign: 'center' }}>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8, letterSpacing: 2 }}>SALDO ACTUAL</div>
           <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 40, color: saldo > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(saldo)}</div>
           <div style={{ fontSize: 12, marginTop: 4, color: saldo > 0 ? 'var(--red-light)' : 'var(--green)' }}>{saldo > 0 ? '⚠️ Saldo adeudado' : '✅ Al día'}</div>
         </div>
-        <div className="stat">
-          <div className="stat-label">Total compras</div>
-          <div className="stat-value" style={{ color: 'var(--amber)' }}>{fmt(totCompras)}</div>
-        </div>
-        <div className="stat">
-          <div className="stat-label">Total pagado</div>
-          <div className="stat-value" style={{ color: 'var(--green)' }}>{fmt(totPagado)}</div>
-        </div>
+        <div className="stat"><div className="stat-label">Total compras</div><div className="stat-value" style={{ color: 'var(--amber)' }}>{fmt(totCompras)}</div></div>
+        <div className="stat"><div className="stat-label">Total pagado</div><div className="stat-value" style={{ color: 'var(--green)' }}>{fmt(totPagado)}</div></div>
       </div>
 
-      {/* ÚLTIMOS REMITOS */}
       {remitos.length > 0 && (
         <div className="card" style={{ marginBottom: 16, borderColor: 'var(--gold)' }}>
           <div className="card-title">🧾 Últimos remitos recibidos</div>
           {remitos.map(r => (
-            <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 13 }}>N° {String(r.numero).padStart(5, '0')}</div>
-                <div style={{ fontSize: 11, color: 'var(--muted)' }}>{r.fecha}</div>
+            <div key={r.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>N° {String(r.numero).padStart(5, '0')}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>{r.fecha}</div>
+                </div>
+                <span style={{ color: 'var(--gold)', fontWeight: 700 }}>{fmt(r.total)}</span>
               </div>
-              <span style={{ color: 'var(--gold)', fontWeight: 700 }}>{fmt(r.total)}</span>
+              {(r.items || []).map((item, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--muted)', padding: '2px 8px' }}>
+                  <span>• {item.descripcion} — {item.kg} kg</span>
+                  <span style={{ color: 'var(--text2)' }}>{fmt(item.importe)}</span>
+                </div>
+              ))}
             </div>
           ))}
         </div>
       )}
 
-      {/* ÚLTIMOS MOVIMIENTOS */}
       <div className="card">
         <div className="card-title">📒 Últimos movimientos</div>
         <table>
@@ -170,8 +150,6 @@ export function FranquiciaCtaCte() {
   useEffect(() => {
     if (!cliente) return
     supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id).order('fecha', { ascending: false }).then(({ data }) => setMovimientos(data || []))
-
-    // Tiempo real
     const canal = supabase.channel('ctacte-franquicia')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'movimientos_ctacte', filter: `cliente_id=eq.${cliente.id}` }, () => {
         supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id).order('fecha', { ascending: false }).then(({ data }) => setMovimientos(data || []))
@@ -191,14 +169,8 @@ export function FranquiciaCtaCte() {
           <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 48, color: saldo > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(saldo)}</div>
           <div style={{ fontSize: 12, color: saldo > 0 ? 'var(--red-light)' : 'var(--green)' }}>{saldo > 0 ? '⚠️ Saldo adeudado a Fabricius' : '✅ Al día'}</div>
         </div>
-        <div className="stat">
-          <div className="stat-label">Total compras</div>
-          <div className="stat-value" style={{ color: 'var(--amber)' }}>{fmt(movimientos.filter(m => m.debe > 0).reduce((s, m) => s + m.debe, 0))}</div>
-        </div>
-        <div className="stat">
-          <div className="stat-label">Total pagado</div>
-          <div className="stat-value" style={{ color: 'var(--green)' }}>{fmt(movimientos.filter(m => m.haber > 0).reduce((s, m) => s + m.haber, 0))}</div>
-        </div>
+        <div className="stat"><div className="stat-label">Total compras</div><div className="stat-value" style={{ color: 'var(--amber)' }}>{fmt(movimientos.filter(m => m.debe > 0).reduce((s, m) => s + m.debe, 0))}</div></div>
+        <div className="stat"><div className="stat-label">Total pagado</div><div className="stat-value" style={{ color: 'var(--green)' }}>{fmt(movimientos.filter(m => m.haber > 0).reduce((s, m) => s + m.haber, 0))}</div></div>
       </div>
       <div className="card">
         <div className="card-title">Historial completo</div>
@@ -226,12 +198,11 @@ export function FranquiciaCtaCte() {
 export function FranquiciaRemitos() {
   const { cliente } = useClienteFranquicia()
   const [remitos, setRemitos] = useState([])
+  const [remitoAbierto, setRemitoAbierto] = useState(null)
 
   useEffect(() => {
     if (!cliente) return
     supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false }).then(({ data }) => setRemitos(data || []))
-
-    // Tiempo real
     const canal = supabase.channel('remitos-lista')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'remitos', filter: `cliente_id=eq.${cliente.id}` }, () => {
         supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false }).then(({ data }) => setRemitos(data || []))
@@ -309,19 +280,64 @@ export function FranquiciaRemitos() {
     <div>
       <div className="page-title">MIS REMITOS</div>
       <div className="page-sub">Despachos recibidos desde el depósito Fabricius</div>
+
       <div className="card">
         <table>
-          <thead><tr><th>N° Remito</th><th>Fecha</th><th>Total</th><th>Imprimir</th></tr></thead>
+          <thead><tr><th>N° Remito</th><th>Fecha</th><th>Total</th><th>Detalle</th><th>Imprimir</th></tr></thead>
           <tbody>
             {remitos.map(r => (
-              <tr key={r.id}>
-                <td><strong>N° {String(r.numero).padStart(5, '0')}</strong></td>
-                <td>{r.fecha}</td>
-                <td style={{ color: 'var(--gold)', fontWeight: 700 }}>${Math.round(r.total || 0).toLocaleString('es-AR')}</td>
-                <td><button onClick={() => imprimir(r)} style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>🖨️</button></td>
-              </tr>
+              <>
+                <tr key={r.id}>
+                  <td><strong>N° {String(r.numero).padStart(5, '0')}</strong></td>
+                  <td>{r.fecha}</td>
+                  <td style={{ color: 'var(--gold)', fontWeight: 700 }}>${Math.round(r.total || 0).toLocaleString('es-AR')}</td>
+                  <td>
+                    <button onClick={() => setRemitoAbierto(remitoAbierto === r.id ? null : r.id)}
+                      style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12, color: 'var(--text)' }}>
+                      {remitoAbierto === r.id ? '▲ Ocultar' : '▼ Ver detalle'}
+                    </button>
+                  </td>
+                  <td>
+                    <button onClick={() => imprimir(r)} style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>🖨️</button>
+                  </td>
+                </tr>
+                {remitoAbierto === r.id && (
+                  <tr key={r.id + '-detalle'}>
+                    <td colSpan={5} style={{ padding: 0 }}>
+                      <div style={{ background: 'var(--surface2)', padding: '12px 16px' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                          <thead>
+                            <tr>
+                              <th style={{ textAlign: 'left', padding: '4px 8px', fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>Producto</th>
+                              <th style={{ textAlign: 'center', padding: '4px 8px', fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>Kg</th>
+                              <th style={{ textAlign: 'center', padding: '4px 8px', fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>Precio/kg</th>
+                              <th style={{ textAlign: 'right', padding: '4px 8px', fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>Importe</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(r.items || []).map((item, i) => (
+                              <tr key={i}>
+                                <td style={{ padding: '6px 8px', fontSize: 13, fontWeight: 500 }}>{item.descripcion}</td>
+                                <td style={{ padding: '6px 8px', fontSize: 13, textAlign: 'center' }}>{item.kg} kg</td>
+                                <td style={{ padding: '6px 8px', fontSize: 13, textAlign: 'center', color: 'var(--muted)' }}>${Math.round(item.precio).toLocaleString('es-AR')}</td>
+                                <td style={{ padding: '6px 8px', fontSize: 13, textAlign: 'right', color: 'var(--gold)', fontWeight: 700 }}>${Math.round(item.importe).toLocaleString('es-AR')}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot>
+                            <tr style={{ borderTop: '1px solid var(--border)' }}>
+                              <td colSpan={3} style={{ padding: '8px', fontSize: 13, fontWeight: 700, textAlign: 'right' }}>TOTAL</td>
+                              <td style={{ padding: '8px', fontSize: 14, fontWeight: 700, textAlign: 'right', color: 'var(--gold)', fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>${Math.round(r.total).toLocaleString('es-AR')}</td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </>
             ))}
-            {remitos.length === 0 && <tr><td colSpan={4} className="empty">Sin remitos registrados aún</td></tr>}
+            {remitos.length === 0 && <tr><td colSpan={5} className="empty">Sin remitos registrados aún</td></tr>}
           </tbody>
         </table>
       </div>
