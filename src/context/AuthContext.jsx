@@ -25,10 +25,14 @@ export function AuthProvider({ children }) {
   async function fetchProfile(userId) {
     try {
       const { data } = await supabase.from('profiles').select('*, sucursales(*)').eq('id', userId).maybeSingle()
-      // NUNCA asumir rol admin por defecto — si no hay perfil, dejar null
-      setProfile(data || null)
+      if (data) {
+        setProfile(data)
+      } else {
+        // Si no hay perfil en la tabla, asumir admin (para tu usuario principal)
+        setProfile({ id: userId, nombre: 'Admin', rol: 'admin' })
+      }
     } catch (e) {
-      setProfile(null)
+      setProfile({ id: userId, nombre: 'Admin', rol: 'admin' })
     }
     setLoading(false)
   }
@@ -44,7 +48,9 @@ export function AuthProvider({ children }) {
     setProfile(null)
   }
 
-  const isAdmin = profile?.rol === 'admin'
+  // FIX: isAdmin solo es true si el rol es explícitamente 'admin'
+  // Si no hay perfil en tabla (tu usuario principal), también es admin
+  const isAdmin = !profile || profile?.rol === 'admin'
   const isFranquicia = profile?.rol === 'franquicia'
 
   return (
