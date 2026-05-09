@@ -16,8 +16,7 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const [cierres, setCierres] = useState([])
   const [clientes, setClientes] = useState([])
-  const [entradas, setEntradas] = useState([])
-  const [salidas, setSalidas] = useState([])
+  const [stock, setStock] = useState({})
   const [remitos, setRemitos] = useState([])
   const [gastos, setGastos] = useState([])
   const [cheques, setCheques] = useState([])
@@ -26,19 +25,19 @@ export default function Dashboard() {
   useEffect(() => { fetchData() }, [])
 
   async function fetchData() {
-    const [c, cl, e, s, r, g, ch] = await Promise.all([
+    const [c, cl, st, r, g, ch] = await Promise.all([
       supabase.from('cierres_semanales').select('*').order('semana_inicio', { ascending: false }).limit(8),
       supabase.from('clientes').select('*').order('saldo', { ascending: false }),
-      supabase.from('entradas_deposito').select('*').order('fecha', { ascending: false }).limit(100),
-      supabase.from('salidas_deposito').select('*').order('fecha', { ascending: false }).limit(100),
+      supabase.from('stock_actual').select('*'),
       supabase.from('remitos').select('*').order('created_at', { ascending: false }).limit(5),
       supabase.from('gastos').select('*').order('fecha', { ascending: false }).limit(5),
       supabase.from('cheques').select('*').order('fecha_pago', { ascending: true }).limit(20),
     ])
     setCierres(c.data || [])
     setClientes(cl.data || [])
-    setEntradas(e.data || [])
-    setSalidas(s.data || [])
+    const s = {}
+    ;(st.data || []).forEach(r => s[r.tipo] = r.kg_disponible)
+    setStock(s)
     setRemitos(r.data || [])
     setGastos(g.data || [])
     setCheques(ch.data || [])
@@ -51,14 +50,17 @@ export default function Dashboard() {
 
   const ultimo = cierres[0]
   const mesActual = cierres.filter(c => c.mes === ultimo?.mes)
-  const totMesVentas = mesActual.reduce((s, c) => s + c.ventas, 0)
-  const totMesGanancia = mesActual.reduce((s, c) => s + c.ganancia, 0)
-  const totMesCompras = mesActual.reduce((s, c) => s + c.compras, 0)
-  const totMesGastos = mesActual.reduce((s, c) => s + c.gastos, 0)
+  const totMesVentas = mesActual.reduce((s, c) => s + (c.ventas || 0), 0)
+  const totMesGanancia = mesActual.reduce((s, c) => s + (c.ganancia || 0), 0)
+  const totMesCompras = mesActual.reduce((s, c) => s + (c.compras || 0), 0)
+  const totMesGastos = mesActual.reduce((s, c) => s + (c.gastos || 0), 0)
 
-  const stockBovino = Math.max(0, entradas.filter(e => e.tipo === 'bovino_mr').reduce((s, e) => s + (e.kg_real || 0), 0) - salidas.filter(s => s.tipo === 'bovino_mr').reduce((s, e) => s + (e.kg || 0), 0))
-  const stockPollo = Math.max(0, entradas.filter(e => e.tipo === 'pollo').reduce((s, e) => s + (e.kg || 0), 0) - salidas.filter(s => s.tipo === 'pollo').reduce((s, e) => s + (e.kg || 0), 0))
-  const stockCerdo = Math.max(0, entradas.filter(e => e.tipo === 'cerdo').reduce((s, e) => s + (e.kg || 0), 0) - salidas.filter(s => s.tipo === 'cerdo').reduce((s, e) => s + (e.kg || 0), 0))
+  const stockBovino = Math.max(0, stock.bovino_mr || 0)
+  const stockPollo = Math.max(0, stock.pollo || 0)
+  const stockCerdo = Math.max(0, stock.cerdo || 0)
+  const stockCortes = Math.max(0, stock.bovino_corte || 0)
+  const stockBrosas = Math.max(0, stock.bovino_brosa || 0)
+  const stockEmbutido = Math.max(0, stock.embutido || 0)
 
   const clientesDeuda = clientes.filter(c => c.saldo > 0).sort((a, b) => b.saldo - a.saldo)
   const totalDeuda = clientesDeuda.reduce((s, c) => s + c.saldo, 0)
@@ -73,10 +75,10 @@ export default function Dashboard() {
 
   const datosGrafico = [...cierres].reverse().slice(-6).map(c => ({
     semana: new Date(c.semana_inicio + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' }),
-    Ventas: c.ventas,
-    Compras: c.compras,
-    Gastos: c.gastos,
-    Ganancia: c.ganancia,
+    Ventas: c.ventas || 0,
+    Compras: c.compras || 0,
+    Gastos: c.gastos || 0,
+    Ganancia: c.ganancia || 0,
   }))
 
   if (loading) return <div style={{ padding: 40, color: 'var(--muted)', textAlign: 'center' }}>Cargando dashboard...</div>
@@ -84,15 +86,15 @@ export default function Dashboard() {
   return (
     <div>
       {/* WELCOME */}
-      <div style={{ background: 'linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%)', border: '1px solid var(--border)', borderRadius: 16, padding: 28, marginBottom: 24, backgroundImage: 'radial-gradient(circle at 90% 50%, rgba(201,168,76,0.08), transparent 60%)' }}>
-        <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 32, letterSpacing: 2, color: 'var(--gold)' }}>{saludo}, {nombre} 👋</div>
+      <div style={{ background: 'linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%)', border: '1px solid var(--border)', borderRadius: 16, padding: 24, marginBottom: 20, backgroundImage: 'radial-gradient(circle at 90% 50%, rgba(201,168,76,0.08), transparent 60%)' }}>
+        <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 30, letterSpacing: 2, color: 'var(--gold)' }}>{saludo}, {nombre} 👋</div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div>
-        <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 8 }}>Sistema de gestión · Carnicerías Fabricius · Río Primero, Córdoba</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>Sistema de gestión · Carnicerías Fabricius · Río Primero, Córdoba</div>
       </div>
 
       {/* ALERTAS */}
       {(chequesPorVencer.length > 0 || totalDeuda > 0) && (
-        <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
           {chequesPorVencer.length > 0 && (
             <div style={{ background: '#2a1a0a', border: '1px solid var(--amber)', borderRadius: 10, padding: '10px 16px', flex: 1, minWidth: 200 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--amber)', marginBottom: 4 }}>⚠️ Cheques por vencer</div>
@@ -104,14 +106,14 @@ export default function Dashboard() {
           {totalDeuda > 0 && (
             <div style={{ background: '#1a0a0a', border: '1px solid var(--red-light)', borderRadius: 10, padding: '10px 16px', flex: 1, minWidth: 200 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--red-light)', marginBottom: 4 }}>📋 Cuentas corrientes pendientes</div>
-              <div style={{ fontSize: 13, color: 'var(--text2)' }}>{clientesDeuda.length} clientes deben un total de <strong style={{ color: 'var(--red-light)' }}>{fmtFull(totalDeuda)}</strong></div>
+              <div style={{ fontSize: 13, color: 'var(--text2)' }}>{clientesDeuda.length} clientes deben <strong style={{ color: 'var(--red-light)' }}>{fmtFull(totalDeuda)}</strong></div>
             </div>
           )}
         </div>
       )}
 
       {/* STATS MES */}
-      <div className="grid4" style={{ marginBottom: 20 }}>
+      <div className="grid4" style={{ marginBottom: 16 }}>
         {[
           { label: 'Ventas del mes', value: fmt(totMesVentas), sub: mesActual.length + ' semanas cerradas', color: 'var(--green)', icon: '💰' },
           { label: 'Compras del mes', value: fmt(totMesCompras), sub: 'proveedores', color: 'var(--red-light)', icon: '🛒' },
@@ -119,7 +121,7 @@ export default function Dashboard() {
           { label: 'Ganancia del mes', value: fmt(totMesGanancia), sub: totMesGanancia >= 0 ? '✅ Positivo' : '⚠️ Negativo', color: totMesGanancia >= 0 ? 'var(--gold)' : 'var(--red-light)', icon: '📈' },
         ].map(s => (
           <div key={s.label} className="stat" onMouseOver={e => e.currentTarget.style.borderColor = 'var(--gold)'} onMouseOut={e => e.currentTarget.style.borderColor = 'var(--border)'}>
-            <div style={{ fontSize: 22, marginBottom: 6 }}>{s.icon}</div>
+            <div style={{ fontSize: 20, marginBottom: 4 }}>{s.icon}</div>
             <div className="stat-label">{s.label}</div>
             <div className="stat-value" style={{ color: s.color }}>{s.value}</div>
             <div className="stat-sub">{s.sub}</div>
@@ -127,11 +129,9 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* GRÁFICOS SVG */}
+      {/* GRÁFICOS */}
       {datosGrafico.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
-
-          {/* BARRAS */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
           <div className="card">
             <div className="card-title">📊 Ventas vs Egresos — últimas semanas</div>
             <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 160, padding: '0 4px', marginBottom: 8 }}>
@@ -140,9 +140,9 @@ export default function Dashboard() {
                 return (
                   <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
                     <div style={{ width: '100%', display: 'flex', gap: 2, alignItems: 'flex-end', height: 140 }}>
-                      <div title={`Ventas: ${fmt(d.Ventas)}`} style={{ flex: 1, background: '#22c55e', borderRadius: '3px 3px 0 0', height: Math.max(2, d.Ventas / maxVal * 135) + 'px', cursor: 'pointer', transition: 'opacity 0.2s' }} onMouseOver={e => e.target.style.opacity = '0.7'} onMouseOut={e => e.target.style.opacity = '1'} />
-                      <div title={`Compras: ${fmt(d.Compras)}`} style={{ flex: 1, background: '#ef4444', borderRadius: '3px 3px 0 0', height: Math.max(2, d.Compras / maxVal * 135) + 'px', cursor: 'pointer', transition: 'opacity 0.2s' }} onMouseOver={e => e.target.style.opacity = '0.7'} onMouseOut={e => e.target.style.opacity = '1'} />
-                      <div title={`Gastos: ${fmt(d.Gastos)}`} style={{ flex: 1, background: '#f59e0b', borderRadius: '3px 3px 0 0', height: Math.max(2, d.Gastos / maxVal * 135) + 'px', cursor: 'pointer', transition: 'opacity 0.2s' }} onMouseOver={e => e.target.style.opacity = '0.7'} onMouseOut={e => e.target.style.opacity = '1'} />
+                      <div title={`Ventas: ${fmt(d.Ventas)}`} style={{ flex: 1, background: '#22c55e', borderRadius: '3px 3px 0 0', height: Math.max(2, d.Ventas / maxVal * 135) + 'px', cursor: 'pointer' }} />
+                      <div title={`Compras: ${fmt(d.Compras)}`} style={{ flex: 1, background: '#ef4444', borderRadius: '3px 3px 0 0', height: Math.max(2, d.Compras / maxVal * 135) + 'px', cursor: 'pointer' }} />
+                      <div title={`Gastos: ${fmt(d.Gastos)}`} style={{ flex: 1, background: '#f59e0b', borderRadius: '3px 3px 0 0', height: Math.max(2, d.Gastos / maxVal * 135) + 'px', cursor: 'pointer' }} />
                     </div>
                     <div style={{ fontSize: 9, color: 'var(--muted)', textAlign: 'center', whiteSpace: 'nowrap' }}>{d.semana}</div>
                   </div>
@@ -158,7 +158,6 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* LÍNEA GANANCIA */}
           <div className="card">
             <div className="card-title">📈 Tendencia de ganancia semanal</div>
             <div style={{ position: 'relative', height: 160, marginBottom: 8 }}>
@@ -169,17 +168,14 @@ export default function Dashboard() {
                   const maxV = Math.max(...vals, 1)
                   const range = maxV - minV || 1
                   const W = 380; const H = 120; const padX = 10
-
                   const points = datosGrafico.map((d, i) => ({
                     x: padX + (i / Math.max(datosGrafico.length - 1, 1)) * W,
                     y: H - ((d.Ganancia - minV) / range) * H,
                     d
                   }))
-
                   const zeroY = H - ((0 - minV) / range) * H
                   const polyline = points.map(p => `${p.x},${p.y}`).join(' ')
                   const areaPath = `M${points[0].x},${zeroY} ` + points.map(p => `L${p.x},${p.y}`).join(' ') + ` L${points[points.length - 1].x},${zeroY} Z`
-
                   return (
                     <>
                       <defs>
@@ -214,29 +210,32 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* STOCK */}
-      <div className="card" style={{ marginBottom: 20 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      {/* STOCK DESDE stock_actual */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
           <div className="card-title" style={{ margin: 0 }}>📦 Stock actual del depósito</div>
           <button className="btn btn-ghost btn-sm" onClick={() => navigate('/admin/deposito')}>Ver depósito →</button>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
           {[
-            { label: '🥩 Bovino (Media Res)', kg: stockBovino, color: 'var(--gold)', aprox: Math.round(stockBovino / 105) + ' medias aprox' },
-            { label: '🍗 Pollo', kg: stockPollo, color: 'var(--blue)', aprox: Math.round(stockPollo / 20) + ' cajones aprox' },
-            { label: '🐷 Cerdo', kg: stockCerdo, color: 'var(--amber)', aprox: Math.round(stockCerdo / 107) + ' capones aprox' },
+            { label: '🐄 Bovino Media Res', kg: stockBovino, color: 'var(--gold)', aprox: Math.round(stockBovino / 105) + ' medias', bajo: stockBovino < 100 },
+            { label: '🥩 Bovino Cortes', kg: stockCortes, color: 'var(--gold)', aprox: stockCortes.toFixed(1) + ' kg', bajo: stockCortes < 50 },
+            { label: '🫀 Brosas', kg: stockBrosas, color: 'var(--amber)', aprox: stockBrosas.toFixed(1) + ' kg', bajo: stockBrosas < 20 },
+            { label: '🐷 Cerdo', kg: stockCerdo, color: 'var(--amber)', aprox: Math.round(stockCerdo / 107) + ' capones', bajo: stockCerdo < 50 },
+            { label: '🍗 Pollo', kg: stockPollo, color: 'var(--blue)', aprox: Math.round(stockPollo / 20) + ' cajones', bajo: stockPollo < 50 },
+            { label: '🌭 Embutidos', kg: stockEmbutido, color: 'var(--purple)', aprox: stockEmbutido.toFixed(1) + ' kg', bajo: stockEmbutido < 20 },
           ].map(s => (
-            <div key={s.label} style={{ background: 'var(--surface2)', borderRadius: 10, padding: 16, textAlign: 'center' }}>
-              <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>{s.label}</div>
-              <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 32, color: s.kg < 100 ? 'var(--red-light)' : s.color }}>{s.kg.toFixed(1)} kg</div>
-              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>{s.aprox}</div>
-              {s.kg < 100 && <div style={{ fontSize: 11, color: 'var(--red-light)', marginTop: 4, fontWeight: 700 }}>⚠️ Stock bajo</div>}
+            <div key={s.label} style={{ background: s.bajo ? '#3a1a1a' : 'var(--surface2)', border: `1px solid ${s.bajo ? 'var(--red-light)' : 'var(--border)'}`, borderRadius: 10, padding: '12px 14px', textAlign: 'center' }}>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>{s.label}</div>
+              <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 26, color: s.bajo ? 'var(--red-light)' : s.color }}>{s.kg.toFixed(1)} kg</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>{s.aprox}</div>
+              {s.bajo && <div style={{ fontSize: 10, color: 'var(--red-light)', fontWeight: 700, marginTop: 4 }}>⚠️ Stock bajo</div>}
             </div>
           ))}
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
         {/* CLIENTES CON DEUDA */}
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -286,7 +285,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
         {/* CIERRES */}
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -329,6 +328,7 @@ export default function Dashboard() {
                 </span>
               </div>
             ))}
+            {gastos.length === 0 && <div className="empty">Sin gastos recientes</div>}
           </div>
 
           {/* ACCESOS RÁPIDOS */}
