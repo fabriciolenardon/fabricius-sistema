@@ -23,15 +23,28 @@ export function AuthProvider({ children }) {
   }, [])
 
   async function fetchProfile(userId) {
-    try {
-      const { data } = await supabase.from('profiles').select('*, sucursales(*)').eq('id', userId).maybeSingle()
-      if (data) {
-        setProfile(data)
+    // Primero intentar sin el join de sucursales
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle()
+
+    if (data) {
+      // Si tiene sucursal_id, traer la sucursal por separado
+      if (data.sucursal_id) {
+        const { data: sucursal } = await supabase
+          .from('sucursales')
+          .select('*')
+          .eq('id', data.sucursal_id)
+          .maybeSingle()
+        setProfile({ ...data, sucursales: sucursal })
       } else {
-        // Si no hay perfil en la tabla, asumir admin (para tu usuario principal)
-        setProfile({ id: userId, nombre: 'Admin', rol: 'admin' })
+        setProfile(data)
       }
-    } catch (e) {
+    } else {
+      // Solo si NO hay perfil en la tabla asumimos admin
+      // (esto es para tu usuario principal que puede no tener perfil)
       setProfile({ id: userId, nombre: 'Admin', rol: 'admin' })
     }
     setLoading(false)
@@ -48,9 +61,7 @@ export function AuthProvider({ children }) {
     setProfile(null)
   }
 
-  // FIX: isAdmin solo es true si el rol es explícitamente 'admin'
-  // Si no hay perfil en tabla (tu usuario principal), también es admin
-  const isAdmin = !profile || profile?.rol === 'admin'
+  const isAdmin = profile?.rol === 'admin'
   const isFranquicia = profile?.rol === 'franquicia'
 
   return (
