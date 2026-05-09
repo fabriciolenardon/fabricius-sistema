@@ -11,6 +11,7 @@ export function Clientes() {
   const [remitos, setRemitos] = useState([])
   const [showForm, setShowForm] = useState(false)
   const [showPago, setShowPago] = useState(false)
+  const [editandoId, setEditandoId] = useState(null)
   const [pago, setPago] = useState({ importe: '', forma: 'efectivo', fecha: new Date().toISOString().split('T')[0], notas: '' })
   const [form, setForm] = useState({ nombre: '', nombre_fantasia: '', tipo: 'carniceria', telefono: '', localidad: '', domicilio: '', cuit: '', lista_precios: 'carn', notas: '' })
 
@@ -24,17 +25,57 @@ export function Clientes() {
   async function seleccionar(cliente) {
     setSeleccionado(cliente)
     setShowPago(false)
+    setShowForm(false)
     const { data: movs } = await supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id).order('fecha', { ascending: false })
     setMovimientos(movs || [])
     const { data: rems } = await supabase.from('remitos').select('*').eq('cliente_nombre', cliente.nombre).order('created_at', { ascending: false }).limit(20)
     setRemitos(rems || [])
   }
 
+  function abrirFormNuevo() {
+    setEditandoId(null)
+    setForm({ nombre: '', nombre_fantasia: '', tipo: 'carniceria', telefono: '', localidad: '', domicilio: '', cuit: '', lista_precios: 'carn', notas: '' })
+    setShowForm(true)
+    setSeleccionado(null)
+  }
+
+  function abrirFormEditar(cliente) {
+    setEditandoId(cliente.id)
+    setForm({
+      nombre: cliente.nombre || '',
+      nombre_fantasia: cliente.nombre_fantasia || '',
+      tipo: cliente.tipo || 'carniceria',
+      telefono: cliente.telefono || '',
+      localidad: cliente.localidad || '',
+      domicilio: cliente.domicilio || '',
+      cuit: cliente.cuit || '',
+      lista_precios: cliente.lista_precios || 'carn',
+      notas: cliente.notas || ''
+    })
+    setShowForm(true)
+  }
+
   async function guardarCliente() {
     if (!form.nombre) return
-    await supabase.from('clientes').insert({ ...form, saldo: 0 })
+    if (editandoId) {
+      await supabase.from('clientes').update({ ...form }).eq('id', editandoId)
+      // Actualizar seleccionado si es el mismo
+      if (seleccionado?.id === editandoId) {
+        setSeleccionado(prev => ({ ...prev, ...form }))
+      }
+    } else {
+      await supabase.from('clientes').insert({ ...form, saldo: 0 })
+    }
     setForm({ nombre: '', nombre_fantasia: '', tipo: 'carniceria', telefono: '', localidad: '', domicilio: '', cuit: '', lista_precios: 'carn', notas: '' })
     setShowForm(false)
+    setEditandoId(null)
+    fetchClientes()
+  }
+
+  async function eliminarCliente(cliente) {
+    if (!confirm(`¿Eliminar a ${cliente.nombre}? Esta acción no se puede deshacer.`)) return
+    await supabase.from('clientes').delete().eq('id', cliente.id)
+    if (seleccionado?.id === cliente.id) setSeleccionado(null)
     fetchClientes()
   }
 
@@ -136,12 +177,12 @@ export function Clientes() {
           <div className="page-title">CLIENTES & CTA. CTE.</div>
           <div className="page-sub">Carnicerías, gastronómicos, sucursales</div>
         </div>
-        <button className="btn btn-gold" onClick={() => setShowForm(!showForm)}>+ Nuevo cliente</button>
+        <button className="btn btn-gold" onClick={abrirFormNuevo}>+ Nuevo cliente</button>
       </div>
 
       {showForm && (
         <div className="card" style={{ borderColor: 'var(--gold)', marginBottom: 20 }}>
-          <div className="card-title">Nuevo cliente</div>
+          <div className="card-title">{editandoId ? '✏️ Editar cliente' : 'Nuevo cliente'}</div>
           <div className="form-row">
             <div className="form-group"><label>Nombre</label><input style={inp} value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} /></div>
             <div className="form-group"><label>Nombre Fantasía</label><input style={inp} value={form.nombre_fantasia} onChange={e => setForm(f => ({ ...f, nombre_fantasia: e.target.value }))} /></div>
@@ -171,8 +212,8 @@ export function Clientes() {
           </div>
           <div className="form-group"><label>Notas</label><input style={inp} value={form.notas} onChange={e => setForm(f => ({ ...f, notas: e.target.value }))} /></div>
           <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-            <button className="btn btn-ghost" onClick={() => setShowForm(false)}>Cancelar</button>
-            <button className="btn btn-gold" onClick={guardarCliente}>Guardar cliente</button>
+            <button className="btn btn-ghost" onClick={() => { setShowForm(false); setEditandoId(null) }}>Cancelar</button>
+            <button className="btn btn-gold" onClick={guardarCliente}>{editandoId ? '💾 Guardar cambios' : 'Guardar cliente'}</button>
           </div>
         </div>
       )}
@@ -186,15 +227,21 @@ export function Clientes() {
         <div className="card">
           <div className="card-title">Clientes</div>
           {clientes.map(c => (
-            <div key={c.id} onClick={() => seleccionar(c)}
-              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 8px', borderBottom: '1px solid var(--border)', cursor: 'pointer', borderRadius: 6, background: seleccionado?.id === c.id ? 'var(--surface2)' : 'transparent' }}>
-              <div>
+            <div key={c.id}
+              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 8px', borderBottom: '1px solid var(--border)', borderRadius: 6, background: seleccionado?.id === c.id ? 'var(--surface2)' : 'transparent' }}>
+              <div onClick={() => seleccionar(c)} style={{ flex: 1, cursor: 'pointer' }}>
                 <div style={{ fontWeight: 600 }}>{c.nombre}</div>
                 <div style={{ fontSize: 11, color: 'var(--muted)' }}>{c.nombre_fantasia ? `"${c.nombre_fantasia}" · ` : ''}{c.localidad} · {c.tipo}</div>
               </div>
-              <span style={{ color: c.saldo > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 700, fontSize: 13 }}>
-                {c.saldo > 0 ? fmt(c.saldo) + ' debe' : c.saldo < 0 ? fmt(Math.abs(c.saldo)) + ' a favor' : '✅ Al día'}
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ color: c.saldo > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 700, fontSize: 13 }}>
+                  {c.saldo > 0 ? fmt(c.saldo) + ' debe' : c.saldo < 0 ? fmt(Math.abs(c.saldo)) + ' a favor' : '✅ Al día'}
+                </span>
+                <button onClick={() => abrirFormEditar(c)}
+                  style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#000' }}>✏️</button>
+                <button onClick={() => eliminarCliente(c)}
+                  style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--red-light)' }}>🗑️</button>
+              </div>
             </div>
           ))}
           {clientes.length === 0 && <p style={{ color: 'var(--muted)', textAlign: 'center', padding: 20 }}>Sin clientes registrados</p>}
@@ -202,14 +249,16 @@ export function Clientes() {
 
         {seleccionado && (
           <div>
-            {/* PERFIL DEL CLIENTE */}
             <div className="card" style={{ marginBottom: 16, borderColor: 'var(--gold)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
                   <div className="card-title" style={{ marginBottom: 4 }}>{seleccionado.nombre}</div>
                   {seleccionado.nombre_fantasia && <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>"{seleccionado.nombre_fantasia}"</div>}
                 </div>
-                <button className="btn btn-ghost" onClick={() => setSeleccionado(null)}>✕</button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn btn-ghost btn-sm" onClick={() => abrirFormEditar(seleccionado)}>✏️ Editar</button>
+                  <button className="btn btn-ghost" onClick={() => setSeleccionado(null)}>✕</button>
+                </div>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
@@ -228,7 +277,6 @@ export function Clientes() {
                 ))}
               </div>
 
-              {/* STATS CTA CTE */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
                 <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, textAlign: 'center' }}>
                   <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>SALDO</div>
@@ -270,7 +318,6 @@ export function Clientes() {
               )}
             </div>
 
-            {/* REMITOS */}
             <div className="card" style={{ marginBottom: 16 }}>
               <div className="card-title">🧾 Remitos</div>
               <table>
@@ -289,7 +336,6 @@ export function Clientes() {
               </table>
             </div>
 
-            {/* MOVIMIENTOS CTA CTE */}
             <div className="card">
               <div className="card-title">📒 Cuenta Corriente</div>
               <table>
