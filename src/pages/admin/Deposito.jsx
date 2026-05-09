@@ -2,19 +2,33 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../supabaseClient'
 
+const fmt = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
+
+// Hook para cargar proveedores dinámicamente desde Supabase
+function useProveedores() {
+  const [proveedores, setProveedores] = useState([])
+  useEffect(() => { cargar() }, [])
+  async function cargar() {
+    const { data } = await supabase.from('proveedores').select('*').eq('activo', true).order('nombre')
+    setProveedores((data || []).map(p => p.nombre))
+  }
+  return { proveedores, recargar: cargar }
+}
+
 export function Deposito() {
   const [tab, setTab] = useState('stock')
   const [entradas, setEntradas] = useState([])
   const [salidas, setSalidas] = useState([])
   const [alert, setAlert] = useState(null)
   const [remitoActual, setRemitoActual] = useState(null)
+  const { proveedores } = useProveedores()
 
   const tabs = [
     { id: 'stock', label: '📊 Stock' },
     { id: 'entradas', label: '📥 Entradas' },
     { id: 'salidas', label: '📤 Despachos' },
     { id: 'remitos', label: '🧾 Remitos' },
-    { id: 'proveedores', label: '🏭 Proveedores' },
+    { id: 'proveedores', label: '🏭 Cuenta Proveedores' },
   ]
 
   useEffect(() => { fetchData() }, [])
@@ -44,7 +58,7 @@ export function Deposito() {
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap' }}>
         {tabs.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
             style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border)', background: tab === t.id ? 'var(--amber)' : 'transparent', color: tab === t.id ? '#fff' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", fontWeight: 600, fontSize: 12 }}>
@@ -92,7 +106,7 @@ export function Deposito() {
         </div>
       )}
 
-      {tab === 'entradas' && <EntradaForm onSaved={fetchData} showAlert={setAlert} />}
+      {tab === 'entradas' && <EntradaForm onSaved={fetchData} showAlert={setAlert} proveedores={proveedores} />}
       {tab === 'salidas' && <SalidaForm onSaved={fetchData} showAlert={setAlert} onRemito={setRemitoActual} setTab={setTab} />}
       {tab === 'remitos' && <RemitosTab remitoActual={remitoActual} />}
       {tab === 'proveedores' && <ProveedoresTab />}
@@ -100,13 +114,15 @@ export function Deposito() {
   )
 }
 
-function EntradaForm({ onSaved, showAlert }) {
+function EntradaForm({ onSaved, showAlert, proveedores }) {
   const [form, setForm] = useState({ tipo: '', proveedor: '', descripcion: '', fecha: new Date().toISOString().split('T')[0], kg: '', precioKg: '9800', merma: '', destino: 'DEPOSITO', importe: '' })
 
   async function guardar() {
     if (!form.tipo || !form.proveedor || !form.kg) { showAlert({ type: 'error', msg: 'Completá los campos requeridos' }); return }
     const kgReal = parseFloat(form.kg) * (1 - (parseFloat(form.merma) || 0) / 100)
-    const importe = form.tipo === 'bovino_mr' ? parseFloat(form.kg) * parseFloat(form.precioKg) : parseFloat(form.importe) || 0
+    const importe = form.tipo === 'bovino_mr'
+      ? parseFloat(form.kg) * parseFloat(form.precioKg)
+      : parseFloat(form.importe) || 0
     const { error } = await supabase.from('entradas_deposito').insert({
       fecha: form.fecha, tipo: form.tipo, proveedor_nombre: form.proveedor,
       descripcion: form.descripcion || form.tipo, kg: parseFloat(form.kg), kg_real: kgReal,
@@ -114,8 +130,15 @@ function EntradaForm({ onSaved, showAlert }) {
       importe, destino: form.destino, cantidad: 1
     })
     if (error) { showAlert({ type: 'error', msg: error.message }); return }
+
+    await supabase.from('compras_proveedores').insert({
+      fecha: form.fecha, proveedor_nombre: form.proveedor,
+      producto: form.descripcion || form.tipo,
+      kg: parseFloat(form.kg), importe
+    })
+
     showAlert({ type: 'success', msg: '✅ Entrada registrada' })
-    setForm(f => ({ ...f, descripcion: '', kg: '', importe: '' }))
+    setForm(f => ({ ...f, descripcion: '', kg: '', importe: '', precioKg: '9800' }))
     onSaved()
     setTimeout(() => showAlert(null), 3000)
   }
@@ -143,7 +166,7 @@ function EntradaForm({ onSaved, showAlert }) {
         <div className="form-group"><label>Proveedor</label>
           <select value={form.proveedor} onChange={e => setForm(f => ({ ...f, proveedor: e.target.value }))}>
             <option value="">— Seleccioná —</option>
-            {['PRETTO', 'LEO', 'BERTOSSI', 'INDACOR', 'BELMACO', 'CUBALA', 'LA AVENIDA', 'MOTTURA', 'BELBRUN', 'MELO CARBON', 'SHELL'].map(p => <option key={p}>{p}</option>)}
+            {proveedores.map(p => <option key={p}>{p}</option>)}
           </select>
         </div>
         <div className="form-group"><label>Descripción</label>
@@ -151,31 +174,37 @@ function EntradaForm({ onSaved, showAlert }) {
         </div>
       </div>
       <div className="form-row">
-        <div className="form-group"><label>Kg (remito)</label>
+        <div className="form-group"><label>Kg</label>
           <input type="number" step="0.1" placeholder="0" value={form.kg} onChange={e => setForm(f => ({ ...f, kg: e.target.value }))} />
         </div>
-        {form.tipo === 'bovino_mr' && (
-          <div className="form-group"><label>Precio/kg ($)</label>
-            <input type="number" value={form.precioKg} onChange={e => setForm(f => ({ ...f, precioKg: e.target.value }))} />
-          </div>
-        )}
+        <div className="form-group"><label>Precio/kg ($)</label>
+          <input type="number" value={form.precioKg} onChange={e => setForm(f => ({ ...f, precioKg: e.target.value }))} placeholder="Precio por kg" />
+        </div>
       </div>
-      {form.tipo === 'bovino_mr' && (
-        <div className="form-row">
+      <div className="form-row">
+        {form.tipo === 'bovino_mr' && (
           <div className="form-group"><label>Merma % (opcional)</label>
             <input type="number" step="0.5" placeholder="2.5" value={form.merma} onChange={e => setForm(f => ({ ...f, merma: e.target.value }))} />
           </div>
-          <div className="form-group"><label>Destino</label>
-            <select value={form.destino} onChange={e => setForm(f => ({ ...f, destino: e.target.value }))}>
-              <option value="MITRE">Local Mitre</option>
-              <option value="CENTRO">Centro</option>
-              <option value="MONTE CRISTO">Monte Cristo</option>
-              <option value="CLIENTE">Cliente externo</option>
-              <option value="DEPOSITO">Queda en depósito</option>
-            </select>
+        )}
+        {form.tipo !== 'bovino_mr' && (
+          <div className="form-group"><label>Importe total ($)</label>
+            <input type="number" placeholder="0" value={form.importe} onChange={e => setForm(f => ({ ...f, importe: e.target.value }))} />
           </div>
+        )}
+        <div className="form-group"><label>Destino</label>
+          <select value={form.destino} onChange={e => setForm(f => ({ ...f, destino: e.target.value }))}>
+            <option value="MITRE">Local Mitre</option>
+            <option value="CENTRO">Centro</option>
+            <option value="MONTE CRISTO">Monte Cristo</option>
+            <option value="CLIENTE">Cliente externo</option>
+            <option value="DEPOSITO">Queda en depósito</option>
+          </select>
         </div>
-      )}
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--green)', marginBottom: 12 }}>
+        ✅ La entrada se registrará automáticamente en Cuenta Proveedores
+      </div>
       <button className="btn btn-gold" onClick={guardar}>✅ Registrar entrada</button>
     </div>
   )
@@ -195,22 +224,13 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   }, [])
 
   const CATEGORIAS = {
-    bovino_mr: '🐄 Media Reses',
-    bovino_corte: '🥩 Bovinos — Cortes',
-    bovino_brosa: '🫀 Brosas',
-    bovino_pieza: '🍖 Piezas',
-    cerdo_corte: '🐷 Cerdo',
-    embutido: '🌭 Embutidos',
-    pollo: '🍗 Pollo Cajones',
-    rebozado: '🧊 Rebozados',
+    bovino_mr: '🐄 Media Reses', bovino_corte: '🥩 Bovinos — Cortes',
+    bovino_brosa: '🫀 Brosas', bovino_pieza: '🍖 Piezas',
+    cerdo_corte: '🐷 Cerdo', embutido: '🌭 Embutidos',
+    pollo: '🍗 Pollo Cajones', rebozado: '🧊 Rebozados',
   }
 
-  // Mapeo de destinos fijos a nombres de clientes
-  const DESTINOS_FRANQUICIA = {
-    'CENTRO': 'ALVEAR',
-    'MONTE CRISTO': 'MONTE CRISTO',
-  }
-
+  const DESTINOS_FRANQUICIA = { 'CENTRO': 'ALVEAR', 'MONTE CRISTO': 'MONTE CRISTO' }
   const categorias = [...new Set(todosPrecios.map(p => p.categoria))]
   const productosFiltrados = todosPrecios.filter(p => p.categoria === form.categoria)
   const clientesFiltrados = clientes.filter(c => c.nombre.toLowerCase().includes(busqueda.toLowerCase()))
@@ -237,10 +257,8 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
     if (!form.kg || !form.precio || !form.productoId) { showAlert({ type: 'error', msg: 'Seleccioná producto y completá kg' }); return }
     const prod = todosPrecios.find(p => p.id === form.productoId)
     const item = {
-      descripcion: prod?.nombre || '',
-      kg: parseFloat(form.kg),
-      precio: parseFloat(form.precio),
-      importe: parseFloat(form.kg) * parseFloat(form.precio),
+      descripcion: prod?.nombre || '', kg: parseFloat(form.kg),
+      precio: parseFloat(form.precio), importe: parseFloat(form.kg) * parseFloat(form.precio),
       tipo: form.categoria
     }
     setItems(prev => [...prev, item])
@@ -248,17 +266,14 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   }
 
   function quitarItem(idx) { setItems(prev => prev.filter((_, i) => i !== idx)) }
-
   const total = items.reduce((s, i) => s + i.importe, 0)
 
   async function guardar() {
     if (items.length === 0) { showAlert({ type: 'error', msg: 'Agregá al menos un producto' }); return }
-
     let clienteId = form.clienteId
     let clienteNombre = form.clienteNombre || form.destino
     let domicilio = form.domicilio
 
-    // Si es franquicia, buscar el cliente automáticamente
     if (esFranquicia) {
       const nombreBuscar = DESTINOS_FRANQUICIA[form.destino]
       const { data: clienteFranquicia } = await supabase.from('clientes').select('*').ilike('nombre', `%${nombreBuscar}%`).single()
@@ -269,7 +284,6 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
       }
     }
 
-    // 1. Guardar salidas de depósito
     for (const item of items) {
       await supabase.from('salidas_deposito').insert({
         fecha: form.fecha, cliente_nombre: clienteNombre,
@@ -280,35 +294,20 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
       })
     }
 
-    // 2. Guardar remito
     const { data: remitoData } = await supabase.from('remitos').insert({
-      fecha: form.fecha,
-      cliente_nombre: clienteNombre,
-      cliente_id: clienteId || null,
-      domicilio,
-      items,
-      total,
-      cobro: form.cobro,
-      notas: form.notas
+      fecha: form.fecha, cliente_nombre: clienteNombre,
+      cliente_id: clienteId || null, domicilio,
+      items, total, cobro: form.cobro, notas: form.notas
     }).select().single()
 
-    // 3. Si hay cliente vinculado, cargar en su cuenta corriente
     if (clienteId) {
       const { data: clienteActual } = await supabase.from('clientes').select('saldo').eq('id', clienteId).single()
-      const saldoActual = clienteActual?.saldo || 0
-      const nuevoSaldo = saldoActual + total
-
+      const nuevoSaldo = (clienteActual?.saldo || 0) + total
       await supabase.from('movimientos_ctacte').insert({
-        cliente_id: clienteId,
-        fecha: form.fecha,
-        tipo: 'compra',
+        cliente_id: clienteId, fecha: form.fecha, tipo: 'compra',
         descripcion: `Remito N° ${String(remitoData?.numero || '').padStart(5, '0')} — ${items.map(i => i.descripcion).join(', ')}`,
-        debe: total,
-        haber: 0,
-        saldo: nuevoSaldo,
-        remito_id: remitoData?.id || null
+        debe: total, haber: 0, saldo: nuevoSaldo, remito_id: remitoData?.id || null
       })
-
       await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', clienteId)
     }
 
@@ -327,7 +326,7 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
         <div className="card-title">Registrar despacho</div>
         <div className="form-row">
           <div className="form-group"><label>Destino</label>
-            <select value={form.destino} onChange={e => setForm(f => ({ ...f, destino: e.target.value, clienteId: '', clienteNombre: '', busqueda: '' }))}>
+            <select value={form.destino} onChange={e => setForm(f => ({ ...f, destino: e.target.value, clienteId: '', clienteNombre: '' }))}>
               <option value="MITRE">Local Mitre</option>
               <option value="CENTRO">🏪 Centro — Alvear (Roxana)</option>
               <option value="MONTE CRISTO">🏪 Monte Cristo (Agustín)</option>
@@ -349,13 +348,11 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
         {esClienteExterno && (
           <div style={{ position: 'relative', marginBottom: 12 }}>
             <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Buscar cliente</label>
-            <input
-              value={busqueda}
+            <input value={busqueda}
               onChange={e => { setBusqueda(e.target.value); setMostrarClientes(true); setForm(f => ({ ...f, clienteId: '', clienteNombre: e.target.value })) }}
               onFocus={() => setMostrarClientes(true)}
               placeholder="Escribí el nombre del cliente..."
-              style={{ background: 'var(--surface)', border: '1px solid var(--gold)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }}
-            />
+              style={{ background: 'var(--surface)', border: '1px solid var(--gold)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }} />
             {mostrarClientes && clientesFiltrados.length > 0 && (
               <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, zIndex: 100, maxHeight: 200, overflowY: 'auto' }}>
                 {clientesFiltrados.map(c => (
@@ -460,73 +457,23 @@ function RemitosTab({ remitoActual }) {
     supabase.from('remitos').select('*').order('created_at', { ascending: false }).limit(20).then(({ data }) => setRemitos(data || []))
   }, [])
 
-  useEffect(() => {
-    if (remitoActual) setSeleccionado(remitoActual)
-  }, [remitoActual])
+  useEffect(() => { if (remitoActual) setSeleccionado(remitoActual) }, [remitoActual])
 
   function imprimir(remito) {
     const items = remito.items || []
     const win = window.open('', '_blank')
-    win.document.write(`
-      <html>
-      <head><title>Remito N° ${remito.numero}</title>
-      <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: Arial, sans-serif; font-size: 12px; padding: 20px; max-width: 400px; margin: 0 auto; }
-        .header { display: flex; justify-content: space-between; margin-bottom: 16px; border-bottom: 2px solid #000; padding-bottom: 12px; }
-        .logo-title { font-size: 22px; font-weight: 900; letter-spacing: 2px; }
-        .doc-no-valido { font-size: 10px; font-weight: 700; border: 1px solid #000; padding: 2px 6px; margin-bottom: 4px; text-align:center; }
-        .remito-title { font-size: 24px; font-weight: 900; font-style: italic; }
-        .campo { border-bottom: 1px solid #000; margin-bottom: 8px; padding-bottom: 2px; }
-        .campo label { font-size: 10px; font-weight: 700; margin-right: 6px; }
-        table { width: 100%; border-collapse: collapse; margin: 12px 0; }
-        th { border: 1px solid #000; padding: 4px; text-align: center; font-size: 10px; font-weight: 700; background: #f0f0f0; }
-        td { border: 1px solid #000; padding: 4px; text-align: center; font-size: 11px; }
-        td.desc { text-align: left; }
-        .total-row { display: flex; justify-content: flex-end; margin-top: 8px; }
-        .total-box { border: 1px solid #000; padding: 6px 12px; font-size: 13px; font-weight: 700; }
-        .firma { margin-top: 40px; border-top: 1px solid #000; padding-top: 4px; text-align: center; font-size: 10px; }
-        @media print { body { padding: 10px; } }
-      </style></head>
+    win.document.write(`<html><head><title>Remito N° ${remito.numero}</title>
+      <style>* { margin: 0; padding: 0; box-sizing: border-box; } body { font-family: Arial, sans-serif; font-size: 12px; padding: 20px; max-width: 400px; margin: 0 auto; } .header { display: flex; justify-content: space-between; margin-bottom: 16px; border-bottom: 2px solid #000; padding-bottom: 12px; } table { width: 100%; border-collapse: collapse; margin: 12px 0; } th { border: 1px solid #000; padding: 4px; text-align: center; font-size: 10px; font-weight: 700; background: #f0f0f0; } td { border: 1px solid #000; padding: 4px; text-align: center; font-size: 11px; } td.desc { text-align: left; } .total-box { border: 1px solid #000; padding: 6px 12px; font-size: 13px; font-weight: 700; } .firma { margin-top: 40px; border-top: 1px solid #000; padding-top: 4px; text-align: center; font-size: 10px; } @media print { body { padding: 10px; } }</style></head>
       <body>
-        <div class="header">
-          <div>
-            <div class="logo-title">FABRICIUS</div>
-            <div style="font-size:9px;color:#555">CARNICERÍAS · PREMIUM QUALITY</div>
-            <div style="font-size:10px;color:#444;margin-top:4px">📍 Casa Central: Av. Mitre 670 - Río Primero, Córdoba</div>
-            <div style="font-size:11px;font-weight:700;background:#000;color:#fff;padding:3px 8px;display:inline-block;border-radius:4px;margin-top:4px">📱 3574 400346</div>
-          </div>
-          <div style="text-align:right">
-            <div class="doc-no-valido">X — DOCUMENTO NO VÁLIDO COMO FACTURA</div>
-            <div class="remito-title">REMITO</div>
-            <div style="font-size:13px;font-weight:700">N° ${String(remito.numero).padStart(5, '0')}</div>
-          </div>
-        </div>
+        <div class="header"><div><div style="font-size:22px;font-weight:900;letter-spacing:2px">FABRICIUS</div><div style="font-size:9px;color:#555">CARNICERÍAS · PREMIUM QUALITY</div><div style="font-size:10px;color:#444;margin-top:4px">📍 Casa Central: Av. Mitre 670 - Río Primero, Córdoba</div><div style="font-size:11px;font-weight:700;background:#000;color:#fff;padding:3px 8px;display:inline-block;border-radius:4px;margin-top:4px">📱 3574 400346</div></div><div style="text-align:right"><div style="font-size:10px;font-weight:700;border:1px solid #000;padding:2px 6px;margin-bottom:4px;text-align:center">X — DOCUMENTO NO VÁLIDO COMO FACTURA</div><div style="font-size:24px;font-weight:900;font-style:italic">REMITO</div><div style="font-size:13px;font-weight:700">N° ${String(remito.numero).padStart(5, '0')}</div></div></div>
         <div style="font-size:11px;margin-bottom:8px">Fecha: <strong>${remito.fecha}</strong></div>
-        <div class="campo"><label>Señor/a:</label>${remito.cliente_nombre || ''}</div>
-        <div class="campo"><label>Domicilio:</label>${remito.domicilio || ''}</div>
-        <table>
-          <thead><tr>
-            <th style="width:40%">DESCRIPCIÓN</th>
-            <th style="width:15%">KG</th>
-            <th style="width:22%">PRECIO UNITARIO</th>
-            <th style="width:23%">IMPORTE</th>
-          </tr></thead>
-          <tbody>
-            ${items.map(item => `<tr>
-              <td class="desc">${item.descripcion}</td>
-              <td>${item.kg}</td>
-              <td>$${Math.round(item.precio).toLocaleString('es-AR')}</td>
-              <td>$${Math.round(item.importe).toLocaleString('es-AR')}</td>
-            </tr>`).join('')}
-            ${Array(Math.max(0, 10 - items.length)).fill('<tr><td>&nbsp;</td><td></td><td></td><td></td></tr>').join('')}
-          </tbody>
-        </table>
-        <div class="total-row"><div class="total-box">TOTAL: $${Math.round(remito.total).toLocaleString('es-AR')}</div></div>
+        <div style="border-bottom:1px solid #000;margin-bottom:8px;padding-bottom:2px"><span style="font-size:10px;font-weight:700;margin-right:6px">Señor/a:</span>${remito.cliente_nombre || ''}</div>
+        <table><thead><tr><th style="width:40%">DESCRIPCIÓN</th><th style="width:15%">KG</th><th style="width:22%">PRECIO UNITARIO</th><th style="width:23%">IMPORTE</th></tr></thead>
+        <tbody>${items.map(item => `<tr><td class="desc">${item.descripcion}</td><td>${item.kg}</td><td>$${Math.round(item.precio).toLocaleString('es-AR')}</td><td>$${Math.round(item.importe).toLocaleString('es-AR')}</td></tr>`).join('')}${Array(Math.max(0, 10 - items.length)).fill('<tr><td>&nbsp;</td><td></td><td></td><td></td></tr>').join('')}</tbody></table>
+        <div style="display:flex;justify-content:flex-end;margin-top:8px"><div class="total-box">TOTAL: $${Math.round(remito.total).toLocaleString('es-AR')}</div></div>
         <div class="firma">Firma y aclaración: ________________________________</div>
         <script>window.onload = () => { window.print(); }</script>
-      </body></html>
-    `)
+      </body></html>`)
     win.document.close()
   }
 
@@ -564,68 +511,304 @@ function RemitosTab({ remitoActual }) {
 }
 
 function ProveedoresTab() {
+  const [subtab, setSubtab] = useState('resumen')
+  const [compras, setCompras] = useState([])
   const [pagos, setPagos] = useState([])
-  const [form, setForm] = useState({ proveedor: '', importe: '', forma: 'transferencia', fecha: new Date().toISOString().split('T')[0], notas: '' })
+  const [proveedoresDB, setProveedoresDB] = useState([])
+  const [alert, setAlert] = useState(null)
+  const [nuevoProveedor, setNuevoProveedor] = useState('')
 
-  useEffect(() => {
-    supabase.from('pagos_proveedores').select('*').order('fecha', { ascending: false }).limit(20).then(({ data }) => setPagos(data || []))
-  }, [])
+  const [formCompra, setFormCompra] = useState({ fecha: new Date().toISOString().split('T')[0], semana_inicio: '', semana_fin: '', proveedor_nombre: '', producto: '', kg: '', importe: '' })
+  const [formPago, setFormPago] = useState({ fecha: new Date().toISOString().split('T')[0], semana_inicio: '', semana_fin: '', proveedor_nombre: '', importe_compra: '', percepcion: '', saldo_anterior: '', entrega: '', notas: '' })
 
-  async function guardar() {
-    if (!form.proveedor || !form.importe) return
-    await supabase.from('pagos_proveedores').insert({
-      proveedor_nombre: form.proveedor, importe: parseFloat(form.importe),
-      forma: form.forma, fecha: form.fecha, notas: form.notas
-    })
-    setForm(f => ({ ...f, importe: '', notas: '' }))
-    supabase.from('pagos_proveedores').select('*').order('fecha', { ascending: false }).limit(20).then(({ data }) => setPagos(data || []))
+  const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, width: '100%', boxSizing: 'border-box' }
+
+  useEffect(() => { fetchAll() }, [])
+
+  async function fetchAll() {
+    const [{ data: c }, { data: p }, { data: prov }] = await Promise.all([
+      supabase.from('compras_proveedores').select('*').order('fecha', { ascending: false }).limit(100),
+      supabase.from('pagos_proveedores_semanal').select('*').order('fecha', { ascending: false }).limit(100),
+      supabase.from('proveedores').select('*').eq('activo', true).order('nombre')
+    ])
+    setCompras(c || [])
+    setPagos(p || [])
+    setProveedoresDB(prov || [])
   }
 
+  function showMsg(msg, type = 'success') { setAlert({ msg, type }); setTimeout(() => setAlert(null), 3000) }
+
+  async function agregarProveedor() {
+    if (!nuevoProveedor.trim()) return
+    const nombre = nuevoProveedor.trim().toUpperCase()
+    const { error } = await supabase.from('proveedores').insert({ nombre, activo: true })
+    if (error) { showMsg('❌ Ya existe ese proveedor', 'error'); return }
+    showMsg('✅ Proveedor agregado')
+    setNuevoProveedor('')
+    fetchAll()
+  }
+
+  async function eliminarProveedor(id, nombre) {
+    if (!confirm(`¿Eliminar el proveedor ${nombre}?`)) return
+    await supabase.from('proveedores').update({ activo: false }).eq('id', id)
+    showMsg('🗑️ Proveedor eliminado')
+    fetchAll()
+  }
+
+  async function guardarCompra() {
+    if (!formCompra.proveedor_nombre || !formCompra.importe) { showMsg('Completá proveedor e importe', 'error'); return }
+    await supabase.from('compras_proveedores').insert({
+      fecha: formCompra.fecha, semana_inicio: formCompra.semana_inicio || null,
+      semana_fin: formCompra.semana_fin || null, proveedor_nombre: formCompra.proveedor_nombre,
+      producto: formCompra.producto, kg: parseFloat(formCompra.kg) || 0, importe: parseFloat(formCompra.importe) || 0
+    })
+    showMsg('✅ Compra registrada')
+    setFormCompra(f => ({ ...f, producto: '', kg: '', importe: '', proveedor_nombre: '' }))
+    fetchAll()
+  }
+
+  async function guardarPago() {
+    if (!formPago.proveedor_nombre) { showMsg('Seleccioná un proveedor', 'error'); return }
+    const saldoAdeudado = (parseFloat(formPago.importe_compra) || 0) + (parseFloat(formPago.percepcion) || 0) + (parseFloat(formPago.saldo_anterior) || 0) - (parseFloat(formPago.entrega) || 0)
+    await supabase.from('pagos_proveedores_semanal').insert({
+      fecha: formPago.fecha, semana_inicio: formPago.semana_inicio || null, semana_fin: formPago.semana_fin || null,
+      proveedor_nombre: formPago.proveedor_nombre, importe_compra: parseFloat(formPago.importe_compra) || 0,
+      percepcion: parseFloat(formPago.percepcion) || 0, saldo_anterior: parseFloat(formPago.saldo_anterior) || 0,
+      entrega: parseFloat(formPago.entrega) || 0, saldo_adeudado: saldoAdeudado, notas: formPago.notas
+    })
+    showMsg('✅ Pago registrado')
+    setFormPago(f => ({ ...f, importe_compra: '', percepcion: '', saldo_anterior: '', entrega: '', notas: '', proveedor_nombre: '' }))
+    fetchAll()
+  }
+
+  const proveedoresNombres = proveedoresDB.map(p => p.nombre)
+
+  const resumen = proveedoresNombres.map(prov => {
+    const comprasProv = compras.filter(c => c.proveedor_nombre?.toUpperCase().includes(prov))
+    const pagosProv = pagos.filter(p => p.proveedor_nombre?.toUpperCase().includes(prov))
+    const totalCompras = comprasProv.reduce((s, c) => s + (c.importe || 0), 0)
+    const totalEntregado = pagosProv.reduce((s, p) => s + (p.entrega || 0), 0)
+    const ultimoPago = pagosProv[0]
+    const saldoAdeudado = ultimoPago?.saldo_adeudado ?? (totalCompras - totalEntregado)
+    return { prov, totalCompras, totalEntregado, saldoAdeudado }
+  }).filter(r => r.totalCompras > 0 || r.saldoAdeudado !== 0)
+
+  const totalDeuda = resumen.reduce((s, r) => s + Math.max(0, r.saldoAdeudado), 0)
+
   return (
-    <div className="grid2">
-      <div className="card">
-        <div className="card-title">Registrar pago a proveedor</div>
-        <div className="form-group"><label>Proveedor</label>
-          <select value={form.proveedor} onChange={e => setForm(f => ({ ...f, proveedor: e.target.value }))}>
-            <option value="">— Seleccioná —</option>
-            {['PRETTO', 'LEO', 'BERTOSSI', 'INDACOR', 'BELMACO', 'CUBALA', 'LA AVENIDA', 'MOTTURA', 'MELO CARBON'].map(p => <option key={p}>{p}</option>)}
-          </select>
+    <div>
+      {alert && (
+        <div style={{ background: alert.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${alert.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: alert.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>
+          {alert.msg}
         </div>
-        <div className="form-row">
-          <div className="form-group"><label>Importe ($)</label>
-            <input type="number" value={form.importe} onChange={e => setForm(f => ({ ...f, importe: e.target.value }))} />
-          </div>
-          <div className="form-group"><label>Forma de pago</label>
-            <select value={form.forma} onChange={e => setForm(f => ({ ...f, forma: e.target.value }))}>
-              <option value="efectivo">Efectivo</option>
-              <option value="transferencia">Transferencia</option>
-              <option value="cheque">Cheque (endoso)</option>
-              <option value="echeq">E-cheq</option>
-            </select>
-          </div>
-        </div>
-        <div className="form-group"><label>Notas</label>
-          <input value={form.notas} onChange={e => setForm(f => ({ ...f, notas: e.target.value }))} placeholder="Cheque nro., banco, etc." />
-        </div>
-        <button className="btn btn-gold" onClick={guardar}>✅ Registrar pago</button>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
+        {[{ id: 'resumen', label: '📊 Resumen' }, { id: 'compras', label: '📥 Compras' }, { id: 'pagos', label: '💰 Pagos semanales' }, { id: 'gestionar', label: '⚙️ Gestionar proveedores' }].map(t => (
+          <button key={t.id} onClick={() => setSubtab(t.id)}
+            style={{ padding: '7px 16px', borderRadius: 8, border: `1px solid ${subtab === t.id ? 'var(--amber)' : 'var(--border)'}`, background: subtab === t.id ? 'var(--amber)' : 'transparent', color: subtab === t.id ? '#fff' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
+            {t.label}
+          </button>
+        ))}
       </div>
-      <div className="card">
-        <div className="card-title">Últimos pagos</div>
-        <table>
-          <thead><tr><th>Fecha</th><th>Proveedor</th><th>Importe</th><th>Forma</th></tr></thead>
-          <tbody>
-            {pagos.map(p => (
-              <tr key={p.id}>
-                <td>{p.fecha}</td>
-                <td><strong>{p.proveedor_nombre}</strong></td>
-                <td style={{ color: 'var(--green)' }}>${Math.round(p.importe).toLocaleString('es-AR')}</td>
-                <td><span className="badge badge-blue">{p.forma}</span></td>
-              </tr>
-            ))}
-            {pagos.length === 0 && <tr><td colSpan={4} className="empty">Sin pagos</td></tr>}
-          </tbody>
-        </table>
-      </div>
+
+      {subtab === 'resumen' && (
+        <div>
+          <div style={{ display: 'flex', gap: 14, marginBottom: 20 }}>
+            <div className="stat"><div className="stat-label">Total adeudado proveedores</div><div className="stat-value" style={{ color: 'var(--red-light)' }}>{fmt(totalDeuda)}</div></div>
+            <div className="stat"><div className="stat-label">Proveedores activos</div><div className="stat-value" style={{ color: 'var(--gold)' }}>{proveedoresDB.length}</div></div>
+          </div>
+          <div className="card">
+            <div className="card-title">Estado de cuenta por proveedor</div>
+            <table>
+              <thead><tr>
+                <th>Proveedor</th>
+                <th style={{ color: 'var(--amber)' }}>Total compras</th>
+                <th style={{ color: 'var(--green)' }}>Total entregado</th>
+                <th style={{ color: 'var(--red-light)' }}>Saldo adeudado</th>
+                <th>Estado</th>
+              </tr></thead>
+              <tbody>
+                {resumen.map(r => (
+                  <tr key={r.prov}>
+                    <td><strong>{r.prov}</strong></td>
+                    <td style={{ color: 'var(--amber)' }}>{fmt(r.totalCompras)}</td>
+                    <td style={{ color: 'var(--green)' }}>{fmt(r.totalEntregado)}</td>
+                    <td style={{ color: r.saldoAdeudado > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 700 }}>{fmt(r.saldoAdeudado)}</td>
+                    <td><span style={{ background: r.saldoAdeudado > 0 ? '#3a1a1a' : '#1a3a1a', color: r.saldoAdeudado > 0 ? 'var(--red-light)' : 'var(--green)', borderRadius: 4, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>{r.saldoAdeudado > 0 ? 'DEBE' : '✅ AL DÍA'}</span></td>
+                  </tr>
+                ))}
+                {resumen.length === 0 && <tr><td colSpan={5} className="empty">Sin compras registradas</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {subtab === 'compras' && (
+        <div>
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div className="card-title">➕ Registrar compra manual</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>Las entradas al depósito se registran automáticamente. Usá esto para compras adicionales.</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Proveedor</label>
+                <select value={formCompra.proveedor_nombre} onChange={e => setFormCompra(f => ({ ...f, proveedor_nombre: e.target.value }))} style={inp}>
+                  <option value="">— Seleccioná —</option>
+                  {proveedoresNombres.map(p => <option key={p}>{p}</option>)}
+                </select>
+              </div>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Producto</label>
+                <input value={formCompra.producto} onChange={e => setFormCompra(f => ({ ...f, producto: e.target.value }))} placeholder="Ej: Bovino Media Res" style={inp} />
+              </div>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Fecha</label>
+                <input type="date" value={formCompra.fecha} onChange={e => setFormCompra(f => ({ ...f, fecha: e.target.value }))} style={inp} />
+              </div>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Kg</label>
+                <input type="number" value={formCompra.kg} onChange={e => setFormCompra(f => ({ ...f, kg: e.target.value }))} placeholder="0" style={inp} />
+              </div>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Importe ($)</label>
+                <input type="number" value={formCompra.importe} onChange={e => setFormCompra(f => ({ ...f, importe: e.target.value }))} placeholder="0" style={{ ...inp, borderColor: 'var(--gold)' }} />
+              </div>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Semana (inicio → fin)</label>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <input type="date" value={formCompra.semana_inicio} onChange={e => setFormCompra(f => ({ ...f, semana_inicio: e.target.value }))} style={{ ...inp, fontSize: 11 }} />
+                  <input type="date" value={formCompra.semana_fin} onChange={e => setFormCompra(f => ({ ...f, semana_fin: e.target.value }))} style={{ ...inp, fontSize: 11 }} />
+                </div>
+              </div>
+            </div>
+            <button className="btn btn-gold" onClick={guardarCompra}>✅ Registrar compra</button>
+          </div>
+          <div className="card">
+            <div className="card-title">Historial de compras</div>
+            <table>
+              <thead><tr><th>Fecha</th><th>Proveedor</th><th>Producto</th><th>Kg</th><th>Importe</th></tr></thead>
+              <tbody>
+                {compras.slice(0, 20).map(c => (
+                  <tr key={c.id}>
+                    <td>{c.fecha}</td>
+                    <td><strong>{c.proveedor_nombre}</strong></td>
+                    <td>{c.producto || '—'}</td>
+                    <td>{c.kg > 0 ? c.kg + ' kg' : '—'}</td>
+                    <td style={{ color: 'var(--amber)', fontWeight: 600 }}>{fmt(c.importe)}</td>
+                  </tr>
+                ))}
+                {compras.length === 0 && <tr><td colSpan={5} className="empty">Sin compras registradas</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {subtab === 'pagos' && (
+        <div>
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div className="card-title">💰 Registrar pago semanal</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Proveedor</label>
+                <select value={formPago.proveedor_nombre} onChange={e => setFormPago(f => ({ ...f, proveedor_nombre: e.target.value }))} style={inp}>
+                  <option value="">— Seleccioná —</option>
+                  {proveedoresNombres.map(p => <option key={p}>{p}</option>)}
+                </select>
+              </div>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Fecha</label>
+                <input type="date" value={formPago.fecha} onChange={e => setFormPago(f => ({ ...f, fecha: e.target.value }))} style={inp} />
+              </div>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Importe compra ($)</label>
+                <input type="number" value={formPago.importe_compra} onChange={e => setFormPago(f => ({ ...f, importe_compra: e.target.value }))} placeholder="0" style={inp} />
+              </div>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Percepción ($)</label>
+                <input type="number" value={formPago.percepcion} onChange={e => setFormPago(f => ({ ...f, percepcion: e.target.value }))} placeholder="0" style={inp} />
+              </div>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Saldo semana anterior ($)</label>
+                <input type="number" value={formPago.saldo_anterior} onChange={e => setFormPago(f => ({ ...f, saldo_anterior: e.target.value }))} placeholder="0" style={inp} />
+              </div>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Lo que se entrega ($)</label>
+                <input type="number" value={formPago.entrega} onChange={e => setFormPago(f => ({ ...f, entrega: e.target.value }))} placeholder="0" style={{ ...inp, borderColor: 'var(--green)' }} />
+              </div>
+            </div>
+            {(formPago.importe_compra || formPago.entrega) && (
+              <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+                <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>Compra: </span><strong style={{ color: 'var(--amber)' }}>{fmt(parseFloat(formPago.importe_compra) || 0)}</strong></div>
+                <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>+ Percepción: </span><strong>{fmt(parseFloat(formPago.percepcion) || 0)}</strong></div>
+                <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>+ Saldo ant.: </span><strong>{fmt(parseFloat(formPago.saldo_anterior) || 0)}</strong></div>
+                <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>− Entrega: </span><strong style={{ color: 'var(--green)' }}>{fmt(parseFloat(formPago.entrega) || 0)}</strong></div>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>
+                  <span style={{ color: 'var(--muted)' }}>= Saldo adeudado: </span>
+                  <strong style={{ color: ((parseFloat(formPago.importe_compra) || 0) + (parseFloat(formPago.percepcion) || 0) + (parseFloat(formPago.saldo_anterior) || 0) - (parseFloat(formPago.entrega) || 0)) > 0 ? 'var(--red-light)' : 'var(--green)' }}>
+                    {fmt((parseFloat(formPago.importe_compra) || 0) + (parseFloat(formPago.percepcion) || 0) + (parseFloat(formPago.saldo_anterior) || 0) - (parseFloat(formPago.entrega) || 0))}
+                  </strong>
+                </div>
+              </div>
+            )}
+            <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Notas</label>
+              <input value={formPago.notas} onChange={e => setFormPago(f => ({ ...f, notas: e.target.value }))} placeholder="Cheque nro., banco, etc." style={{ ...inp, marginBottom: 12 }} />
+            </div>
+            <button className="btn btn-gold" onClick={guardarPago}>✅ Registrar pago semanal</button>
+          </div>
+          <div className="card">
+            <div className="card-title">Historial de pagos semanales</div>
+            <table>
+              <thead><tr><th>Fecha</th><th>Proveedor</th><th>Compra</th><th>Percep.</th><th>Saldo ant.</th><th>Entrega</th><th>Saldo adeudado</th></tr></thead>
+              <tbody>
+                {pagos.slice(0, 20).map(p => (
+                  <tr key={p.id}>
+                    <td>{p.fecha}</td>
+                    <td><strong>{p.proveedor_nombre}</strong></td>
+                    <td style={{ color: 'var(--amber)' }}>{fmt(p.importe_compra)}</td>
+                    <td>{p.percepcion > 0 ? fmt(p.percepcion) : '—'}</td>
+                    <td>{p.saldo_anterior > 0 ? fmt(p.saldo_anterior) : '—'}</td>
+                    <td style={{ color: 'var(--green)' }}>{fmt(p.entrega)}</td>
+                    <td style={{ color: p.saldo_adeudado > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 700 }}>{fmt(p.saldo_adeudado)}</td>
+                  </tr>
+                ))}
+                {pagos.length === 0 && <tr><td colSpan={7} className="empty">Sin pagos registrados</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {subtab === 'gestionar' && (
+        <div>
+          {/* AGREGAR PROVEEDOR */}
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div className="card-title">➕ Agregar nuevo proveedor</div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Nombre del proveedor</label>
+                <input
+                  value={nuevoProveedor}
+                  onChange={e => setNuevoProveedor(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && agregarProveedor()}
+                  placeholder="Ej: GARCIA, SAN MARTIN..."
+                  style={{ ...inp, borderColor: 'var(--gold)', textTransform: 'uppercase' }}
+                />
+              </div>
+              <button onClick={agregarProveedor} className="btn btn-gold" style={{ whiteSpace: 'nowrap' }}>
+                ➕ Agregar
+              </button>
+            </div>
+          </div>
+
+          {/* LISTA DE PROVEEDORES */}
+          <div className="card">
+            <div className="card-title">📋 Proveedores activos ({proveedoresDB.length})</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+              {proveedoresDB.map(p => (
+                <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', border: '1px solid var(--border)' }}>
+                  <span style={{ fontWeight: 600, fontSize: 13 }}>{p.nombre}</span>
+                  <button onClick={() => eliminarProveedor(p.id, p.nombre)}
+                    style={{ background: 'none', border: 'none', color: 'var(--red-light)', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}
+                    title="Eliminar proveedor">
+                    🗑️
+                  </button>
+                </div>
+              ))}
+              {proveedoresDB.length === 0 && <div className="empty" style={{ gridColumn: '1/-1' }}>Sin proveedores registrados</div>}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
