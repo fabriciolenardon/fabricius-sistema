@@ -28,6 +28,13 @@ export default function Precios() {
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
 
+  // Estados para actualización masiva
+  const [masivoCat, setMasivoCat] = useState('todas')
+  const [masivoLista, setMasivoLista] = useState('todas')
+  const [masivoPct, setMasivoPct] = useState('')
+  const [masivoLoading, setMasivoLoading] = useState(false)
+  const [masivoPreview, setMasivoPreview] = useState([])
+
   useEffect(() => { cargar() }, [])
 
   async function cargar() {
@@ -43,8 +50,7 @@ export default function Precios() {
     if (!form.nombre.trim()) return mostrarMsg('❌ El nombre es obligatorio')
     setLoading(true)
     const datos = {
-      categoria: form.categoria,
-      nombre: form.nombre,
+      categoria: form.categoria, nombre: form.nombre,
       precio_carniceria: form.precio_carniceria === '' ? null : Number(form.precio_carniceria),
       precio_mayorista: form.precio_mayorista === '' ? null : Number(form.precio_mayorista),
       precio_minorista: form.precio_minorista === '' ? null : Number(form.precio_minorista),
@@ -73,6 +79,37 @@ export default function Precios() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
+  // Preview de actualización masiva
+  function calcularPreview() {
+    const pct = parseFloat(masivoPct)
+    if (!pct) return setMasivoPreview([])
+    const filtrados = masivoCat === 'todas' ? precios : precios.filter(p => p.categoria === masivoCat)
+    setMasivoPreview(filtrados.map(p => ({
+      ...p,
+      nuevo_carniceria: masivoLista === 'todas' || masivoLista === 'carniceria' ? Math.round((p.precio_carniceria || 0) * (1 + pct / 100)) : p.precio_carniceria,
+      nuevo_mayorista: masivoLista === 'todas' || masivoLista === 'mayorista' ? Math.round((p.precio_mayorista || 0) * (1 + pct / 100)) : p.precio_mayorista,
+      nuevo_minorista: masivoLista === 'todas' || masivoLista === 'minorista' ? Math.round((p.precio_minorista || 0) * (1 + pct / 100)) : p.precio_minorista,
+    })))
+  }
+
+  async function aplicarMasivo() {
+    if (!masivoPct || masivoPreview.length === 0) return
+    if (!confirm(`¿Confirmar actualización de ${masivoPreview.length} productos con ${masivoPct}%?`)) return
+    setMasivoLoading(true)
+    for (const p of masivoPreview) {
+      const update = {}
+      if (masivoLista === 'todas' || masivoLista === 'carniceria') update.precio_carniceria = p.nuevo_carniceria
+      if (masivoLista === 'todas' || masivoLista === 'mayorista') update.precio_mayorista = p.nuevo_mayorista
+      if (masivoLista === 'todas' || masivoLista === 'minorista') update.precio_minorista = p.nuevo_minorista
+      await supabase.from('precios').update(update).eq('id', p.id)
+    }
+    setMasivoLoading(false)
+    setMasivoPct('')
+    setMasivoPreview([])
+    mostrarMsg(`✅ ${masivoPreview.length} productos actualizados con ${masivoPct}%`)
+    await cargar()
+  }
+
   async function enviarChat() {
     if (!chatInput.trim() || chatLoading) return
     const pregunta = chatInput.trim()
@@ -89,7 +126,7 @@ export default function Precios() {
         body: JSON.stringify({
           model: 'openrouter/auto',
           messages: [
-            { role: 'system', content: `Sos el asistente de Carnicerías Fabricius, una carnicería mayorista argentina. Respondé en español argentino, de forma amigable y directa. NUNCA uses asteriscos, negritas ni formato markdown en tus respuestas. Escribí todo en texto plano.\n\nREGLAS IMPORTANTES:\n1. NUNCA inventes precios. Solo usá los precios exactos de la lista.\n2. Cuando pregunten por un producto, respondé EXACTAMENTE en este formato:\n\nEl precio de [NOMBRE PRODUCTO] es:\n🔴 PRECIO CARNICERIA: $[precio] por kg\n🟡 PRECIO MAYORISTA: $[precio] por kg\n🟢 PRECIO MINORISTA: $[precio] por kg\n\n3. Si el precio es — significa que no aplica para esa lista.\n4. Si no encontrás el producto exacto, buscá el más parecido y avisá.\n5. PRECIO CARNICERIA es para carnicerías revendedoras. PRECIO MAYORISTA es para compradores al por mayor. PRECIO MINORISTA es para consumidor final.\n6. NUNCA uses asteriscos ni markdown. Solo texto plano.\n\nLISTA DE PRECIOS (Carn=carnicería / May=mayorista / Min=minorista):\n${listaTexto}` },
+            { role: 'system', content: `Sos el asistente de Carnicerías Fabricius, una carnicería mayorista argentina. Respondé en español argentino, de forma amigable y directa. NUNCA uses asteriscos, negritas ni formato markdown en tus respuestas. Escribí todo en texto plano.\n\nLISTA DE PRECIOS:\n${listaTexto}` },
             ...chatMsgs.filter((_, i) => i > 0).map(m => ({ role: m.rol === 'user' ? 'user' : 'assistant', content: m.texto })),
             { role: 'user', content: pregunta }
           ]
@@ -116,9 +153,10 @@ export default function Precios() {
     <div>
       <div className="page-title">PRECIOS</div>
       <div className="page-sub">Consultá, administrá y usá la IA para gestionar tus precios</div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap' }}>
         {tabBtn('ver', '📋 Ver Precios')}
         {tabBtn('admin', '✏️ Administrar')}
+        {tabBtn('masivo', '🚀 Actualización masiva')}
         {tabBtn('chat', '🤖 Asistente IA')}
       </div>
       {msg && <div style={{ background: '#1a2a1a', border: '1px solid #2d5a2d', borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: '#7dff7d', fontWeight: 600 }}>{msg}</div>}
@@ -230,6 +268,92 @@ export default function Precios() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {tab === 'masivo' && (
+        <div>
+          <div className="card" style={{ marginBottom: 20, borderColor: 'var(--gold)' }}>
+            <div className="card-title">🚀 Actualización masiva de precios</div>
+            <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
+              Actualizá todos los precios de una categoría de una sola vez con un porcentaje de aumento o reducción.
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
+              <div>
+                <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Categoría</label>
+                <select value={masivoCat} onChange={e => { setMasivoCat(e.target.value); setMasivoPreview([]) }} style={inp}>
+                  <option value="todas">📦 Todas las categorías</option>
+                  {Object.entries(CATEGORIAS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Lista de precios</label>
+                <select value={masivoLista} onChange={e => { setMasivoLista(e.target.value); setMasivoPreview([]) }} style={inp}>
+                  <option value="todas">💰 Todas las listas</option>
+                  <option value="carniceria">🔴 Solo Carnicería</option>
+                  <option value="mayorista">🟡 Solo Mayorista</option>
+                  <option value="minorista">🟢 Solo Minorista</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Porcentaje (+ aumento / - reducción)</label>
+                <input type="number" step="0.5" placeholder="Ej: 10 para +10% / -5 para -5%" value={masivoPct} onChange={e => { setMasivoPct(e.target.value); setMasivoPreview([]) }} style={{ ...inp, borderColor: masivoPct ? 'var(--gold)' : 'var(--border)' }} />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={calcularPreview} disabled={!masivoPct}
+                style={{ padding: '10px 20px', background: 'var(--surface2)', color: 'var(--text)', border: '1px solid var(--gold)', borderRadius: 8, fontWeight: 700, cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+                👁️ Ver preview
+              </button>
+              <button onClick={aplicarMasivo} disabled={masivoLoading || masivoPreview.length === 0}
+                style={{ padding: '10px 20px', background: masivoPreview.length > 0 ? 'var(--gold)' : 'var(--surface2)', color: masivoPreview.length > 0 ? '#000' : 'var(--muted)', border: 'none', borderRadius: 8, fontWeight: 700, cursor: masivoPreview.length > 0 ? 'pointer' : 'not-allowed', fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+                {masivoLoading ? '⏳ Aplicando...' : `✅ Aplicar a ${masivoPreview.length} productos`}
+              </button>
+            </div>
+          </div>
+
+          {masivoPreview.length > 0 && (
+            <div className="card">
+              <div className="card-title">👁️ Preview — {masivoPreview.length} productos afectados</div>
+              <div style={{ fontSize: 12, color: 'var(--amber)', marginBottom: 12, fontWeight: 600 }}>
+                {parseFloat(masivoPct) > 0 ? `📈 Aumento del ${masivoPct}%` : `📉 Reducción del ${Math.abs(parseFloat(masivoPct))}%`}
+              </div>
+              <table>
+                <thead><tr>
+                  <th>Producto</th>
+                  <th>Categoría</th>
+                  {(masivoLista === 'todas' || masivoLista === 'carniceria') && <th style={{ color: 'var(--red-light)' }}>🔴 Carn. actual → nuevo</th>}
+                  {(masivoLista === 'todas' || masivoLista === 'mayorista') && <th style={{ color: 'var(--amber)' }}>🟡 May. actual → nuevo</th>}
+                  {(masivoLista === 'todas' || masivoLista === 'minorista') && <th style={{ color: 'var(--green)' }}>🟢 Min. actual → nuevo</th>}
+                </tr></thead>
+                <tbody>
+                  {masivoPreview.map(p => (
+                    <tr key={p.id}>
+                      <td style={{ fontWeight: 500 }}>{p.nombre}</td>
+                      <td style={{ fontSize: 11, color: 'var(--muted)' }}>{CATEGORIAS[p.categoria]}</td>
+                      {(masivoLista === 'todas' || masivoLista === 'carniceria') && (
+                        <td style={{ color: 'var(--red-light)' }}>
+                          {fmt(p.precio_carniceria)} → <strong style={{ color: 'var(--gold)' }}>{fmt(p.nuevo_carniceria)}</strong>
+                        </td>
+                      )}
+                      {(masivoLista === 'todas' || masivoLista === 'mayorista') && (
+                        <td style={{ color: 'var(--amber)' }}>
+                          {fmt(p.precio_mayorista)} → <strong style={{ color: 'var(--gold)' }}>{fmt(p.nuevo_mayorista)}</strong>
+                        </td>
+                      )}
+                      {(masivoLista === 'todas' || masivoLista === 'minorista') && (
+                        <td style={{ color: 'var(--green)' }}>
+                          {fmt(p.precio_minorista)} → <strong style={{ color: 'var(--gold)' }}>{fmt(p.nuevo_minorista)}</strong>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
