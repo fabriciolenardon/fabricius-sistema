@@ -410,7 +410,7 @@ function DesposteTab({ onSaved }) {
                   <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--red-light)' }}>−{(kgBase * 0.025).toFixed(1)} kg</div>
                 </div>
                 <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 2' }}>Kg neto disponible</div>
+                  <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 2 }}>Kg neto disponible</div>
                   <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--green)' }}>{kgNeto.toFixed(1)} kg</div>
                 </div>
               </div>
