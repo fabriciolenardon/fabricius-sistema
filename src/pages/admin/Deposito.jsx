@@ -519,12 +519,107 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
 function RemitosTab({ remitoActual }) {
   const [remitos, setRemitos] = useState([])
   const [seleccionado, setSeleccionado] = useState(remitoActual)
+  const [editando, setEditando] = useState(null)
+  const [itemsEdit, setItemsEdit] = useState([])
+  const [alert, setAlert] = useState(null)
+  const [todosPrecios, setTodosPrecios] = useState([])
+  const [nuevaCategoria, setNuevaCategoria] = useState('')
+  const [nuevoProductoId, setNuevoProductoId] = useState('')
+  const [nuevoKg, setNuevoKg] = useState('')
+  const [nuevoPrecio, setNuevoPrecio] = useState('')
+
+  const CATEGORIAS = {
+    bovino_mr: '🐄 Media Reses', bovino_corte: '🥩 Bovinos — Cortes',
+    bovino_brosa: '🫀 Brosas', bovino_pieza: '🍖 Piezas',
+    bovino_caja_cb: '📦 Cajas CB', bovino_caja_pt: '📦 Cajas PT',
+    cerdo_corte: '🐷 Cerdo', embutido: '🌭 Embutidos',
+    pollo: '🍗 Pollo', rebozado: '🧊 Rebozados',
+  }
 
   useEffect(() => {
-    supabase.from('remitos').select('*').order('created_at', { ascending: false }).limit(20).then(({ data }) => setRemitos(data || []))
+    cargarRemitos()
+    supabase.from('precios').select('*').order('nombre').then(({ data }) => setTodosPrecios(data || []))
   }, [])
 
   useEffect(() => { if (remitoActual) setSeleccionado(remitoActual) }, [remitoActual])
+
+  async function cargarRemitos() {
+    const { data } = await supabase.from('remitos').select('*').order('created_at', { ascending: false }).limit(30)
+    setRemitos(data || [])
+  }
+
+  function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(() => setAlert(null), 4000) }
+
+  function abrirEdicion(remito) {
+    setEditando(remito)
+    setItemsEdit(JSON.parse(JSON.stringify(remito.items || [])))
+    setSeleccionado(null)
+  }
+
+  function editarItem(idx, campo, valor) {
+    setItemsEdit(prev => {
+      const items = [...prev]
+      items[idx] = { ...items[idx], [campo]: parseFloat(valor) || valor }
+      if (campo === 'kg' || campo === 'precio') {
+        items[idx].importe = (parseFloat(items[idx].kg) || 0) * (parseFloat(items[idx].precio) || 0)
+      }
+      return items
+    })
+  }
+
+  function quitarItemEdit(idx) {
+    setItemsEdit(prev => prev.filter((_, i) => i !== idx))
+  }
+
+  function agregarItemEdit() {
+    if (!nuevoKg || !nuevoPrecio || !nuevoProductoId) return
+    const prod = todosPrecios.find(p => p.id === nuevoProductoId)
+    const item = {
+      descripcion: prod?.nombre || '',
+      kg: parseFloat(nuevoKg),
+      precio: parseFloat(nuevoPrecio),
+      importe: parseFloat(nuevoKg) * parseFloat(nuevoPrecio),
+      tipo: nuevaCategoria
+    }
+    setItemsEdit(prev => [...prev, item])
+    setNuevoKg(''); setNuevoPrecio(''); setNuevoProductoId(''); setNuevaCategoria('')
+  }
+
+  async function guardarEdicion() {
+    if (itemsEdit.length === 0) { showAlert('Debe tener al menos un producto', 'error'); return }
+    const nuevoTotal = itemsEdit.reduce((s, i) => s + (parseFloat(i.importe) || 0), 0)
+    const totalAnterior = editando.total || 0
+    const diferencia = nuevoTotal - totalAnterior
+
+    // Actualizar el remito
+    await supabase.from('remitos').update({ items: itemsEdit, total: nuevoTotal }).eq('id', editando.id)
+
+    // Si tiene cliente, corregir movimiento y saldo
+    if (editando.cliente_id && diferencia !== 0) {
+      // Buscar el movimiento del remito
+      const { data: movs } = await supabase.from('movimientos_ctacte')
+        .select('*').eq('remito_id', editando.id).maybeSingle()
+
+      if (movs) {
+        const nuevoDebeMovimiento = (movs.debe || 0) + diferencia
+        await supabase.from('movimientos_ctacte').update({
+          debe: nuevoDebeMovimiento,
+          saldo: (movs.saldo || 0) + diferencia,
+          descripcion: `Remito N° ${String(editando.numero || '').padStart(5, '0')} — ${itemsEdit.map(i => i.descripcion).join(', ')} ✏️ Editado`
+        }).eq('id', movs.id)
+      }
+
+      // Actualizar saldo del cliente
+      const { data: clienteActual } = await supabase.from('clientes').select('saldo').eq('id', editando.cliente_id).single()
+      const nuevoSaldo = (clienteActual?.saldo || 0) + diferencia
+      await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', editando.cliente_id)
+    }
+
+    showAlert(`✅ Remito N° ${String(editando.numero).padStart(5, '0')} actualizado correctamente`)
+    setEditando(null)
+    setItemsEdit([])
+    cargarRemitos()
+  }
 
   function imprimir(remito) {
     const items = remito.items || []
@@ -544,21 +639,134 @@ function RemitosTab({ remitoActual }) {
     win.document.close()
   }
 
+  const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '6px 10px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, boxSizing: 'border-box' }
+  const categorias = [...new Set(todosPrecios.map(p => p.categoria))]
+  const productosFiltrados = todosPrecios.filter(p => p.categoria === nuevaCategoria)
+
+  // PANTALLA DE EDICIÓN
+  if (editando) {
+    const nuevoTotal = itemsEdit.reduce((s, i) => s + (parseFloat(i.importe) || 0), 0)
+    return (
+      <div>
+        {alert && <div style={{ background: alert.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${alert.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: alert.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>{alert.msg}</div>}
+
+        <button onClick={() => setEditando(null)} className="btn btn-ghost" style={{ marginBottom: 16 }}>← Volver a remitos</button>
+
+        <div style={{ background: '#2a1a0a', border: '1px solid var(--amber)', borderRadius: 10, padding: '12px 16px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ fontWeight: 700, color: 'var(--amber)', fontSize: 14 }}>✏️ Editando Remito N° {String(editando.numero).padStart(5, '0')}</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{editando.cliente_nombre} · {editando.fecha}</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>Total original</div>
+            <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--muted)', textDecoration: 'line-through' }}>${Math.round(editando.total).toLocaleString('es-AR')}</div>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-title">Items del remito</div>
+          <table>
+            <thead><tr><th style={{ width: '35%' }}>Descripción</th><th>Kg</th><th>Precio/kg</th><th>Importe</th><th></th></tr></thead>
+            <tbody>
+              {itemsEdit.map((item, i) => (
+                <tr key={i}>
+                  <td style={{ fontWeight: 500 }}>{item.descripcion}</td>
+                  <td>
+                    <input type="number" step="0.1" value={item.kg} onChange={e => editarItem(i, 'kg', e.target.value)}
+                      style={{ ...inp, width: 70 }} />
+                  </td>
+                  <td>
+                    <input type="number" value={item.precio} onChange={e => editarItem(i, 'precio', e.target.value)}
+                      style={{ ...inp, width: 100 }} />
+                  </td>
+                  <td style={{ color: 'var(--gold)', fontWeight: 600 }}>
+                    ${Math.round(item.importe || 0).toLocaleString('es-AR')}
+                  </td>
+                  <td>
+                    <button onClick={() => quitarItemEdit(i)} style={{ background: 'none', border: 'none', color: 'var(--red-light)', cursor: 'pointer', fontSize: 16 }}>🗑️</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {/* AGREGAR ITEM */}
+          <div style={{ marginTop: 16, padding: 14, background: 'var(--surface2)', borderRadius: 8 }}>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10, fontWeight: 600 }}>➕ Agregar producto</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 80px 100px auto', gap: 8, alignItems: 'flex-end' }}>
+              <div>
+                <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Categoría</label>
+                <select value={nuevaCategoria} onChange={e => { setNuevaCategoria(e.target.value); setNuevoProductoId('') }} style={{ ...inp, width: '100%' }}>
+                  <option value="">— Seleccioná —</option>
+                  {categorias.map(c => <option key={c} value={c}>{CATEGORIAS[c] || c}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Producto</label>
+                <select value={nuevoProductoId} onChange={e => {
+                  setNuevoProductoId(e.target.value)
+                  const prod = todosPrecios.find(p => p.id === e.target.value)
+                  if (prod) setNuevoPrecio((prod.precio_carniceria || prod.precio_mayorista || '').toString())
+                }} disabled={!nuevaCategoria} style={{ ...inp, width: '100%' }}>
+                  <option value="">— Producto —</option>
+                  {productosFiltrados.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Kg</label>
+                <input type="number" step="0.1" placeholder="0" value={nuevoKg} onChange={e => setNuevoKg(e.target.value)} style={{ ...inp, width: '100%' }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Precio/kg</label>
+                <input type="number" placeholder="0" value={nuevoPrecio} onChange={e => setNuevoPrecio(e.target.value)} style={{ ...inp, width: '100%', borderColor: 'var(--gold)' }} />
+              </div>
+              <button onClick={agregarItemEdit} className="btn btn-ghost" style={{ whiteSpace: 'nowrap', alignSelf: 'flex-end' }}>➕ Agregar</button>
+            </div>
+          </div>
+
+          {/* NUEVO TOTAL */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, padding: '12px 0', borderTop: '2px solid var(--border)' }}>
+            <div>
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>Diferencia: </span>
+              <span style={{ fontWeight: 700, color: nuevoTotal - editando.total >= 0 ? 'var(--green)' : 'var(--red-light)' }}>
+                {nuevoTotal - editando.total >= 0 ? '+' : ''}{fmt(nuevoTotal - editando.total)}
+              </span>
+              {editando.cliente_id && <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 8 }}>(se ajusta en cuenta corriente)</span>}
+            </div>
+            <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 32, color: 'var(--gold)' }}>
+              TOTAL: ${Math.round(nuevoTotal).toLocaleString('es-AR')}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 12 }}>
+            <button className="btn btn-ghost" onClick={() => setEditando(null)}>Cancelar</button>
+            <button className="btn btn-gold" onClick={guardarEdicion}>💾 Guardar cambios en remito</button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // VISTA NORMAL
   return (
     <div>
+      {alert && <div style={{ background: '#1a2a1a', border: '1px solid #2d5a2d', borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: '#7dff7d', fontWeight: 600 }}>{alert.msg}</div>}
+
       {seleccionado && (
         <div className="card" style={{ marginBottom: 16, borderColor: 'var(--gold)' }}>
           <div className="card-title">🧾 Remito N° {String(seleccionado.numero).padStart(5, '0')} — {seleccionado.cliente_nombre}</div>
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
             <button className="btn btn-gold" onClick={() => imprimir(seleccionado)}>🖨️ Imprimir remito</button>
+            <button className="btn btn-ghost" onClick={() => abrirEdicion(seleccionado)}>✏️ Editar remito</button>
             <button className="btn btn-ghost" onClick={() => setSeleccionado(null)}>✕ Cerrar</button>
           </div>
         </div>
       )}
+
       <div className="card">
         <div className="card-title">Historial de remitos</div>
         <table>
-          <thead><tr><th>N° Remito</th><th>Fecha</th><th>Cliente</th><th>Total</th><th>Acción</th></tr></thead>
+          <thead><tr><th>N° Remito</th><th>Fecha</th><th>Cliente</th><th>Total</th><th>Acciones</th></tr></thead>
           <tbody>
             {remitos.map(r => (
               <tr key={r.id}>
@@ -566,7 +774,12 @@ function RemitosTab({ remitoActual }) {
                 <td>{r.fecha}</td>
                 <td>{r.cliente_nombre}</td>
                 <td style={{ color: 'var(--gold)' }}>${Math.round(r.total).toLocaleString('es-AR')}</td>
-                <td><button onClick={() => imprimir(r)} style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>🖨️</button></td>
+                <td>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button onClick={() => imprimir(r)} style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>🖨️</button>
+                    <button onClick={() => abrirEdicion(r)} style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 12, color: 'var(--amber)' }}>✏️</button>
+                  </div>
+                </td>
               </tr>
             ))}
             {remitos.length === 0 && <tr><td colSpan={5} className="empty">Sin remitos</td></tr>}
@@ -576,7 +789,6 @@ function RemitosTab({ remitoActual }) {
     </div>
   )
 }
-
 function ProveedoresTab() {
   const [subtab, setSubtab] = useState('resumen')
   const [compras, setCompras] = useState([])
