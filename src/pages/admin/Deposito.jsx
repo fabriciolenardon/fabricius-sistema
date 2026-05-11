@@ -1,17 +1,13 @@
-// Deposito.jsx
-import { useState, useEffect } from 'react'
-import { supabase } from '../../supabaseClient'
-
-const fmt = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
-
+// =============================================
+// MÓDULO DE DESPOSTE BOVINO
+// =============================================
 function DesposteTab({ onSaved }) {
   const [subtab, setSubtab] = useState('piezas')
   const [mediasRes, setMediasRes] = useState([])
-  const [piezasStock, setPiezasStock] = useState([])
+  const [piezasStock, setPiezasStock] = useState({})
   const [despostes, setDespostes] = useState([])
   const [precios, setPrecios] = useState([])
   const [seleccionada, setSeleccionada] = useState(null)
-  const [seleccionadaPieza, setSeleccionadaPieza] = useState(null)
   const [modelo, setModelo] = useState('A')
   const [tipoAnimal, setTipoAnimal] = useState('novillo')
   const [piezas, setPiezas] = useState([])
@@ -19,8 +15,11 @@ function DesposteTab({ onSaved }) {
   const [notas, setNotas] = useState('')
   const [alert, setAlert] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [kgPiezaConvertir, setKgPiezaConvertir] = useState('')
+  const [nombrePieza, setNombrePieza] = useState('')
+  const [tipoAnimalPieza, setTipoAnimalPieza] = useState('novillo')
+  const [precioCostoPieza, setPrecioCostoPieza] = useState('')
 
-  // Mermas por tipo de animal para venta por kilo
   const MERMAS_KILO = {
     novillo:  { label: 'Novillo / Novillito', merma: 0.24, color: 'var(--gold)' },
     ternera:  { label: 'Ternera',             merma: 0.30, color: 'var(--amber)' },
@@ -39,7 +38,6 @@ function DesposteTab({ onSaved }) {
     setMediasRes(entradas || [])
     setDespostes(despostesData || [])
     setPrecios(preciosData || [])
-    // Stock de piezas disponibles
     const stockMap = {}
     ;(stockData || []).forEach(r => stockMap[r.tipo] = r.kg_disponible)
     setPiezasStock(stockMap)
@@ -88,11 +86,8 @@ function DesposteTab({ onSaved }) {
     setPiezas(prev => prev.map((p, i) => i === idx ? { ...p, precio_venta: parseFloat(valor) || 0 } : p))
   }
 
-  // =============================================
-  // CONFIRMAR DESPOSTE EN PIEZAS
-  // =============================================
   async function confirmarDespostePiezas() {
-    if (!seleccionada || piezas.length === 0) { showAlert('Seleccioná una media res', 'error'); return }
+    if (!seleccionada || piezas.length === 0) { showAlert('Selecciona una media res', 'error'); return }
     setLoading(true)
     try {
       const kgBase = seleccionada.kg_real || seleccionada.kg || 0
@@ -105,32 +100,24 @@ function DesposteTab({ onSaved }) {
         notas
       }).select().single()
       if (error) throw error
-
       await supabase.from('entradas_deposito').update({ despostada: true, desposte_id: desposteData.id }).eq('id', seleccionada.id)
       await actualizarStock('bovino_mr', -kgBase)
-      for (const pieza of piezas) {
-        await actualizarStock('bovino_pieza', pieza.kg_editado)
-      }
-
-      showAlert(`✅ Desposte en piezas completado — ${piezas.length} piezas ingresadas al stock`)
+      for (const pieza of piezas) { await actualizarStock('bovino_pieza', pieza.kg_editado) }
+      showAlert('✅ Desposte en piezas completado — ' + piezas.length + ' piezas al stock')
       setSeleccionada(null); setPiezas([]); setNotas('')
       await cargarDatos(); onSaved()
     } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
     setLoading(false)
   }
 
-  // =============================================
-  // CONFIRMAR DESPOSTE PARA VENTA POR KILO
-  // =============================================
   async function confirmarDesposteKilo() {
-    if (!seleccionada) { showAlert('Seleccioná una media res', 'error'); return }
+    if (!seleccionada) { showAlert('Selecciona una media res', 'error'); return }
     setLoading(true)
     try {
       const kgBase = seleccionada.kg_real || seleccionada.kg || 0
       const merma = MERMAS_KILO[tipoAnimal].merma
       const kgNeto = parseFloat((kgBase * (1 - merma)).toFixed(2))
       const precioCostoKg = seleccionada.precio_kg > 0 ? parseFloat((seleccionada.precio_kg / (1 - merma)).toFixed(0)) : 0
-
       const { data: desposteData, error } = await supabase.from('despostes').insert({
         fecha, entrada_id: seleccionada.id, modelo: 'KILO',
         tipo_desposte: 'kilo', tipo_animal: tipoAnimal,
@@ -139,28 +126,18 @@ function DesposteTab({ onSaved }) {
         notas
       }).select().single()
       if (error) throw error
-
       await supabase.from('entradas_deposito').update({ despostada: true, desposte_id: desposteData.id }).eq('id', seleccionada.id)
       await actualizarStock('bovino_mr', -kgBase)
       await actualizarStock('bovino_corte', kgNeto)
-
-      showAlert(`✅ Media res enviada a cortes por kilo — ${kgNeto.toFixed(1)} kg al stock`)
+      showAlert('✅ Media res enviada a cortes — ' + kgNeto.toFixed(1) + ' kg al stock')
       setSeleccionada(null); setNotas('')
       await cargarDatos(); onSaved()
     } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
     setLoading(false)
   }
 
-  // =============================================
-  // CONFIRMAR CONVERSIÓN PIEZA → CORTES POR KILO
-  // =============================================
-  const [kgPiezaConvertir, setKgPiezaConvertir] = useState('')
-  const [nombrePieza, setNombrePieza] = useState('')
-  const [tipoAnimalPieza, setTipoAnimalPieza] = useState('novillo')
-  const [precioCostoPieza, setPrecioCostoPieza] = useState('')
-
   async function confirmarConversionPieza() {
-    if (!kgPiezaConvertir || !nombrePieza) { showAlert('Completá todos los campos', 'error'); return }
+    if (!kgPiezaConvertir || !nombrePieza) { showAlert('Completa todos los campos', 'error'); return }
     const kg = parseFloat(kgPiezaConvertir)
     const merma = MERMAS_KILO[tipoAnimalPieza].merma
     const kgNeto = parseFloat((kg * (1 - merma)).toFixed(2))
@@ -173,11 +150,9 @@ function DesposteTab({ onSaved }) {
         piezas: [{ nombre: nombrePieza, kg: kgNeto, precio_costo_kg: parseFloat(precioCostoPieza) || 0 }],
         notas
       })
-
       await actualizarStock('bovino_pieza', -kg)
       await actualizarStock('bovino_corte', kgNeto)
-
-      showAlert(`✅ ${nombrePieza} convertida a cortes — ${kgNeto.toFixed(1)} kg al stock`)
+      showAlert('✅ ' + nombrePieza + ' convertida — ' + kgNeto.toFixed(1) + ' kg al stock')
       setKgPiezaConvertir(''); setNombrePieza(''); setPrecioCostoPieza(''); setNotas('')
       await cargarDatos(); onSaved()
     } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
@@ -191,827 +166,7 @@ function DesposteTab({ onSaved }) {
   const mermaKilo = MERMAS_KILO[tipoAnimal]
   const kgNetoKilo = kgBase * (1 - mermaKilo.merma)
   const precioCostoKilo = seleccionada?.precio_kg > 0 ? (seleccionada.precio_kg / (1 - mermaKilo.merma)).toFixed(0) : 0
-
   const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '7px 10px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, boxSizing: 'border-box' }
-
-  return (
-    <div>
-      {alert && <div style={{ background: alert.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${alert.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: alert.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>{alert.msg}</div>}
-
-      {/* SUBTABS */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
-        {[
-          { id: 'piezas', label: '🍖 Desposte en Piezas', desc: 'Cortito, Costillar, Cuarto Pistola...' },
-          { id: 'kilo', label: '⚖️ Desposte para venta por Kilo', desc: 'Media res → bovino_corte' },
-          { id: 'pieza_kilo', label: '🔄 Convertir Pieza a Cortes', desc: 'Pieza → cortes por kilo' },
-          { id: 'historial', label: '📋 Historial', desc: '' },
-        ].map(t => (
-          <button key={t.id} onClick={() => { setSubtab(t.id); setSeleccionada(null); setPiezas([]) }}
-            style={{ padding: '8px 16px', borderRadius: 8, border: `1px solid ${subtab === t.id ? 'var(--gold)' : 'var(--border)'}`, background: subtab === t.id ? 'var(--gold)' : 'transparent', color: subtab === t.id ? '#000' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* ===================== DESPOSTE EN PIEZAS ===================== */}
-      {subtab === 'piezas' && (
-        <div style={{ display: 'grid', gridTemplateColumns: seleccionada ? '1fr 1.5fr' : '1fr', gap: 16 }}>
-          <div>
-            <div className="card">
-              <div className="card-title">🐄 Medias Reses disponibles</div>
-              {mediasRes.length === 0 ? <div className="empty">Sin medias reses para despostar</div> : mediasRes.map(e => (
-                <div key={e.id} onClick={() => seleccionarMedia(e)}
-                  style={{ padding: 12, borderRadius: 8, marginBottom: 8, cursor: 'pointer', border: `2px solid ${seleccionada?.id === e.id ? 'var(--gold)' : 'var(--border)'}`, background: seleccionada?.id === e.id ? 'rgba(201,168,76,0.08)' : 'var(--surface2)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: 13 }}>🐄 {e.descripcion || 'Media Res'}</div>
-                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.fecha} · {e.proveedor_nombre}</div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{(e.kg_real || e.kg || 0).toFixed(1)} kg</div>
-                      <div style={{ fontSize: 10, color: 'var(--muted)' }}>Neto: {((e.kg_real || e.kg || 0) * 0.975).toFixed(1)} kg</div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {seleccionada && (
-            <div className="card" style={{ borderColor: 'var(--gold)' }}>
-              <div className="card-title">🔪 Despostar en piezas: {seleccionada.descripcion || 'Media Res'}</div>
-
-              {/* Info */}
-              <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-                <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg entrada</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{kgBase.toFixed(1)} kg</div></div>
-                <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)' }}>Merma 2.5%</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--red-light)' }}>−{(kgBase * 0.025).toFixed(1)} kg</div></div>
-                <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg neto</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--green)' }}>{kgNetoPiezas.toFixed(1)} kg</div></div>
-              </div>
-
-              <div className="form-row" style={{ marginBottom: 14 }}>
-                <div className="form-group"><label>Fecha</label><input type="date" value={fecha} onChange={e => setFecha(e.target.value)} style={inp} /></div>
-                <div className="form-group"><label>Notas</label><input placeholder="Observaciones..." value={notas} onChange={e => setNotas(e.target.value)} style={inp} /></div>
-              </div>
-
-              {/* Modelo */}
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Modelo</label>
-                <div style={{ display: 'flex', gap: 10 }}>
-                  {Object.entries(MODELOS_DESPOSTE).map(([id, m]) => (
-                    <button key={id} onClick={() => cambiarModelo(id)}
-                      style={{ flex: 1, padding: '10px 14px', borderRadius: 10, border: `2px solid ${modelo === id ? 'var(--gold)' : 'var(--border)'}`, background: modelo === id ? 'rgba(201,168,76,0.1)' : 'var(--surface2)', color: modelo === id ? 'var(--gold)' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12, textAlign: 'left' }}>
-                      <div style={{ fontSize: 15, marginBottom: 3 }}>{id === 'A' ? '🅰️' : '🅱️'} Modelo {id}</div>
-                      <div style={{ fontSize: 11, opacity: 0.8 }}>{m.piezas.map(p => p.nombre).join(' + ')}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Tabla piezas */}
-              <table style={{ marginBottom: 14 }}>
-                <thead><tr><th>Pieza</th><th>%</th><th>Kg sugerido</th><th>Kg real ✏️</th><th style={{ color: 'var(--gold)' }}>Precio/kg</th><th style={{ color: 'var(--green)' }}>Valor</th></tr></thead>
-                <tbody>
-                  {piezas.map((p, i) => (
-                    <tr key={i}>
-                      <td style={{ fontWeight: 600 }}>{p.nombre}</td>
-                      <td style={{ color: 'var(--muted)', fontSize: 11 }}>{(MODELOS_DESPOSTE[modelo].piezas[i]?.pct * 100).toFixed(1)}%</td>
-                      <td style={{ color: 'var(--muted)', fontSize: 11 }}>{p.kg.toFixed(1)} kg</td>
-                      <td><input type="number" step="0.1" value={p.kg_editado} onChange={e => editarKg(i, e.target.value)} style={{ ...inp, width: 75, borderColor: Math.abs(p.kg_editado - p.kg) > 2 ? 'var(--amber)' : 'var(--border)' }} /></td>
-                      <td><input type="number" value={p.precio_venta} onChange={e => editarPrecio(i, e.target.value)} style={{ ...inp, width: 100, borderColor: 'var(--gold)' }} /></td>
-                      <td style={{ color: 'var(--green)', fontWeight: 600, fontSize: 12 }}>${Math.round((p.kg_editado || 0) * (p.precio_venta || 0)).toLocaleString('es-AR')}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              {/* Resumen */}
-              <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
-                <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg en piezas</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{kgTotalPiezas.toFixed(1)} kg</div></div>
-                <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Diferencia</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: Math.abs(diferencia) > 5 ? 'var(--red-light)' : 'var(--green)' }}>{diferencia >= 0 ? '+' : ''}{diferencia.toFixed(1)} kg</div></div>
-                <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Valor total</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--green)' }}>${Math.round(piezas.reduce((s, p) => s + (p.kg_editado || 0) * (p.precio_venta || 0), 0)).toLocaleString('es-AR')}</div></div>
-              </div>
-
-              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-                <button className="btn btn-ghost" onClick={() => { setSeleccionada(null); setPiezas([]) }}>Cancelar</button>
-                <button className="btn btn-gold" onClick={confirmarDespostePiezas} disabled={loading}>{loading ? '⏳ Procesando...' : '🔪 Confirmar desposte en piezas'}</button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ===================== DESPOSTE PARA VENTA POR KILO ===================== */}
-      {subtab === 'kilo' && (
-        <div style={{ display: 'grid', gridTemplateColumns: seleccionada ? '1fr 1.2fr' : '1fr', gap: 16 }}>
-          <div>
-            <div style={{ background: '#1a1a2a', border: '1px solid #2a2a5a', borderRadius: 10, padding: '12px 16px', marginBottom: 16 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#7db5ff', marginBottom: 6 }}>⚖️ Desposte para venta por kilo</div>
-              <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                La media res se desarma completa para vender corte por corte. Los kg netos (descontando merma de hueso y grasa según tipo de animal) van al stock de <strong style={{ color: 'var(--gold)' }}>Bovino Cortes</strong>.
-              </div>
-            </div>
-
-            <div className="card">
-              <div className="card-title">🐄 Seleccioná una media res</div>
-              {mediasRes.length === 0 ? <div className="empty">Sin medias reses disponibles</div> : mediasRes.map(e => (
-                <div key={e.id} onClick={() => setSeleccionada(e)}
-                  style={{ padding: 12, borderRadius: 8, marginBottom: 8, cursor: 'pointer', border: `2px solid ${seleccionada?.id === e.id ? 'var(--blue)' : 'var(--border)'}`, background: seleccionada?.id === e.id ? 'rgba(41,128,185,0.08)' : 'var(--surface2)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: 13 }}>🐄 {e.descripcion || 'Media Res'}</div>
-                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.fecha} · {e.proveedor_nombre}</div>
-                      {e.precio_kg > 0 && <div style={{ fontSize: 11, color: 'var(--amber)' }}>Costo: ${Math.round(e.precio_kg).toLocaleString('es-AR')}/kg</div>}
-                    </div>
-                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--blue)' }}>{(e.kg_real || e.kg || 0).toFixed(1)} kg</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {seleccionada && (
-            <div className="card" style={{ borderColor: 'var(--blue)' }}>
-              <div className="card-title">⚖️ Configurar desposte por kilo</div>
-
-              {/* Tipo de animal */}
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Tipo de animal</label>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  {Object.entries(MERMAS_KILO).map(([id, m]) => (
-                    <button key={id} onClick={() => setTipoAnimal(id)}
-                      style={{ flex: 1, padding: '10px', borderRadius: 8, border: `2px solid ${tipoAnimal === id ? m.color : 'var(--border)'}`, background: tipoAnimal === id ? m.color + '22' : 'var(--surface2)', color: tipoAnimal === id ? m.color : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
-                      <div>{m.label}</div>
-                      <div style={{ fontSize: 11, marginTop: 2 }}>Merma: {(m.merma * 100).toFixed(0)}%</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Cálculo automático */}
-              <div style={{ background: 'var(--surface2)', borderRadius: 10, padding: 16, marginBottom: 16 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>Kg entrada</div>
-                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24 }}>{kgBase.toFixed(1)} kg</div>
-                  </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>Merma {(mermaKilo.merma * 100).toFixed(0)}%</div>
-                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: 'var(--red-light)' }}>−{(kgBase * mermaKilo.merma).toFixed(1)} kg</div>
-                  </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>Kg vendibles</div>
-                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: 'var(--green)' }}>{kgNetoKilo.toFixed(1)} kg</div>
-                  </div>
-                </div>
-                {seleccionada.precio_kg > 0 && (
-                  <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ fontSize: 12, color: 'var(--muted)' }}>Precio costo compra: <strong style={{ color: 'var(--text)' }}>${Math.round(seleccionada.precio_kg).toLocaleString('es-AR')}/kg</strong></div>
-                    <div style={{ fontSize: 13, fontWeight: 700 }}>Precio costo real: <span style={{ color: 'var(--amber)', fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>${parseInt(precioCostoKilo).toLocaleString('es-AR')}/kg</span></div>
-                  </div>
-                )}
-                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>
-                  ℹ️ El precio de costo real sube porque el mismo precio pagado se divide en menos kg de carne útil.
-                </div>
-              </div>
-
-              <div className="form-row" style={{ marginBottom: 14 }}>
-                <div className="form-group"><label>Fecha</label><input type="date" value={fecha} onChange={e => setFecha(e.target.value)} style={inp} /></div>
-                <div className="form-group"><label>Notas</label><input placeholder="Observaciones..." value={notas} onChange={e => setNotas(e.target.value)} style={inp} /></div>
-              </div>
-
-              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-                <button className="btn btn-ghost" onClick={() => setSeleccionada(null)}>Cancelar</button>
-                <button className="btn btn-gold" onClick={confirmarDesposteKilo} disabled={loading}>{loading ? '⏳ Procesando...' : `⚖️ Confirmar — ${kgNetoKilo.toFixed(1)} kg a Bovino Cortes`}</button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ===================== CONVERTIR PIEZA → CORTES ===================== */}
-      {subtab === 'pieza_kilo' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <div>
-            <div style={{ background: '#1a1a2a', border: '1px solid #2a2a5a', borderRadius: 10, padding: '12px 16px', marginBottom: 16 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#7db5ff', marginBottom: 6 }}>🔄 Convertir Pieza a Cortes por Kilo</div>
-              <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                Tomás una pieza del stock (ej: una pierna de {(piezasStock['bovino_pieza'] || 0).toFixed(1)} kg disponibles) y la abrís para vender sus cortes por kilo. Los kg netos van al stock de <strong style={{ color: 'var(--gold)' }}>Bovino Cortes</strong>.
-              </div>
-            </div>
-
-            {/* Stock actual de piezas */}
-            <div className="card">
-              <div className="card-title">📦 Stock actual de piezas</div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>🍖 Bovino Piezas (total)</span>
-                <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{(piezasStock['bovino_pieza'] || 0).toFixed(1)} kg</span>
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>Ingresá los kg exactos de la pieza que vas a convertir.</div>
-            </div>
-          </div>
-
-          <div className="card">
-            <div className="card-title">🔄 Convertir pieza a cortes</div>
-
-            <div className="form-group" style={{ marginBottom: 12 }}>
-              <label>Nombre de la pieza</label>
-              <input value={nombrePieza} onChange={e => setNombrePieza(e.target.value)} placeholder="Ej: Pierna, Cortito, Costillar..." style={inp} />
-            </div>
-
-            <div className="form-group" style={{ marginBottom: 12 }}>
-              <label>Kg de la pieza a convertir</label>
-              <input type="number" step="0.1" value={kgPiezaConvertir} onChange={e => setKgPiezaConvertir(e.target.value)} placeholder="0" style={{ ...inp, borderColor: 'var(--gold)' }} />
-            </div>
-
-            <div style={{ marginBottom: 14 }}>
-              <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Tipo de animal</label>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {Object.entries(MERMAS_KILO).map(([id, m]) => (
-                  <button key={id} onClick={() => setTipoAnimalPieza(id)}
-                    style={{ flex: 1, padding: '8px', borderRadius: 8, border: `2px solid ${tipoAnimalPieza === id ? m.color : 'var(--border)'}`, background: tipoAnimalPieza === id ? m.color + '22' : 'var(--surface2)', color: tipoAnimalPieza === id ? m.color : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 11 }}>
-                    <div>{m.label}</div>
-                    <div>Merma: {(m.merma * 100).toFixed(0)}%</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {kgPiezaConvertir > 0 && (
-              <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, marginBottom: 14 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
-                  <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg pieza</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{parseFloat(kgPiezaConvertir).toFixed(1)} kg</div></div>
-                  <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Merma {(MERMAS_KILO[tipoAnimalPieza].merma * 100).toFixed(0)}%</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--red-light)' }}>−{(parseFloat(kgPiezaConvertir) * MERMAS_KILO[tipoAnimalPieza].merma).toFixed(1)} kg</div></div>
-                  <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg a cortes</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--green)' }}>{(parseFloat(kgPiezaConvertir) * (1 - MERMAS_KILO[tipoAnimalPieza].merma)).toFixed(1)} kg</div></div>
-                </div>
-              </div>
-            )}
-
-            <div className="form-group" style={{ marginBottom: 12 }}>
-              <label>Precio costo/kg de la pieza (opcional)</label>
-              <input type="number" value={precioCostoPieza} onChange={e => setPrecioCostoPieza(e.target.value)} placeholder="Para referencia" style={inp} />
-            </div>
-
-            <div className="form-group" style={{ marginBottom: 14 }}>
-              <label>Fecha</label>
-              <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} style={inp} />
-            </div>
-
-            <button className="btn btn-gold" onClick={confirmarConversionPieza} disabled={loading || !kgPiezaConvertir || !nombrePieza} style={{ width: '100%' }}>
-              {loading ? '⏳ Procesando...' : '🔄 Confirmar conversión a cortes por kilo'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ===================== HISTORIAL ===================== */}
-      {subtab === 'historial' && (
-        <div className="card">
-          <div className="card-title">📋 Historial de despostes</div>
-          {despostes.length === 0 ? <div className="empty">Sin despostes registrados</div> : despostes.map(d => (
-            <div key={d.id} style={{ padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 13 }}>
-                    {d.tipo_desposte === 'piezas' ? '🍖 Piezas' : d.tipo_desposte === 'kilo' ? '⚖️ Por Kilo' : '🔄 Pieza → Kilo'}
-                    {' '}{d.tipo_animal ? `· ${MERMAS_KILO[d.tipo_animal]?.label || d.tipo_animal}` : ''}
-                    {d.modelo && d.modelo !== 'KILO' && d.modelo !== 'PIEZA_KILO' ? ` · Modelo ${d.modelo}` : ''}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>{d.fecha} · {d.kg_media_res?.toFixed(1)} kg entrada → {d.kg_neto?.toFixed(1)} kg neto</div>
-                  {d.notas && <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>{d.notas}</div>}
-                </div>
-                <span style={{ background: d.tipo_desposte === 'piezas' ? '#2a2010' : '#1a1a2a', color: d.tipo_desposte === 'piezas' ? 'var(--gold)' : '#7db5ff', borderRadius: 6, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>
-                  {d.tipo_desposte === 'piezas' ? 'PIEZAS' : d.tipo_desposte === 'kilo' ? 'X KILO' : 'PIEZA→KILO'}
-                </span>
-              </div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {(d.piezas || []).map((p, i) => (
-                  <span key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, padding: '2px 8px', fontSize: 11, color: 'var(--text2)' }}>
-                    {p.nombre}: {p.kg?.toFixed(1)} kg
-                    {p.precio_venta > 0 ? ` · $${Math.round(p.precio_venta).toLocaleString('es-AR')}/kg` : ''}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-async function actualizarStock(tipo, kgDelta) {
-  const { data } = await supabase.from('stock_actual').select('kg_disponible').eq('tipo', tipo).maybeSingle()
-  const actual = data?.kg_disponible || 0
-  const nuevo = Math.max(0, actual + kgDelta)
-  await supabase.from('stock_actual').upsert({ tipo, kg_disponible: nuevo, ultima_actualizacion: new Date().toISOString() }, { onConflict: 'tipo' })
-}
-
-// PIEZAS POR MODELO con porcentajes y mapeo a stock y precios
-const MODELOS_DESPOSTE = {
-  A: {
-    label: 'Modelo A — Cortito + Costillar + Cuarto Pistola',
-    piezas: [
-      { nombre: 'Cortito', pct: 0.359, tipo_stock: 'bovino_pieza', busqueda_precio: 'Cortito' },
-      { nombre: 'Costillar', pct: 0.205, tipo_stock: 'bovino_pieza', busqueda_precio: 'Costillar' },
-      { nombre: 'Cuarto Pistola', pct: 0.436, tipo_stock: 'bovino_pieza', busqueda_precio: 'Cuarto Pistola' },
-    ]
-  },
-  B: {
-    label: 'Modelo B — Cortito + Costillar + Pierna + Carré',
-    piezas: [
-      { nombre: 'Cortito', pct: 0.359, tipo_stock: 'bovino_pieza', busqueda_precio: 'Cortito' },
-      { nombre: 'Costillar', pct: 0.205, tipo_stock: 'bovino_pieza', busqueda_precio: 'Costillar' },
-      { nombre: 'Pierna (Mocho)', pct: 0.369, tipo_stock: 'bovino_pieza', busqueda_precio: 'Pierna' },
-      { nombre: 'Carré con Lomo', pct: 0.067, tipo_stock: 'bovino_pieza', busqueda_precio: 'Carre' },
-    ]
-  }
-}
-
-export function Deposito() {
-  const [tab, setTab] = useState('stock')
-  const [entradas, setEntradas] = useState([])
-  const [stock, setStock] = useState({ bovino_mr: 0, pollo: 0, cerdo: 0, bovino_corte: 0, bovino_brosa: 0, embutido: 0 })
-  const [alert, setAlert] = useState(null)
-  const [remitoActual, setRemitoActual] = useState(null)
-  const { proveedores } = useProveedores()
-
-  const tabs = [
-    { id: 'stock', label: '📊 Stock' },
-    { id: 'entradas', label: '📥 Entradas' },
-    { id: 'salidas', label: '📤 Despachos' },
-    { id: 'remitos', label: '🧾 Remitos' },
-    { id: 'desposte', label: '🔪 Desposte' },
-    { id: 'proveedores', label: '🏭 Cuenta Proveedores' },
-  ]
-
-  useEffect(() => { fetchData() }, [])
-
-  async function fetchData() {
-    const [{ data: e }, { data: stockData }] = await Promise.all([
-      supabase.from('entradas_deposito').select('*').order('fecha', { ascending: false }).limit(50),
-      supabase.from('stock_actual').select('*')
-    ])
-    setEntradas(e || [])
-    if (stockData) {
-      const s = {}
-      stockData.forEach(r => s[r.tipo] = r.kg_disponible)
-      setStock(prev => ({ ...prev, ...s }))
-    }
-  }
-
-  const stockBovino = Math.max(0, stock.bovino_mr || 0)
-  const stockPollo = Math.max(0, stock.pollo || 0)
-  const stockCerdo = Math.max(0, stock.cerdo || 0)
-
-  return (
-    <div>
-      <div className="page-title">DEPÓSITO</div>
-      <div className="page-sub">Stock, entradas, despachos y proveedores</div>
-
-      {alert && (
-        <div style={{ background: alert.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${alert.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: alert.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>
-          {alert.msg}
-        </div>
-      )}
-
-      <div style={{ display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap' }}>
-        {tabs.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
-            style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border)', background: tab === t.id ? 'var(--amber)' : 'transparent', color: tab === t.id ? '#fff' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", fontWeight: 600, fontSize: 12 }}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {tab === 'stock' && (
-        <div>
-          <div className="grid4" style={{ marginBottom: 24 }}>
-            {[
-              { label: 'Bovino disponible', val: stockBovino.toFixed(1) + ' kg', sub: Math.round(stockBovino / 105) + ' medias aprox', color: stockBovino < 100 ? 'var(--red-light)' : 'var(--gold)' },
-              { label: 'Pollo disponible', val: stockPollo.toFixed(1) + ' kg', sub: Math.round(stockPollo / 20) + ' cajones aprox', color: stockPollo < 50 ? 'var(--red-light)' : 'var(--blue)' },
-              { label: 'Cerdo disponible', val: stockCerdo.toFixed(1) + ' kg', sub: Math.round(stockCerdo / 107) + ' capones aprox', color: stockCerdo < 50 ? 'var(--red-light)' : 'var(--amber)' },
-              { label: 'Entradas semana', val: entradas.filter(e => { const d = new Date(e.fecha); const hoy = new Date(); return d >= new Date(hoy.setDate(hoy.getDate() - 7)) }).length, sub: 'últimos 7 días', color: 'var(--green)' },
-            ].map(s => (
-              <div key={s.label} className="stat">
-                <div className="stat-label">{s.label}</div>
-                <div className="stat-value" style={{ color: s.color }}>{s.val}</div>
-                <div className="stat-sub">{s.sub}</div>
-              </div>
-            ))}
-          </div>
-
-          <div className="card" style={{ marginBottom: 20 }}>
-            <div className="card-title">📦 Stock detallado por tipo</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-              {[
-                { tipo: 'bovino_mr', label: '🐄 Bovino Media Res', aprox: kg => Math.round(kg / 105) + ' medias' },
-                { tipo: 'bovino_corte', label: '🥩 Bovino Cortes', aprox: kg => kg.toFixed(1) + ' kg' },
-                { tipo: 'bovino_brosa', label: '🫀 Brosas', aprox: kg => kg.toFixed(1) + ' kg' },
-                { tipo: 'cerdo', label: '🐷 Cerdo Capones', aprox: kg => Math.round(kg / 107) + ' capones' },
-                { tipo: 'pollo', label: '🍗 Pollo Cajones', aprox: kg => Math.round(kg / 20) + ' cajones' },
-                { tipo: 'embutido', label: '🌭 Embutidos', aprox: kg => kg.toFixed(1) + ' kg' },
-              ].map(({ tipo, label, aprox }) => {
-                const kg = Math.max(0, stock[tipo] || 0)
-                const bajo = kg < 50
-                return (
-                  <div key={tipo} style={{ background: bajo ? '#3a1a1a' : 'var(--surface2)', border: `1px solid ${bajo ? 'var(--red-light)' : 'var(--border)'}`, borderRadius: 10, padding: '12px 16px', textAlign: 'center' }}>
-                    <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>{label}</div>
-                    <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 28, color: bajo ? 'var(--red-light)' : 'var(--gold)' }}>{kg.toFixed(1)} kg</div>
-                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>{aprox(kg)}</div>
-                    {bajo && <div style={{ fontSize: 10, color: 'var(--red-light)', fontWeight: 700, marginTop: 4 }}>⚠️ Stock bajo</div>}
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-
-          <div className="card">
-            <div className="card-title">Últimas entradas registradas</div>
-            <table>
-              <thead><tr><th>Fecha</th><th>Tipo</th><th>Proveedor</th><th>Descripción</th><th>Kg</th><th>Destino</th><th>Importe</th></tr></thead>
-              <tbody>
-                {entradas.slice(0, 10).map(e => (
-                  <tr key={e.id}>
-                    <td>{e.fecha}</td>
-                    <td><span className="badge badge-gold">{e.tipo}</span></td>
-                    <td>{e.proveedor_nombre}</td>
-                    <td>{e.descripcion}</td>
-                    <td>{e.kg} kg</td>
-                    <td>{e.destino || '—'}</td>
-                    <td style={{ color: 'var(--amber)' }}>${Math.round(e.importe || 0).toLocaleString('es-AR')}</td>
-                  </tr>
-                ))}
-                {entradas.length === 0 && <tr><td colSpan={7} className="empty">Sin entradas registradas</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {tab === 'entradas' && <EntradaForm onSaved={fetchData} showAlert={setAlert} proveedores={proveedores} />}
-      {tab === 'salidas' && <SalidaForm onSaved={fetchData} showAlert={setAlert} onRemito={setRemitoActual} setTab={setTab} />}
-      {tab === 'remitos' && <RemitosTab remitoActual={remitoActual} />}
-      {tab === 'desposte' && <DesposteTab onSaved={fetchData} />}
-      {tab === 'proveedores' && <ProveedoresTab />}
-    </div>
-  )
-}
-
-// =============================================
-// MÓDULO DE DESPOSTE BOVINO
-// =============================================
-function DesposteTab({ onSaved }) {
-  const [mediasRes, setMediasRes] = useState([])
-  const [despostes, setDespostes] = useState([])
-  const [precios, setPrecios] = useState([])
-  const [seleccionada, setSeleccionada] = useState(null)
-  const [modelo, setModelo] = useState('A')
-  const [piezas, setPiezas] = useState([])
-  const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0])
-  const [notas, setNotas] = useState('')
-  const [alert, setAlert] = useState(null)
-  const [loading, setLoading] = useState(false)
-
-  useEffect(() => { cargarDatos() }, [])
-
-  async function cargarDatos() {
-    const [{ data: entradas }, { data: despostesData }, { data: preciosData }] = await Promise.all([
-      supabase.from('entradas_deposito').select('*')
-        .eq('tipo', 'bovino_mr')
-        .eq('despostada', false)
-        .order('fecha', { ascending: false }),
-      supabase.from('despostes').select('*, entradas_deposito(descripcion, fecha, proveedor_nombre)')
-        .order('fecha', { ascending: false }).limit(20),
-      supabase.from('precios').select('*').eq('categoria', 'bovino_pieza')
-    ])
-    setMediasRes(entradas || [])
-    setDespostes(despostesData || [])
-    setPrecios(preciosData || [])
-  }
-
-  function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(() => setAlert(null), 5000) }
-
-  function buscarPrecio(busqueda) {
-    const termino = busqueda.toLowerCase()
-    const encontrado = precios.find(p =>
-      p.nombre.toLowerCase().includes(termino) ||
-      termino.split(' ').some(t => t.length > 3 && p.nombre.toLowerCase().includes(t))
-    )
-    return encontrado?.precio_carniceria || encontrado?.precio_mayorista || 0
-  }
-
-  function calcularPiezas(entrada, modeloId) {
-    if (!entrada) return []
-    const kgBase = entrada.kg_real || entrada.kg || 0
-    const merma = 0.025 // 2.5% merma inicial
-    const kgNeto = kgBase * (1 - merma)
-    const modelo = MODELOS_DESPOSTE[modeloId]
-
-    return modelo.piezas.map(pieza => {
-      const kg = parseFloat((kgNeto * pieza.pct).toFixed(2))
-      const precio = buscarPrecio(pieza.busqueda_precio)
-      return {
-        nombre: pieza.nombre,
-        kg,
-        kg_editado: kg,
-        tipo_stock: pieza.tipo_stock,
-        precio_venta: precio,
-        precio_costo_kg: entrada.precio_kg || 0,
-      }
-    })
-  }
-
-  function seleccionarMedia(entrada) {
-    setSeleccionada(entrada)
-    const piezasCalc = calcularPiezas(entrada, modelo)
-    setPiezas(piezasCalc)
-  }
-
-  function cambiarModelo(m) {
-    setModelo(m)
-    if (seleccionada) {
-      const piezasCalc = calcularPiezas(seleccionada, m)
-      setPiezas(piezasCalc)
-    }
-  }
-
-  function editarKg(idx, valor) {
-    setPiezas(prev => prev.map((p, i) => i === idx ? { ...p, kg_editado: parseFloat(valor) || 0 } : p))
-  }
-
-  function editarPrecio(idx, valor) {
-    setPiezas(prev => prev.map((p, i) => i === idx ? { ...p, precio_venta: parseFloat(valor) || 0 } : p))
-  }
-
-  const kgBase = seleccionada ? (seleccionada.kg_real || seleccionada.kg || 0) : 0
-  const kgNeto = kgBase * 0.975
-  const kgTotalPiezas = piezas.reduce((s, p) => s + (p.kg_editado || 0), 0)
-  const diferencia = kgNeto - kgTotalPiezas
-
-  async function confirmarDesposte() {
-    if (!seleccionada) { showAlert('Seleccioná una media res', 'error'); return }
-    if (piezas.length === 0) { showAlert('No hay piezas calculadas', 'error'); return }
-    if (Math.abs(diferencia) > 5) {
-      if (!confirm(`Hay una diferencia de ${diferencia.toFixed(1)} kg entre el kg neto y las piezas. ¿Continuás?`)) return
-    }
-
-    setLoading(true)
-
-    try {
-      // 1. Guardar registro de desposte
-      const { data: desposteData, error: errD } = await supabase.from('despostes').insert({
-        fecha,
-        entrada_id: seleccionada.id,
-        modelo,
-        kg_media_res: kgBase,
-        merma_pct: 2.5,
-        kg_neto: kgNeto,
-        piezas: piezas.map(p => ({
-          nombre: p.nombre,
-          kg: p.kg_editado,
-          precio_venta: p.precio_venta,
-          tipo_stock: p.tipo_stock
-        })),
-        notas
-      }).select().single()
-
-      if (errD) throw errD
-
-      // 2. Marcar la media res como despostada
-      await supabase.from('entradas_deposito').update({
-        despostada: true,
-        desposte_id: desposteData.id
-      }).eq('id', seleccionada.id)
-
-      // 3. Descontar del stock bovino_mr
-      await actualizarStock('bovino_mr', -kgBase)
-
-      // 4. Sumar cada pieza al stock bovino_pieza
-      for (const pieza of piezas) {
-        await actualizarStock('bovino_pieza', pieza.kg_editado)
-      }
-
-      showAlert(`✅ Desposte completado — ${piezas.length} piezas ingresadas al stock`)
-      setSeleccionada(null)
-      setPiezas([])
-      setNotas('')
-      await cargarDatos()
-      onSaved()
-    } catch (err) {
-      showAlert('❌ Error: ' + err.message, 'error')
-    }
-    setLoading(false)
-  }
-
-  const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '7px 10px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, boxSizing: 'border-box' }
-
-  return (
-    <div>
-      {alert && <div style={{ background: alert.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${alert.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: alert.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>{alert.msg}</div>}
-
-      <div style={{ display: 'grid', gridTemplateColumns: seleccionada ? '1fr 1.5fr' : '1fr', gap: 16 }}>
-
-        {/* PANEL IZQUIERDO — Lista de medias reses */}
-        <div>
-          <div className="card">
-            <div className="card-title">🐄 Medias Reses disponibles para despostar</div>
-            {mediasRes.length === 0 ? (
-              <div className="empty">Sin medias reses en stock para despostar</div>
-            ) : (
-              mediasRes.map(e => (
-                <div key={e.id}
-                  onClick={() => seleccionarMedia(e)}
-                  style={{ padding: '12px', borderRadius: 8, marginBottom: 8, cursor: 'pointer', border: `2px solid ${seleccionada?.id === e.id ? 'var(--gold)' : 'var(--border)'}`, background: seleccionada?.id === e.id ? 'rgba(201,168,76,0.08)' : 'var(--surface2)', transition: 'all 0.15s' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text)' }}>
-                        🐄 {e.descripcion || 'Media Res'}
-                      </div>
-                      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
-                        {e.fecha} · {e.proveedor_nombre}
-                      </div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{(e.kg_real || e.kg || 0).toFixed(1)} kg</div>
-                      <div style={{ fontSize: 10, color: 'var(--muted)' }}>Neto: {((e.kg_real || e.kg || 0) * 0.975).toFixed(1)} kg</div>
-                    </div>
-                  </div>
-                  {seleccionada?.id === e.id && (
-                    <div style={{ marginTop: 8, fontSize: 11, color: 'var(--gold)', fontWeight: 600 }}>✅ Seleccionada — elegí el modelo de desposte →</div>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
-
-          {/* HISTORIAL DE DESPOSTES */}
-          <div className="card">
-            <div className="card-title">📋 Historial de despostes</div>
-            {despostes.length === 0 ? (
-              <div className="empty">Sin despostes registrados</div>
-            ) : (
-              despostes.map(d => (
-                <div key={d.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: 13 }}>
-                        Modelo {d.modelo} — {d.kg_media_res?.toFixed(1)} kg
-                      </div>
-                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                        {d.fecha} · {d.entradas_deposito?.proveedor_nombre || '—'}
-                      </div>
-                    </div>
-                    <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                      {(d.piezas || []).length} piezas
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
-                    {(d.piezas || []).map((p, i) => (
-                      <span key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, padding: '2px 8px', fontSize: 11, color: 'var(--gold)' }}>
-                        {p.nombre}: {p.kg?.toFixed(1)} kg
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* PANEL DERECHO — Formulario de desposte */}
-        {seleccionada && (
-          <div>
-            <div className="card" style={{ borderColor: 'var(--gold)' }}>
-              <div className="card-title">🔪 Despostar: {seleccionada.descripcion || 'Media Res'}</div>
-
-              {/* INFO MEDIA RES */}
-              <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '12px 14px', marginBottom: 16, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 2 }}>Kg entrada</div>
-                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--text)' }}>{kgBase.toFixed(1)} kg</div>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 2 }}>Merma 2.5%</div>
-                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--red-light)' }}>−{(kgBase * 0.025).toFixed(1)} kg</div>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 2 }}>Kg neto disponible</div>
-                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--green)' }}>{kgNeto.toFixed(1)} kg</div>
-                </div>
-              </div>
-
-              {/* FECHA */}
-              <div className="form-row" style={{ marginBottom: 16 }}>
-                <div className="form-group">
-                  <label>Fecha de desposte</label>
-                  <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} style={inp} />
-                </div>
-                <div className="form-group">
-                  <label>Notas</label>
-                  <input placeholder="Observaciones..." value={notas} onChange={e => setNotas(e.target.value)} style={inp} />
-                </div>
-              </div>
-
-              {/* SELECCIÓN DE MODELO */}
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 8, letterSpacing: 1, textTransform: 'uppercase' }}>Modelo de desposte</label>
-                <div style={{ display: 'flex', gap: 10 }}>
-                  {Object.entries(MODELOS_DESPOSTE).map(([id, m]) => (
-                    <button key={id} onClick={() => cambiarModelo(id)}
-                      style={{ flex: 1, padding: '10px 14px', borderRadius: 10, border: `2px solid ${modelo === id ? 'var(--gold)' : 'var(--border)'}`, background: modelo === id ? 'rgba(201,168,76,0.1)' : 'var(--surface2)', color: modelo === id ? 'var(--gold)' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12, textAlign: 'left' }}>
-                      <div style={{ fontSize: 16, marginBottom: 4 }}>{id === 'A' ? '🅰️' : '🅱️'} Modelo {id}</div>
-                      <div style={{ fontSize: 11, opacity: 0.8 }}>{m.piezas.map(p => p.nombre).join(' + ')}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* TABLA DE PIEZAS */}
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8, letterSpacing: 1, textTransform: 'uppercase' }}>Piezas resultantes — editá los kg y precios</div>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Pieza</th>
-                      <th>% esperado</th>
-                      <th>Kg sugerido</th>
-                      <th>Kg real ✏️</th>
-                      <th style={{ color: 'var(--gold)' }}>Precio/kg</th>
-                      <th style={{ color: 'var(--green)' }}>Valor total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {piezas.map((pieza, i) => (
-                      <tr key={i}>
-                        <td style={{ fontWeight: 600 }}>{pieza.nombre}</td>
-                        <td style={{ color: 'var(--muted)', fontSize: 12 }}>
-                          {(MODELOS_DESPOSTE[modelo].piezas[i]?.pct * 100).toFixed(1)}%
-                        </td>
-                        <td style={{ color: 'var(--muted)', fontSize: 12 }}>{pieza.kg.toFixed(1)} kg</td>
-                        <td>
-                          <input type="number" step="0.1" value={pieza.kg_editado}
-                            onChange={e => editarKg(i, e.target.value)}
-                            style={{ ...inp, width: 80, borderColor: Math.abs(pieza.kg_editado - pieza.kg) > 2 ? 'var(--amber)' : 'var(--border)' }} />
-                        </td>
-                        <td>
-                          <input type="number" value={pieza.precio_venta}
-                            onChange={e => editarPrecio(i, e.target.value)}
-                            style={{ ...inp, width: 100, borderColor: 'var(--gold)' }} />
-                        </td>
-                        <td style={{ color: 'var(--green)', fontWeight: 600 }}>
-                          ${Math.round((pieza.kg_editado || 0) * (pieza.precio_venta || 0)).toLocaleString('es-AR')}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* RESUMEN */}
-              <div style={{ background: 'var(--surface2)', borderRadius: 10, padding: '14px 16px', marginBottom: 16 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12 }}>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 2 }}>Kg neto</div>
-                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--text)' }}>{kgNeto.toFixed(1)} kg</div>
-                  </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 2 }}>Kg en piezas</div>
-                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{kgTotalPiezas.toFixed(1)} kg</div>
-                  </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 2 }}>Diferencia</div>
-                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: Math.abs(diferencia) > 5 ? 'var(--red-light)' : 'var(--green)' }}>
-                      {diferencia >= 0 ? '+' : ''}{diferencia.toFixed(1)} kg
-                    </div>
-                  </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 2 }}>Valor total piezas</div>
-                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--green)' }}>
-                      ${Math.round(piezas.reduce((s, p) => s + (p.kg_editado || 0) * (p.precio_venta || 0), 0)).toLocaleString('es-AR')}
-                    </div>
-                  </div>
-                </div>
-                {Math.abs(diferencia) > 5 && (
-                  <div style={{ marginTop: 10, fontSize: 12, color: 'var(--amber)', textAlign: 'center' }}>
-                    ⚠️ La diferencia entre kg neto y kg en piezas es mayor a 5 kg. Revisá los valores.
-                  </div>
-                )}
-              </div>
-
-              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-                <button className="btn btn-ghost" onClick={() => { setSeleccionada(null); setPiezas([]) }}>Cancelar</button>
-                <button className="btn btn-gold" onClick={confirmarDesposte} disabled={loading}>
-                  {loading ? '⏳ Procesando...' : '🔪 Confirmar desposte'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
 function EntradaForm({ onSaved, showAlert, proveedores }) {
   const [form, setForm] = useState({ tipo: '', proveedor: '', descripcion: '', fecha: new Date().toISOString().split('T')[0], kg: '', precioKg: '9800', merma: '', destino: 'DEPOSITO', importe: '' })
 
