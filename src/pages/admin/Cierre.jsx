@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../../supabaseClient'
+import { supabase } from '../../lib/supabase'
 
 function fmt(n) { return '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR') }
 function fmtKg(n) { return parseFloat(n || 0).toFixed(1) + ' kg' }
@@ -216,6 +216,24 @@ export default function Cierre() {
     } else {
       const { error } = await supabase.from('cierres_semanales').insert(datos)
       if (error) { showAlert({ type: 'error', msg: 'Error al guardar: ' + error.message }); setLoading(false); return }
+// Resetear stock con los remanentes ingresados
+const stockUpdates = [
+  { tipo: 'bovino_corte', kg: parseFloat(form.kgRemanenteCarne) || 0 },
+  { tipo: 'bovino_pieza', kg: 0 },
+  { tipo: 'bovino_mr', kg: 0 },
+  { tipo: 'bovino_brosa', kg: 0 },
+  { tipo: 'pollo', kg: parseFloat(form.kgRemanentePollo) || 0 },
+  { tipo: 'cerdo', kg: parseFloat(form.kgRemanenteCerdo) || 0 },
+  { tipo: 'embutido', kg: 0 },
+]
+for (const s of stockUpdates) {
+  const { data: existe } = await supabase.from('stock_actual').select('id').eq('tipo', s.tipo).maybeSingle()
+  if (existe) {
+    await supabase.from('stock_actual').update({ kg_disponible: s.kg }).eq('tipo', s.tipo)
+  } else {
+    await supabase.from('stock_actual').insert({ tipo: s.tipo, kg_disponible: s.kg })
+  }
+}
       showAlert({ type: 'success', msg: '✅ Cierre semanal confirmado y guardado' })
     }
 
