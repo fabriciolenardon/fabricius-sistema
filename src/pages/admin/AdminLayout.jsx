@@ -13,6 +13,7 @@ const navItems = [
   { to: '/admin/sueldos',     icon: '💰', label: 'Sueldos' },
   { to: '/admin/gastos',      icon: '💸', label: 'Gastos' },
   { to: '/admin/cierre',      icon: '📋', label: 'Cierre' },
+  { to: '/admin/ventas', icon: '🛒', label: 'Ventas' },
 ]
 
 function useNotificaciones() {
