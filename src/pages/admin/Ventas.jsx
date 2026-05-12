@@ -14,6 +14,7 @@ const CATEGORIAS = {
 export default function Ventas() {
   const [tab, setTab] = useState('nueva')
   const [ventas, setVentas] = useState([])
+  const [ventasHoy, setVentasHoy] = useState([])
   const [precios, setPrecios] = useState([])
   const [form, setForm] = useState({
     fecha: new Date().toISOString().split('T')[0],
@@ -29,6 +30,7 @@ export default function Ventas() {
   const [kg, setKg] = useState('')
   const [precio, setPrecio] = useState('')
   const [msg, setMsg] = useState(null)
+  const hoy = new Date().toISOString().split('T')[0]
 
   useEffect(() => {
     cargarVentas()
@@ -38,6 +40,7 @@ export default function Ventas() {
   async function cargarVentas() {
     const { data } = await supabase.from('ventas_minoristas').select('*').order('fecha', { ascending: false }).limit(50)
     setVentas(data || [])
+    setVentasHoy((data || []).filter(v => v.fecha === hoy))
   }
 
   function showMsg(texto, type = 'success') { setMsg({ texto, type }); setTimeout(() => setMsg(null), 3000) }
@@ -72,17 +75,14 @@ export default function Ventas() {
     if (items.length === 0) { showMsg('Agregá al menos un producto', 'error'); return }
     const total = totalItems
     await supabase.from('ventas_minoristas').insert({
-      fecha: form.fecha,
-      turno: form.turno,
-      items,
-      total,
+      fecha: form.fecha, turno: form.turno, items, total,
       efectivo: parseFloat(form.efectivo) || 0,
       debito: parseFloat(form.debito) || 0,
       transferencia: parseFloat(form.transferencia) || 0,
       notas: form.notas
     })
     for (const item of items) {
-      const tipoStock = item.categoria === 'bovino_pieza' ? 'bovino_pieza' : 
+      const tipoStock = item.categoria === 'bovino_pieza' ? 'bovino_pieza' :
                         item.categoria === 'bovino_brosa' ? 'bovino_brosa' :
                         item.categoria === 'cerdo' ? 'cerdo' :
                         item.categoria === 'pollo' ? 'pollo' :
@@ -96,6 +96,37 @@ export default function Ventas() {
     cargarVentas()
   }
 
+  async function eliminarVenta(v) {
+    if (!confirm(`¿Eliminar venta de ${fmt(v.total)} del ${v.fecha}?`)) return
+    await supabase.from('ventas_minoristas').delete().eq('id', v.id)
+    for (const item of (v.items || [])) {
+      const tipoStock = item.categoria === 'bovino_pieza' ? 'bovino_pieza' :
+                        item.categoria === 'bovino_brosa' ? 'bovino_brosa' :
+                        item.categoria === 'cerdo' ? 'cerdo' :
+                        item.categoria === 'pollo' ? 'pollo' :
+                        item.categoria === 'embutido' ? 'embutido' : 'bovino_corte'
+      const { data: stock } = await supabase.from('stock_actual').select('*').eq('tipo', tipoStock).maybeSingle()
+      if (stock) await supabase.from('stock_actual').update({ kg_disponible: (stock.kg_disponible || 0) + item.kg }).eq('tipo', tipoStock)
+    }
+    showMsg('🗑️ Venta eliminada y stock revertido')
+    cargarVentas()
+  }
+
+  // Resumen del día
+  const totalHoy = ventasHoy.reduce((s, v) => s + (v.total || 0), 0)
+  const efectivoHoy = ventasHoy.reduce((s, v) => s + (v.efectivo || 0), 0)
+  const debitoHoy = ventasHoy.reduce((s, v) => s + (v.debito || 0), 0)
+  const transferenciaHoy = ventasHoy.reduce((s, v) => s + (v.transferencia || 0), 0)
+
+  // Productos más vendidos hoy
+  const productosHoy = {}
+  ventasHoy.forEach(v => (v.items || []).forEach(item => {
+    if (!productosHoy[item.descripcion]) productosHoy[item.descripcion] = { kg: 0, importe: 0 }
+    productosHoy[item.descripcion].kg += item.kg
+    productosHoy[item.descripcion].importe += item.importe
+  }))
+  const rankingHoy = Object.entries(productosHoy).sort((a, b) => b[1].importe - a[1].importe)
+
   const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, width: '100%', boxSizing: 'border-box' }
 
   return (
@@ -104,7 +135,11 @@ export default function Ventas() {
       <div className="page-sub">Registro de ventas minoristas diarias</div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap' }}>
-        {[{ id: 'nueva', label: '➕ Nueva venta' }, { id: 'historial', label: '📋 Historial' }].map(t => (
+        {[
+          { id: 'resumen', label: '📊 Resumen del día' },
+          { id: 'nueva', label: '➕ Nueva venta' },
+          { id: 'historial', label: '📋 Historial' },
+        ].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
             style={{ padding: '8px 16px', borderRadius: 8, border: `1px solid ${tab === t.id ? 'var(--amber)' : 'var(--border)'}`, background: tab === t.id ? 'var(--amber)' : 'transparent', color: tab === t.id ? '#fff' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
             {t.label}
@@ -113,6 +148,56 @@ export default function Ventas() {
       </div>
 
       {msg && <div style={{ background: msg.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${msg.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: msg.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>{msg.texto}</div>}
+
+      {tab === 'resumen' && (
+        <div>
+          <div style={{ background: 'linear-gradient(135deg,#1a1408,#0a0a08)', border: '1px solid var(--gold)', borderRadius: 16, padding: 24, marginBottom: 20 }}>
+            <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 28, color: 'var(--gold)', marginBottom: 4 }}>📊 RESUMEN DE HOY — {hoy}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12, marginTop: 16 }}>
+              <div style={{ background: 'var(--surface)', borderRadius: 10, padding: 16, textAlign: 'center' }}>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>TOTAL VENDIDO</div>
+                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 32, color: 'var(--gold)' }}>{fmt(totalHoy)}</div>
+              </div>
+              <div style={{ background: 'var(--surface)', borderRadius: 10, padding: 16, textAlign: 'center' }}>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>💵 EFECTIVO</div>
+                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 32, color: 'var(--green)' }}>{fmt(efectivoHoy)}</div>
+              </div>
+              <div style={{ background: 'var(--surface)', borderRadius: 10, padding: 16, textAlign: 'center' }}>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>💳 DÉBITO</div>
+                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 32, color: 'var(--amber)' }}>{fmt(debitoHoy)}</div>
+              </div>
+              <div style={{ background: 'var(--surface)', borderRadius: 10, padding: 16, textAlign: 'center' }}>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>📲 TRANSFERENCIA</div>
+                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 32, color: 'var(--amber)' }}>{fmt(transferenciaHoy)}</div>
+              </div>
+            </div>
+          </div>
+
+          {rankingHoy.length > 0 && (
+            <div className="card" style={{ marginBottom: 16 }}>
+              <div className="card-title">🥩 Productos más vendidos hoy</div>
+              <table>
+                <thead><tr><th>Producto</th><th>Kg vendidos</th><th>Importe</th></tr></thead>
+                <tbody>
+                  {rankingHoy.map(([nombre, data]) => (
+                    <tr key={nombre}>
+                      <td style={{ fontWeight: 600 }}>{nombre}</td>
+                      <td style={{ color: 'var(--amber)' }}>{data.kg.toFixed(1)} kg</td>
+                      <td style={{ color: 'var(--gold)', fontWeight: 600 }}>{fmt(data.importe)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {ventasHoy.length === 0 && (
+            <div className="card">
+              <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Sin ventas registradas hoy</div>
+            </div>
+          )}
+        </div>
+      )}
 
       {tab === 'nueva' && (
         <div>
@@ -213,7 +298,7 @@ export default function Ventas() {
         <div className="card">
           <div className="card-title">📋 Historial de ventas</div>
           <table>
-            <thead><tr><th>Fecha</th><th>Turno</th><th>Total</th><th>Efectivo</th><th>Débito</th><th>Transf.</th><th>Productos</th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Turno</th><th>Total</th><th>Efectivo</th><th>Débito</th><th>Transf.</th><th>Productos</th><th></th></tr></thead>
             <tbody>
               {ventas.map(v => (
                 <tr key={v.id}>
@@ -224,9 +309,10 @@ export default function Ventas() {
                   <td style={{ color: 'var(--amber)' }}>{v.debito > 0 ? fmt(v.debito) : '—'}</td>
                   <td style={{ color: 'var(--amber)' }}>{v.transferencia > 0 ? fmt(v.transferencia) : '—'}</td>
                   <td style={{ fontSize: 11, color: 'var(--muted)' }}>{(v.items || []).map(i => `${i.descripcion} ${i.kg}kg`).join(' · ')}</td>
+                  <td><button onClick={() => eliminarVenta(v)} style={{ background: 'none', border: 'none', color: 'var(--red-light)', cursor: 'pointer', fontSize: 16 }}>🗑️</button></td>
                 </tr>
               ))}
-              {ventas.length === 0 && <tr><td colSpan={7} className="empty">Sin ventas registradas</td></tr>}
+              {ventas.length === 0 && <tr><td colSpan={8} className="empty">Sin ventas registradas</td></tr>}
             </tbody>
           </table>
         </div>
