@@ -1025,14 +1025,14 @@ async function eliminarRemito(remito) {
     eliminado_en: new Date().toISOString()
   }).eq('id', remito.id)
 
-  if (remito.cliente_id) {
+  if (remito.cliente_id && !remito.eliminado) {
     const { data: clienteActual } = await supabase.from('clientes').select('saldo').eq('id', remito.cliente_id).single()
     const nuevoSaldo = (clienteActual?.saldo || 0) - remito.total
     await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', remito.cliente_id)
     await supabase.from('movimientos_ctacte').delete().eq('remito_id', remito.id)
   }
 
-  showAlert('🗑️ Remito anulado y saldo corregido', 'success')
+  showAlert('🗑️ Remito anulado', 'success')
   cargarRemitos()
 }
   function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(() => setAlert(null), 4000) }

@@ -21,17 +21,16 @@ export function Clientes() {
     const { data } = await supabase.from('clientes').select('*').order('nombre')
     setClientes(data || [])
   }
-
-  async function seleccionar(cliente) {
+async function seleccionar(cliente) {
     setSeleccionado(cliente)
     setShowPago(false)
     setShowForm(false)
     const { data: movs } = await supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id).order('fecha', { ascending: false })
     setMovimientos(movs || [])
-    const { data: rems } = await supabase.from('remitos').select('*').eq('cliente_nombre', cliente.nombre).order('created_at', { ascending: false }).limit(20)
+    const { data: rems } = await supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false }).limit(20)
     setRemitos(rems || [])
   }
-async function anularRemitoCliente(remito) {
+ async function anularRemitoCliente(remito) {
   if (!confirm(`¿Anular Remito N° ${String(remito.numero).padStart(5,'0')} por $${Math.round(remito.total).toLocaleString('es-AR')}?`)) return
   const { data: { user } } = await supabase.auth.getUser()
   const { data: perfil } = await supabase.from('profiles').select('nombre').eq('id', user.id).single()
