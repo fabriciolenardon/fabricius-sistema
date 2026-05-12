@@ -993,18 +993,6 @@ function RemitosTab({ remitoActual }) {
   const [nuevoProductoId, setNuevoProductoId] = useState('')
   const [nuevoKg, setNuevoKg] = useState('')
   const [nuevoPrecio, setNuevoPrecio] = useState('')
-async function eliminarRemito(remito) {
-  if (!confirm(`¿Eliminar Remito N° ${String(remito.numero).padStart(5,'0')} de ${remito.cliente_nombre} por $${Math.round(remito.total).toLocaleString('es-AR')}?`)) return
-  await supabase.from('remitos').delete().eq('id', remito.id)
-  if (remito.cliente_id) {
-    const { data: clienteActual } = await supabase.from('clientes').select('saldo').eq('id', remito.cliente_id).single()
-    const nuevoSaldo = (clienteActual?.saldo || 0) - remito.total
-    await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', remito.cliente_id)
-    await supabase.from('movimientos_ctacte').delete().eq('remito_id', remito.id)
-  }
-  showAlert('🗑️ Remito eliminado y saldo corregido', 'success')
-  cargarRemitos()
-}
   const CATEGORIAS = {
     bovino_mr: '🐄 Media Reses', bovino_corte: '🥩 Bovinos — Cortes',
     bovino_brosa: '🫀 Brosas', bovino_pieza: '🍖 Piezas',
@@ -1024,7 +1012,29 @@ async function eliminarRemito(remito) {
     const { data } = await supabase.from('remitos').select('*').order('created_at', { ascending: false }).limit(30)
     setRemitos(data || [])
   }
+async function eliminarRemito(remito) {
+  if (!confirm(`¿Eliminar Remito N° ${String(remito.numero).padStart(5,'0')} de ${remito.cliente_nombre} por $${Math.round(remito.total).toLocaleString('es-AR')}?`)) return
+  
+  const { data: { user } } = await supabase.auth.getUser()
+  const { data: perfil } = await supabase.from('profiles').select('nombre').eq('id', user.id).single()
+  const eliminadoPor = perfil?.nombre || user.email
 
+  await supabase.from('remitos').update({
+    eliminado: true,
+    eliminado_por: eliminadoPor,
+    eliminado_en: new Date().toISOString()
+  }).eq('id', remito.id)
+
+  if (remito.cliente_id) {
+    const { data: clienteActual } = await supabase.from('clientes').select('saldo').eq('id', remito.cliente_id).single()
+    const nuevoSaldo = (clienteActual?.saldo || 0) - remito.total
+    await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', remito.cliente_id)
+    await supabase.from('movimientos_ctacte').delete().eq('remito_id', remito.id)
+  }
+
+  showAlert('🗑️ Remito anulado y saldo corregido', 'success')
+  cargarRemitos()
+}
   function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(() => setAlert(null), 4000) }
 
   function abrirEdicion(remito) {
@@ -1197,8 +1207,11 @@ async function eliminarRemito(remito) {
           <thead><tr><th>N° Remito</th><th>Fecha</th><th>Cliente</th><th>Total</th><th>Acciones</th></tr></thead>
           <tbody>
             {remitos.map(r => (
-              <tr key={r.id}>
-                <td><strong>N° {String(r.numero).padStart(5, '0')}</strong></td>
+              <tr key={r.id} style={{ background: r.eliminado ? 'rgba(255,50,50,0.08)' : 'transparent', opacity: r.eliminado ? 0.7 : 1 }}>
+                <td>
+  <strong>N° {String(r.numero).padStart(5, '0')}</strong>
+  {r.eliminado && <span style={{ marginLeft: 8, background: '#3a1a1a', color: '#ff6b6b', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700 }}>❌ ANULADO por {r.eliminado_por}</span>}
+</td>
                 <td>{r.fecha}</td>
                 <td>{r.cliente_nombre}</td>
                 <td style={{ color: 'var(--gold)' }}>${Math.round(r.total).toLocaleString('es-AR')}</td>
