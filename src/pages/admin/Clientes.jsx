@@ -39,6 +39,8 @@ async function eliminarMovimiento(mov) {
   await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', seleccionado.id)
   const { data: movs } = await supabase.from('movimientos_ctacte').select('*').eq('cliente_id', seleccionado.id).order('fecha', { ascending: false })
   setMovimientos(movs || [])
+  setSeleccionado(prev => ({ ...prev, saldo: nuevoSaldo }))
+  setClientes(prev => prev.map(c => c.id === seleccionado.id ? { ...c, saldo: nuevoSaldo } : c))
 }
   function abrirFormNuevo() {
     setEditandoId(null)
