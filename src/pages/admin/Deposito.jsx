@@ -1,3 +1,67 @@
+import { useState, useEffect } from 'react'
+import { supabase } from '../../lib/supabase'
+
+async function actualizarStock(tipo, kg) {
+  const { data } = await supabase.from('stock_actual').select('*').eq('tipo', tipo).maybeSingle()
+  if (data) {
+    await supabase.from('stock_actual').update({ kg_disponible: (data.kg_disponible || 0) + kg }).eq('tipo', tipo)
+  } else {
+    await supabase.from('stock_actual').insert({ tipo, kg_disponible: kg })
+  }
+}
+
+const MODELOS_DESPOSTE = {
+  A: { piezas: [
+    { nombre: 'Cuarto delantero', pct: 0.45, tipo_stock: 'bovino_pieza', busqueda_precio: 'delantero' },
+    { nombre: 'Cuarto trasero', pct: 0.45, tipo_stock: 'bovino_pieza', busqueda_precio: 'trasero' },
+    { nombre: 'Costillar', pct: 0.10, tipo_stock: 'bovino_pieza', busqueda_precio: 'costilla' },
+  ]},
+  B: { piezas: [
+    { nombre: 'Pierna', pct: 0.35, tipo_stock: 'bovino_pieza', busqueda_precio: 'pierna' },
+    { nombre: 'Paleta', pct: 0.30, tipo_stock: 'bovino_pieza', busqueda_precio: 'paleta' },
+    { nombre: 'Lomo', pct: 0.20, tipo_stock: 'bovino_pieza', busqueda_precio: 'lomo' },
+    { nombre: 'Costillar', pct: 0.15, tipo_stock: 'bovino_pieza', busqueda_precio: 'costilla' },
+  ]},
+}
+
+const fmt = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
+
+export function Deposito() {
+  const [tab, setTab] = useState('entradas')
+  const [alert, setAlert] = useState(null)
+  const [remitoActual, setRemitoActual] = useState(null)
+
+  function showAlert(msg) { setAlert(msg); setTimeout(() => setAlert(null), 4000) }
+
+  return (
+    <div>
+      <div className="page-title">DEPÓSITO</div>
+      <div className="page-sub">Stock, entradas, despachos, desposte y proveedores</div>
+      {alert && <div className={`alert alert-${alert?.type || 'success'}`}>{alert?.msg || alert}</div>}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap' }}>
+        {[
+          { id: 'entradas', label: '📥 Entradas' },
+          { id: 'salidas', label: '📤 Despachos' },
+          { id: 'desposte', label: '🔪 Desposte' },
+          { id: 'remitos', label: '🧾 Remitos' },
+          { id: 'proveedores', label: '🏭 Proveedores' },
+        ].map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)}
+            style={{ padding: '8px 16px', borderRadius: 8, border: `1px solid ${tab === t.id ? 'var(--amber)' : 'var(--border)'}`, background: tab === t.id ? 'var(--amber)' : 'transparent', color: tab === t.id ? '#fff' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {tab === 'entradas' && <EntradaForm onSaved={() => {}} showAlert={showAlert} proveedores={['PRETTO','LEO','BERTOSSI','INDACOR','BELMACO','CUBALA','LA AVENIDA','MOTTURA','BELBRUN','MELO CARBON']} />}
+      {tab === 'salidas' && <SalidaForm onSaved={() => {}} showAlert={showAlert} onRemito={setRemitoActual} setTab={setTab} />}
+      {tab === 'desposte' && <DesposteTab onSaved={() => {}} />}
+      {tab === 'remitos' && <RemitosTab remitoActual={remitoActual} />}
+      {tab === 'proveedores' && <ProveedoresTab />}
+    </div>
+  )
+}
+
+export default Deposito
 // =============================================
 // MÓDULO DE DESPOSTE BOVINO
 // =============================================
