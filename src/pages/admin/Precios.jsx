@@ -225,6 +225,7 @@ export default function Precios() {
         {tabBtn('masivo', '🚀 Actualización masiva')}
         {tabBtn('ofertas', `🏷️ Ofertas${ofertasVigentes.length > 0 ? ` (${ofertasVigentes.length})` : ''}`)}
         {tabBtn('chat', '🤖 Asistente IA')}
+{tabBtn('plu', '🏷️ PLU / Balanza')}
       </div>
       {msg && <div style={{ background: msg.includes('❌') ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${msg.includes('❌') ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: msg.includes('❌') ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>{msg}</div>}
 
@@ -579,6 +580,115 @@ export default function Precios() {
           </div>
         </div>
       )}
+
+      {tab === 'plu' && (
+        <PLUTab precios={precios} />
+      )}
+    </div>
+  )
+function PLUTab({ precios }) {
+  const [plus, setPlus] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [msg, setMsg] = useState('')
+
+  useEffect(() => { cargarPlus() }, [precios])
+
+  async function cargarPlus() {
+    setLoading(true)
+    const { data } = await supabase.from('plu').select('*').order('codigo')
+    if (data && data.length > 0) {
+      setPlus(data)
+    } else {
+      const plusGenerados = precios
+        .filter(p => p.precio_minorista > 0)
+        .map((p, i) => ({
+          codigo: String(i + 1).padStart(4, '0'),
+          nombre: p.nombre,
+          precio: p.precio_minorista,
+          categoria: p.categoria,
+          precio_id: p.id
+        }))
+      setPlus(plusGenerados)
+    }
+    setLoading(false)
+  }
+
+  async function guardarTodos() {
+    await supabase.from('plu').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+    for (const p of plus) {
+      await supabase.from('plu').insert({
+        codigo: p.codigo,
+        nombre: p.nombre,
+        precio: p.precio,
+        categoria: p.categoria,
+        precio_id: p.precio_id
+      })
+    }
+    setMsg('✅ PLU guardados correctamente')
+    setTimeout(() => setMsg(''), 3000)
+    cargarPlus()
+  }
+
+  function exportarCSV() {
+    const header = 'Codigo,Nombre,Precio\n'
+    const rows = plus.map(p => `${p.codigo},"${p.nombre}",${p.precio}`).join('\n')
+    const blob = new Blob([header + rows], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'PLU_Fabricius.csv'
+    a.click()
+  }
+
+  function editarPrecio(idx, valor) {
+    setPlus(prev => prev.map((p, i) => i === idx ? { ...p, precio: parseFloat(valor) || 0 } : p))
+  }
+
+  function editarNombre(idx, valor) {
+    setPlus(prev => prev.map((p, i) => i === idx ? { ...p, nombre: valor } : p))
+  }
+
+  function editarCodigo(idx, valor) {
+    setPlus(prev => prev.map((p, i) => i === idx ? { ...p, codigo: valor } : p))
+  }
+
+  const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '5px 8px', fontFamily: "'DM Sans',sans-serif", fontSize: 12 }
+
+  return (
+    <div>
+      <div className="card" style={{ marginBottom: 16, borderColor: 'var(--gold)' }}>
+        <div className="card-title">🏷️ PLU para Balanza Cuora Max</div>
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
+          Estos son los códigos PLU que se cargan en la balanza. Podés editar el código, nombre y precio, y exportar el archivo para importar en Qendra.
+        </div>
+        {msg && <div style={{ background: '#1a2a1a', border: '1px solid #2d5a2d', borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: '#7dff7d', fontWeight: 600 }}>{msg}</div>}
+        <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+          <button onClick={guardarTodos} className="btn btn-gold">💾 Guardar PLU</button>
+          <button onClick={exportarCSV} className="btn btn-ghost">📥 Exportar CSV para Qendra</button>
+        </div>
+        {loading ? <div style={{ color: 'var(--muted)' }}>Cargando...</div> : (
+          <table>
+            <thead>
+              <tr>
+                <th style={{ width: 80 }}>Código PLU</th>
+                <th>Nombre en balanza</th>
+                <th style={{ width: 120 }}>Precio minorista</th>
+                <th>Categoría</th>
+              </tr>
+            </thead>
+            <tbody>
+              {plus.map((p, i) => (
+                <tr key={i}>
+                  <td><input value={p.codigo} onChange={e => editarCodigo(i, e.target.value)} style={{ ...inp, width: 70, textAlign: 'center', fontWeight: 700, color: 'var(--gold)' }} /></td>
+                  <td><input value={p.nombre} onChange={e => editarNombre(i, e.target.value)} style={{ ...inp, width: '100%' }} /></td>
+                  <td><input type="number" value={p.precio} onChange={e => editarPrecio(i, e.target.value)} style={{ ...inp, width: 100, borderColor: 'var(--green)' }} /></td>
+                  <td style={{ fontSize: 11, color: 'var(--muted)' }}>{p.categoria}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </div>
   )
 }
