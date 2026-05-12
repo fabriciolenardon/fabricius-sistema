@@ -1,6 +1,6 @@
 // FranquiciaDashboard.jsx
 import { useEffect, useState } from 'react'
-import { supabase } from '../../supabaseClient'
+import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 
 function fmt(n) { return '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR') }
@@ -219,11 +219,6 @@ export function FranquiciaRemitos() {
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: Arial, sans-serif; font-size: 12px; padding: 20px; max-width: 400px; margin: 0 auto; }
         .header { display: flex; justify-content: space-between; margin-bottom: 16px; border-bottom: 2px solid #000; padding-bottom: 12px; }
-        .logo-title { font-size: 22px; font-weight: 900; letter-spacing: 2px; }
-        .doc-no-valido { font-size: 10px; font-weight: 700; border: 1px solid #000; padding: 2px 6px; margin-bottom: 4px; text-align:center; }
-        .remito-title { font-size: 24px; font-weight: 900; font-style: italic; }
-        .campo { border-bottom: 1px solid #000; margin-bottom: 8px; padding-bottom: 2px; }
-        .campo label { font-size: 10px; font-weight: 700; margin-right: 6px; }
         table { width: 100%; border-collapse: collapse; margin: 12px 0; }
         th { border: 1px solid #000; padding: 4px; text-align: center; font-size: 10px; font-weight: 700; background: #f0f0f0; }
         td { border: 1px solid #000; padding: 4px; text-align: center; font-size: 11px; }
@@ -235,20 +230,19 @@ export function FranquiciaRemitos() {
       <body>
         <div class="header">
           <div>
-            <div class="logo-title">FABRICIUS</div>
+            <div style="font-size:22px;font-weight:900;letter-spacing:2px">FABRICIUS</div>
             <div style="font-size:9px;color:#555">CARNICERÍAS · PREMIUM QUALITY</div>
             <div style="font-size:10px;color:#444;margin-top:4px">📍 Casa Central: Av. Mitre 670 - Río Primero, Córdoba</div>
             <div style="font-size:11px;font-weight:700;background:#000;color:#fff;padding:3px 8px;display:inline-block;border-radius:4px;margin-top:4px">📱 3574 400346</div>
           </div>
           <div style="text-align:right">
-            <div class="doc-no-valido">X — DOCUMENTO NO VÁLIDO COMO FACTURA</div>
-            <div class="remito-title">REMITO</div>
+            <div style="font-size:10px;font-weight:700;border:1px solid #000;padding:2px 6px;margin-bottom:4px;text-align:center">X — DOCUMENTO NO VÁLIDO COMO FACTURA</div>
+            <div style="font-size:24px;font-weight:900;font-style:italic">REMITO</div>
             <div style="font-size:13px;font-weight:700">N° ${String(remito.numero).padStart(5, '0')}</div>
           </div>
         </div>
         <div style="font-size:11px;margin-bottom:8px">Fecha: <strong>${remito.fecha}</strong></div>
-        <div class="campo"><label>Señor/a:</label>${remito.cliente_nombre || ''}</div>
-        <div class="campo"><label>Domicilio:</label>${remito.domicilio || ''}</div>
+        <div style="border-bottom:1px solid #000;margin-bottom:8px;padding-bottom:2px"><label style="font-size:10px;font-weight:700;margin-right:6px">Señor/a:</label>${remito.cliente_nombre || ''}</div>
         <table>
           <thead><tr>
             <th style="width:40%">DESCRIPCIÓN</th>
@@ -280,7 +274,6 @@ export function FranquiciaRemitos() {
     <div>
       <div className="page-title">MIS REMITOS</div>
       <div className="page-sub">Despachos recibidos desde el depósito Fabricius</div>
-
       <div className="card">
         <table>
           <thead><tr><th>N° Remito</th><th>Fecha</th><th>Total</th><th>Detalle</th><th>Imprimir</th></tr></thead>
@@ -327,7 +320,7 @@ export function FranquiciaRemitos() {
                           <tfoot>
                             <tr style={{ borderTop: '1px solid var(--border)' }}>
                               <td colSpan={3} style={{ padding: '8px', fontSize: 13, fontWeight: 700, textAlign: 'right' }}>TOTAL</td>
-                              <td style={{ padding: '8px', fontSize: 14, fontWeight: 700, textAlign: 'right', color: 'var(--gold)', fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>${Math.round(r.total).toLocaleString('es-AR')}</td>
+                              <td style={{ padding: '8px', fontSize: 20, fontWeight: 700, textAlign: 'right', color: 'var(--gold)', fontFamily: "'Bebas Neue',cursive" }}>${Math.round(r.total).toLocaleString('es-AR')}</td>
                             </tr>
                           </tfoot>
                         </table>
