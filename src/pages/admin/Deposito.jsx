@@ -540,7 +540,10 @@ async function eliminar(entrada) {
       await supabase.from('despostes').delete().eq('id', entrada.desposte_id)
     }
   }
-  
+  await supabase.from('compras_proveedores').delete()
+  .eq('fecha', entrada.fecha)
+  .eq('proveedor_nombre', entrada.proveedor_nombre)
+  .eq('kg', entrada.kg)
   await supabase.from('entradas_deposito').delete().eq('id', entrada.id)
   await actualizarStock(entrada.tipo, -(entrada.kg_real || entrada.kg))
   showAlert({ type: 'success', msg: '🗑️ Entrada y desposte eliminados — Stock revertido' })
