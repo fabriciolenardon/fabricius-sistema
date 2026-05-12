@@ -1354,5 +1354,3 @@ function ProveedoresTab() {
     </div>
   )
 }
-
-export default Deposito
