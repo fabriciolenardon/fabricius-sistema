@@ -5,7 +5,6 @@ import AdminLayout from './pages/admin/AdminLayout'
 import Dashboard from './pages/admin/Dashboard'
 import Deposito from './pages/admin/Deposito'
 import Clientes from './pages/admin/Clientes'
-import Franquicias from './pages/admin/Franquicias'
 import Sueldos from './pages/admin/Sueldos'
 import Gastos from './pages/admin/Gastos'
 import Cheques from './pages/admin/Cheques'
@@ -47,36 +46,17 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/" element={<RootRedirect />} />
-<<<<<<< HEAD
       <Route path="/admin" element={<ProtectedRoute requiredRole="admin"><AdminLayout /></ProtectedRoute>}>
-=======
-      {/* ADMIN ROUTES */}
-      <Route path="/admin" element={
-        <ProtectedRoute requiredRole="admin">
-          <AdminLayout />
-        </ProtectedRoute>
-      }>
->>>>>>> 2d67314865d00c8d3c6e025e909c2950a92d4742
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="deposito" element={<Deposito />} />
         <Route path="precios" element={<Precios />} />
         <Route path="clientes" element={<Clientes />} />
-        <Route path="franquicias" element={<Franquicias />} />
         <Route path="cheques" element={<Cheques />} />
         <Route path="sueldos" element={<Sueldos />} />
         <Route path="gastos" element={<Gastos />} />
         <Route path="cierre" element={<Cierre />} />
       </Route>
-<<<<<<< HEAD
       <Route path="/franquicia" element={<ProtectedRoute requiredRole="franquicia"><FranquiciaLayout /></ProtectedRoute>}>
-=======
-      {/* FRANQUICIA ROUTES */}
-      <Route path="/franquicia" element={
-        <ProtectedRoute requiredRole="franquicia">
-          <FranquiciaLayout />
-        </ProtectedRoute>
-      }>
->>>>>>> 2d67314865d00c8d3c6e025e909c2950a92d4742
         <Route path="dashboard" element={<FranquiciaDashboard />} />
         <Route path="ctacte" element={<FranquiciaCtaCte />} />
         <Route path="remitos" element={<FranquiciaRemitos />} />
