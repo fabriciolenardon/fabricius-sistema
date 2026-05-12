@@ -1286,7 +1286,7 @@ function ProveedoresTab() {
 
   async function eliminarProveedor(id, nombre) {
     if (!confirm(`¿Eliminar el proveedor ${nombre}?`)) return
-    await supabase.from('proveedores').update({ activo: false }).eq('id', id)
+    await supabase.from('proveedores').delete().eq('id', id)
     showMsg('🗑️ Proveedor eliminado')
     if (legajoAbierto?.id === id) setLegajoAbierto(null)
     fetchAll()
