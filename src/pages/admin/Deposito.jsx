@@ -106,18 +106,7 @@ function DesposteTab({ onSaved }) {
     ;(stockData || []).forEach(r => stockMap[r.tipo] = r.kg_disponible)
     setPiezasStock(stockMap)
   }
-async function eliminarRemito(remito) {
-  if (!confirm(`¿Eliminar Remito N° ${String(remito.numero).padStart(5,'0')} de ${remito.cliente_nombre} por $${Math.round(remito.total).toLocaleString('es-AR')}?`)) return
-  await supabase.from('remitos').delete().eq('id', remito.id)
-  if (remito.cliente_id) {
-    const { data: clienteActual } = await supabase.from('clientes').select('saldo').eq('id', remito.cliente_id).single()
-    const nuevoSaldo = (clienteActual?.saldo || 0) - remito.total
-    await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', remito.cliente_id)
-    await supabase.from('movimientos_ctacte').delete().eq('remito_id', remito.id)
-  }
-  showAlert('🗑️ Remito eliminado y saldo corregido', 'success')
-  cargarRemitos()
-}
+
   function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(() => setAlert(null), 5000) }
 
   function buscarPrecio(busqueda) {
@@ -985,7 +974,18 @@ function RemitosTab({ remitoActual }) {
   const [nuevoProductoId, setNuevoProductoId] = useState('')
   const [nuevoKg, setNuevoKg] = useState('')
   const [nuevoPrecio, setNuevoPrecio] = useState('')
-
+async function eliminarRemito(remito) {
+  if (!confirm(`¿Eliminar Remito N° ${String(remito.numero).padStart(5,'0')} de ${remito.cliente_nombre} por $${Math.round(remito.total).toLocaleString('es-AR')}?`)) return
+  await supabase.from('remitos').delete().eq('id', remito.id)
+  if (remito.cliente_id) {
+    const { data: clienteActual } = await supabase.from('clientes').select('saldo').eq('id', remito.cliente_id).single()
+    const nuevoSaldo = (clienteActual?.saldo || 0) - remito.total
+    await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', remito.cliente_id)
+    await supabase.from('movimientos_ctacte').delete().eq('remito_id', remito.id)
+  }
+  showAlert('🗑️ Remito eliminado y saldo corregido', 'success')
+  cargarRemitos()
+}
   const CATEGORIAS = {
     bovino_mr: '🐄 Media Reses', bovino_corte: '🥩 Bovinos — Cortes',
     bovino_brosa: '🫀 Brosas', bovino_pieza: '🍖 Piezas',
