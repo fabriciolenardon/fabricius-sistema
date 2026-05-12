@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { supabase } from '../../lib/supabase'
+import { supabase } from '../../supabaseClient'
 import { useAuth } from '../../context/AuthContext'
 
 function fmt(n) {
   const abs = Math.abs(Math.round(n || 0))
-  const str = abs >= 1000000 ? (abs / 1000000).toFixed(1) + 'M' : abs >= 1000 ? (abs / 1000).toFixed(0) + 'K' : abs.toString()
-  return '$' + str
+  if (abs >= 1000000) return '$' + (abs / 1000000).toFixed(1) + 'M'
+  if (abs >= 1000) return '$' + (abs / 1000).toFixed(0) + 'K'
+  return '$' + abs.toLocaleString('es-AR')
 }
 function fmtFull(n) { return '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR') }
 
@@ -14,21 +15,32 @@ export default function Dashboard() {
   const { profile } = useAuth()
   const navigate = useNavigate()
   const [cierres, setCierres] = useState([])
-  const [alertas, setAlertas] = useState([])
+  const [clientes, setClientes] = useState([])
+  const [stock, setStock] = useState({})
+  const [remitos, setRemitos] = useState([])
+  const [gastos, setGastos] = useState([])
+  const [cheques, setCheques] = useState([])
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    fetchData()
-  }, [])
+  useEffect(() => { fetchData() }, [])
 
   async function fetchData() {
-    // Últimos 5 cierres
-    const { data: c } = await supabase
-      .from('cierres_semanales')
-      .select('*')
-      .order('semana_inicio', { ascending: false })
-      .limit(5)
-    setCierres(c || [])
+    const [c, cl, st, r, g, ch] = await Promise.all([
+      supabase.from('cierres_semanales').select('*').order('semana_inicio', { ascending: false }).limit(8),
+      supabase.from('clientes').select('*').order('saldo', { ascending: false }),
+      supabase.from('stock_actual').select('*'),
+      supabase.from('remitos').select('*').order('created_at', { ascending: false }).limit(5),
+      supabase.from('gastos').select('*').order('fecha', { ascending: false }).limit(5),
+      supabase.from('cheques').select('*').order('fecha_pago', { ascending: true }).limit(20),
+    ])
+    setCierres(c.data || [])
+    setClientes(cl.data || [])
+    const s = {}
+    ;(st.data || []).forEach(r => s[r.tipo] = r.kg_disponible)
+    setStock(s)
+    setRemitos(r.data || [])
+    setGastos(g.data || [])
+    setCheques(ch.data || [])
     setLoading(false)
   }
 
@@ -36,45 +48,80 @@ export default function Dashboard() {
   const saludo = hora < 12 ? 'Buen día' : hora < 18 ? 'Buenas tardes' : 'Buenas noches'
   const nombre = profile?.nombre?.split(' ')[0] || 'Admin'
 
-  // Calcular totales del último cierre
   const ultimo = cierres[0]
   const mesActual = cierres.filter(c => c.mes === ultimo?.mes)
-  const totMesVentas = mesActual.reduce((s, c) => s + c.ventas, 0)
-  const totMesGanancia = mesActual.reduce((s, c) => s + c.ganancia, 0)
-  const totMesKg = mesActual.reduce((s, c) => s + c.kg_carne + c.kg_pollo + c.kg_cerdo, 0)
+  const totMesVentas = mesActual.reduce((s, c) => s + (c.ventas || 0), 0)
+  const totMesGanancia = mesActual.reduce((s, c) => s + (c.ganancia || 0), 0)
+  const totMesCompras = mesActual.reduce((s, c) => s + (c.compras || 0), 0)
+  const totMesGastos = mesActual.reduce((s, c) => s + (c.gastos || 0), 0)
+
+  const stockBovino = Math.max(0, stock.bovino_mr || 0)
+  const stockPollo = Math.max(0, stock.pollo || 0)
+  const stockCerdo = Math.max(0, stock.cerdo || 0)
+  const stockCortes = Math.max(0, stock.bovino_corte || 0)
+  const stockBrosas = Math.max(0, stock.bovino_brosa || 0)
+  const stockEmbutido = Math.max(0, stock.embutido || 0)
+
+  const clientesDeuda = clientes.filter(c => c.saldo > 0).sort((a, b) => b.saldo - a.saldo)
+  const totalDeuda = clientesDeuda.reduce((s, c) => s + c.saldo, 0)
+
+  const hoy = new Date()
+  const en15 = new Date(); en15.setDate(hoy.getDate() + 15)
+  const chequesPorVencer = cheques.filter(ch => {
+    if (!ch.fecha_pago) return false
+    const f = new Date(ch.fecha_pago + 'T12:00')
+    return f >= hoy && f <= en15
+  })
+
+  const datosGrafico = [...cierres].reverse().slice(-6).map(c => ({
+    semana: new Date(c.semana_inicio + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' }),
+    Ventas: c.ventas || 0,
+    Compras: c.compras || 0,
+    Gastos: c.gastos || 0,
+    Ganancia: c.ganancia || 0,
+  }))
+
+  if (loading) return <div style={{ padding: 40, color: 'var(--muted)', textAlign: 'center' }}>Cargando dashboard...</div>
 
   return (
     <div>
       {/* WELCOME */}
-      <div style={{
-        background: 'linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%)',
-        border: '1px solid var(--border)', borderRadius: 16, padding: 28, marginBottom: 24,
-        backgroundImage: 'radial-gradient(circle at 90% 50%, rgba(201,168,76,0.06), transparent 60%)'
-      }}>
-        <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 30, letterSpacing: 2, color: 'var(--gold)' }}>
-          {saludo}, {nombre} 👋
-        </div>
-        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
-          {new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-        </div>
-        <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 10 }}>
-          Sistema de gestión · Carnicerias Fabricius · Río Primero, Córdoba
-        </div>
+      <div style={{ background: 'linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%)', border: '1px solid var(--border)', borderRadius: 16, padding: 24, marginBottom: 20, backgroundImage: 'radial-gradient(circle at 90% 50%, rgba(201,168,76,0.08), transparent 60%)' }}>
+        <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 30, letterSpacing: 2, color: 'var(--gold)' }}>{saludo}, {nombre} 👋</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>Sistema de gestión · Carnicerías Fabricius · Río Primero, Córdoba</div>
       </div>
 
-      {/* STATS */}
-      <div className="grid4" style={{ marginBottom: 24 }}>
+      {/* ALERTAS */}
+      {(chequesPorVencer.length > 0 || totalDeuda > 0) && (
+        <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+          {chequesPorVencer.length > 0 && (
+            <div style={{ background: '#2a1a0a', border: '1px solid var(--amber)', borderRadius: 10, padding: '10px 16px', flex: 1, minWidth: 200 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--amber)', marginBottom: 4 }}>⚠️ Cheques por vencer</div>
+              {chequesPorVencer.map(ch => (
+                <div key={ch.id} style={{ fontSize: 12, color: 'var(--text2)' }}>#{ch.numero} — {ch.cliente_nombre} — {fmtFull(ch.monto)} — vence {ch.fecha_pago}</div>
+              ))}
+            </div>
+          )}
+          {totalDeuda > 0 && (
+            <div style={{ background: '#1a0a0a', border: '1px solid var(--red-light)', borderRadius: 10, padding: '10px 16px', flex: 1, minWidth: 200 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--red-light)', marginBottom: 4 }}>📋 Cuentas corrientes pendientes</div>
+              <div style={{ fontSize: 13, color: 'var(--text2)' }}>{clientesDeuda.length} clientes deben <strong style={{ color: 'var(--red-light)' }}>{fmtFull(totalDeuda)}</strong></div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* STATS MES */}
+      <div className="grid4" style={{ marginBottom: 16 }}>
         {[
-          { label: 'Ventas del mes', value: fmt(totMesVentas), sub: mesActual.length + ' semanas', color: 'var(--green)', icon: '💰' },
+          { label: 'Ventas del mes', value: fmt(totMesVentas), sub: mesActual.length + ' semanas cerradas', color: 'var(--green)', icon: '💰' },
+          { label: 'Compras del mes', value: fmt(totMesCompras), sub: 'proveedores', color: 'var(--red-light)', icon: '🛒' },
+          { label: 'Gastos del mes', value: fmt(totMesGastos), sub: 'operativos + socios', color: 'var(--amber)', icon: '💸' },
           { label: 'Ganancia del mes', value: fmt(totMesGanancia), sub: totMesGanancia >= 0 ? '✅ Positivo' : '⚠️ Negativo', color: totMesGanancia >= 0 ? 'var(--gold)' : 'var(--red-light)', icon: '📈' },
-          { label: 'Kg movidos', value: (totMesKg / 1000).toFixed(1) + 'K', sub: 'carne + pollo + cerdo', color: 'var(--blue)', icon: '⚖️' },
-          { label: 'Semanas cerradas', value: mesActual.length, sub: 'del mes actual', color: 'var(--amber)', icon: '📋' },
         ].map(s => (
-          <div key={s.label} className="stat" style={{ transition: 'border 0.2s' }}
-            onMouseOver={e => e.currentTarget.style.borderColor = 'var(--gold)'}
-            onMouseOut={e => e.currentTarget.style.borderColor = 'var(--border)'}
-          >
-            <div style={{ fontSize: 24, marginBottom: 8 }}>{s.icon}</div>
+          <div key={s.label} className="stat" onMouseOver={e => e.currentTarget.style.borderColor = 'var(--gold)'} onMouseOut={e => e.currentTarget.style.borderColor = 'var(--border)'}>
+            <div style={{ fontSize: 20, marginBottom: 4 }}>{s.icon}</div>
             <div className="stat-label">{s.label}</div>
             <div className="stat-value" style={{ color: s.color }}>{s.value}</div>
             <div className="stat-sub">{s.sub}</div>
@@ -82,85 +129,247 @@ export default function Dashboard() {
         ))}
       </div>
 
-      <div className="grid2">
-        {/* CIERRES */}
-        <div className="card">
-          <div className="card-title">
-            Últimos cierres semanales
-            <button className="btn btn-ghost btn-sm" onClick={() => navigate('/admin/cierre')}>Ver todos →</button>
+      {/* GRÁFICOS */}
+      {datosGrafico.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+          <div className="card">
+            <div className="card-title">📊 Ventas vs Egresos — últimas semanas</div>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 160, padding: '0 4px', marginBottom: 8 }}>
+              {datosGrafico.map((d, i) => {
+                const maxVal = Math.max(...datosGrafico.flatMap(x => [x.Ventas, x.Compras, x.Gastos]), 1)
+                return (
+                  <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                    <div style={{ width: '100%', display: 'flex', gap: 2, alignItems: 'flex-end', height: 140 }}>
+                      <div title={`Ventas: ${fmt(d.Ventas)}`} style={{ flex: 1, background: '#22c55e', borderRadius: '3px 3px 0 0', height: Math.max(2, d.Ventas / maxVal * 135) + 'px', cursor: 'pointer' }} />
+                      <div title={`Compras: ${fmt(d.Compras)}`} style={{ flex: 1, background: '#ef4444', borderRadius: '3px 3px 0 0', height: Math.max(2, d.Compras / maxVal * 135) + 'px', cursor: 'pointer' }} />
+                      <div title={`Gastos: ${fmt(d.Gastos)}`} style={{ flex: 1, background: '#f59e0b', borderRadius: '3px 3px 0 0', height: Math.max(2, d.Gastos / maxVal * 135) + 'px', cursor: 'pointer' }} />
+                    </div>
+                    <div style={{ fontSize: 9, color: 'var(--muted)', textAlign: 'center', whiteSpace: 'nowrap' }}>{d.semana}</div>
+                  </div>
+                )
+              })}
+            </div>
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+              {[['#22c55e', 'Ventas'], ['#ef4444', 'Compras'], ['#f59e0b', 'Gastos']].map(([color, label]) => (
+                <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--muted)' }}>
+                  <div style={{ width: 10, height: 10, background: color, borderRadius: 2 }} />{label}
+                </div>
+              ))}
+            </div>
           </div>
-          {loading ? (
-            <div className="empty">Cargando...</div>
-          ) : cierres.length === 0 ? (
-            <div className="empty">Sin cierres registrados</div>
+
+          <div className="card">
+            <div className="card-title">📈 Tendencia de ganancia semanal</div>
+            <div style={{ position: 'relative', height: 160, marginBottom: 8 }}>
+              <svg viewBox="0 0 400 140" width="100%" height="140" style={{ overflow: 'visible' }}>
+                {(() => {
+                  const vals = datosGrafico.map(d => d.Ganancia)
+                  const minV = Math.min(...vals, 0)
+                  const maxV = Math.max(...vals, 1)
+                  const range = maxV - minV || 1
+                  const W = 380; const H = 120; const padX = 10
+                  const points = datosGrafico.map((d, i) => ({
+                    x: padX + (i / Math.max(datosGrafico.length - 1, 1)) * W,
+                    y: H - ((d.Ganancia - minV) / range) * H,
+                    d
+                  }))
+                  const zeroY = H - ((0 - minV) / range) * H
+                  const polyline = points.map(p => `${p.x},${p.y}`).join(' ')
+                  const areaPath = `M${points[0].x},${zeroY} ` + points.map(p => `L${p.x},${p.y}`).join(' ') + ` L${points[points.length - 1].x},${zeroY} Z`
+                  return (
+                    <>
+                      <defs>
+                        <linearGradient id="gradGanancia" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#c9a84c" stopOpacity="0.3" />
+                          <stop offset="100%" stopColor="#c9a84c" stopOpacity="0" />
+                        </linearGradient>
+                      </defs>
+                      <line x1={padX} y1={zeroY} x2={padX + W} y2={zeroY} stroke="#444" strokeDasharray="4" strokeWidth="1" />
+                      <path d={areaPath} fill="url(#gradGanancia)" />
+                      <polyline points={polyline} fill="none" stroke="#c9a84c" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+                      {points.map((p, i) => (
+                        <g key={i}>
+                          <circle cx={p.x} cy={p.y} r="5" fill="#c9a84c" stroke="var(--surface)" strokeWidth="2" />
+                          <title>{p.d.semana}: {fmt(p.d.Ganancia)}</title>
+                        </g>
+                      ))}
+                    </>
+                  )
+                })()}
+              </svg>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 4, borderTop: '1px solid var(--border)' }}>
+              {datosGrafico.map((d, i) => (
+                <div key={i} style={{ fontSize: 9, color: 'var(--muted)', textAlign: 'center', flex: 1 }}>
+                  <div>{d.semana}</div>
+                  <div style={{ color: d.Ganancia >= 0 ? '#c9a84c' : '#ef4444', fontWeight: 600, fontSize: 10 }}>{fmt(d.Ganancia)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* STOCK DESDE stock_actual */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <div className="card-title" style={{ margin: 0 }}>📦 Stock actual del depósito</div>
+          <button className="btn btn-ghost btn-sm" onClick={() => navigate('/admin/deposito')}>Ver depósito →</button>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+          {[
+            { label: '🐄 Bovino Media Res', kg: stockBovino, color: 'var(--gold)', aprox: Math.round(stockBovino / 105) + ' medias', bajo: stockBovino < 100 },
+            { label: '🥩 Bovino Cortes', kg: stockCortes, color: 'var(--gold)', aprox: stockCortes.toFixed(1) + ' kg', bajo: stockCortes < 50 },
+            { label: '🫀 Brosas', kg: stockBrosas, color: 'var(--amber)', aprox: stockBrosas.toFixed(1) + ' kg', bajo: stockBrosas < 20 },
+            { label: '🐷 Cerdo', kg: stockCerdo, color: 'var(--amber)', aprox: Math.round(stockCerdo / 107) + ' capones', bajo: stockCerdo < 50 },
+            { label: '🍗 Pollo', kg: stockPollo, color: 'var(--blue)', aprox: Math.round(stockPollo / 20) + ' cajones', bajo: stockPollo < 50 },
+            { label: '🌭 Embutidos', kg: stockEmbutido, color: 'var(--purple)', aprox: stockEmbutido.toFixed(1) + ' kg', bajo: stockEmbutido < 20 },
+          ].map(s => (
+            <div key={s.label} style={{ background: s.bajo ? '#3a1a1a' : 'var(--surface2)', border: `1px solid ${s.bajo ? 'var(--red-light)' : 'var(--border)'}`, borderRadius: 10, padding: '12px 14px', textAlign: 'center' }}>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>{s.label}</div>
+              <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 26, color: s.bajo ? 'var(--red-light)' : s.color }}>{s.kg.toFixed(1)} kg</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>{s.aprox}</div>
+              {s.bajo && <div style={{ fontSize: 10, color: 'var(--red-light)', fontWeight: 700, marginTop: 4 }}>⚠️ Stock bajo</div>}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+        {/* CLIENTES CON DEUDA */}
+        <div className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div className="card-title" style={{ margin: 0 }}>💳 Clientes con saldo pendiente</div>
+            <button className="btn btn-ghost btn-sm" onClick={() => navigate('/admin/clientes')}>Ver todos →</button>
+          </div>
+          {clientesDeuda.length === 0 ? (
+            <div className="empty">✅ Sin deudas pendientes</div>
           ) : (
-            <table>
-              <thead><tr><th>Semana</th><th>Ventas</th><th>Compras</th><th>Ganancia</th></tr></thead>
-              <tbody>
-                {cierres.map(c => (
-                  <tr key={c.id}>
-                    <td style={{ fontSize: 12 }}>
-                      {new Date(c.semana_inicio + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })}
-                      {' → '}
-                      {new Date(c.semana_fin + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })}
-                    </td>
-                    <td style={{ color: 'var(--green)' }}>{fmt(c.ventas)}</td>
-                    <td style={{ color: 'var(--red-light)' }}>{fmt(c.compras)}</td>
-                    <td style={{ color: c.ganancia >= 0 ? 'var(--gold)' : 'var(--red-light)', fontWeight: 600 }}>
-                      {fmt(c.ganancia)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            clientesDeuda.slice(0, 6).map(c => (
+              <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>{c.nombre}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>{c.tipo}</div>
+                </div>
+                <span style={{ color: 'var(--red-light)', fontWeight: 700, fontSize: 13 }}>{fmtFull(c.saldo)}</span>
+              </div>
+            ))
+          )}
+          {clientesDeuda.length > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>Total adeudado</span>
+              <span style={{ color: 'var(--red-light)', fontWeight: 700 }}>{fmtFull(totalDeuda)}</span>
+            </div>
           )}
         </div>
 
+        {/* ÚLTIMOS REMITOS */}
+        <div className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div className="card-title" style={{ margin: 0 }}>🧾 Últimos remitos</div>
+            <button className="btn btn-ghost btn-sm" onClick={() => navigate('/admin/deposito')}>Ver todos →</button>
+          </div>
+          {remitos.length === 0 ? (
+            <div className="empty">Sin remitos recientes</div>
+          ) : (
+            remitos.map(r => (
+              <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>N° {String(r.numero).padStart(5, '0')} — {r.cliente_nombre}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>{r.fecha}</div>
+                </div>
+                <span style={{ color: 'var(--gold)', fontWeight: 700, fontSize: 13 }}>{fmtFull(r.total)}</span>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+        {/* CIERRES */}
+        <div className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div className="card-title" style={{ margin: 0 }}>📋 Últimos cierres semanales</div>
+            <button className="btn btn-ghost btn-sm" onClick={() => navigate('/admin/cierre')}>Ver todos →</button>
+          </div>
+          <table>
+            <thead><tr><th>Semana</th><th>Ventas</th><th>Ganancia</th></tr></thead>
+            <tbody>
+              {cierres.slice(0, 5).map(c => (
+                <tr key={c.id}>
+                  <td style={{ fontSize: 11 }}>
+                    {new Date(c.semana_inicio + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })}
+                    {' → '}
+                    {new Date(c.semana_fin + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })}
+                  </td>
+                  <td style={{ color: 'var(--green)' }}>{fmt(c.ventas)}</td>
+                  <td style={{ color: c.ganancia >= 0 ? 'var(--gold)' : 'var(--red-light)', fontWeight: 600 }}>{fmt(c.ganancia)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
         <div>
-          {/* SOCIOS */}
+          {/* ÚLTIMOS GASTOS */}
           <div className="card" style={{ marginBottom: 16 }}>
-            <div className="card-title">Distribución socios — mes actual</div>
-            {[
-              { nombre: 'Fabricio Lenardon', pct: 85, color: 'var(--gold)' },
-              { nombre: 'Ariel Garrone', pct: 15, color: 'var(--blue)' },
-            ].map(s => (
-              <div key={s.nombre} style={{ marginBottom: 12 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
-                  <span>{s.nombre} ({s.pct}%)</span>
-                  <span style={{ color: s.color, fontFamily: "'Bebas Neue', cursive", fontSize: 18 }}>
-                    {fmt(totMesGanancia * s.pct / 100)}
-                  </span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div className="card-title" style={{ margin: 0 }}>💸 Últimos gastos</div>
+              <button className="btn btn-ghost btn-sm" onClick={() => navigate('/admin/gastos')}>Ver todos →</button>
+            </div>
+            {gastos.slice(0, 4).map(g => (
+              <div key={g.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600 }}>{g.descripcion}</div>
+                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>{g.fecha} · {g.tipo}</div>
                 </div>
-                <div style={{ background: 'var(--border)', borderRadius: 4, height: 8 }}>
-                  <div style={{ height: 8, borderRadius: 4, background: s.color, width: s.pct + '%', transition: 'width 0.5s' }} />
-                </div>
+                <span style={{ color: g.tipo === 'ingreso' ? 'var(--green)' : 'var(--red-light)', fontWeight: 700, fontSize: 13 }}>
+                  {g.tipo === 'ingreso' ? '+' : '−'}{fmtFull(g.monto)}
+                </span>
               </div>
             ))}
+            {gastos.length === 0 && <div className="empty">Sin gastos recientes</div>}
           </div>
 
-          {/* ACCESOS RAPIDOS */}
+          {/* ACCESOS RÁPIDOS */}
           <div className="card">
-            <div className="card-title">Accesos rápidos</div>
+            <div className="card-title">⚡ Accesos rápidos</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               {[
                 { label: '📋 Nuevo cierre', path: '/admin/cierre' },
                 { label: '📥 Entrada depósito', path: '/admin/deposito' },
-                { label: '💰 Liquidar sueldos', path: '/admin/sueldos' },
+                { label: '📤 Despacho', path: '/admin/deposito' },
                 { label: '📄 Registrar cheque', path: '/admin/cheques' },
                 { label: '💳 Cuentas corrientes', path: '/admin/clientes' },
                 { label: '💸 Cargar gasto', path: '/admin/gastos' },
               ].map(a => (
-                <button
-                  key={a.path}
-                  className="btn btn-ghost"
-                  style={{ textAlign: 'left', padding: 12, width: '100%' }}
-                  onClick={() => navigate(a.path)}
-                >
+                <button key={a.label} className="btn btn-ghost" style={{ textAlign: 'left', padding: '10px 12px', width: '100%', fontSize: 12 }} onClick={() => navigate(a.path)}>
                   {a.label}
                 </button>
               ))}
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* DISTRIBUCIÓN SOCIOS */}
+      <div className="card">
+        <div className="card-title">👥 Distribución socios — mes actual</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          {[
+            { nombre: 'Fabricio Lenardon', pct: 85, color: 'var(--gold)' },
+            { nombre: 'Ariel Garrone', pct: 15, color: 'var(--blue)' },
+          ].map(s => (
+            <div key={s.nombre}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 8 }}>
+                <span style={{ fontWeight: 600 }}>{s.nombre} ({s.pct}%)</span>
+                <span style={{ color: s.color, fontFamily: "'Bebas Neue', cursive", fontSize: 20 }}>{fmt(totMesGanancia * s.pct / 100)}</span>
+              </div>
+              <div style={{ background: 'var(--border)', borderRadius: 8, height: 10 }}>
+                <div style={{ height: 10, borderRadius: 8, background: s.color, width: s.pct + '%' }} />
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>

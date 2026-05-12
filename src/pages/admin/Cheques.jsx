@@ -1,6 +1,6 @@
 // Cheques.jsx
 import { useEffect, useState } from 'react'
-import { supabase } from '../../lib/supabase'
+import { supabase } from '../../supabaseClient'
 
 function fmt(n) { return '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR') }
 
@@ -18,19 +18,22 @@ export default function Cheques() {
 
   async function guardar() {
     if (!form.numero || !form.monto || !form.clienteId) { setAlert({ type: 'error', msg: 'Completá número, cliente y monto' }); return }
-    const cliente = clientes.find(c => c.id === parseInt(form.clienteId))
+    const cliente = clientes.find(c => c.id === form.clienteId)
     const { error } = await supabase.from('cheques').insert({
       tipo, numero: form.numero, fecha_recepcion: form.fechaRec, fecha_pago: form.fechaPago || null,
-      banco: form.banco, cliente_id: parseInt(form.clienteId), cliente_nombre: cliente?.nombre,
+      banco: form.banco, cliente_id: form.clienteId, cliente_nombre: cliente?.nombre,
       monto: parseFloat(form.monto), destino: form.destino, proveedor_nombre: form.proveedor, notas: form.notas
     })
     if (error) { setAlert({ type: 'error', msg: error.message }); return }
     if (form.destino === 'ctacte') {
+      const { data: clienteActual } = await supabase.from('clientes').select('saldo').eq('id', form.clienteId).single()
+      const nuevoSaldo = (clienteActual?.saldo || 0) - parseFloat(form.monto)
       await supabase.from('movimientos_ctacte').insert({
-        fecha: form.fechaRec, cliente_id: parseInt(form.clienteId),
+        fecha: form.fechaRec, cliente_id: form.clienteId,
         tipo: 'cheque', descripcion: `${tipo === 'echeq' ? 'E-cheq' : 'Cheque'} Nro. ${form.numero}${form.banco ? ' — ' + form.banco : ''}`,
-        debe: 0, haber: parseFloat(form.monto), saldo: 0
+        debe: 0, haber: parseFloat(form.monto), saldo: nuevoSaldo
       })
+      await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', form.clienteId)
     }
     setAlert({ type: 'success', msg: `✅ ${tipo === 'echeq' ? 'E-cheq' : 'Cheque'} #${form.numero} registrado` })
     setForm(f => ({ ...f, numero: '', monto: '', notas: '', banco: '' }))
@@ -42,7 +45,12 @@ export default function Cheques() {
     <div>
       <div className="page-title">CHEQUES / E-CHEQ</div>
       <div className="page-sub">Registro de cheques recibidos y su destino</div>
-      {alert && <div className={`alert alert-${alert.type}`}>{alert.msg}</div>}
+
+      {alert && (
+        <div style={{ background: alert.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${alert.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: alert.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>
+          {alert.msg}
+        </div>
+      )}
 
       <div className="grid2">
         <div className="card">
@@ -56,11 +64,17 @@ export default function Cheques() {
             ))}
           </div>
           <div className="form-row">
-            <div className="form-group"><label>Número de serie</label><input value={form.numero} onChange={e => setForm(f => ({ ...f, numero: e.target.value }))} placeholder="00012345" /></div>
-            <div className="form-group"><label>Fecha recepción</label><input type="date" value={form.fechaRec} onChange={e => setForm(f => ({ ...f, fechaRec: e.target.value }))} /></div>
+            <div className="form-group"><label>Número de serie</label>
+              <input value={form.numero} onChange={e => setForm(f => ({ ...f, numero: e.target.value }))} placeholder="00012345" />
+            </div>
+            <div className="form-group"><label>Fecha recepción</label>
+              <input type="date" value={form.fechaRec} onChange={e => setForm(f => ({ ...f, fechaRec: e.target.value }))} />
+            </div>
           </div>
           <div className="form-row">
-            <div className="form-group"><label>Fecha de pago / vto.</label><input type="date" value={form.fechaPago} onChange={e => setForm(f => ({ ...f, fechaPago: e.target.value }))} /></div>
+            <div className="form-group"><label>Fecha de pago / vto.</label>
+              <input type="date" value={form.fechaPago} onChange={e => setForm(f => ({ ...f, fechaPago: e.target.value }))} />
+            </div>
             <div className="form-group"><label>Banco</label>
               <select value={form.banco} onChange={e => setForm(f => ({ ...f, banco: e.target.value }))}>
                 <option value="">— Seleccioná —</option>
@@ -74,7 +88,9 @@ export default function Cheques() {
               {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
             </select>
           </div>
-          <div className="form-group"><label>Monto ($)</label><input type="number" value={form.monto} onChange={e => setForm(f => ({ ...f, monto: e.target.value }))} /></div>
+          <div className="form-group"><label>Monto ($)</label>
+            <input type="number" value={form.monto} onChange={e => setForm(f => ({ ...f, monto: e.target.value }))} />
+          </div>
           <div className="form-group"><label>Destino</label>
             <select value={form.destino} onChange={e => setForm(f => ({ ...f, destino: e.target.value }))}>
               <option value="ctacte">💳 Imputar a cuenta corriente del cliente</option>
@@ -89,7 +105,9 @@ export default function Cheques() {
               </select>
             </div>
           )}
-          <div className="form-group"><label>Notas</label><input value={form.notas} onChange={e => setForm(f => ({ ...f, notas: e.target.value }))} /></div>
+          <div className="form-group"><label>Notas</label>
+            <input value={form.notas} onChange={e => setForm(f => ({ ...f, notas: e.target.value }))} />
+          </div>
           <button className="btn btn-gold" onClick={guardar}>✅ Registrar cheque</button>
         </div>
 

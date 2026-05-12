@@ -1,48 +1,127 @@
 // FranquiciaDashboard.jsx
 import { useEffect, useState } from 'react'
-import { supabase } from '../../lib/supabase'
+import { supabase } from '../../supabaseClient'
 import { useAuth } from '../../context/AuthContext'
 
 function fmt(n) { return '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR') }
 
-export function FranquiciaDashboard() {
+function useClienteFranquicia() {
   const { profile } = useAuth()
   const [cliente, setCliente] = useState(null)
-  const [movimientos, setMovimientos] = useState([])
-  const sucursalNombre = profile?.sucursales?.nombre || ''
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!sucursalNombre) return
-    supabase.from('clientes').select('*').ilike('nombre', `%${sucursalNombre}%`).single().then(({ data }) => {
-      setCliente(data)
-      if (data) supabase.from('movimientos_ctacte').select('*').eq('cliente_id', data.id).order('fecha', { ascending: false }).limit(5).then(({ data: movs }) => setMovimientos(movs || []))
-    })
-  }, [sucursalNombre])
+    if (!profile) return
+    buscarCliente()
+  }, [profile])
+
+  async function buscarCliente() {
+    setLoading(true)
+    const nombreBuscar = profile?.sucursales?.nombre || profile?.nombre || ''
+    const palabras = nombreBuscar.toUpperCase().split(/[\s-]+/)
+    let clienteEncontrado = null
+    for (const palabra of palabras) {
+      if (palabra.length < 4) continue
+      const { data } = await supabase.from('clientes').select('*').ilike('nombre', `%${palabra}%`).maybeSingle()
+      if (data) { clienteEncontrado = data; break }
+    }
+    setCliente(clienteEncontrado)
+    setLoading(false)
+  }
+
+  return { cliente, loading }
+}
+
+export function FranquiciaDashboard() {
+  const { profile } = useAuth()
+  const { cliente, loading } = useClienteFranquicia()
+  const [movimientos, setMovimientos] = useState([])
+  const [remitos, setRemitos] = useState([])
+  const [notifNueva, setNotifNueva] = useState(null)
+
+  useEffect(() => {
+    if (!cliente) return
+    cargarDatos()
+    const canal = supabase.channel('remitos-franquicia')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'remitos', filter: `cliente_id=eq.${cliente.id}` }, (payload) => {
+        setNotifNueva(payload.new)
+        setTimeout(() => setNotifNueva(null), 8000)
+        cargarDatos()
+      }).subscribe()
+    return () => supabase.removeChannel(canal)
+  }, [cliente])
+
+  async function cargarDatos() {
+    if (!cliente) return
+    const [{ data: movs }, { data: rems }] = await Promise.all([
+      supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id).order('fecha', { ascending: false }).limit(5),
+      supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false }).limit(3)
+    ])
+    setMovimientos(movs || [])
+    setRemitos(rems || [])
+  }
 
   const saldo = cliente?.saldo || 0
   const totCompras = movimientos.filter(m => m.debe > 0).reduce((s, m) => s + m.debe, 0)
   const totPagado = movimientos.filter(m => m.haber > 0).reduce((s, m) => s + m.haber, 0)
 
+  if (loading) return <div style={{ padding: 40, color: 'var(--muted)', textAlign: 'center' }}>Cargando...</div>
+
   return (
     <div>
+      {notifNueva && (
+        <div style={{ background: '#1a3a1a', border: '2px solid var(--green)', borderRadius: 12, padding: '14px 20px', marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--green)' }}>🧾 Nuevo remito recibido!</div>
+            <div style={{ fontSize: 13, color: 'var(--text2)', marginTop: 4 }}>
+              Remito N° {String(notifNueva.numero || '').padStart(5, '0')} — Total: <strong style={{ color: 'var(--gold)' }}>{fmt(notifNueva.total)}</strong>
+            </div>
+          </div>
+          <button onClick={() => setNotifNueva(null)} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 18 }}>✕</button>
+        </div>
+      )}
+
       <div style={{ background: 'linear-gradient(135deg,#1a1408,#0a0a08)', border: '1px solid var(--gold)', borderRadius: 16, padding: 24, marginBottom: 24 }}>
-        <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 30, color: 'var(--gold)', letterSpacing: 2 }}>{profile?.sucursales?.nombre || profile?.nombre}</div>
-        <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>{profile?.sucursales?.direccion}</div>
-        <span className="badge badge-gold" style={{ marginTop: 10, display: 'inline-block' }}>Franquicia Fabricius</span>
+        <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 30, color: 'var(--gold)', letterSpacing: 2 }}>🏪 {profile?.nombre || 'Franquicia'}</div>
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>Franquicia Carnicerías Fabricius</div>
+        <span style={{ display: 'inline-block', marginTop: 10, background: 'var(--gold)', color: '#000', borderRadius: 6, padding: '3px 12px', fontSize: 11, fontWeight: 700 }}>FRANQUICIADO</span>
       </div>
 
-      <div className="grid3" style={{ marginBottom: 24 }}>
-        <div style={{ background: saldo > 0 ? '#3a1a1a' : '#1a3a27', border: `1px solid ${saldo > 0 ? 'var(--red)' : 'var(--green)'}`, borderRadius: 12, padding: 20, textAlign: 'center' }}>
-          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8, letterSpacing: 2, textTransform: 'uppercase' }}>Saldo actual</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 24 }}>
+        <div style={{ background: saldo > 0 ? '#3a1a1a' : '#1a3a27', border: `2px solid ${saldo > 0 ? 'var(--red-light)' : 'var(--green)'}`, borderRadius: 12, padding: 20, textAlign: 'center' }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8, letterSpacing: 2 }}>SALDO ACTUAL</div>
           <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 40, color: saldo > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(saldo)}</div>
-          <div style={{ fontSize: 12, color: saldo > 0 ? 'var(--red-light)' : 'var(--green)', marginTop: 4 }}>{saldo > 0 ? '⚠️ Saldo adeudado' : '✅ Al día'}</div>
+          <div style={{ fontSize: 12, marginTop: 4, color: saldo > 0 ? 'var(--red-light)' : 'var(--green)' }}>{saldo > 0 ? '⚠️ Saldo adeudado' : '✅ Al día'}</div>
         </div>
         <div className="stat"><div className="stat-label">Total compras</div><div className="stat-value" style={{ color: 'var(--amber)' }}>{fmt(totCompras)}</div></div>
         <div className="stat"><div className="stat-label">Total pagado</div><div className="stat-value" style={{ color: 'var(--green)' }}>{fmt(totPagado)}</div></div>
       </div>
 
+      {remitos.length > 0 && (
+        <div className="card" style={{ marginBottom: 16, borderColor: 'var(--gold)' }}>
+          <div className="card-title">🧾 Últimos remitos recibidos</div>
+          {remitos.map(r => (
+            <div key={r.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>N° {String(r.numero).padStart(5, '0')}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>{r.fecha}</div>
+                </div>
+                <span style={{ color: 'var(--gold)', fontWeight: 700 }}>{fmt(r.total)}</span>
+              </div>
+              {(r.items || []).map((item, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--muted)', padding: '2px 8px' }}>
+                  <span>• {item.descripcion} — {item.kg} kg</span>
+                  <span style={{ color: 'var(--text2)' }}>{fmt(item.importe)}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="card">
-        <div className="card-title">Últimos movimientos</div>
+        <div className="card-title">📒 Últimos movimientos</div>
         <table>
           <thead><tr><th>Fecha</th><th>Tipo</th><th>Descripción</th><th>Debe</th><th>Haber</th><th>Saldo</th></tr></thead>
           <tbody>
@@ -65,40 +144,33 @@ export function FranquiciaDashboard() {
 }
 
 export function FranquiciaCtaCte() {
-  const { profile } = useAuth()
-  const [cliente, setCliente] = useState(null)
+  const { cliente } = useClienteFranquicia()
   const [movimientos, setMovimientos] = useState([])
-  const sucursalNombre = profile?.sucursales?.nombre || ''
 
   useEffect(() => {
-    if (!sucursalNombre) return
-    supabase.from('clientes').select('*').ilike('nombre', `%${sucursalNombre}%`).single().then(({ data }) => {
-      setCliente(data)
-      if (data) supabase.from('movimientos_ctacte').select('*').eq('cliente_id', data.id).order('fecha', { ascending: false }).then(({ data: movs }) => setMovimientos(movs || []))
-    })
-  }, [sucursalNombre])
+    if (!cliente) return
+    supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id).order('fecha', { ascending: false }).then(({ data }) => setMovimientos(data || []))
+    const canal = supabase.channel('ctacte-franquicia')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'movimientos_ctacte', filter: `cliente_id=eq.${cliente.id}` }, () => {
+        supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id).order('fecha', { ascending: false }).then(({ data }) => setMovimientos(data || []))
+      }).subscribe()
+    return () => supabase.removeChannel(canal)
+  }, [cliente])
 
   const saldo = cliente?.saldo || 0
+
   return (
     <div>
       <div className="page-title">MI CUENTA CORRIENTE</div>
       <div className="page-sub">Historial completo de compras y pagos</div>
-      <div className="grid2" style={{ marginBottom: 20 }}>
-        <div style={{ background: saldo > 0 ? '#3a1a1a' : '#1a3a27', border: `1px solid ${saldo > 0 ? 'var(--red)' : 'var(--green)'}`, borderRadius: 12, padding: 20, textAlign: 'center' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 20 }}>
+        <div style={{ background: saldo > 0 ? '#3a1a1a' : '#1a3a27', border: `2px solid ${saldo > 0 ? 'var(--red-light)' : 'var(--green)'}`, borderRadius: 12, padding: 20, textAlign: 'center' }}>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>SALDO ACTUAL</div>
           <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 48, color: saldo > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(saldo)}</div>
           <div style={{ fontSize: 12, color: saldo > 0 ? 'var(--red-light)' : 'var(--green)' }}>{saldo > 0 ? '⚠️ Saldo adeudado a Fabricius' : '✅ Al día'}</div>
         </div>
-        <div>
-          <div className="stat" style={{ marginBottom: 12 }}>
-            <div className="stat-label">Total compras</div>
-            <div className="stat-value" style={{ color: 'var(--amber)' }}>{fmt(movimientos.filter(m => m.debe > 0).reduce((s, m) => s + m.debe, 0))}</div>
-          </div>
-          <div className="stat">
-            <div className="stat-label">Total pagado</div>
-            <div className="stat-value" style={{ color: 'var(--green)' }}>{fmt(movimientos.filter(m => m.haber > 0).reduce((s, m) => s + m.haber, 0))}</div>
-          </div>
-        </div>
+        <div className="stat"><div className="stat-label">Total compras</div><div className="stat-value" style={{ color: 'var(--amber)' }}>{fmt(movimientos.filter(m => m.debe > 0).reduce((s, m) => s + m.debe, 0))}</div></div>
+        <div className="stat"><div className="stat-label">Total pagado</div><div className="stat-value" style={{ color: 'var(--green)' }}>{fmt(movimientos.filter(m => m.haber > 0).reduce((s, m) => s + m.haber, 0))}</div></div>
       </div>
       <div className="card">
         <div className="card-title">Historial completo</div>
@@ -124,78 +196,150 @@ export function FranquiciaCtaCte() {
 }
 
 export function FranquiciaRemitos() {
-  const { profile } = useAuth()
+  const { cliente } = useClienteFranquicia()
   const [remitos, setRemitos] = useState([])
-  const sucursalNombre = profile?.sucursales?.nombre || ''
+  const [remitoAbierto, setRemitoAbierto] = useState(null)
 
   useEffect(() => {
-    if (!sucursalNombre) return
-    supabase.from('salidas_deposito').select('*').ilike('cliente_nombre', `%${sucursalNombre}%`).order('fecha', { ascending: false }).then(({ data }) => setRemitos(data || []))
-  }, [sucursalNombre])
+    if (!cliente) return
+    supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false }).then(({ data }) => setRemitos(data || []))
+    const canal = supabase.channel('remitos-lista')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'remitos', filter: `cliente_id=eq.${cliente.id}` }, () => {
+        supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false }).then(({ data }) => setRemitos(data || []))
+      }).subscribe()
+    return () => supabase.removeChannel(canal)
+  }, [cliente])
+
+  function imprimir(remito) {
+    const items = remito.items || []
+    const win = window.open('', '_blank')
+    win.document.write(`
+      <html><head><title>Remito N° ${remito.numero}</title>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; font-size: 12px; padding: 20px; max-width: 400px; margin: 0 auto; }
+        .header { display: flex; justify-content: space-between; margin-bottom: 16px; border-bottom: 2px solid #000; padding-bottom: 12px; }
+        .logo-title { font-size: 22px; font-weight: 900; letter-spacing: 2px; }
+        .doc-no-valido { font-size: 10px; font-weight: 700; border: 1px solid #000; padding: 2px 6px; margin-bottom: 4px; text-align:center; }
+        .remito-title { font-size: 24px; font-weight: 900; font-style: italic; }
+        .campo { border-bottom: 1px solid #000; margin-bottom: 8px; padding-bottom: 2px; }
+        .campo label { font-size: 10px; font-weight: 700; margin-right: 6px; }
+        table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+        th { border: 1px solid #000; padding: 4px; text-align: center; font-size: 10px; font-weight: 700; background: #f0f0f0; }
+        td { border: 1px solid #000; padding: 4px; text-align: center; font-size: 11px; }
+        td.desc { text-align: left; }
+        .total-box { border: 1px solid #000; padding: 6px 12px; font-size: 13px; font-weight: 700; }
+        .firma { margin-top: 40px; border-top: 1px solid #000; padding-top: 4px; text-align: center; font-size: 10px; }
+        @media print { body { padding: 10px; } }
+      </style></head>
+      <body>
+        <div class="header">
+          <div>
+            <div class="logo-title">FABRICIUS</div>
+            <div style="font-size:9px;color:#555">CARNICERÍAS · PREMIUM QUALITY</div>
+            <div style="font-size:10px;color:#444;margin-top:4px">📍 Casa Central: Av. Mitre 670 - Río Primero, Córdoba</div>
+            <div style="font-size:11px;font-weight:700;background:#000;color:#fff;padding:3px 8px;display:inline-block;border-radius:4px;margin-top:4px">📱 3574 400346</div>
+          </div>
+          <div style="text-align:right">
+            <div class="doc-no-valido">X — DOCUMENTO NO VÁLIDO COMO FACTURA</div>
+            <div class="remito-title">REMITO</div>
+            <div style="font-size:13px;font-weight:700">N° ${String(remito.numero).padStart(5, '0')}</div>
+          </div>
+        </div>
+        <div style="font-size:11px;margin-bottom:8px">Fecha: <strong>${remito.fecha}</strong></div>
+        <div class="campo"><label>Señor/a:</label>${remito.cliente_nombre || ''}</div>
+        <div class="campo"><label>Domicilio:</label>${remito.domicilio || ''}</div>
+        <table>
+          <thead><tr>
+            <th style="width:40%">DESCRIPCIÓN</th>
+            <th style="width:15%">KG</th>
+            <th style="width:22%">PRECIO UNITARIO</th>
+            <th style="width:23%">IMPORTE</th>
+          </tr></thead>
+          <tbody>
+            ${items.map(item => `<tr>
+              <td class="desc">${item.descripcion}</td>
+              <td>${item.kg}</td>
+              <td>$${Math.round(item.precio).toLocaleString('es-AR')}</td>
+              <td>$${Math.round(item.importe).toLocaleString('es-AR')}</td>
+            </tr>`).join('')}
+            ${Array(Math.max(0, 10 - items.length)).fill('<tr><td>&nbsp;</td><td></td><td></td><td></td></tr>').join('')}
+          </tbody>
+        </table>
+        <div style="display:flex;justify-content:flex-end;margin-top:8px">
+          <div class="total-box">TOTAL: $${Math.round(remito.total).toLocaleString('es-AR')}</div>
+        </div>
+        <div class="firma">Firma y aclaración: ________________________________</div>
+        <script>window.onload = () => { window.print(); }</script>
+      </body></html>
+    `)
+    win.document.close()
+  }
 
   return (
     <div>
       <div className="page-title">MIS REMITOS</div>
       <div className="page-sub">Despachos recibidos desde el depósito Fabricius</div>
+
       <div className="card">
         <table>
-          <thead><tr><th>Fecha</th><th>Producto</th><th>Descripción</th><th>Kg</th><th>Precio/kg</th><th>Total</th></tr></thead>
+          <thead><tr><th>N° Remito</th><th>Fecha</th><th>Total</th><th>Detalle</th><th>Imprimir</th></tr></thead>
           <tbody>
             {remitos.map(r => (
-              <tr key={r.id}>
-                <td>{r.fecha}</td>
-                <td><span className="badge badge-gold">{r.tipo}</span></td>
-                <td>{r.descripcion}</td>
-                <td>{r.kg} kg</td>
-                <td style={{ color: 'var(--amber)' }}>${Math.round(r.precio_kg || 0).toLocaleString('es-AR')}</td>
-                <td style={{ color: 'var(--gold)', fontWeight: 700 }}>${Math.round(r.total || 0).toLocaleString('es-AR')}</td>
-              </tr>
+              <>
+                <tr key={r.id}>
+                  <td><strong>N° {String(r.numero).padStart(5, '0')}</strong></td>
+                  <td>{r.fecha}</td>
+                  <td style={{ color: 'var(--gold)', fontWeight: 700 }}>${Math.round(r.total || 0).toLocaleString('es-AR')}</td>
+                  <td>
+                    <button onClick={() => setRemitoAbierto(remitoAbierto === r.id ? null : r.id)}
+                      style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12, color: 'var(--text)' }}>
+                      {remitoAbierto === r.id ? '▲ Ocultar' : '▼ Ver detalle'}
+                    </button>
+                  </td>
+                  <td>
+                    <button onClick={() => imprimir(r)} style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>🖨️</button>
+                  </td>
+                </tr>
+                {remitoAbierto === r.id && (
+                  <tr key={r.id + '-detalle'}>
+                    <td colSpan={5} style={{ padding: 0 }}>
+                      <div style={{ background: 'var(--surface2)', padding: '12px 16px' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                          <thead>
+                            <tr>
+                              <th style={{ textAlign: 'left', padding: '4px 8px', fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>Producto</th>
+                              <th style={{ textAlign: 'center', padding: '4px 8px', fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>Kg</th>
+                              <th style={{ textAlign: 'center', padding: '4px 8px', fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>Precio/kg</th>
+                              <th style={{ textAlign: 'right', padding: '4px 8px', fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>Importe</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(r.items || []).map((item, i) => (
+                              <tr key={i}>
+                                <td style={{ padding: '6px 8px', fontSize: 13, fontWeight: 500 }}>{item.descripcion}</td>
+                                <td style={{ padding: '6px 8px', fontSize: 13, textAlign: 'center' }}>{item.kg} kg</td>
+                                <td style={{ padding: '6px 8px', fontSize: 13, textAlign: 'center', color: 'var(--muted)' }}>${Math.round(item.precio).toLocaleString('es-AR')}</td>
+                                <td style={{ padding: '6px 8px', fontSize: 13, textAlign: 'right', color: 'var(--gold)', fontWeight: 700 }}>${Math.round(item.importe).toLocaleString('es-AR')}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot>
+                            <tr style={{ borderTop: '1px solid var(--border)' }}>
+                              <td colSpan={3} style={{ padding: '8px', fontSize: 13, fontWeight: 700, textAlign: 'right' }}>TOTAL</td>
+                              <td style={{ padding: '8px', fontSize: 14, fontWeight: 700, textAlign: 'right', color: 'var(--gold)', fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>${Math.round(r.total).toLocaleString('es-AR')}</td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </>
             ))}
-            {remitos.length === 0 && <tr><td colSpan={6} className="empty">Sin remitos registrados aún</td></tr>}
+            {remitos.length === 0 && <tr><td colSpan={5} className="empty">Sin remitos registrados aún</td></tr>}
           </tbody>
         </table>
-      </div>
-    </div>
-  )
-}
-
-export function FranquiciaPrecios() {
-  const precios = [
-    { nombre: 'Media Res Premium (Novillito/Vaquillona)', precio: 10300 },
-    { nombre: 'Cuadril / Nalga / Peceto', precio: 17955 },
-    { nombre: 'Vacío', precio: 16150 },
-    { nombre: 'Costilla', precio: 16625 },
-    { nombre: 'Matambre', precio: 17100 },
-    { nombre: 'Tapa de Asado', precio: 16150 },
-    { nombre: 'Tapa de Nalga', precio: 14630 },
-    { nombre: 'Aguja Especial', precio: 13245 },
-    { nombre: 'Hamburguesa Bovina', precio: 14535 },
-    { nombre: 'Osobuco', precio: 8550 },
-    { nombre: 'Bondiola Cerdo', precio: 7500 },
-    { nombre: 'Chorizo Parrillero', precio: 7300 },
-    { nombre: 'Morcilla', precio: 5500 },
-    { nombre: 'Cajón Pollo INDA x 20kg', precio: 76000 },
-  ]
-  return (
-    <div>
-      <div className="page-title">LISTA DE PRECIOS</div>
-      <div className="page-sub">Precios vigentes — Lista Carnicería Fabricius</div>
-      <div className="card" style={{ borderColor: 'var(--gold)' }}>
-        <div className="card-title">🔴 Precios Carnicería — vigentes</div>
-        <table>
-          <thead><tr><th>Producto</th><th>Precio/kg</th></tr></thead>
-          <tbody>
-            {precios.map((p, i) => (
-              <tr key={i}>
-                <td style={{ fontWeight: 500 }}>{p.nombre}</td>
-                <td style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 20, color: 'var(--gold)' }}>${Math.round(p.precio).toLocaleString('es-AR')}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 16, padding: '10px 0', borderTop: '1px solid var(--border)' }}>
-          Precios actualizados por la administración central de Carnicerias Fabricius. Ante cualquier consulta contactar a Fabricio o Ariel.
-        </div>
       </div>
     </div>
   )
