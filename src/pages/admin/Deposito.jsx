@@ -419,7 +419,6 @@ function DesposteTab({ onSaved }) {
 }
 
 
-function EntradaForm
 function EntradaForm({ onSaved, showAlert, proveedores }) {
   const [form, setForm] = useState({ tipo: '', proveedor: '', descripcion: '', fecha: new Date().toISOString().split('T')[0], kg: '', precioKg: '9800', merma: '', destino: 'DEPOSITO', importe: '' })
 
