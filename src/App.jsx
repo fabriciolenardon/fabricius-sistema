@@ -26,13 +26,8 @@ function ProtectedRoute({ children, requiredRole }) {
 
 function LoadingScreen() {
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      minHeight: '100vh', background: 'var(--bg)', flexDirection: 'column', gap: 16
-    }}>
-      <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 32, color: 'var(--gold)', letterSpacing: 3 }}>
-        CARNICERIAS FABRICIUS
-      </div>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: 'var(--bg)', flexDirection: 'column', gap: 16 }}>
+      <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 32, color: 'var(--gold)', letterSpacing: 3 }}>CARNICERIAS FABRICIUS</div>
       <div style={{ color: 'var(--muted)', fontSize: 13 }}>Cargando sistema...</div>
     </div>
   )
@@ -51,13 +46,7 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/" element={<RootRedirect />} />
-
-      {/* ADMIN ROUTES */}
-      <Route path="/admin" element={
-        <ProtectedRoute requiredRole="admin">
-          <AdminLayout />
-        </ProtectedRoute>
-      }>
+      <Route path="/admin" element={<ProtectedRoute requiredRole="admin"><AdminLayout /></ProtectedRoute>}>
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="deposito" element={<Deposito />} />
         <Route path="precios" element={<Precios />} />
@@ -67,13 +56,7 @@ export default function App() {
         <Route path="gastos" element={<Gastos />} />
         <Route path="cierre" element={<Cierre />} />
       </Route>
-
-      {/* FRANQUICIA ROUTES */}
-      <Route path="/franquicia" element={
-        <ProtectedRoute requiredRole="franquicia">
-          <FranquiciaLayout />
-        </ProtectedRoute>
-      }>
+      <Route path="/franquicia" element={<ProtectedRoute requiredRole="franquicia"><FranquiciaLayout /></ProtectedRoute>}>
         <Route path="dashboard" element={<FranquiciaDashboard />} />
         <Route path="ctacte" element={<FranquiciaCtaCte />} />
         <Route path="remitos" element={<FranquiciaRemitos />} />
