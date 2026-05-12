@@ -581,12 +581,11 @@ export default function Precios() {
         </div>
       )}
 
-      {tab === 'plu' && (
-        <PLUTab precios={precios} />
-      )}
-    </div>
+     {tab === 'plu' && (
+  <PLUTab precios={precios} ofertas={ofertas} />
+)}    </div>
   )
-function PLUTab({ precios }) {
+function PLUTab({ precios, ofertas = [] }) {
   const [plus, setPlus] = useState([])
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState('')
@@ -630,16 +629,25 @@ function PLUTab({ precios }) {
   }
 
   function exportarCSV() {
-    const header = 'Codigo,Nombre,Precio\n'
-    const rows = plus.map(p => `${p.codigo},"${p.nombre}",${p.precio}`).join('\n')
-    const blob = new Blob([header + rows], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'PLU_Fabricius.csv'
-    a.click()
-  }
-
+  const hoy = new Date().toISOString().split('T')[0]
+  const header = 'Codigo,Nombre,Precio\n'
+  const rows = plus.map(p => {
+    const ofertaVigente = ofertas?.find(o => 
+      o.precio_id === p.precio_id && 
+      o.activa && 
+      o.fecha_inicio <= hoy && 
+      o.fecha_fin >= hoy
+    )
+    const precioFinal = ofertaVigente ? ofertaVigente.precio_oferta : p.precio
+    return `${p.codigo},"${p.nombre}",${precioFinal}`
+  }).join('\n')
+  const blob = new Blob([header + rows], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'PLU_Fabricius.csv'
+  a.click()
+}
   function editarPrecio(idx, valor) {
     setPlus(prev => prev.map((p, i) => i === idx ? { ...p, precio: parseFloat(valor) || 0 } : p))
   }
