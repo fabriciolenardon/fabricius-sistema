@@ -31,6 +31,24 @@ export function Clientes() {
     const { data: rems } = await supabase.from('remitos').select('*').eq('cliente_nombre', cliente.nombre).order('created_at', { ascending: false }).limit(20)
     setRemitos(rems || [])
   }
+async function anularRemitoCliente(remito) {
+  if (!confirm(`¿Anular Remito N° ${String(remito.numero).padStart(5,'0')} por $${Math.round(remito.total).toLocaleString('es-AR')}?`)) return
+  const { data: { user } } = await supabase.auth.getUser()
+  const { data: perfil } = await supabase.from('profiles').select('nombre').eq('id', user.id).single()
+  const eliminadoPor = perfil?.nombre || user.email
+  await supabase.from('remitos').update({
+    eliminado: true,
+    eliminado_por: eliminadoPor,
+    eliminado_en: new Date().toISOString()
+  }).eq('id', remito.id)
+  const nuevoSaldo = (seleccionado.saldo || 0) - remito.total
+  await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', seleccionado.id)
+  await supabase.from('movimientos_ctacte').delete().eq('remito_id', remito.id)
+  setSeleccionado(prev => ({ ...prev, saldo: nuevoSaldo }))
+  setClientes(prev => prev.map(c => c.id === seleccionado.id ? { ...c, saldo: nuevoSaldo } : c))
+  const { data: rems } = await supabase.from('remitos').select('*').eq('cliente_id', seleccionado.id).order('created_at', { ascending: false }).limit(20)
+  setRemitos(rems || [])
+}
 async function eliminarMovimiento(mov) {
   if (!confirm(`¿Eliminar este movimiento de ${fmt(mov.debe || mov.haber)}?`)) return
   await supabase.from('movimientos_ctacte').delete().eq('id', mov.id)
@@ -340,18 +358,21 @@ async function eliminarMovimiento(mov) {
               <div className="card-title">🧾 Remitos</div>
               <table>
                 <thead><tr><th>N° Remito</th><th>Fecha</th><th>Total</th><th>Imprimir</th></tr></thead>
-                <tbody>
-                  {remitos.map(r => (
-                    <tr key={r.id}>
-                      <td><strong>N° {String(r.numero).padStart(5, '0')}</strong></td>
-                      <td>{r.fecha}</td>
-                      <td style={{ color: 'var(--gold)' }}>${Math.round(r.total).toLocaleString('es-AR')}</td>
-                      <td><button onClick={() => imprimirRemito(r)} style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>🖨️</button></td>
-                    </tr>
-                  ))}
-                  {remitos.length === 0 && <tr><td colSpan={4} className="empty">Sin remitos</td></tr>}
-                </tbody>
-              </table>
+                 <tbody>
+  {remitos.map(r => (
+    <tr key={r.id} style={{ background: r.eliminado ? 'rgba(255,50,50,0.08)' : 'transparent' }}>
+      <td><strong>N° {String(r.numero).padStart(5, '0')}</strong></td>
+      <td>{r.fecha}</td>
+      <td style={{ color: 'var(--gold)' }}>${Math.round(r.total).toLocaleString('es-AR')}</td>
+      <td><button onClick={() => imprimirRemito(r)} style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>🖨️</button></td>
+      <td>
+        {!r.eliminado && <button onClick={() => anularRemitoCliente(r)} style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 12, color: '#ff6b6b' }}>🗑️</button>}
+        {r.eliminado && <span style={{ background: '#3a1a1a', color: '#ff6b6b', borderRadius: 4, padding: '2px 8px', fontSize: 10, fontWeight: 700 }}>❌ ANULADO por {r.eliminado_por}</span>}
+      </td>
+    </tr>
+  ))}
+  {remitos.length === 0 && <tr><td colSpan={5} className="empty">Sin remitos</td></tr>}
+</tbody>             </table>
             </div>
 
             <div className="card">
