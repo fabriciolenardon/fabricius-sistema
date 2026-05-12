@@ -692,3 +692,4 @@ function PLUTab({ precios }) {
     </div>
   )
 }
+}
