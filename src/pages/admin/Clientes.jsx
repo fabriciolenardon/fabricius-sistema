@@ -2,7 +2,7 @@
 // CLIENTES & CUENTA CORRIENTE
 // =============================================
 import { useEffect, useState } from 'react'
-import { supabase } from '../../supabaseClient'
+import { supabase } from '../../lib/supabase'
 
 export function Clientes() {
   const [clientes, setClientes] = useState([])
