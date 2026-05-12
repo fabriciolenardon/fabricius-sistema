@@ -31,7 +31,15 @@ export function Clientes() {
     const { data: rems } = await supabase.from('remitos').select('*').eq('cliente_nombre', cliente.nombre).order('created_at', { ascending: false }).limit(20)
     setRemitos(rems || [])
   }
-
+async function eliminarMovimiento(mov) {
+  if (!confirm(`¿Eliminar este movimiento de ${fmt(mov.debe || mov.haber)}?`)) return
+  await supabase.from('movimientos_ctacte').delete().eq('id', mov.id)
+  const ajuste = mov.tipo === 'compra' ? -mov.debe : mov.haber
+  const nuevoSaldo = (seleccionado.saldo || 0) - ajuste
+  await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', seleccionado.id)
+  const { data: movs } = await supabase.from('movimientos_ctacte').select('*').eq('cliente_id', seleccionado.id).order('fecha', { ascending: false })
+  setMovimientos(movs || [])
+}
   function abrirFormNuevo() {
     setEditandoId(null)
     setForm({ nombre: '', nombre_fantasia: '', tipo: 'carniceria', telefono: '', localidad: '', domicilio: '', cuit: '', lista_precios: 'carn', notas: '' })
@@ -339,7 +347,7 @@ export function Clientes() {
             <div className="card">
               <div className="card-title">📒 Cuenta Corriente</div>
               <table>
-                <thead><tr><th>Fecha</th><th>Tipo</th><th>Descripción</th><th>Debe</th><th>Haber</th><th>Saldo</th></tr></thead>
+               <thead><tr><th>Fecha</th><th>Tipo</th><th>Descripción</th><th>Debe</th><th>Haber</th><th>Saldo</th><th></th></tr></thead>
                 <tbody>
                   {movimientos.map(m => (
                     <tr key={m.id}>
@@ -348,7 +356,10 @@ export function Clientes() {
                       <td>{m.descripcion}</td>
                       <td style={{ color: 'var(--red-light)' }}>{m.debe > 0 ? fmt(m.debe) : '—'}</td>
                       <td style={{ color: 'var(--green)' }}>{m.haber > 0 ? fmt(m.haber) : '—'}</td>
-                      <td style={{ fontWeight: 600, color: m.saldo > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(m.saldo)}</td>
+                     <td style={{ fontWeight: 600, color: m.saldo > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(m.saldo)}</td>
+<td>
+  <button onClick={() => eliminarMovimiento(m)} style={{ background: 'none', border: 'none', color: 'var(--red-light)', cursor: 'pointer', fontSize: 16 }}>🗑️</button>
+</td>
                     </tr>
                   ))}
                   {movimientos.length === 0 && <tr><td colSpan={6} className="empty">Sin movimientos</td></tr>}
