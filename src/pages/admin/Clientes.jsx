@@ -354,48 +354,25 @@ async function eliminarMovimiento(mov) {
             </div>
 
             <div className="card" style={{ marginBottom: 16 }}>
-              <div className="card-title">🧾 Remitos</div>
-              <table>
-                <thead><tr><th>N° Remito</th><th>Fecha</th><th>Total</th><th>Imprimir</th></tr></thead>
-                 <tbody>
-  {remitos.map(r => (
-    <tr key={r.id} style={{ background: r.eliminado ? 'rgba(255,50,50,0.08)' : 'transparent' }}>
-      <td><strong>N° {String(r.numero).padStart(5, '0')}</strong></td>
-      <td>{r.fecha}</td>
-      <td style={{ color: 'var(--gold)' }}>${Math.round(r.total).toLocaleString('es-AR')}</td>
-      <td><button onClick={() => imprimirRemito(r)} style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>🖨️</button></td>
-      <td>
-        {!r.eliminado && <button onClick={() => anularRemitoCliente(r)} style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 12, color: '#ff6b6b' }}>🗑️</button>}
-        {r.eliminado && <span style={{ background: '#3a1a1a', color: '#ff6b6b', borderRadius: 4, padding: '2px 8px', fontSize: 10, fontWeight: 700 }}>❌ ANULADO por {r.eliminado_por}</span>}
-      </td>
-    </tr>
-  ))}
-  {remitos.length === 0 && <tr><td colSpan={5} className="empty">Sin remitos</td></tr>}
-</tbody>             </table>
-            </div>
-
-            <div className="card">
-              <div className="card-title">📒 Cuenta Corriente</div>
-              <table>
-               <thead><tr><th>Fecha</th><th>Tipo</th><th>Descripción</th><th>Debe</th><th>Haber</th><th>Saldo</th><th></th></tr></thead>
-                <tbody>
-                  {movimientos.map(m => (
-                    <tr key={m.id}>
-                      <td>{m.fecha}</td>
-                      <td><span className={`badge ${m.tipo === 'compra' ? 'badge-red' : 'badge-green'}`}>{m.tipo}</span></td>
-                      <td>{m.descripcion}</td>
-                      <td style={{ color: 'var(--red-light)' }}>{m.debe > 0 ? fmt(m.debe) : '—'}</td>
-                      <td style={{ color: 'var(--green)' }}>{m.haber > 0 ? fmt(m.haber) : '—'}</td>
-                     <td style={{ fontWeight: 600, color: m.saldo > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(m.saldo)}</td>
-<td>
-  <button onClick={() => eliminarMovimiento(m)} style={{ background: 'none', border: 'none', color: 'var(--red-light)', cursor: 'pointer', fontSize: 16 }}>🗑️</button>
-</td>
-                    </tr>
-                  ))}
-                  {movimientos.length === 0 && <tr><td colSpan={6} className="empty">Sin movimientos</td></tr>}
-                </tbody>
-              </table>
-            </div>
+  <div className="card-title">🧾 Remitos</div>
+  <table>
+    <thead><tr><th>N° Remito</th><th>Fecha</th><th>Total</th><th>Imprimir</th></tr></thead>
+    <tbody>
+      {remitos.map(r => (
+        <tr key={r.id} style={{ background: r.eliminado ? 'rgba(255,50,50,0.08)' : 'transparent', opacity: r.eliminado ? 0.8 : 1 }}>
+          <td>
+            <strong>N° {String(r.numero).padStart(5, '0')}</strong>
+            {r.eliminado && <span style={{ marginLeft: 8, background: '#3a1a1a', color: '#ff6b6b', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700 }}>❌ ANULADO por {r.eliminado_por}</span>}
+          </td>
+          <td>{r.fecha}</td>
+          <td style={{ color: r.eliminado ? 'var(--muted)' : 'var(--gold)', textDecoration: r.eliminado ? 'line-through' : 'none' }}>${Math.round(r.total).toLocaleString('es-AR')}</td>
+          <td>{!r.eliminado && <button onClick={() => imprimirRemito(r)} style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>🖨️</button>}</td>
+        </tr>
+      ))}
+      {remitos.length === 0 && <tr><td colSpan={4} className="empty">Sin remitos</td></tr>}
+    </tbody>
+  </table>
+</div>
           </div>
         )}
       </div>
