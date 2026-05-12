@@ -262,4 +262,3 @@ export default function Franquicias() {
     </div>
   )
 }
-export default Franquicias
