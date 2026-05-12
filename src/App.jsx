@@ -1,3 +1,4 @@
+import Franquicias from './pages/admin/Franquicias'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
 import LoginPage from './pages/LoginPage'
@@ -55,6 +56,7 @@ export default function App() {
         <Route path="sueldos" element={<Sueldos />} />
         <Route path="gastos" element={<Gastos />} />
         <Route path="cierre" element={<Cierre />} />
+<Route path="franquicias" element={<Franquicias />} />
       </Route>
       <Route path="/franquicia" element={<ProtectedRoute requiredRole="franquicia"><FranquiciaLayout /></ProtectedRoute>}>
         <Route path="dashboard" element={<FranquiciaDashboard />} />
