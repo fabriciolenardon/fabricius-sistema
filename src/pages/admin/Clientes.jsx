@@ -34,8 +34,16 @@ export function Clientes() {
 async function eliminarMovimiento(mov) {
   if (!confirm(`¿Eliminar este movimiento de ${fmt(mov.debe || mov.haber)}?`)) return
   await supabase.from('movimientos_ctacte').delete().eq('id', mov.id)
-  const ajuste = mov.tipo === 'compra' ? -mov.debe : mov.haber
-  const nuevoSaldo = (seleccionado.saldo || 0) - ajuste
+  
+  let nuevoSaldo
+  if (mov.tipo === 'compra') {
+    // Era una venta — al eliminarla el cliente debe menos
+    nuevoSaldo = (seleccionado.saldo || 0) - mov.debe
+  } else {
+    // Era un pago — al eliminarlo el cliente debe más
+    nuevoSaldo = (seleccionado.saldo || 0) + mov.haber
+  }
+  
   await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', seleccionado.id)
   const { data: movs } = await supabase.from('movimientos_ctacte').select('*').eq('cliente_id', seleccionado.id).order('fecha', { ascending: false })
   setMovimientos(movs || [])
