@@ -106,7 +106,18 @@ function DesposteTab({ onSaved }) {
     ;(stockData || []).forEach(r => stockMap[r.tipo] = r.kg_disponible)
     setPiezasStock(stockMap)
   }
-
+async function eliminarRemito(remito) {
+  if (!confirm(`¿Eliminar Remito N° ${String(remito.numero).padStart(5,'0')} de ${remito.cliente_nombre} por $${Math.round(remito.total).toLocaleString('es-AR')}?`)) return
+  await supabase.from('remitos').delete().eq('id', remito.id)
+  if (remito.cliente_id) {
+    const { data: clienteActual } = await supabase.from('clientes').select('saldo').eq('id', remito.cliente_id).single()
+    const nuevoSaldo = (clienteActual?.saldo || 0) - remito.total
+    await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', remito.cliente_id)
+    await supabase.from('movimientos_ctacte').delete().eq('remito_id', remito.id)
+  }
+  showAlert('🗑️ Remito eliminado y saldo corregido', 'success')
+  cargarRemitos()
+}
   function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(() => setAlert(null), 5000) }
 
   function buscarPrecio(busqueda) {
@@ -1176,6 +1187,7 @@ function RemitosTab({ remitoActual }) {
                   <div style={{ display: 'flex', gap: 6 }}>
                     <button onClick={() => imprimir(r)} style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>🖨️</button>
                     <button onClick={() => abrirEdicion(r)} style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 12, color: 'var(--amber)' }}>✏️</button>
+<button onClick={() => eliminarRemito(r)} style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 12, color: '#ff6b6b' }}>🗑️</button>
                   </div>
                 </td>
               </tr>
