@@ -523,14 +523,30 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     setTimeout(() => showAlert(null), 3000)
   }
 
-  async function eliminar(entrada) {
-    if (!confirm(`¿Eliminar esta entrada de ${entrada.kg} kg de ${entrada.proveedor_nombre}?`)) return
-    await supabase.from('entradas_deposito').delete().eq('id', entrada.id)
-    await actualizarStock(entrada.tipo, -(entrada.kg_real || entrada.kg))
-    showAlert({ type: 'success', msg: '🗑️ Entrada eliminada — Stock actualizado' })
-    cargarHistorial()
-    onSaved()
+async function eliminar(entrada) {
+  if (!confirm(`¿Eliminar esta entrada de ${entrada.kg} kg de ${entrada.proveedor_nombre}?`)) return
+  
+  if (entrada.despostada && entrada.desposte_id) {
+    const { data: desposte } = await supabase.from('despostes').select('*').eq('id', entrada.desposte_id).single()
+    if (desposte) {
+      if (desposte.tipo_desposte === 'piezas') {
+        const kgPiezas = (desposte.piezas || []).reduce((s, p) => s + (p.kg || 0), 0)
+        await actualizarStock('bovino_pieza', -kgPiezas)
+      } else if (desposte.tipo_desposte === 'kilo') {
+        await actualizarStock('bovino_corte', -(desposte.kg_neto || 0))
+      } else if (desposte.tipo_desposte === 'pieza_kilo') {
+        await actualizarStock('bovino_corte', -(desposte.kg_neto || 0))
+      }
+      await supabase.from('despostes').delete().eq('id', entrada.desposte_id)
+    }
   }
+  
+  await supabase.from('entradas_deposito').delete().eq('id', entrada.id)
+  await actualizarStock(entrada.tipo, -(entrada.kg_real || entrada.kg))
+  showAlert({ type: 'success', msg: '🗑️ Entrada y desposte eliminados — Stock revertido' })
+  cargarHistorial()
+  onSaved()
+}
 
   function abrirEdicion(entrada) {
     setEditando(entrada.id)
