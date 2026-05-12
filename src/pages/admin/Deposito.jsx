@@ -485,6 +485,16 @@ function DesposteTab({ onSaved }) {
 
 function EntradaForm({ onSaved, showAlert, proveedores }) {
   const [form, setForm] = useState({ tipo: '', proveedor: '', descripcion: '', fecha: new Date().toISOString().split('T')[0], kg: '', precioKg: '9800', merma: '', destino: 'DEPOSITO', importe: '' })
+  const [historial, setHistorial] = useState([])
+  const [editando, setEditando] = useState(null)
+  const [formEdit, setFormEdit] = useState({})
+
+  useEffect(() => { cargarHistorial() }, [])
+
+  async function cargarHistorial() {
+    const { data } = await supabase.from('entradas_deposito').select('*').order('fecha', { ascending: false }).limit(100)
+    setHistorial(data || [])
+  }
 
   async function guardar() {
     if (!form.tipo || !form.proveedor || !form.kg) { showAlert({ type: 'error', msg: 'Completá los campos requeridos' }); return }
@@ -492,7 +502,6 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     const importe = form.tipo === 'bovino_mr'
       ? parseFloat(form.kg) * parseFloat(form.precioKg)
       : parseFloat(form.importe) || 0
-
     const { error } = await supabase.from('entradas_deposito').insert({
       fecha: form.fecha, tipo: form.tipo, proveedor_nombre: form.proveedor,
       descripcion: form.descripcion || form.tipo, kg: parseFloat(form.kg), kg_real: kgReal,
@@ -500,85 +509,189 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
       importe, destino: form.destino, cantidad: 1
     })
     if (error) { showAlert({ type: 'error', msg: error.message }); return }
-
     const kgSumar = form.tipo === 'bovino_mr' ? kgReal : parseFloat(form.kg)
     await actualizarStock(form.tipo, kgSumar)
-
     await supabase.from('compras_proveedores').insert({
       fecha: form.fecha, proveedor_nombre: form.proveedor,
       producto: form.descripcion || form.tipo,
       kg: parseFloat(form.kg), importe
     })
-
     showAlert({ type: 'success', msg: '✅ Entrada registrada — Stock actualizado' })
     setForm(f => ({ ...f, descripcion: '', kg: '', importe: '', precioKg: '9800' }))
     onSaved()
+    cargarHistorial()
     setTimeout(() => showAlert(null), 3000)
   }
 
+  async function eliminar(entrada) {
+    if (!confirm(`¿Eliminar esta entrada de ${entrada.kg} kg de ${entrada.proveedor_nombre}?`)) return
+    await supabase.from('entradas_deposito').delete().eq('id', entrada.id)
+    await actualizarStock(entrada.tipo, -(entrada.kg_real || entrada.kg))
+    showAlert({ type: 'success', msg: '🗑️ Entrada eliminada — Stock actualizado' })
+    cargarHistorial()
+    onSaved()
+  }
+
+  function abrirEdicion(entrada) {
+    setEditando(entrada.id)
+    setFormEdit({
+      fecha: entrada.fecha,
+      descripcion: entrada.descripcion || '',
+      kg: entrada.kg || '',
+      precioKg: entrada.precio_kg || '',
+      proveedor: entrada.proveedor_nombre || '',
+      destino: entrada.destino || 'DEPOSITO',
+    })
+  }
+
+  async function guardarEdicion(entrada) {
+    const kgAnterior = entrada.kg_real || entrada.kg || 0
+    const kgNuevo = parseFloat(formEdit.kg) || 0
+    const kgReal = kgNuevo * (1 - (entrada.merma_pct || 0) / 100)
+    const diferencia = kgReal - kgAnterior
+    await supabase.from('entradas_deposito').update({
+      fecha: formEdit.fecha,
+      descripcion: formEdit.descripcion,
+      kg: kgNuevo,
+      kg_real: kgReal,
+      precio_kg: parseFloat(formEdit.precioKg) || 0,
+      proveedor_nombre: formEdit.proveedor,
+      destino: formEdit.destino,
+      importe: kgNuevo * (parseFloat(formEdit.precioKg) || 0)
+    }).eq('id', entrada.id)
+    if (diferencia !== 0) await actualizarStock(entrada.tipo, diferencia)
+    setEditando(null)
+    showAlert({ type: 'success', msg: '✅ Entrada actualizada' })
+    cargarHistorial()
+    onSaved()
+  }
+
+  const TIPOS = {
+    bovino_mr: '🐄 Media Res', bovino_corte: '🥩 Bovino Corte',
+    bovino_brosa: '🫀 Brosa', cerdo: '🐷 Cerdo',
+    pollo: '🍗 Pollo', embutido: '🌭 Embutido'
+  }
+
+  const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, width: '100%', boxSizing: 'border-box' }
+
   return (
-    <div className="card">
-      <div className="card-title">Registrar entrada al depósito</div>
-      <div className="form-row">
-        <div className="form-group"><label>Tipo de producto</label>
-          <select value={form.tipo} onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))}>
-            <option value="">— Seleccioná —</option>
-            <option value="bovino_mr">🐄 Media Res</option>
-            <option value="bovino_corte">🥩 Bovino — Corte/Caja</option>
-            <option value="bovino_brosa">🫀 Bovino — Brosa</option>
-            <option value="cerdo">🐷 Cerdo — Capón</option>
-            <option value="pollo">🍗 Pollo — Cajón</option>
-            <option value="embutido">🌭 Embutido/Rebozado</option>
-          </select>
-        </div>
-        <div className="form-group"><label>Fecha</label>
-          <input type="date" value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} />
-        </div>
-      </div>
-      <div className="form-row">
-        <div className="form-group"><label>Proveedor</label>
-          <select value={form.proveedor} onChange={e => setForm(f => ({ ...f, proveedor: e.target.value }))}>
-            <option value="">— Seleccioná —</option>
-            {proveedores.map(p => <option key={p}>{p}</option>)}
-          </select>
-        </div>
-        <div className="form-group"><label>Descripción</label>
-          <input placeholder="Ej: Novillito Premium, Pollo entero..." value={form.descripcion} onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))} />
-        </div>
-      </div>
-      <div className="form-row">
-        <div className="form-group"><label>Kg</label>
-          <input type="number" step="0.1" placeholder="0" value={form.kg} onChange={e => setForm(f => ({ ...f, kg: e.target.value }))} />
-        </div>
-        <div className="form-group"><label>Precio/kg ($)</label>
-          <input type="number" value={form.precioKg} onChange={e => setForm(f => ({ ...f, precioKg: e.target.value }))} placeholder="Precio por kg" />
-        </div>
-      </div>
-      <div className="form-row">
-        {form.tipo === 'bovino_mr' && (
-          <div className="form-group"><label>Merma % (opcional)</label>
-            <input type="number" step="0.5" placeholder="2.5" value={form.merma} onChange={e => setForm(f => ({ ...f, merma: e.target.value }))} />
+    <div>
+      <div className="card" style={{ marginBottom: 20 }}>
+        <div className="card-title">Registrar entrada al depósito</div>
+        <div className="form-row">
+          <div className="form-group"><label>Tipo de producto</label>
+            <select value={form.tipo} onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))}>
+              <option value="">— Seleccioná —</option>
+              <option value="bovino_mr">🐄 Media Res</option>
+              <option value="bovino_corte">🥩 Bovino — Corte/Caja</option>
+              <option value="bovino_brosa">🫀 Bovino — Brosa</option>
+              <option value="cerdo">🐷 Cerdo — Capón</option>
+              <option value="pollo">🍗 Pollo — Cajón</option>
+              <option value="embutido">🌭 Embutido/Rebozado</option>
+            </select>
           </div>
-        )}
-        {form.tipo !== 'bovino_mr' && (
-          <div className="form-group"><label>Importe total ($)</label>
-            <input type="number" placeholder="0" value={form.importe} onChange={e => setForm(f => ({ ...f, importe: e.target.value }))} />
+          <div className="form-group"><label>Fecha</label>
+            <input type="date" value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} />
           </div>
-        )}
-        <div className="form-group"><label>Destino</label>
-          <select value={form.destino} onChange={e => setForm(f => ({ ...f, destino: e.target.value }))}>
-            <option value="MITRE">Local Mitre</option>
-            <option value="CENTRO">Centro</option>
-            <option value="MONTE CRISTO">Monte Cristo</option>
-            <option value="CLIENTE">Cliente externo</option>
-            <option value="DEPOSITO">Queda en depósito</option>
-          </select>
         </div>
+        <div className="form-row">
+          <div className="form-group"><label>Proveedor</label>
+            <select value={form.proveedor} onChange={e => setForm(f => ({ ...f, proveedor: e.target.value }))}>
+              <option value="">— Seleccioná —</option>
+              {proveedores.map(p => <option key={p}>{p}</option>)}
+            </select>
+          </div>
+          <div className="form-group"><label>Descripción</label>
+            <input placeholder="Ej: Novillito Premium..." value={form.descripcion} onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))} />
+          </div>
+        </div>
+        <div className="form-row">
+          <div className="form-group"><label>Kg</label>
+            <input type="number" step="0.1" placeholder="0" value={form.kg} onChange={e => setForm(f => ({ ...f, kg: e.target.value }))} />
+          </div>
+          <div className="form-group"><label>Precio/kg ($)</label>
+            <input type="number" value={form.precioKg} onChange={e => setForm(f => ({ ...f, precioKg: e.target.value }))} placeholder="Precio por kg" />
+          </div>
+        </div>
+        <div className="form-row">
+          {form.tipo === 'bovino_mr' && (
+            <div className="form-group"><label>Merma % (opcional)</label>
+              <input type="number" step="0.5" placeholder="2.5" value={form.merma} onChange={e => setForm(f => ({ ...f, merma: e.target.value }))} />
+            </div>
+          )}
+          {form.tipo !== 'bovino_mr' && (
+            <div className="form-group"><label>Importe total ($)</label>
+              <input type="number" placeholder="0" value={form.importe} onChange={e => setForm(f => ({ ...f, importe: e.target.value }))} />
+            </div>
+          )}
+          <div className="form-group"><label>Destino</label>
+            <select value={form.destino} onChange={e => setForm(f => ({ ...f, destino: e.target.value }))}>
+              <option value="MITRE">Local Mitre</option>
+              <option value="CENTRO">Centro</option>
+              <option value="MONTE CRISTO">Monte Cristo</option>
+              <option value="CLIENTE">Cliente externo</option>
+              <option value="DEPOSITO">Queda en depósito</option>
+            </select>
+          </div>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--green)', marginBottom: 12 }}>
+          ✅ La entrada actualizará el stock y se registrará en Cuenta Proveedores
+        </div>
+        <button className="btn btn-gold" onClick={guardar}>✅ Registrar entrada</button>
       </div>
-      <div style={{ fontSize: 12, color: 'var(--green)', marginBottom: 12 }}>
-        ✅ La entrada actualizará el stock y se registrará en Cuenta Proveedores
+
+      <div className="card">
+        <div className="card-title">📋 Historial de entradas ({historial.length})</div>
+        <table>
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Tipo</th>
+              <th>Proveedor</th>
+              <th>Descripción</th>
+              <th>Kg</th>
+              <th>Precio/kg</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {historial.map(e => (
+              editando === e.id ? (
+                <tr key={e.id} style={{ background: 'rgba(201,168,76,0.08)' }}>
+                  <td><input type="date" value={formEdit.fecha} onChange={x => setFormEdit(f => ({ ...f, fecha: x.target.value }))} style={{ ...inp, width: 130 }} /></td>
+                  <td style={{ color: 'var(--muted)', fontSize: 12 }}>{TIPOS[e.tipo] || e.tipo}</td>
+                  <td><input value={formEdit.proveedor} onChange={x => setFormEdit(f => ({ ...f, proveedor: x.target.value }))} style={{ ...inp, width: 110 }} /></td>
+                  <td><input value={formEdit.descripcion} onChange={x => setFormEdit(f => ({ ...f, descripcion: x.target.value }))} style={{ ...inp, width: 130 }} /></td>
+                  <td><input type="number" step="0.1" value={formEdit.kg} onChange={x => setFormEdit(f => ({ ...f, kg: x.target.value }))} style={{ ...inp, width: 70, borderColor: 'var(--gold)' }} /></td>
+                  <td><input type="number" value={formEdit.precioKg} onChange={x => setFormEdit(f => ({ ...f, precioKg: x.target.value }))} style={{ ...inp, width: 90 }} /></td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <button onClick={() => guardarEdicion(e)} style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>💾</button>
+                      <button onClick={() => setEditando(null)} style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12 }}>✕</button>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                <tr key={e.id}>
+                  <td>{e.fecha}</td>
+                  <td style={{ fontSize: 12 }}>{TIPOS[e.tipo] || e.tipo}</td>
+                  <td>{e.proveedor_nombre}</td>
+                  <td>{e.descripcion}</td>
+                  <td style={{ color: 'var(--gold)', fontWeight: 600 }}>{(e.kg_real || e.kg || 0).toFixed(1)} kg</td>
+                  <td style={{ color: 'var(--muted)' }}>{e.precio_kg > 0 ? '$' + Math.round(e.precio_kg).toLocaleString('es-AR') : '—'}</td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <button onClick={() => abrirEdicion(e)} style={{ background: 'var(--amber)', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#fff' }}>✏️</button>
+                      <button onClick={() => eliminar(e)} style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12, color: '#ff6b6b' }}>🗑️</button>
+                    </div>
+                  </td>
+                </tr>
+              )
+            ))}
+            {historial.length === 0 && <tr><td colSpan={7} className="empty">Sin entradas registradas</td></tr>}
+          </tbody>
+        </table>
       </div>
-      <button className="btn btn-gold" onClick={guardar}>✅ Registrar entrada</button>
     </div>
   )
 }
