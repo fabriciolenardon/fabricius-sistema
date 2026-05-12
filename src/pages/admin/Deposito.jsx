@@ -30,6 +30,12 @@ export function Deposito() {
   const [tab, setTab] = useState('entradas')
   const [alert, setAlert] = useState(null)
   const [remitoActual, setRemitoActual] = useState(null)
+  const [proveedores, setProveedores] = useState([])
+
+  useEffect(() => {
+    supabase.from('proveedores').select('nombre').eq('activo', true).order('nombre')
+      .then(({ data }) => setProveedores((data || []).map(p => p.nombre)))
+  }, [])
 
   function showAlert(msg) { setAlert(msg); setTimeout(() => setAlert(null), 4000) }
 
@@ -52,7 +58,7 @@ export function Deposito() {
           </button>
         ))}
       </div>
-      {tab === 'entradas' && <EntradaForm onSaved={() => {}} showAlert={showAlert} proveedores={['PRETTO','LEO','BERTOSSI','INDACOR','BELMACO','CUBALA','LA AVENIDA','MOTTURA','BELBRUN','MELO CARBON']} />}
+      {tab === 'entradas' && <EntradaForm onSaved={() => {}} showAlert={showAlert} proveedores={proveedores} />}
       {tab === 'salidas' && <SalidaForm onSaved={() => {}} showAlert={showAlert} onRemito={setRemitoActual} setTab={setTab} />}
       {tab === 'desposte' && <DesposteTab onSaved={() => {}} />}
       {tab === 'remitos' && <RemitosTab remitoActual={remitoActual} />}
@@ -985,6 +991,7 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
 function RemitosTab({ remitoActual }) {
   const [remitos, setRemitos] = useState([])
   const [seleccionado, setSeleccionado] = useState(remitoActual)
+  const [anulando, setAnulando] = useState(false)
   const [editando, setEditando] = useState(null)
   const [itemsEdit, setItemsEdit] = useState([])
   const [alert, setAlert] = useState(null)
@@ -1012,30 +1019,36 @@ function RemitosTab({ remitoActual }) {
     const { data } = await supabase.from('remitos').select('*').order('created_at', { ascending: false }).limit(30)
     setRemitos(data || [])
   }
-async function eliminarRemito(remito) {
+  async function eliminarRemito(remito) {
+  if (anulando) return
   if (!confirm(`¿Eliminar Remito N° ${String(remito.numero).padStart(5,'0')} de ${remito.cliente_nombre} por $${Math.round(remito.total).toLocaleString('es-AR')}?`)) return
   
+  setAnulando(true)
+  const { data: remitoActual } = await supabase.from('remitos').select('eliminado').eq('id', remito.id).single()
+  if (remitoActual?.eliminado) {
+    showAlert('Este remito ya fue anulado', 'error')
+    setAnulando(false)
+    return
+  }
   const { data: { user } } = await supabase.auth.getUser()
   const { data: perfil } = await supabase.from('profiles').select('nombre').eq('id', user.id).single()
   const eliminadoPor = perfil?.nombre || user.email
-
   await supabase.from('remitos').update({
     eliminado: true,
     eliminado_por: eliminadoPor,
     eliminado_en: new Date().toISOString()
   }).eq('id', remito.id)
-
-  if (remito.cliente_id && !remito.eliminado) {
+  if (remito.cliente_id) {
     const { data: clienteActual } = await supabase.from('clientes').select('saldo').eq('id', remito.cliente_id).single()
     const nuevoSaldo = (clienteActual?.saldo || 0) - remito.total
     await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', remito.cliente_id)
     await supabase.from('movimientos_ctacte').delete().eq('remito_id', remito.id)
   }
-
   showAlert('🗑️ Remito anulado', 'success')
+  setAnulando(false)
   cargarRemitos()
 }
-  function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(() => setAlert(null), 4000) }
+function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(() => setAlert(null), 4000) }
 
   function abrirEdicion(remito) {
     setEditando(remito)
@@ -1218,14 +1231,14 @@ async function eliminarRemito(remito) {
                 <td>
                   <div style={{ display: 'flex', gap: 6 }}>
                     <button onClick={() => imprimir(r)} style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>🖨️</button>
-                    <button onClick={() => abrirEdicion(r)} style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 12, color: 'var(--amber)' }}>✏️</button>
-{!r.eliminado && <button onClick={() => eliminarRemito(r)} style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 12, color: '#ff6b6b' }}>🗑️</button>}
+                     <button onClick={() => abrirEdicion(r)} style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 12, color: 'var(--amber)' }}>✏️</button>
+{!r.eliminado && <button onClick={() => eliminarRemito(r)} disabled={anulando} style={{ background: anulando ? '#2a2a2a' : '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '4px 10px', cursor: anulando ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 12, color: '#ff6b6b', opacity: anulando ? 0.5 : 1 }}>🗑️</button>}
 {r.eliminado && <span style={{ background: '#3a1a1a', color: '#ff6b6b', borderRadius: 4, padding: '2px 6px', fontSize: 10, fontWeight: 700 }}>❌ ANULADO</span>}
                   </div>
                 </td>
               </tr>
-            ))}
-            {remitos.length === 0 && <tr><td colSpan={5} className="empty">Sin remitos</td></tr>}
+            ))}          
+{remitos.length === 0 && <tr><td colSpan={5} className="empty">Sin remitos</td></tr>}
           </tbody>
         </table>
       </div>
