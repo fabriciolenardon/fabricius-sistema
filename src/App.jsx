@@ -1,3 +1,4 @@
+import Ventas from './pages/admin/Ventas'
 import Franquicias from './pages/admin/Franquicias'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
@@ -46,24 +47,25 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/" element={<RootRedirect />} />
-      <Route path="/admin" element={<ProtectedRoute requiredRole="admin"><AdminLayout /></ProtectedRoute>}>
-        <Route path="dashboard" element={<Dashboard />} />
-        <Route path="deposito" element={<Deposito />} />
-        <Route path="precios" element={<Precios />} />
-        <Route path="clientes" element={<Clientes />} />
-        <Route path="cheques" element={<Cheques />} />
-        <Route path="sueldos" element={<Sueldos />} />
-        <Route path="gastos" element={<Gastos />} />
-        <Route path="cierre" element={<Cierre />} />
-<Route path="franquicias" element={<Franquicias />} />
-      </Route>
-      <Route path="/franquicia" element={<ProtectedRoute requiredRole="franquicia"><FranquiciaLayout /></ProtectedRoute>}>
-        <Route path="dashboard" element={<FranquiciaDashboard />} />
-        <Route path="ctacte" element={<FranquiciaCtaCte />} />
-        <Route path="remitos" element={<FranquiciaRemitos />} />
-        <Route path="precios" element={<FranquiciaPrecios />} />
-      </Route>
-    </Routes>
+<Route path="/" element={<RootRedirect />} />
+<Route path="/admin" element={<ProtectedRoute requiredRole="admin"><AdminLayout /></ProtectedRoute>}>
+  <Route path="dashboard" element={<Dashboard />} />
+  <Route path="deposito" element={<Deposito />} />
+  <Route path="precios" element={<Precios />} />
+  <Route path="clientes" element={<Clientes />} />
+  <Route path="cheques" element={<Cheques />} />
+  <Route path="sueldos" element={<Sueldos />} />
+  <Route path="gastos" element={<Gastos />} />
+  <Route path="cierre" element={<Cierre />} />
+  <Route path="franquicias" element={<Franquicias />} />
+  <Route path="ventas" element={<Ventas />} />
+</Route>
+<Route path="/franquicia" element={<ProtectedRoute requiredRole="franquicia"><FranquiciaLayout /></ProtectedRoute>}>
+  <Route path="dashboard" element={<FranquiciaDashboard />} />
+  <Route path="ctacte" element={<FranquiciaCtaCte />} />
+  <Route path="remitos" element={<FranquiciaRemitos />} />
+  <Route path="precios" element={<FranquiciaPrecios />} />
+</Route>
+</Routes>
   )
 }
