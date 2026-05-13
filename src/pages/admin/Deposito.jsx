@@ -843,16 +843,7 @@ const CATEGORIA_A_STOCK = {
     setForm(f => ({ ...f, kg: '', productoId: '', precio: '', categoria: '' }))
     setMediaSeleccionada(null)
   }
-    const prod = todosPrecios.find(p => p.id === form.productoId)
-    const item = {
-      descripcion: prod?.nombre || '', kg: parseFloat(form.kg),
-      precio: parseFloat(form.precio), importe: parseFloat(form.kg) * parseFloat(form.precio),
-      tipo: form.categoria
-    }
-    setItems(prev => [...prev, item])
-    setForm(f => ({ ...f, kg: '', productoId: '', precio: '', categoria: '' }))
-  }
-
+   
   function quitarItem(idx) { setItems(prev => prev.filter((_, i) => i !== idx)) }
   const total = items.reduce((s, i) => s + i.importe, 0)
 
