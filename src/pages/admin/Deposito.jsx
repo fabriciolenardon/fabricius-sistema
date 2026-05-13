@@ -761,10 +761,12 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   const [clientes, setClientes] = useState([])
   const [busqueda, setBusqueda] = useState('')
   const [mostrarClientes, setMostrarClientes] = useState(false)
-
+  const [mediasDisponibles, setMediasDisponibles] = useState([])
+  const [mediaSeleccionada, setMediaSeleccionada] = useState(null)
   useEffect(() => {
     supabase.from('precios').select('*').order('nombre').then(({ data }) => setTodosPrecios(data || []))
     supabase.from('clientes').select('*').order('nombre').then(({ data }) => setClientes(data || []))
+    supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false }).then(({ data }) => setMediasDisponibles(data || []))
   }, [])
 
   const CATEGORIAS = {
@@ -871,8 +873,14 @@ const CATEGORIA_A_STOCK = {
       const tipoStock = CATEGORIA_A_STOCK[item.tipo] || item.tipo
       kgPorTipo[tipoStock] = (kgPorTipo[tipoStock] || 0) + item.kg
     }
-    for (const [tipo, kg] of Object.entries(kgPorTipo)) {
+   for (const [tipo, kg] of Object.entries(kgPorTipo)) {
       await actualizarStock(tipo, -kg)
+    }
+    if (mediaSeleccionada) {
+      await supabase.from('entradas_deposito').update({ despostada: true }).eq('id', mediaSeleccionada.id)
+      setMediaSeleccionada(null)
+      const { data: medias } = await supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false })
+      setMediasDisponibles(medias || [])
     }
 
     const { data: remitoData } = await supabase.from('remitos').insert({
@@ -919,7 +927,23 @@ const CATEGORIA_A_STOCK = {
             <input type="date" value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} />
           </div>
         </div>
-
+{form.categoria === 'bovino_mr' && (
+  <div style={{ background: '#1a2a1a', border: '1px solid #2d5a2d', borderRadius: 10, padding: '14px 16px', marginBottom: 12 }}>
+    <div style={{ fontSize: 12, fontWeight: 700, color: '#7dff7d', marginBottom: 10 }}>🐄 Seleccioná la media res a despachar</div>
+    {mediasDisponibles.length === 0 ? (
+      <div style={{ fontSize: 12, color: 'var(--muted)' }}>Sin medias reses disponibles</div>
+    ) : mediasDisponibles.map(e => (
+      <div key={e.id} onClick={() => { setMediaSeleccionada(e); setForm(f => ({ ...f, kg: (e.kg_real || e.kg || 0).toString() })) }}
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderRadius: 8, marginBottom: 6, cursor: 'pointer', border: `2px solid ${mediaSeleccionada?.id === e.id ? 'var(--gold)' : 'var(--border)'}`, background: mediaSeleccionada?.id === e.id ? 'rgba(201,168,76,0.1)' : 'var(--surface2)' }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 13 }}>🐄 {e.descripcion || 'Media Res'}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.fecha} · {e.proveedor_nombre}</div>
+        </div>
+        <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{(e.kg_real || e.kg || 0).toFixed(1)} kg</div>
+      </div>
+    ))}
+  </div>
+)}
         {esFranquicia && (
           <div style={{ background: 'var(--surface2)', border: '1px solid var(--gold)', borderRadius: 8, padding: '10px 14px', marginBottom: 12 }}>
             <span style={{ fontSize: 12, color: 'var(--gold)', fontWeight: 600 }}>🏪 Franquicia — el remito se cargará automáticamente en su legajo</span>
