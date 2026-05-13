@@ -86,6 +86,7 @@ function DesposteTab({ onSaved }) {
   const [alert, setAlert] = useState(null)
   const [loading, setLoading] = useState(false)
   const [kgPiezaConvertir, setKgPiezaConvertir] = useState('')
+  const [tipoPiezaSeleccionada, setTipoPiezaSeleccionada] = useState('')
   const [nombrePieza, setNombrePieza] = useState('')
   const [tipoAnimalPieza, setTipoAnimalPieza] = useState('novillo')
   const [precioCostoPieza, setPrecioCostoPieza] = useState('')
@@ -207,28 +208,41 @@ function DesposteTab({ onSaved }) {
   }
 
   async function confirmarConversionPieza() {
-    if (!kgPiezaConvertir || !nombrePieza) { showAlert('Completa todos los campos', 'error'); return }
-    const kg = parseFloat(kgPiezaConvertir)
-    const merma = MERMAS_KILO[tipoAnimalPieza].merma
-    const kgNeto = parseFloat((kg * (1 - merma)).toFixed(2))
-    setLoading(true)
-    try {
-      await supabase.from('despostes').insert({
-        fecha, entrada_id: null, modelo: 'PIEZA_KILO',
-        tipo_desposte: 'pieza_kilo', tipo_animal: tipoAnimalPieza,
-        kg_media_res: kg, merma_pct: merma * 100, kg_neto: kgNeto,
-        piezas: [{ nombre: nombrePieza, kg: kgNeto, precio_costo_kg: parseFloat(precioCostoPieza) || 0 }],
-        notas
-      })
-      await actualizarStock('bovino_pieza', -kg)
-      await actualizarStock('bovino_corte', kgNeto)
-      showAlert('✅ ' + nombrePieza + ' convertida — ' + kgNeto.toFixed(1) + ' kg al stock')
-      setKgPiezaConvertir(''); setNombrePieza(''); setPrecioCostoPieza(''); setNotas('')
-      await cargarDatos(); onSaved()
-    } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
-    setLoading(false)
+  if (!kgPiezaConvertir || !nombrePieza) { showAlert('Completa todos los campos', 'error'); return }
+  const kg = parseFloat(kgPiezaConvertir)
+  const merma = MERMAS_KILO[tipoAnimalPieza].merma
+  const kgNeto = parseFloat((kg * (1 - merma)).toFixed(2))
+  
+  const PIEZA_A_STOCK = {
+    '🦵 Pierna con hueso': 'pieza_pierna',
+    '🥩 Cuarto pistola': 'pieza_cuarto_pistola',
+    '🍖 Costillar completo': 'pieza_costillar',
+    '🥩 Cortito': 'pieza_cortito',
+    '🥩 Carré sin lomo': 'pieza_carre',
+    '🥩 Paleta entera': 'pieza_paleta',
+    '🥩 Parrillero': 'pieza_parrillero',
+    '📦 Caja CB': 'caja_cb',
+    '📦 Caja PT': 'caja_pt',
   }
+  const tipoStock = PIEZA_A_STOCK[nombrePieza] || 'bovino_pieza'
 
+  setLoading(true)
+  try {
+    await supabase.from('despostes').insert({
+      fecha, entrada_id: null, modelo: 'PIEZA_KILO',
+      tipo_desposte: 'pieza_kilo', tipo_animal: tipoAnimalPieza,
+      kg_media_res: kg, merma_pct: merma * 100, kg_neto: kgNeto,
+      piezas: [{ nombre: nombrePieza, kg: kgNeto, precio_costo_kg: parseFloat(precioCostoPieza) || 0 }],
+      notas
+    })
+    await actualizarStock(tipoStock, -kg)
+    await actualizarStock('bovino_corte', kgNeto)
+    showAlert('✅ ' + nombrePieza + ' convertida — ' + kgNeto.toFixed(1) + ' kg al stock')
+    setKgPiezaConvertir(''); setNombrePieza(''); setPrecioCostoPieza(''); setNotas('')
+    await cargarDatos(); onSaved()
+  } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
+  setLoading(false)
+}
   const kgBase = seleccionada ? (seleccionada.kg_real || seleccionada.kg || 0) : 0
   const kgNetoPiezas = kgBase * 0.975
   const kgTotalPiezas = piezas.reduce((s, p) => s + (p.kg_editado || 0), 0)
@@ -412,7 +426,7 @@ function DesposteTab({ onSaved }) {
           { tipo: 'caja_cb', label: '📦 Caja CB' },
           { tipo: 'caja_pt', label: '📦 Caja PT' },
         ].map(p => (
-          <div key={p.tipo} onClick={() => { setNombrePieza(p.label); setKgPiezaConvertir((piezasStock[p.tipo] || 0).toString()); }}
+          <div key={p.tipo} onClick={() => { setNombrePieza(p.label); setTipoPiezaSeleccionada(p.tipo); setKgPiezaConvertir((piezasStock[p.tipo] || 0).toString()); }}
             style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 8px', borderBottom: '1px solid var(--border)', cursor: 'pointer', borderRadius: 6, background: nombrePieza === p.label ? 'rgba(201,168,76,0.08)' : 'transparent', border: nombrePieza === p.label ? '1px solid var(--gold)' : '1px solid transparent' }}>
             <span style={{ fontSize: 13, fontWeight: 600 }}>{p.label}</span>
             <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: (piezasStock[p.tipo] || 0) > 0 ? 'var(--gold)' : 'var(--muted)' }}>
