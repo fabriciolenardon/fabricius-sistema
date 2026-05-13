@@ -102,8 +102,7 @@ function DesposteTab({ onSaved }) {
 
   async function cargarDatos() {
     const [{ data: entradas }, { data: despostesData }, { data: preciosData }, { data: stockData }] = await Promise.all([
-      supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false }),
-      supabase.from('despostes').select('*').order('fecha', { ascending: false }).limit(20),
+     supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).eq('reservada', false).order('fecha', { ascending: false }),       supabase.from('despostes').select('*').order('fecha', { ascending: false }).limit(20),
       supabase.from('precios').select('*').eq('categoria', 'bovino_pieza'),
       supabase.from('stock_actual').select('*')
     ])
