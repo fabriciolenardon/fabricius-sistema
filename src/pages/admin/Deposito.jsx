@@ -828,7 +828,21 @@ const CATEGORIA_A_STOCK = {
   }
 
   function agregarItem() {
-    if (!form.kg || !form.precio || !form.productoId) { showAlert({ type: 'error', msg: 'Seleccioná producto y completá kg' }); return }
+    if (!form.kg || !form.precio) { showAlert({ type: 'error', msg: 'Completá kg y precio' }); return }
+    if (form.categoria !== 'bovino_mr' && !form.productoId) { showAlert({ type: 'error', msg: 'Seleccioná un producto' }); return }
+    const prod = todosPrecios.find(p => p.id === form.productoId)
+    const descripcion = form.categoria === 'bovino_mr' 
+      ? (mediaSeleccionada ? `Media Res — ${mediaSeleccionada.descripcion || mediaSeleccionada.proveedor_nombre}` : 'Media Res')
+      : (prod?.nombre || '')
+    const item = {
+      descripcion, kg: parseFloat(form.kg),
+      precio: parseFloat(form.precio), importe: parseFloat(form.kg) * parseFloat(form.precio),
+      tipo: form.categoria
+    }
+    setItems(prev => [...prev, item])
+    setForm(f => ({ ...f, kg: '', productoId: '', precio: '', categoria: '' }))
+    setMediaSeleccionada(null)
+  }
     const prod = todosPrecios.find(p => p.id === form.productoId)
     const item = {
       descripcion: prod?.nombre || '', kg: parseFloat(form.kg),
