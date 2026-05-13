@@ -766,7 +766,7 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   useEffect(() => {
     supabase.from('precios').select('*').order('nombre').then(({ data }) => setTodosPrecios(data || []))
     supabase.from('clientes').select('*').order('nombre').then(({ data }) => setClientes(data || []))
-    supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false }).then(({ data }) => setMediasDisponibles(data || []))
+  supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).eq('reservada', false).order('fecha', { ascending: false }).then(({ data }) => setMediasDisponibles(data || []))
   }, [])
 
   const CATEGORIAS = {
@@ -826,8 +826,7 @@ const CATEGORIA_A_STOCK = {
     const precio = prod[getLista(form.destino)] || prod.precio_mayorista || 0
     setForm(f => ({ ...f, productoId: id, precio }))
   }
-
-  function agregarItem() {
+async function agregarItem() {
     if (!form.kg || !form.precio) { showAlert({ type: 'error', msg: 'Completá kg y precio' }); return }
     if (form.categoria !== 'bovino_mr' && !form.productoId) { showAlert({ type: 'error', msg: 'Seleccioná un producto' }); return }
     const prod = todosPrecios.find(p => p.id === form.productoId)
@@ -841,10 +840,17 @@ const CATEGORIA_A_STOCK = {
     }
     setItems(prev => [...prev, item])
     setForm(f => ({ ...f, kg: '', productoId: '', precio: '', categoria: '' }))
-    setMediasDisponibles(prev => prev.filter(m => m.id !== mediaSeleccionada?.id))
-setMediaSeleccionada(null)
+    if (mediaSeleccionada) {
+      await supabase.from('entradas_deposito').update({ 
+        reservada: true, 
+        reservada_para: 'remito en proceso',
+        reservada_en: new Date().toISOString()
+      }).eq('id', mediaSeleccionada.id)
+      setMediasDisponibles(prev => prev.filter(m => m.id !== mediaSeleccionada.id))
+      setMediaSeleccionada(null)
+    }
   }
-   
+ 
   function quitarItem(idx) { setItems(prev => prev.filter((_, i) => i !== idx)) }
   const total = items.reduce((s, i) => s + i.importe, 0)
 
@@ -882,15 +888,13 @@ setMediaSeleccionada(null)
    for (const [tipo, kg] of Object.entries(kgPorTipo)) {
       await actualizarStock(tipo, -kg)
     }
-    if (mediaSeleccionada) {
+      if (mediaSeleccionada) {
       await supabase.from('entradas_deposito').update({ despostada: true }).eq('id', mediaSeleccionada.id)
       setMediaSeleccionada(null)
-      const { data: medias } = await supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false })
+      const { data: medias } = await supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).eq('reservada', false).order('fecha', { ascending: false })
       setMediasDisponibles(medias || [])
     }
-
-    const { data: remitoData } = await supabase.from('remitos').insert({
-      fecha: form.fecha, cliente_nombre: clienteNombre,
+    const { data: remitoData } = await supabase.from('remitos').insert({     fecha: form.fecha, cliente_nombre: clienteNombre,
       cliente_id: clienteId || null, domicilio,
       items, total, cobro: form.cobro, notas: form.notas
     }).select().single()
