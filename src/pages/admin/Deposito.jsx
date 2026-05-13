@@ -754,20 +754,29 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
     pollo: '🍗 Pollo Cajones',
     rebozado: '🧊 Rebozados',
   }
-
-  const CATEGORIA_A_STOCK = {
+const CATEGORIA_A_STOCK = {
     bovino_mr: 'bovino_mr',
     bovino_corte: 'bovino_corte',
     bovino_brosa: 'bovino_brosa',
     bovino_pieza: 'bovino_pieza',
-    bovino_caja_cb: 'bovino_corte',
-    bovino_caja_pt: 'bovino_corte',
+    bovino_caja_cb: 'caja_cb',
+    bovino_caja_pt: 'caja_pt',
+    pieza_pierna: 'pieza_pierna',
+    pieza_cuarto_pistola: 'pieza_cuarto_pistola',
+    pieza_costillar: 'pieza_costillar',
+    pieza_cortito: 'pieza_cortito',
+    pieza_carre: 'pieza_carre',
+    pieza_paleta: 'pieza_paleta',
+    pieza_parrillero: 'pieza_parrillero',
+    caja_cb: 'caja_cb',
+    caja_pt: 'caja_pt',
     cerdo_corte: 'cerdo',
+    cerdo: 'cerdo',
     embutido: 'embutido',
     pollo: 'pollo',
-    rebozado: 'embutido',
+    rebozado: 'rebozado',
   }
-
+  
   const DESTINOS_FRANQUICIA = { 'CENTRO': 'ALVEAR', 'MONTE CRISTO': 'MONTE CRISTO' }
   const categorias = [...new Set(todosPrecios.map(p => p.categoria))]
   const productosFiltrados = todosPrecios.filter(p => p.categoria === form.categoria)
