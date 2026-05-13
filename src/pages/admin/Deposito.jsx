@@ -90,6 +90,7 @@ function DesposteTab({ onSaved }) {
   const [nombrePieza, setNombrePieza] = useState('')
   const [tipoAnimalPieza, setTipoAnimalPieza] = useState('novillo')
   const [precioCostoPieza, setPrecioCostoPieza] = useState('')
+  const [mermaPieza, setMermaPieza] = useState(25)
 
   const MERMAS_KILO = {
     novillo:  { label: 'Novillo / Novillito', merma: 0.24, color: 'var(--gold)' },
@@ -211,7 +212,7 @@ console.log('STOCK CARGADO:', stockMap)
   async function confirmarConversionPieza() {
   if (!kgPiezaConvertir || !nombrePieza) { showAlert('Completa todos los campos', 'error'); return }
   const kg = parseFloat(kgPiezaConvertir)
-  const merma = MERMAS_KILO[tipoAnimalPieza].merma
+  const merma = mermaPieza / 100
   const kgNeto = parseFloat((kg * (1 - merma)).toFixed(2))
   
   const PIEZA_A_STOCK = {
@@ -407,7 +408,7 @@ console.log('STOCK CARGADO:', stockMap)
         </div>
       )}
 
-      {subtab === 'pieza_kilo' && (
+     {subtab === 'pieza_kilo' && (
   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
     <div>
       <div style={{ background: '#1a1a2a', border: '1px solid #2a2a5a', borderRadius: 10, padding: '12px 16px', marginBottom: 16 }}>
@@ -448,23 +449,19 @@ console.log('STOCK CARGADO:', stockMap)
         <input type="number" step="0.1" value={kgPiezaConvertir} onChange={e => setKgPiezaConvertir(e.target.value)} placeholder="0" style={{ ...inp, borderColor: 'var(--gold)' }} />
       </div>
       <div style={{ marginBottom: 14 }}>
-        <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Tipo de animal</label>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {Object.entries(MERMAS_KILO).map(([id, m]) => (
-            <button key={id} onClick={() => setTipoAnimalPieza(id)}
-              style={{ flex: 1, padding: '8px', borderRadius: 8, border: `2px solid ${tipoAnimalPieza === id ? m.color : 'var(--border)'}`, background: tipoAnimalPieza === id ? m.color + '22' : 'var(--surface2)', color: tipoAnimalPieza === id ? m.color : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 11 }}>
-              <div>{m.label}</div>
-              <div>Merma: {(m.merma * 100).toFixed(0)}%</div>
-            </button>
-          ))}
+        <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>% de merma de la pieza</label>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <input type="number" step="0.5" min="0" max="50" value={mermaPieza} onChange={e => setMermaPieza(parseFloat(e.target.value) || 0)}
+            style={{ ...inp, width: 80, borderColor: 'var(--gold)', textAlign: 'center', fontSize: 18, fontWeight: 700 }} />
+          <span style={{ fontSize: 13, color: 'var(--muted)' }}>% — editable según la pieza</span>
         </div>
       </div>
       {kgPiezaConvertir > 0 && (
         <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, marginBottom: 14 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
             <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg pieza</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{parseFloat(kgPiezaConvertir).toFixed(1)} kg</div></div>
-            <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Merma {(MERMAS_KILO[tipoAnimalPieza].merma * 100).toFixed(0)}%</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--red-light)' }}>-{(parseFloat(kgPiezaConvertir) * MERMAS_KILO[tipoAnimalPieza].merma).toFixed(1)} kg</div></div>
-            <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg a cortes</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--green)' }}>{(parseFloat(kgPiezaConvertir) * (1 - MERMAS_KILO[tipoAnimalPieza].merma)).toFixed(1)} kg</div></div>
+            <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Merma {mermaPieza}%</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--red-light)' }}>-{(parseFloat(kgPiezaConvertir) * mermaPieza / 100).toFixed(1)} kg</div></div>
+            <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg a cortes</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--green)' }}>{(parseFloat(kgPiezaConvertir) * (1 - mermaPieza / 100)).toFixed(1)} kg</div></div>
           </div>
         </div>
       )}
