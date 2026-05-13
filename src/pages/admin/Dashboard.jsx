@@ -84,7 +84,7 @@ const stockRebozado = Math.max(0, stock.rebozado || 0)
     Ganancia: c.ganancia || 0,
   }))
 
-  if (loading) return <div style={{ padding: 40, color: 'var(--muted)', textAlign: 'center' }}>Cargando dashboard...</div>
+  if (loading) return <div style={{ padding: 40, color: 'var(--muted)', textAlign: 'center' }}>Cargando...</div>
 
   return (
     <div>
@@ -222,12 +222,15 @@ const stockRebozado = Math.max(0, stock.rebozado || 0)
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
           {[
             { label: '🐄 Bovino Media Res', kg: stockBovino, color: 'var(--gold)', aprox: Math.round(stockBovino / 105) + ' medias', bajo: stockBovino < 100 },
-            { label: '🥩 Bovino Cortes', kg: stockCortes, color: 'var(--gold)', aprox: stockCortes.toFixed(1) + ' kg', bajo: stockCortes < 50 },
-            { label: '🫀 Brosas', kg: stockBrosas, color: 'var(--amber)', aprox: stockBrosas.toFixed(1) + ' kg', bajo: stockBrosas < 20 },
-            { label: '🐷 Cerdo', kg: stockCerdo, color: 'var(--amber)', aprox: Math.round(stockCerdo / 107) + ' capones', bajo: stockCerdo < 50 },
-            { label: '🍗 Pollo', kg: stockPollo, color: 'var(--blue)', aprox: Math.round(stockPollo / 20) + ' cajones', bajo: stockPollo < 50 },
-            { label: '🌭 Embutidos', kg: stockEmbutido, color: 'var(--purple)', aprox: stockEmbutido.toFixed(1) + ' kg', bajo: stockEmbutido < 20 },
-          ].map(s => (
+{ label: '🍖 Piezas Bovinas', kg: stockPiezas, color: 'var(--gold)', aprox: stockPiezas.toFixed(1) + ' kg', bajo: stockPiezas < 30 },
+{ label: '📦 Cajas Bovinas', kg: stockCajas, color: 'var(--gold)', aprox: stockCajas.toFixed(1) + ' kg', bajo: stockCajas < 20 },
+{ label: '🥩 Bovino Cortes', kg: stockCortes, color: 'var(--gold)', aprox: stockCortes.toFixed(1) + ' kg', bajo: stockCortes < 50 },
+{ label: '🐷 Cerdo Capones', kg: stockCerdo, color: 'var(--amber)', aprox: Math.round(stockCerdo / 107) + ' capones', bajo: stockCerdo < 50 },
+{ label: '🍗 Pollo', kg: stockPollo, color: 'var(--blue)', aprox: Math.round(stockPollo / 20) + ' cajones', bajo: stockPollo < 50 },
+{ label: '🫀 Brosas', kg: stockBrosas, color: 'var(--amber)', aprox: stockBrosas.toFixed(1) + ' kg', bajo: stockBrosas < 20 },
+{ label: '🌭 Embutidos', kg: stockEmbutido, color: 'var(--purple)', aprox: stockEmbutido.toFixed(1) + ' kg', bajo: stockEmbutido < 20 },
+{ label: '🧊 Rebozados/Congelados', kg: stockRebozado, color: 'var(--blue)', aprox: stockRebozado.toFixed(1) + ' kg', bajo: stockRebozado < 20 },
+         ].map(s => (
             <div key={s.label} style={{ background: s.bajo ? '#3a1a1a' : 'var(--surface2)', border: `1px solid ${s.bajo ? 'var(--red-light)' : 'var(--border)'}`, borderRadius: 10, padding: '12px 14px', textAlign: 'center' }}>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>{s.label}</div>
               <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 26, color: s.bajo ? 'var(--red-light)' : s.color }}>{s.kg.toFixed(1)} kg</div>
