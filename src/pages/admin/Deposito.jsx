@@ -841,7 +841,8 @@ const CATEGORIA_A_STOCK = {
     }
     setItems(prev => [...prev, item])
     setForm(f => ({ ...f, kg: '', productoId: '', precio: '', categoria: '' }))
-    setMediaSeleccionada(null)
+    setMediasDisponibles(prev => prev.filter(m => m.id !== mediaSeleccionada?.id))
+setMediaSeleccionada(null)
   }
    
   function quitarItem(idx) { setItems(prev => prev.filter((_, i) => i !== idx)) }
