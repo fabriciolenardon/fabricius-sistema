@@ -393,67 +393,80 @@ function DesposteTab({ onSaved }) {
       )}
 
       {subtab === 'pieza_kilo' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <div>
-            <div style={{ background: '#1a1a2a', border: '1px solid #2a2a5a', borderRadius: 10, padding: '12px 16px', marginBottom: 16 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#7db5ff', marginBottom: 6 }}>🔄 Convertir Pieza a Cortes</div>
-              <div style={{ fontSize: 12, color: 'var(--muted)' }}>Tomás una pieza del stock y la abrís para vender sus cortes por kilo. Los kg netos van a <strong style={{ color: 'var(--gold)' }}>Bovino Cortes</strong>.</div>
-            </div>
-            <div className="card">
-              <div className="card-title">📦 Stock actual de piezas</div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>🍖 Bovino Piezas (total)</span>
-                <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{(piezasStock['bovino_pieza'] || 0).toFixed(1)} kg</span>
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>Ingresá los kg exactos de la pieza que vas a convertir.</div>
-            </div>
+  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+    <div>
+      <div style={{ background: '#1a1a2a', border: '1px solid #2a2a5a', borderRadius: 10, padding: '12px 16px', marginBottom: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#7db5ff', marginBottom: 6 }}>🔄 Convertir Pieza a Cortes</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)' }}>Seleccioná una pieza del stock, ingresá los kg a convertir y los kg netos van a <strong style={{ color: 'var(--gold)' }}>Bovino Cortes</strong>.</div>
+      </div>
+      <div className="card">
+        <div className="card-title">📦 Stock actual de piezas</div>
+        {[
+          { tipo: 'pieza_pierna', label: '🦵 Pierna con hueso' },
+          { tipo: 'pieza_cuarto_pistola', label: '🥩 Cuarto pistola' },
+          { tipo: 'pieza_costillar', label: '🍖 Costillar completo' },
+          { tipo: 'pieza_cortito', label: '🥩 Cortito' },
+          { tipo: 'pieza_carre', label: '🥩 Carré sin lomo' },
+          { tipo: 'pieza_paleta', label: '🥩 Paleta entera' },
+          { tipo: 'pieza_parrillero', label: '🥩 Parrillero' },
+          { tipo: 'caja_cb', label: '📦 Caja CB' },
+          { tipo: 'caja_pt', label: '📦 Caja PT' },
+        ].map(p => (
+          <div key={p.tipo} onClick={() => { setNombrePieza(p.label); setKgPiezaConvertir((piezasStock[p.tipo] || 0).toString()); }}
+            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 8px', borderBottom: '1px solid var(--border)', cursor: 'pointer', borderRadius: 6, background: nombrePieza === p.label ? 'rgba(201,168,76,0.08)' : 'transparent', border: nombrePieza === p.label ? '1px solid var(--gold)' : '1px solid transparent' }}>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>{p.label}</span>
+            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: (piezasStock[p.tipo] || 0) > 0 ? 'var(--gold)' : 'var(--muted)' }}>
+              {(piezasStock[p.tipo] || 0).toFixed(1)} kg
+            </span>
           </div>
-          <div className="card">
-            <div className="card-title">🔄 Convertir pieza a cortes</div>
-            <div className="form-group" style={{ marginBottom: 12 }}>
-              <label>Nombre de la pieza</label>
-              <input value={nombrePieza} onChange={e => setNombrePieza(e.target.value)} placeholder="Ej: Pierna, Cortito, Costillar..." style={inp} />
-            </div>
-            <div className="form-group" style={{ marginBottom: 12 }}>
-              <label>Kg de la pieza a convertir</label>
-              <input type="number" step="0.1" value={kgPiezaConvertir} onChange={e => setKgPiezaConvertir(e.target.value)} placeholder="0" style={{ ...inp, borderColor: 'var(--gold)' }} />
-            </div>
-            <div style={{ marginBottom: 14 }}>
-              <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Tipo de animal</label>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {Object.entries(MERMAS_KILO).map(([id, m]) => (
-                  <button key={id} onClick={() => setTipoAnimalPieza(id)}
-                    style={{ flex: 1, padding: '8px', borderRadius: 8, border: `2px solid ${tipoAnimalPieza === id ? m.color : 'var(--border)'}`, background: tipoAnimalPieza === id ? m.color + '22' : 'var(--surface2)', color: tipoAnimalPieza === id ? m.color : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 11 }}>
-                    <div>{m.label}</div>
-                    <div>Merma: {(m.merma * 100).toFixed(0)}%</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-            {kgPiezaConvertir > 0 && (
-              <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, marginBottom: 14 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
-                  <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg pieza</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{parseFloat(kgPiezaConvertir).toFixed(1)} kg</div></div>
-                  <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Merma {(MERMAS_KILO[tipoAnimalPieza].merma * 100).toFixed(0)}%</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--red-light)' }}>-{(parseFloat(kgPiezaConvertir) * MERMAS_KILO[tipoAnimalPieza].merma).toFixed(1)} kg</div></div>
-                  <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg a cortes</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--green)' }}>{(parseFloat(kgPiezaConvertir) * (1 - MERMAS_KILO[tipoAnimalPieza].merma)).toFixed(1)} kg</div></div>
-                </div>
-              </div>
-            )}
-            <div className="form-group" style={{ marginBottom: 12 }}>
-              <label>Precio costo/kg de la pieza (opcional)</label>
-              <input type="number" value={precioCostoPieza} onChange={e => setPrecioCostoPieza(e.target.value)} placeholder="Para referencia" style={inp} />
-            </div>
-            <div className="form-group" style={{ marginBottom: 14 }}>
-              <label>Fecha</label>
-              <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} style={inp} />
-            </div>
-            <button className="btn btn-gold" onClick={confirmarConversionPieza} disabled={loading || !kgPiezaConvertir || !nombrePieza} style={{ width: '100%' }}>
-              {loading ? '⏳ Procesando...' : '🔄 Confirmar conversión a cortes por kilo'}
+        ))}
+      </div>
+    </div>
+    <div className="card">
+      <div className="card-title">🔄 Convertir pieza a cortes</div>
+      <div className="form-group" style={{ marginBottom: 12 }}>
+        <label>Pieza seleccionada</label>
+        <input value={nombrePieza} onChange={e => setNombrePieza(e.target.value)} placeholder="Clickeá una pieza del stock o escribí..." style={{ ...inp, borderColor: nombrePieza ? 'var(--gold)' : 'var(--border)' }} />
+      </div>
+      <div className="form-group" style={{ marginBottom: 12 }}>
+        <label>Kg a convertir</label>
+        <input type="number" step="0.1" value={kgPiezaConvertir} onChange={e => setKgPiezaConvertir(e.target.value)} placeholder="0" style={{ ...inp, borderColor: 'var(--gold)' }} />
+      </div>
+      <div style={{ marginBottom: 14 }}>
+        <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Tipo de animal</label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {Object.entries(MERMAS_KILO).map(([id, m]) => (
+            <button key={id} onClick={() => setTipoAnimalPieza(id)}
+              style={{ flex: 1, padding: '8px', borderRadius: 8, border: `2px solid ${tipoAnimalPieza === id ? m.color : 'var(--border)'}`, background: tipoAnimalPieza === id ? m.color + '22' : 'var(--surface2)', color: tipoAnimalPieza === id ? m.color : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 11 }}>
+              <div>{m.label}</div>
+              <div>Merma: {(m.merma * 100).toFixed(0)}%</div>
             </button>
+          ))}
+        </div>
+      </div>
+      {kgPiezaConvertir > 0 && (
+        <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, marginBottom: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
+            <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg pieza</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{parseFloat(kgPiezaConvertir).toFixed(1)} kg</div></div>
+            <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Merma {(MERMAS_KILO[tipoAnimalPieza].merma * 100).toFixed(0)}%</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--red-light)' }}>-{(parseFloat(kgPiezaConvertir) * MERMAS_KILO[tipoAnimalPieza].merma).toFixed(1)} kg</div></div>
+            <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg a cortes</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--green)' }}>{(parseFloat(kgPiezaConvertir) * (1 - MERMAS_KILO[tipoAnimalPieza].merma)).toFixed(1)} kg</div></div>
           </div>
         </div>
       )}
-
+      <div className="form-group" style={{ marginBottom: 12 }}>
+        <label>Precio costo/kg (opcional)</label>
+        <input type="number" value={precioCostoPieza} onChange={e => setPrecioCostoPieza(e.target.value)} placeholder="Para referencia" style={inp} />
+      </div>
+      <div className="form-group" style={{ marginBottom: 14 }}>
+        <label>Fecha</label>
+        <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} style={inp} />
+      </div>
+      <button className="btn btn-gold" onClick={confirmarConversionPieza} disabled={loading || !kgPiezaConvertir || !nombrePieza} style={{ width: '100%' }}>
+        {loading ? '⏳ Procesando...' : '🔄 Confirmar conversión a cortes'}
+      </button>
+    </div>
+  </div>
+)}
       {subtab === 'historial' && (
         <div className="card">
           <div className="card-title">📋 Historial de despostes</div>
