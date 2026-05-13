@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { supabase } from '../../supabaseClient'
+import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 
 function fmt(n) {
@@ -56,11 +56,14 @@ export default function Dashboard() {
   const totMesGastos = mesActual.reduce((s, c) => s + (c.gastos || 0), 0)
 
   const stockBovino = Math.max(0, stock.bovino_mr || 0)
-  const stockPollo = Math.max(0, stock.pollo || 0)
-  const stockCerdo = Math.max(0, stock.cerdo || 0)
-  const stockCortes = Math.max(0, stock.bovino_corte || 0)
-  const stockBrosas = Math.max(0, stock.bovino_brosa || 0)
-  const stockEmbutido = Math.max(0, stock.embutido || 0)
+const stockPiezas = Math.max(0, (stock.pieza_pierna || 0) + (stock.pieza_cuarto_pistola || 0) + (stock.pieza_costillar || 0) + (stock.pieza_cortito || 0) + (stock.pieza_carre || 0) + (stock.pieza_paleta || 0) + (stock.pieza_parrillero || 0))
+const stockCajas = Math.max(0, (stock.caja_cb || 0) + (stock.caja_pt || 0))
+const stockCortes = Math.max(0, stock.bovino_corte || 0)
+const stockCerdo = Math.max(0, stock.cerdo || 0)
+const stockPollo = Math.max(0, stock.pollo || 0)
+const stockBrosas = Math.max(0, stock.bovino_brosa || 0)
+const stockEmbutido = Math.max(0, stock.embutido || 0)
+const stockRebozado = Math.max(0, stock.rebozado || 0)
 
   const clientesDeuda = clientes.filter(c => c.saldo > 0).sort((a, b) => b.saldo - a.saldo)
   const totalDeuda = clientesDeuda.reduce((s, c) => s + c.saldo, 0)
