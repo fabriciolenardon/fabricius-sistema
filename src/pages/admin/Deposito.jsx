@@ -607,12 +607,20 @@ async function eliminar(entrada) {
           <div className="form-group"><label>Tipo de producto</label>
             <select value={form.tipo} onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))}>
               <option value="">— Seleccioná —</option>
-              <option value="bovino_mr">🐄 Media Res</option>
-              <option value="bovino_corte">🥩 Bovino — Corte/Caja</option>
-              <option value="bovino_brosa">🫀 Bovino — Brosa</option>
-              <option value="cerdo">🐷 Cerdo — Capón</option>
-              <option value="pollo">🍗 Pollo — Cajón</option>
-              <option value="embutido">🌭 Embutido/Rebozado</option>
+<option value="bovino_mr">🐄 Media Res</option>
+<option value="pieza_pierna">🦵 Pierna bovina con hueso</option>
+<option value="pieza_cuarto_pistola">🥩 Cuarto pistola</option>
+<option value="pieza_costillar">🍖 Costillar completo</option>
+<option value="pieza_cortito">🥩 Cortito</option>
+<option value="pieza_carre">🥩 Carré sin lomo</option>
+<option value="pieza_paleta">🥩 Paleta entera</option>
+<option value="pieza_parrillero">🥩 Parrillero</option>
+<option value="caja_cb">📦 Caja bovina CB</option>
+<option value="caja_pt">📦 Caja bovina PT</option>
+<option value="bovino_brosa">🫀 Bovino — Brosa</option>
+<option value="cerdo">🐷 Cerdo — Capón</option>
+<option value="pollo">🍗 Pollo — Cajón</option>
+<option value="embutido">🌭 Embutido/Rebozado</option>
             </select>
           </div>
           <div className="form-group"><label>Fecha</label>
