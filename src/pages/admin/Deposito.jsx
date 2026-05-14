@@ -97,6 +97,16 @@ const [piezasCerdo, setPiezasCerdo] = useState({
   pierna: '', carre: '', pechito: '', matambre: '',
   paleta: '', parrillero: '', bondiola: '', huesos: '', tocino: '', cuero: '', cabeza: ''
 })
+const [tipoElaboracion, setTipoElaboracion] = useState('embutido')
+const [tipoEmbutido, setTipoEmbutido] = useState('chorizo_parrillero')
+const [piezasEmbutido, setPiezasEmbutido] = useState({
+  cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '',
+  cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: ''
+})
+const [kgCarneBovinaEmbutido, setKgCarneBovinaEmbutido] = useState('')
+const [kgQuesoEmbutido, setKgQuesoEmbutido] = useState('')
+const [pctAumentoEmbutido, setPctAumentoEmbutido] = useState(10)
+const [elaboraciones, setElaboraciones] = useState([])
   const MERMAS_KILO = {
     novillo:  { label: 'Novillo / Novillito', merma: 0.24, color: 'var(--gold)' },
     ternera:  { label: 'Ternera',             merma: 0.30, color: 'var(--amber)' },
@@ -215,6 +225,70 @@ console.log('CAPONES:', caponesData)
     } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
     setLoading(false)
   }
+async function confirmarElaboracionEmbutido() {
+  const kgCerdo = Object.values(piezasEmbutido).reduce((s, v) => s + (parseFloat(v) || 0), 0)
+  if (kgCerdo === 0) { showAlert('Ingresá al menos una pieza de cerdo', 'error'); return }
+  setLoading(true)
+  try {
+    const kgTotal = kgCerdo + (parseFloat(kgCarneBovinaEmbutido) || 0)
+    const kgFinal = parseFloat((kgTotal * (1 + pctAumentoEmbutido / 100)).toFixed(2))
+    const piezasUsadas = Object.entries(piezasEmbutido)
+      .filter(([, v]) => parseFloat(v) > 0)
+      .map(([tipo, v]) => ({ tipo, kg: parseFloat(v) }))
+    await supabase.from('elaboraciones_embutidos').insert({
+      fecha, tipo: 'embutido', tipo_embutido: tipoEmbutido,
+      piezas_usadas: piezasUsadas,
+      kg_carne_cerdo: kgCerdo,
+      kg_carne_bovina: parseFloat(kgCarneBovinaEmbutido) || 0,
+      kg_elaborado: kgTotal, pct_aumento: pctAumentoEmbutido,
+      kg_final: kgFinal, maduracion_completa: true, notas
+    })
+    for (const [tipo, v] of Object.entries(piezasEmbutido)) {
+      if (parseFloat(v) > 0) await actualizarStock(tipo, -parseFloat(v))
+    }
+    if (parseFloat(kgCarneBovinaEmbutido) > 0) await actualizarStock('bovino_corte', -parseFloat(kgCarneBovinaEmbutido))
+    await actualizarStock('embutido', kgFinal)
+    showAlert(`✅ ${kgFinal.toFixed(1)} kg de embutidos elaborados al stock`)
+    setPiezasEmbutido({ cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '', cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: '' })
+    setKgCarneBovinaEmbutido(''); setKgQuesoEmbutido(''); setNotas('')
+    await cargarDatos(); onSaved()
+  } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
+  setLoading(false)
+}
+
+async function confirmarElaboracionSalame() {
+    const kgCerdo = Object.values(piezasEmbutido).reduce((s, v) => s + (parseFloat(v) || 0), 0)
+    if (kgCerdo === 0) { showAlert('Ingresá al menos una pieza de cerdo', 'error'); return }
+    setLoading(true)
+    try {
+      const kgTotal = kgCerdo + (parseFloat(kgCarneBovinaEmbutido) || 0) + (parseFloat(kgQuesoEmbutido) || 0)
+      const fechaFin = new Date(fecha)
+      fechaFin.setDate(fechaFin.getDate() + 21)
+      const piezasUsadas = Object.entries(piezasEmbutido)
+        .filter(([, v]) => parseFloat(v) > 0)
+        .map(([tipo, v]) => ({ tipo, kg: parseFloat(v) }))
+      await supabase.from('elaboraciones_embutidos').insert({
+        fecha, tipo: 'salame', tipo_embutido: tipoEmbutido,
+        piezas_usadas: piezasUsadas,
+        kg_carne_cerdo: kgCerdo,
+        kg_carne_bovina: parseFloat(kgCarneBovinaEmbutido) || 0,
+        kg_queso: parseFloat(kgQuesoEmbutido) || 0,
+        kg_elaborado: kgTotal, pct_aumento: 0,
+        kg_final: 0, maduracion_completa: false,
+        fecha_fin_maduracion: fechaFin.toISOString().split('T')[0],
+        notas
+      })
+      for (const [tipo, v] of Object.entries(piezasEmbutido)) {
+        if (parseFloat(v) > 0) await actualizarStock(tipo, -parseFloat(v))
+      }
+      if (parseFloat(kgCarneBovinaEmbutido) > 0) await actualizarStock('bovino_corte', -parseFloat(kgCarneBovinaEmbutido))
+      showAlert(`✅ Salame registrado — Maduración hasta ${fechaFin.toISOString().split('T')[0]}`)
+      setPiezasEmbutido({ cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '', cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: '' })
+      setKgCarneBovinaEmbutido(''); setKgQuesoEmbutido(''); setNotas('')
+      await cargarDatos(); onSaved()
+    } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
+    setLoading(false)
+  }
 async function confirmarDesposteCerdo() {
   if (!caponSeleccionado) { showAlert('Seleccioná un capón', 'error'); return }
   setLoading(true)
@@ -303,7 +377,7 @@ async function confirmarDesposteCerdo() {
       {alert && <div style={{ background: alert.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${alert.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: alert.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>{alert.msg}</div>}
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
         {[{ id: 'piezas', label: '🍖 Desposte en Piezas' }, { id: 'kilo', label: '⚖️ Desposte para venta por Kilo' }, { id: 'pieza_kilo', label: '🔄 Convertir Pieza a Cortes' }, { id: 'cerdo', label: '🐷 Desposte Cerdo' },
-{ id: 'historial', label: '📋 Historial' }].map(t => (
+{ id: 'embutidos', label: '🌭 Elaborar Embutidos' }, { id: 'historial', label: '📋 Historial' }].map(t => (
           <button key={t.id} onClick={() => { setSubtab(t.id); setSeleccionada(null); setPiezas([]); cargarDatos() }}
             style={{ padding: '8px 16px', borderRadius: 8, border: `1px solid ${subtab === t.id ? 'var(--gold)' : 'var(--border)'}`, background: subtab === t.id ? 'var(--gold)' : 'transparent', color: subtab === t.id ? '#000' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
             {t.label}
@@ -620,7 +694,129 @@ async function confirmarDesposteCerdo() {
     )}
   </div>
 )}
-      {subtab === 'historial' && (
+{subtab === 'embutidos' && (
+  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: 16 }}>
+    <div>
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-title">🌭 Tipo de elaboración</div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+          {[{ id: 'embutido', label: '🌭 Embutidos frescos' }, { id: 'salame', label: '🥩 Salames' }].map(t => (
+            <button key={t.id} onClick={() => setTipoElaboracion(t.id)}
+              style={{ flex: 1, padding: '10px', borderRadius: 8, border: `2px solid ${tipoElaboracion === t.id ? 'var(--gold)' : 'var(--border)'}`, background: tipoElaboracion === t.id ? 'rgba(201,168,76,0.1)' : 'var(--surface2)', color: tipoElaboracion === t.id ? 'var(--gold)' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+        {tipoElaboracion === 'embutido' && (
+          <div>
+            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>Tipo de embutido</label>
+            <select value={tipoEmbutido} onChange={e => setTipoEmbutido(e.target.value)} style={{ ...inp, marginBottom: 10 }}>
+              <option value="chorizo_parrillero">🌭 Chorizo Parrillero</option>
+              <option value="chorizo_saborizado">🌭 Chorizo Saborizado</option>
+              <option value="salchicha_parrillera">🌭 Salchicha Parrillera</option>
+            </select>
+            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>% de aumento por agregados</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <input type="number" step="0.5" min="0" max="30" value={pctAumentoEmbutido} onChange={e => setPctAumentoEmbutido(parseFloat(e.target.value) || 0)}
+                style={{ ...inp, width: 80, borderColor: 'var(--gold)', textAlign: 'center', fontSize: 18, fontWeight: 700 }} />
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>% — vino, tripas, especias</span>
+            </div>
+          </div>
+        )}
+        {tipoElaboracion === 'salame' && (
+          <div>
+            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>Tipo de salame</label>
+            <select value={tipoEmbutido} onChange={e => setTipoEmbutido(e.target.value)} style={{ ...inp, marginBottom: 10 }}>
+              <option value="salame_comun">🥩 Salame Común</option>
+              <option value="salame_rockeford">🥩 Salame Rockeford</option>
+              <option value="salame_holanda">🥩 Salame Holanda (con queso)</option>
+            </select>
+            <div style={{ background: '#1a1a2a', border: '1px solid #2a2a5a', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#7db5ff' }}>
+              ℹ️ Los salames tienen 15-30 días de maduración y pierden ~50% del peso. El stock se actualiza al finalizar la maduración.
+            </div>
+          </div>
+        )}
+      </div>
+      <div className="card">
+        <div className="card-title">📦 Stock piezas de cerdo disponibles</div>
+        {[
+          { tipo: 'cerdo_pierna', label: '🦵 Piernas' },
+          { tipo: 'cerdo_paleta', label: '🥩 Paletas' },
+          { tipo: 'cerdo_parrillero', label: '🥩 Carnaza' },
+          { tipo: 'cerdo_pechito', label: '🍖 Pechitos' },
+          { tipo: 'cerdo_matambre', label: '🥩 Matambres' },
+          { tipo: 'cerdo_carre', label: '🥩 Carrés' },
+          { tipo: 'cerdo_bondiola', label: '🥩 Bondiola' },
+          { tipo: 'cerdo_tocino', label: '🧀 Tocino' },
+        ].map(p => (
+          <div key={p.tipo} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+            <span style={{ fontSize: 12, fontWeight: 600 }}>{p.label}</span>
+            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: (piezasStock[p.tipo] || 0) > 0 ? 'var(--amber)' : 'var(--muted)' }}>
+              {(piezasStock[p.tipo] || 0).toFixed(1)} kg
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+    <div className="card">
+      <div className="card-title">🌭 {tipoElaboracion === 'embutido' ? 'Elaborar embutidos' : 'Elaborar salames'}</div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>Ingresá los kg de cada pieza que vas a usar.</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
+        {[
+          { id: 'cerdo_pierna', label: '🦵 Piernas' },
+          { id: 'cerdo_paleta', label: '🥩 Paletas' },
+          { id: 'cerdo_parrillero', label: '🥩 Carnaza' },
+          { id: 'cerdo_pechito', label: '🍖 Pechitos' },
+          { id: 'cerdo_matambre', label: '🥩 Matambres' },
+          { id: 'cerdo_carre', label: '🥩 Carrés' },
+          { id: 'cerdo_bondiola', label: '🥩 Bondiola' },
+          { id: 'cerdo_tocino', label: '🧀 Tocino' },
+        ].map(p => (
+          <div key={p.id}>
+            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>{p.label}</label>
+            <input type="number" step="0.1" placeholder="0" value={piezasEmbutido[p.id]} onChange={e => setPiezasEmbutido(prev => ({ ...prev, [p.id]: e.target.value }))}
+              style={{ ...inp, borderColor: piezasEmbutido[p.id] ? 'var(--gold)' : 'var(--border)' }} />
+          </div>
+        ))}
+      </div>
+      <div className="form-group" style={{ marginBottom: 10 }}>
+        <label>🥩 Carne bovina (kg)</label>
+        <input type="number" step="0.1" placeholder="0" value={kgCarneBovinaEmbutido} onChange={e => setKgCarneBovinaEmbutido(e.target.value)} style={{ ...inp, borderColor: 'var(--gold)' }} />
+      </div>
+      {tipoElaboracion === 'salame' && tipoEmbutido === 'salame_holanda' && (
+        <div className="form-group" style={{ marginBottom: 10 }}>
+          <label>🧀 Queso Holanda (kg)</label>
+          <input type="number" step="0.1" placeholder="0" value={kgQuesoEmbutido} onChange={e => setKgQuesoEmbutido(e.target.value)} style={{ ...inp, borderColor: 'var(--amber)' }} />
+        </div>
+      )}
+      <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, marginBottom: 14 }}>
+        {(() => {
+          const kgCerdo = Object.values(piezasEmbutido).reduce((s, v) => s + (parseFloat(v) || 0), 0)
+          const kgBovino = parseFloat(kgCarneBovinaEmbutido) || 0
+          const kgQueso = parseFloat(kgQuesoEmbutido) || 0
+          const kgTotal = kgCerdo + kgBovino + kgQueso
+          const kgFinal = tipoElaboracion === 'embutido' ? kgTotal * (1 + pctAumentoEmbutido / 100) : kgTotal * 0.5
+          return (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
+              <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg carne total</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{kgTotal.toFixed(1)} kg</div></div>
+              <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>{tipoElaboracion === 'embutido' ? `+${pctAumentoEmbutido}% agregados` : '-50% maduración'}</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: tipoElaboracion === 'embutido' ? 'var(--green)' : 'var(--red-light)' }}>{tipoElaboracion === 'embutido' ? '+' : ''}{(kgFinal - kgTotal).toFixed(1)} kg</div></div>
+              <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg finales</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{kgFinal.toFixed(1)} kg</div></div>
+            </div>
+          )
+        })()}
+      </div>
+      <div className="form-row" style={{ marginBottom: 14 }}>
+        <div className="form-group"><label>Fecha</label><input type="date" value={fecha} onChange={e => setFecha(e.target.value)} style={inp} /></div>
+        <div className="form-group"><label>Notas</label><input placeholder="Observaciones..." value={notas} onChange={e => setNotas(e.target.value)} style={inp} /></div>
+      </div>
+      <button className="btn btn-gold" onClick={tipoElaboracion === 'embutido' ? confirmarElaboracionEmbutido : confirmarElaboracionSalame} disabled={loading} style={{ width: '100%' }}>
+        {loading ? '⏳ Procesando...' : tipoElaboracion === 'embutido' ? '🌭 Confirmar elaboración de embutidos' : '🥩 Registrar salame en maduración'}
+      </button>
+    </div>
+  </div>
+)}
+
+{subtab === 'historial' && (
         <div className="card">
           <div className="card-title">📋 Historial de despostes</div>
           {despostes.length === 0 ? <div className="empty">Sin despostes registrados</div> : despostes.map(d => (
@@ -628,15 +824,15 @@ async function confirmarDesposteCerdo() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
                 <div>
                   <div style={{ fontWeight: 700, fontSize: 13 }}>
-                    {d.tipo_desposte === 'piezas' ? '🍖 Piezas' : d.tipo_desposte === 'kilo' ? '⚖️ Por Kilo' : '🔄 Pieza a Kilo'}
+                    {d.tipo_desposte === 'piezas' ? '🍖 Piezas' : d.tipo_desposte === 'kilo' ? '⚖️ Por Kilo' : d.tipo_desposte === 'cerdo' ? '🐷 Cerdo' : '🔄 Pieza a Kilo'}
                     {d.tipo_animal ? ` · ${MERMAS_KILO[d.tipo_animal]?.label || d.tipo_animal}` : ''}
-                    {d.modelo && d.modelo !== 'KILO' && d.modelo !== 'PIEZA_KILO' ? ` · Modelo ${d.modelo}` : ''}
+                    {d.modelo && d.modelo !== 'KILO' && d.modelo !== 'PIEZA_KILO' && d.modelo !== 'CERDO' ? ` · Modelo ${d.modelo}` : ''}
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--muted)' }}>{d.fecha} · {d.kg_media_res?.toFixed(1)} kg — {d.kg_neto?.toFixed(1)} kg neto</div>
                   {d.notas && <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>{d.notas}</div>}
                 </div>
-                <span style={{ background: d.tipo_desposte === 'piezas' ? '#2a2010' : '#1a1a2a', color: d.tipo_desposte === 'piezas' ? 'var(--gold)' : '#7db5ff', borderRadius: 6, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>
-                  {d.tipo_desposte === 'piezas' ? 'PIEZAS' : d.tipo_desposte === 'kilo' ? 'X KILO' : 'PIEZA→KILO'}
+                <span style={{ background: d.tipo_desposte === 'piezas' ? '#2a2010' : d.tipo_desposte === 'cerdo' ? '#2a1a0a' : '#1a1a2a', color: d.tipo_desposte === 'piezas' ? 'var(--gold)' : d.tipo_desposte === 'cerdo' ? 'var(--amber)' : '#7db5ff', borderRadius: 6, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>
+                  {d.tipo_desposte === 'piezas' ? 'PIEZAS' : d.tipo_desposte === 'kilo' ? 'X KILO' : d.tipo_desposte === 'cerdo' ? 'CERDO' : 'PIEZA→KILO'}
                 </span>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -653,8 +849,6 @@ async function confirmarDesposteCerdo() {
     </div>
   )
 }
-
-
 function EntradaForm({ onSaved, showAlert, proveedores }) {
   const [form, setForm] = useState({ tipo: '', proveedor: '', descripcion: '', fecha: new Date().toISOString().split('T')[0], kg: '', precioKg: '9800', merma: '', destino: 'DEPOSITO', importe: '' })
   const [historial, setHistorial] = useState([])
