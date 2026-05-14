@@ -121,6 +121,7 @@ const [piezasCerdo, setPiezasCerdo] = useState({
     ;(stockData || []).forEach(r => stockMap[r.tipo] = r.kg_disponible)
     setPiezasStock(stockMap)
     setCaponesDisponibles(caponesData || [])
+console.log('CAPONES:', caponesData)
     console.log('STOCK CARGADO:', stockMap)
   }
   function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(() => setAlert(null), 5000) }
