@@ -908,14 +908,21 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).eq('reservada', false).order('fecha', { ascending: false }).then(({ data }) => setMediasDisponibles(data || []))
   }, [])
 
-  const CATEGORIAS = {
+ const CATEGORIAS = {
     bovino_mr: '🐄 Media Reses',
     bovino_corte: '🥩 Bovinos — Cortes',
     bovino_brosa: '🫀 Brosas',
     bovino_pieza: '🍖 Piezas',
     bovino_caja_cb: '📦 Cajas Bovinas CB',
     bovino_caja_pt: '📦 Cajas Bovinas PT',
-    cerdo_corte: '🐷 Cerdo',
+    cerdo_corte: '🐷 Cerdo — Cortes',
+    cerdo_pierna: '🦵 Cerdo — Pierna',
+    cerdo_carre: '🥩 Cerdo — Carré',
+    cerdo_pechito: '🍖 Cerdo — Pechito',
+    cerdo_matambre: '🥩 Cerdo — Matambre',
+    cerdo_paleta: '🥩 Cerdo — Paleta',
+    cerdo_parrillero: '🥩 Cerdo — Parrillero',
+    cerdo_bondiola: '🥩 Cerdo — Bondiola',
     embutido: '🌭 Embutidos',
     pollo: '🍗 Pollo Cajones',
     rebozado: '🧊 Rebozados',
@@ -1219,7 +1226,14 @@ function RemitosTab({ remitoActual }) {
     bovino_mr: '🐄 Media Reses', bovino_corte: '🥩 Bovinos — Cortes',
     bovino_brosa: '🫀 Brosas', bovino_pieza: '🍖 Piezas',
     bovino_caja_cb: '📦 Cajas CB', bovino_caja_pt: '📦 Cajas PT',
-    cerdo_corte: '🐷 Cerdo', embutido: '🌭 Embutidos',
+    cerdo_corte: '🐷 Cerdo — Cortes',
+    cerdo_pierna: '🦵 Cerdo — Pierna',
+    cerdo_carre: '🥩 Cerdo — Carré',
+    cerdo_pechito: '🍖 Cerdo — Pechito',
+    cerdo_matambre: '🥩 Cerdo — Matambre',
+    cerdo_paleta: '🥩 Cerdo — Paleta',
+    cerdo_parrillero: '🥩 Cerdo — Parrillero',
+    cerdo_bondiola: '🥩 Cerdo — Bondiola',
     pollo: '🍗 Pollo', rebozado: '🧊 Rebozados',
   }
 
