@@ -819,8 +819,9 @@ async function confirmarDesposteCerdo() {
 )}
 
 {subtab === 'historial' && (
-        <div className="card">
-          <div className="card-title">📋 Historial de despostes</div>
+  <div>
+    <div className="card">
+      <div className="card-title">📋 Historial de despostes</div>
           {despostes.length === 0 ? <div className="empty">Sin despostes registrados</div> : despostes.map(d => (
             <div key={d.id} style={{ padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
@@ -845,9 +846,8 @@ async function confirmarDesposteCerdo() {
                 ))}
               </div>
             </div>
-          ))}
+         ))}
         </div>
-      </div>
     <div className="card" style={{ marginTop: 16 }}>
       <div className="card-title">🌭 Historial de elaboraciones</div>
       {elaboraciones.length === 0 ? <div className="empty">Sin elaboraciones registradas</div> : elaboraciones.map(e => (
@@ -881,10 +881,8 @@ async function confirmarDesposteCerdo() {
         </div>
       ))}
     </div>
-      )}
-    </div>
-  )
-}
+  </div>
+)}
 function EntradaForm({ onSaved, showAlert, proveedores }) {
   const [form, setForm] = useState({ tipo: '', proveedor: '', descripcion: '', fecha: new Date().toISOString().split('T')[0], kg: '', precioKg: '9800', merma: '', destino: 'DEPOSITO', importe: '' })
   const [historial, setHistorial] = useState([])
