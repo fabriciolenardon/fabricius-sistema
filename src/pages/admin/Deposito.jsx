@@ -116,22 +116,24 @@ const [elaboraciones, setElaboraciones] = useState([])
   useEffect(() => { cargarDatos() }, [])
 
   async function cargarDatos() {
-    const [{ data: entradas }, { data: despostesData }, { data: preciosData }, { data: stockData }, { data: caponesData }] = await Promise.all([
-      supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).eq('reservada', false).order('fecha', { ascending: false }),
-      supabase.from('despostes').select('*').order('fecha', { ascending: false }).limit(20),
-      supabase.from('precios').select('*').eq('categoria', 'bovino_pieza'),
-      supabase.from('stock_actual').select('*'),
-      supabase.from('entradas_deposito').select('*').eq('tipo', 'cerdo').eq('despostada', false).order('fecha', { ascending: false })
-    ])
-    setMediasRes(entradas || [])
-    setDespostes(despostesData || [])
-    setPrecios(preciosData || [])
-    const stockMap = {}
-    ;(stockData || []).forEach(r => stockMap[r.tipo] = r.kg_disponible)
-    setPiezasStock(stockMap)
-    setCaponesDisponibles(caponesData || [])
+    const [{ data: entradas }, { data: despostesData }, { data: preciosData }, { data: stockData }, { data: caponesData }, { data: elaboracionesData }] = await Promise.all([
+  supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).eq('reservada', false).order('fecha', { ascending: false }),
+  supabase.from('despostes').select('*').order('fecha', { ascending: false }).limit(20),
+  supabase.from('precios').select('*').eq('categoria', 'bovino_pieza'),
+  supabase.from('stock_actual').select('*'),
+  supabase.from('entradas_deposito').select('*').eq('tipo', 'cerdo').eq('despostada', false).order('fecha', { ascending: false }),
+  supabase.from('elaboraciones_embutidos').select('*').order('fecha', { ascending: false }).limit(20)
+])
+setMediasRes(entradas || [])
+setDespostes(despostesData || [])
+setPrecios(preciosData || [])
+const stockMap = {}
+;(stockData || []).forEach(r => stockMap[r.tipo] = r.kg_disponible)
+setPiezasStock(stockMap)
+setCaponesDisponibles(caponesData || [])
+setElaboraciones(elaboracionesData || [])
 console.log('CAPONES:', caponesData)
-    console.log('STOCK CARGADO:', stockMap)
+console.log('STOCK CARGADO:', stockMap)
   }
   function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(() => setAlert(null), 5000) }
 
@@ -845,6 +847,39 @@ async function confirmarDesposteCerdo() {
             </div>
           ))}
         </div>
+    <div className="card" style={{ marginTop: 16 }}>
+      <div className="card-title">🌭 Historial de elaboraciones</div>
+      {elaboraciones.length === 0 ? <div className="empty">Sin elaboraciones registradas</div> : elaboraciones.map(e => (
+        <div key={e.id} style={{ padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 13 }}>
+                {e.tipo === 'salame' ? '🥩' : '🌭'} {e.tipo_embutido?.replace(/_/g, ' ').toUpperCase()}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                {e.fecha} · {(e.kg_carne_cerdo || 0).toFixed(1)} kg cerdo + {(e.kg_carne_bovina || 0).toFixed(1)} kg bovino
+                {e.kg_queso > 0 ? ` + ${e.kg_queso.toFixed(1)} kg queso` : ''}
+              </div>
+              {e.tipo === 'salame' && !e.maduracion_completa && (
+                <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 2 }}>⏳ En maduración hasta: {e.fecha_fin_maduracion}</div>
+              )}
+              {e.tipo === 'salame' && e.maduracion_completa && (
+                <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 2 }}>✅ Maduración completa</div>
+              )}
+              {e.notas && <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>{e.notas}</div>}
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <span style={{ background: e.tipo === 'salame' ? '#2a1a0a' : '#1a2a1a', color: e.tipo === 'salame' ? 'var(--amber)' : 'var(--green)', borderRadius: 6, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>
+                {e.tipo === 'salame' ? 'SALAME' : 'EMBUTIDO'}
+              </span>
+              <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: 'var(--gold)', marginTop: 4 }}>
+                {e.tipo === 'salame' ? `${(e.kg_elaborado || 0).toFixed(1)} kg` : `${(e.kg_final || 0).toFixed(1)} kg`}
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
       )}
     </div>
   )
