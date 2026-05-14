@@ -60,8 +60,8 @@ export function Deposito() {
       </div>
       {tab === 'entradas' && <EntradaForm onSaved={() => {}} showAlert={showAlert} proveedores={proveedores} />}
       {tab === 'salidas' && <SalidaForm onSaved={() => {}} showAlert={showAlert} onRemito={setRemitoActual} setTab={setTab} />}
-      {tab === 'desposte' && <DesposteTab onSaved={() => {}} />}
-      {tab === 'remitos' && <RemitosTab remitoActual={remitoActual} />}
+        {tab === 'desposte' && <DesposteTab key={tab} onSaved={() => {}} />}    
+{tab === 'remitos' && <RemitosTab remitoActual={remitoActual} />}
       {tab === 'proveedores' && <ProveedoresTab />}
     </div>
   )
@@ -91,6 +91,12 @@ function DesposteTab({ onSaved }) {
   const [tipoAnimalPieza, setTipoAnimalPieza] = useState('novillo')
   const [precioCostoPieza, setPrecioCostoPieza] = useState('')
   const [mermaPieza, setMermaPieza] = useState(25)
+  const [caponesDisponibles, setCaponesDisponibles] = useState([])
+const [caponSeleccionado, setCaponSeleccionado] = useState(null)
+const [piezasCerdo, setPiezasCerdo] = useState({
+  pierna: '', carre: '', pechito: '', matambre: '',
+  paleta: '', parrillero: '', bondiola: '', tocino: '', cuero: '', cabeza: ''
+})
 
   const MERMAS_KILO = {
     novillo:  { label: 'Novillo / Novillito', merma: 0.24, color: 'var(--gold)' },
@@ -257,7 +263,8 @@ console.log('STOCK CARGADO:', stockMap)
     <div>
       {alert && <div style={{ background: alert.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${alert.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: alert.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>{alert.msg}</div>}
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
-        {[{ id: 'piezas', label: '🍖 Desposte en Piezas' }, { id: 'kilo', label: '⚖️ Desposte para venta por Kilo' }, { id: 'pieza_kilo', label: '🔄 Convertir Pieza a Cortes' }, { id: 'historial', label: '📋 Historial' }].map(t => (
+        {[{ id: 'piezas', label: '🍖 Desposte en Piezas' }, { id: 'kilo', label: '⚖️ Desposte para venta por Kilo' }, { id: 'pieza_kilo', label: '🔄 Convertir Pieza a Cortes' }, { id: 'cerdo', label: '🐷 Desposte Cerdo' },
+{ id: 'historial', label: '📋 Historial' }].map(t => (
           <button key={t.id} onClick={() => { setSubtab(t.id); setSeleccionada(null); setPiezas([]); cargarDatos() }}
             style={{ padding: '8px 16px', borderRadius: 8, border: `1px solid ${subtab === t.id ? 'var(--gold)' : 'var(--border)'}`, background: subtab === t.id ? 'var(--gold)' : 'transparent', color: subtab === t.id ? '#000' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
             {t.label}
