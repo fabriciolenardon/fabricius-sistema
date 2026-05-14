@@ -107,10 +107,12 @@ const [piezasCerdo, setPiezasCerdo] = useState({
   useEffect(() => { cargarDatos() }, [])
 
   async function cargarDatos() {
-    const [{ data: entradas }, { data: despostesData }, { data: preciosData }, { data: stockData }] = await Promise.all([
-     supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).eq('reservada', false).order('fecha', { ascending: false }),       supabase.from('despostes').select('*').order('fecha', { ascending: false }).limit(20),
+    const [{ data: entradas }, { data: despostesData }, { data: preciosData }, { data: stockData }, { data: caponesData }] = await Promise.all([
+      supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).eq('reservada', false).order('fecha', { ascending: false }),
+      supabase.from('despostes').select('*').order('fecha', { ascending: false }).limit(20),
       supabase.from('precios').select('*').eq('categoria', 'bovino_pieza'),
-      supabase.from('stock_actual').select('*')
+      supabase.from('stock_actual').select('*'),
+      supabase.from('entradas_deposito').select('*').eq('tipo', 'cerdo').eq('despostada', false).order('fecha', { ascending: false })
     ])
     setMediasRes(entradas || [])
     setDespostes(despostesData || [])
@@ -118,9 +120,9 @@ const [piezasCerdo, setPiezasCerdo] = useState({
     const stockMap = {}
     ;(stockData || []).forEach(r => stockMap[r.tipo] = r.kg_disponible)
     setPiezasStock(stockMap)
-console.log('STOCK CARGADO:', stockMap)
+    setCaponesDisponibles(caponesData || [])
+    console.log('STOCK CARGADO:', stockMap)
   }
-
   function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(() => setAlert(null), 5000) }
 
   function buscarPrecio(busqueda) {
@@ -213,7 +215,43 @@ console.log('STOCK CARGADO:', stockMap)
     } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
     setLoading(false)
   }
-
+async function confirmarDesposteCerdo() {
+  if (!caponSeleccionado) { showAlert('Seleccioná un capón', 'error'); return }
+  setLoading(true)
+  try {
+    const kgCapon = caponSeleccionado.kg_real || caponSeleccionado.kg || 0
+    const piezasRegistradas = [
+      { nombre: 'Piernas (x2)', kg: parseFloat(piezasCerdo.pierna) || 0, stock: 'cerdo_pierna' },
+      { nombre: 'Carrés (x2)', kg: parseFloat(piezasCerdo.carre) || 0, stock: 'cerdo_carre' },
+      { nombre: 'Pechitos (x2)', kg: parseFloat(piezasCerdo.pechito) || 0, stock: 'cerdo_pechito' },
+      { nombre: 'Matambres (x2)', kg: parseFloat(piezasCerdo.matambre) || 0, stock: 'cerdo_matambre' },
+      { nombre: 'Paletas (x2)', kg: parseFloat(piezasCerdo.paleta) || 0, stock: 'cerdo_paleta' },
+      { nombre: 'Carnaza parrillero', kg: parseFloat(piezasCerdo.parrillero) || 0, stock: 'cerdo_parrillero' },
+      { nombre: 'Bondiola s/hueso', kg: parseFloat(piezasCerdo.bondiola) || 0, stock: 'cerdo_bondiola' },
+      { nombre: 'Tocino', kg: parseFloat(piezasCerdo.tocino) || 0, stock: 'cerdo_tocino' },
+      { nombre: 'Cuero', kg: parseFloat(piezasCerdo.cuero) || 0, stock: 'cerdo_cuero' },
+      { nombre: 'Cabeza', kg: parseFloat(piezasCerdo.cabeza) || 0, stock: 'cerdo_cabeza' },
+    ].filter(p => p.kg > 0)
+    await supabase.from('despostes').insert({
+      fecha, entrada_id: caponSeleccionado.id, modelo: 'CERDO',
+      tipo_desposte: 'cerdo', tipo_animal: 'cerdo',
+      kg_media_res: kgCapon, merma_pct: 0, kg_neto: kgCapon,
+      piezas: piezasRegistradas.map(p => ({ nombre: p.nombre, kg: p.kg, tipo_stock: p.stock })),
+      notas
+    })
+    await supabase.from('entradas_deposito').update({ despostada: true }).eq('id', caponSeleccionado.id)
+    await actualizarStock('cerdo', -kgCapon)
+    for (const pieza of piezasRegistradas) {
+      await actualizarStock(pieza.stock, pieza.kg)
+    }
+    showAlert('✅ Capón despostado — piezas al stock')
+    setCaponSeleccionado(null)
+    setPiezasCerdo({ pierna: '', carre: '', pechito: '', matambre: '', paleta: '', parrillero: '', bondiola: '', tocino: '', cuero: '', cabeza: '' })
+    setNotas('')
+    await cargarDatos(); onSaved()
+  } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
+  setLoading(false)
+}
   async function confirmarConversionPieza() {
   if (!kgPiezaConvertir || !nombrePieza) { showAlert('Completa todos los campos', 'error'); return }
   const kg = parseFloat(kgPiezaConvertir)
@@ -483,6 +521,76 @@ console.log('STOCK CARGADO:', stockMap)
         {loading ? '⏳ Procesando...' : '🔄 Confirmar conversión a cortes'}
       </button>
     </div>
+  </div>
+)}
+{subtab === 'cerdo' && (
+  <div style={{ display: 'grid', gridTemplateColumns: caponSeleccionado ? '1fr 1.5fr' : '1fr', gap: 16 }}>
+    <div>
+      <div className="card">
+        <div className="card-title">🐷 Capones disponibles</div>
+        {caponesDisponibles.length === 0 ? <div className="empty">Sin capones para despostar</div> : caponesDisponibles.map(e => (
+          <div key={e.id} onClick={() => setCaponSeleccionado(e)}
+            style={{ padding: 12, borderRadius: 8, marginBottom: 8, cursor: 'pointer', border: `2px solid ${caponSeleccionado?.id === e.id ? 'var(--amber)' : 'var(--border)'}`, background: caponSeleccionado?.id === e.id ? 'rgba(201,130,60,0.08)' : 'var(--surface2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>🐷 {e.descripcion || 'Capón'}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.fecha} · {e.proveedor_nombre}</div>
+                {e.precio_kg > 0 && <div style={{ fontSize: 11, color: 'var(--amber)' }}>${Math.round(e.precio_kg).toLocaleString('es-AR')}/kg</div>}
+              </div>
+              <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--amber)' }}>{(e.kg_real || e.kg || 0).toFixed(1)} kg</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+    {caponSeleccionado && (
+      <div className="card" style={{ borderColor: 'var(--amber)' }}>
+        <div className="card-title">🔪 Despostar capón: {caponSeleccionado.descripcion || 'Capón'} — {(caponSeleccionado.kg_real || caponSeleccionado.kg || 0).toFixed(1)} kg</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>Ingresá los kg de cada pieza. Los valores son editables.</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
+          {[
+            { id: 'pierna', label: '🦵 Piernas (x2)', stock: 'cerdo_pierna' },
+            { id: 'carre', label: '🥩 Carrés (x2)', stock: 'cerdo_carre' },
+            { id: 'pechito', label: '🍖 Pechitos (x2)', stock: 'cerdo_pechito' },
+            { id: 'matambre', label: '🥩 Matambres (x2)', stock: 'cerdo_matambre' },
+            { id: 'paleta', label: '🥩 Paletas (x2)', stock: 'cerdo_paleta' },
+            { id: 'parrillero', label: '🥩 Carnaza parrillero', stock: 'cerdo_parrillero' },
+            { id: 'bondiola', label: '🥩 Bondiola s/hueso', stock: 'cerdo_bondiola' },
+            { id: 'tocino', label: '🧀 Tocino', stock: 'cerdo_tocino' },
+            { id: 'cuero', label: '🟫 Cuero', stock: 'cerdo_cuero' },
+            { id: 'cabeza', label: '💀 Cabeza', stock: 'cerdo_cabeza' },
+          ].map(p => (
+            <div key={p.id}>
+              <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>{p.label}</label>
+              <input type="number" step="0.1" placeholder="0" value={piezasCerdo[p.id]} onChange={e => setPiezasCerdo(prev => ({ ...prev, [p.id]: e.target.value }))}
+                style={{ ...inp, borderColor: piezasCerdo[p.id] ? 'var(--amber)' : 'var(--border)' }} />
+            </div>
+          ))}
+        </div>
+        <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', marginBottom: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>Kg capón:</span>
+            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{(caponSeleccionado.kg_real || caponSeleccionado.kg || 0).toFixed(1)} kg</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>Kg registrados:</span>
+            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: 'var(--amber)' }}>
+              {Object.values(piezasCerdo).reduce((s, v) => s + (parseFloat(v) || 0), 0).toFixed(1)} kg
+            </span>
+          </div>
+        </div>
+        <div className="form-row" style={{ marginBottom: 14 }}>
+          <div className="form-group"><label>Fecha</label><input type="date" value={fecha} onChange={e => setFecha(e.target.value)} style={inp} /></div>
+          <div className="form-group"><label>Notas</label><input placeholder="Observaciones..." value={notas} onChange={e => setNotas(e.target.value)} style={inp} /></div>
+        </div>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button className="btn btn-ghost" onClick={() => setCaponSeleccionado(null)}>Cancelar</button>
+          <button className="btn btn-gold" onClick={confirmarDesposteCerdo} disabled={loading} style={{ background: 'var(--amber)' }}>
+            {loading ? '⏳ Procesando...' : '🔪 Confirmar desposte de cerdo'}
+          </button>
+        </div>
+      </div>
+    )}
   </div>
 )}
       {subtab === 'historial' && (
