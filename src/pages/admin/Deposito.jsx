@@ -96,7 +96,7 @@ const [caponSeleccionado, setCaponSeleccionado] = useState(null)
 const [piezasCerdo, setPiezasCerdo] = useState({
   pierna: '', carre: '', pechito: '', matambre: '',
   paleta: '', parrillero: '', bondiola: '', huesos: '', tocino: '', cuero: '', cabeza: ''
-
+})
   const MERMAS_KILO = {
     novillo:  { label: 'Novillo / Novillito', merma: 0.24, color: 'var(--gold)' },
     ternera:  { label: 'Ternera',             merma: 0.30, color: 'var(--amber)' },
