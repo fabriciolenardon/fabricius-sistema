@@ -95,8 +95,7 @@ function DesposteTab({ onSaved }) {
 const [caponSeleccionado, setCaponSeleccionado] = useState(null)
 const [piezasCerdo, setPiezasCerdo] = useState({
   pierna: '', carre: '', pechito: '', matambre: '',
-  paleta: '', parrillero: '', bondiola: '', tocino: '', cuero: '', cabeza: ''
-})
+  paleta: '', parrillero: '', bondiola: '', huesos: '', tocino: '', cuero: '', cabeza: ''
 
   const MERMAS_KILO = {
     novillo:  { label: 'Novillo / Novillito', merma: 0.24, color: 'var(--gold)' },
@@ -579,7 +578,8 @@ async function confirmarDesposteCerdo() {
             { id: 'pechito', label: '🍖 Pechitos (x2)', stock: 'cerdo_pechito' },
             { id: 'matambre', label: '🥩 Matambres (x2)', stock: 'cerdo_matambre' },
             { id: 'paleta', label: '🥩 Paletas (x2)', stock: 'cerdo_paleta' },
-            { id: 'parrillero', label: '🥩 Carnaza parrillero', stock: 'cerdo_parrillero' },
+            { id: 'parrillero', label: '🥩 Carnaza', stock: 'cerdo_parrillero' },
+{ id: 'huesos', label: '🦴 Huesos', stock: 'cerdo_huesos' },
             { id: 'bondiola', label: '🥩 Bondiola s/hueso', stock: 'cerdo_bondiola' },
             { id: 'tocino', label: '🧀 Tocino', stock: 'cerdo_tocino' },
             { id: 'cuero', label: '🟫 Cuero', stock: 'cerdo_cuero' },
