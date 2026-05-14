@@ -974,11 +974,15 @@ async function agregarItem() {
     const descripcion = form.categoria === 'bovino_mr' 
       ? (mediaSeleccionada ? `Media Res — ${mediaSeleccionada.descripcion || mediaSeleccionada.proveedor_nombre}` : 'Media Res')
       : (prod?.nombre || '')
-    const item = {
-      descripcion, kg: parseFloat(form.kg),
-      precio: parseFloat(form.precio), importe: parseFloat(form.kg) * parseFloat(form.precio),
-      tipo: form.categoria
-    }
+    const prodItem = form.categoria !== 'bovino_mr' ? todosPrecios.find(p => p.id === form.productoId) : null
+const item = {
+  descripcion,
+  kg: parseFloat(form.kg),
+  precio: parseFloat(form.precio),
+  importe: parseFloat(form.kg) * parseFloat(form.precio),
+  tipo: form.categoria,
+  stock_origen: prodItem?.stock_origen || null
+}
     setItems(prev => [...prev, item])
     setForm(f => ({ ...f, kg: '', productoId: '', precio: '', categoria: '' }))
     if (mediaSeleccionada) {
@@ -1022,10 +1026,10 @@ async function agregarItem() {
     }
 
     const kgPorTipo = {}
-    for (const item of items) {
-      const tipoStock = CATEGORIA_A_STOCK[item.tipo] || item.tipo
-      kgPorTipo[tipoStock] = (kgPorTipo[tipoStock] || 0) + item.kg
-    }
+for (const item of items) {
+  const tipoStock = item.stock_origen || CATEGORIA_A_STOCK[item.tipo] || item.tipo
+  kgPorTipo[tipoStock] = (kgPorTipo[tipoStock] || 0) + item.kg
+}
    for (const [tipo, kg] of Object.entries(kgPorTipo)) {
       await actualizarStock(tipo, -kg)
     }
