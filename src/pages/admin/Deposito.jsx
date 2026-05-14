@@ -847,6 +847,7 @@ async function confirmarDesposteCerdo() {
             </div>
           ))}
         </div>
+      </div>
     <div className="card" style={{ marginTop: 16 }}>
       <div className="card-title">🌭 Historial de elaboraciones</div>
       {elaboraciones.length === 0 ? <div className="empty">Sin elaboraciones registradas</div> : elaboraciones.map(e => (
