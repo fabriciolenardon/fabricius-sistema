@@ -60,6 +60,18 @@ const stockPiezas = Math.max(0, (stock.pieza_pierna || 0) + (stock.pieza_cuarto_
 const stockCajas = Math.max(0, (stock.caja_cb || 0) + (stock.caja_pt || 0))
 const stockCortes = Math.max(0, stock.bovino_corte || 0)
 const stockCerdo = Math.max(0, stock.cerdo || 0)
+const stockCerdoPiezas = Math.max(0,
+  (stock.cerdo_pierna || 0) +
+  (stock.cerdo_carre || 0) +
+  (stock.cerdo_pechito || 0) +
+  (stock.cerdo_matambre || 0) +
+  (stock.cerdo_paleta || 0) +
+  (stock.cerdo_parrillero || 0) +
+  (stock.cerdo_bondiola || 0) +
+  (stock.cerdo_tocino || 0) +
+  (stock.cerdo_cuero || 0) +
+  (stock.cerdo_cabeza || 0)
+)
 const stockPollo = Math.max(0, stock.pollo || 0)
 const stockBrosas = Math.max(0, stock.bovino_brosa || 0)
 const stockEmbutido = Math.max(0, stock.embutido || 0)
@@ -226,6 +238,7 @@ const stockRebozado = Math.max(0, stock.rebozado || 0)
 { label: '📦 Cajas Bovinas', kg: stockCajas, color: 'var(--gold)', aprox: stockCajas.toFixed(1) + ' kg', bajo: stockCajas < 20 },
 { label: '🥩 Bovino Cortes', kg: stockCortes, color: 'var(--gold)', aprox: stockCortes.toFixed(1) + ' kg', bajo: stockCortes < 50 },
 { label: '🐷 Cerdo Capones', kg: stockCerdo, color: 'var(--amber)', aprox: Math.round(stockCerdo / 107) + ' capones', bajo: stockCerdo < 50 },
+{ label: '🐷 Cerdo Piezas', kg: stockCerdoPiezas, color: 'var(--amber)', aprox: stockCerdoPiezas.toFixed(1) + ' kg', bajo: stockCerdoPiezas < 20 },
 { label: '🍗 Pollo', kg: stockPollo, color: 'var(--blue)', aprox: Math.round(stockPollo / 20) + ' cajones', bajo: stockPollo < 50 },
 { label: '🫀 Brosas', kg: stockBrosas, color: 'var(--amber)', aprox: stockBrosas.toFixed(1) + ' kg', bajo: stockBrosas < 20 },
 { label: '🌭 Embutidos', kg: stockEmbutido, color: 'var(--purple)', aprox: stockEmbutido.toFixed(1) + ' kg', bajo: stockEmbutido < 20 },
