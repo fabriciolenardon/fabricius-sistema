@@ -526,24 +526,48 @@ async function confirmarDesposteCerdo() {
 )}
 {subtab === 'cerdo' && (
   <div style={{ display: 'grid', gridTemplateColumns: caponSeleccionado ? '1fr 1.5fr' : '1fr', gap: 16 }}>
-    <div>
-      <div className="card">
-        <div className="card-title">🐷 Capones disponibles</div>
-        {caponesDisponibles.length === 0 ? <div className="empty">Sin capones para despostar</div> : caponesDisponibles.map(e => (
-          <div key={e.id} onClick={() => setCaponSeleccionado(e)}
-            style={{ padding: 12, borderRadius: 8, marginBottom: 8, cursor: 'pointer', border: `2px solid ${caponSeleccionado?.id === e.id ? 'var(--amber)' : 'var(--border)'}`, background: caponSeleccionado?.id === e.id ? 'rgba(201,130,60,0.08)' : 'var(--surface2)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 13 }}>🐷 {e.descripcion || 'Capón'}</div>
-                <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.fecha} · {e.proveedor_nombre}</div>
-                {e.precio_kg > 0 && <div style={{ fontSize: 11, color: 'var(--amber)' }}>${Math.round(e.precio_kg).toLocaleString('es-AR')}/kg</div>}
-              </div>
-              <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--amber)' }}>{(e.kg_real || e.kg || 0).toFixed(1)} kg</div>
-            </div>
+  <div>
+    <div className="card" style={{ marginBottom: 16, borderColor: 'var(--amber)' }}>
+      <div className="card-title">🐷 Stock piezas de cerdo</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        {[
+          { tipo: 'cerdo_pierna', label: '🦵 Piernas' },
+          { tipo: 'cerdo_carre', label: '🥩 Carrés' },
+          { tipo: 'cerdo_pechito', label: '🍖 Pechitos' },
+          { tipo: 'cerdo_matambre', label: '🥩 Matambres' },
+          { tipo: 'cerdo_paleta', label: '🥩 Paletas' },
+          { tipo: 'cerdo_parrillero', label: '🥩 Parrillero' },
+          { tipo: 'cerdo_bondiola', label: '🥩 Bondiola' },
+          { tipo: 'cerdo_tocino', label: '🧀 Tocino' },
+          { tipo: 'cerdo_cuero', label: '🟫 Cuero' },
+          { tipo: 'cerdo_cabeza', label: '💀 Cabeza' },
+        ].map(p => (
+          <div key={p.tipo} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: 'var(--surface2)', borderRadius: 8, border: '1px solid var(--border)' }}>
+            <span style={{ fontSize: 12, fontWeight: 600 }}>{p.label}</span>
+            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: (piezasStock[p.tipo] || 0) > 0 ? 'var(--amber)' : 'var(--muted)' }}>
+              {(piezasStock[p.tipo] || 0).toFixed(1)} kg
+            </span>
           </div>
         ))}
       </div>
     </div>
+    <div className="card">
+      <div className="card-title">🐷 Capones disponibles</div>
+      {caponesDisponibles.length === 0 ? <div className="empty">Sin capones para despostar</div> : caponesDisponibles.map(e => (
+        <div key={e.id} onClick={() => setCaponSeleccionado(e)}
+          style={{ padding: 12, borderRadius: 8, marginBottom: 8, cursor: 'pointer', border: `2px solid ${caponSeleccionado?.id === e.id ? 'var(--amber)' : 'var(--border)'}`, background: caponSeleccionado?.id === e.id ? 'rgba(201,130,60,0.08)' : 'var(--surface2)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 13 }}>🐷 {e.descripcion || 'Capón'}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.fecha} · {e.proveedor_nombre}</div>
+              {e.precio_kg > 0 && <div style={{ fontSize: 11, color: 'var(--amber)' }}>${Math.round(e.precio_kg).toLocaleString('es-AR')}/kg</div>}
+            </div>
+            <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--amber)' }}>{(e.kg_real || e.kg || 0).toFixed(1)} kg</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
     {caponSeleccionado && (
       <div className="card" style={{ borderColor: 'var(--amber)' }}>
         <div className="card-title">🔪 Despostar capón: {caponSeleccionado.descripcion || 'Capón'} — {(caponSeleccionado.kg_real || caponSeleccionado.kg || 0).toFixed(1)} kg</div>
