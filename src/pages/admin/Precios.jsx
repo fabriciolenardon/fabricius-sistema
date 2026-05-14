@@ -4,15 +4,15 @@ const CATEGORIAS = {
   bovino_mr: '🐄 Media Reses',
   bovino_corte: '🥩 Bovinos — Cortes',
   bovino_brosa: '🫀 Brosas',
-  bovino_pieza: '🍖 Piezas',
+  bovino_pieza: '🍖 Piezas Bovinas',
   bovino_caja_cb: '📦 Cajas Bovinas CB',
   bovino_caja_pt: '📦 Cajas Bovinas PT',
-  cerdo_corte: '🐷 Cerdo',
+  cerdo_corte: '🐷 Cerdo — Cortes',
+  cerdo_pieza: '🐷 Cerdo — Piezas',
   embutido: '🌭 Embutidos',
   pollo: '🍗 Pollo Cajones',
   rebozado: '🧊 Rebozados',
 }
-
 const VACIO = { categoria: 'bovino_corte', nombre: '', precio_carniceria: '', precio_mayorista: '', precio_minorista: '' }
 const fmt = n => n != null ? '$' + Math.round(n).toLocaleString('es-AR') : '—'
 const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }
