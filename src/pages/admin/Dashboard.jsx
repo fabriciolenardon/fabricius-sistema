@@ -20,18 +20,20 @@ export default function Dashboard() {
   const [remitos, setRemitos] = useState([])
   const [gastos, setGastos] = useState([])
   const [cheques, setCheques] = useState([])
+  const [precios, setPrecios] = useState([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => { fetchData() }, [])
 
   async function fetchData() {
-    const [c, cl, st, r, g, ch] = await Promise.all([
+    const [c, cl, st, r, g, ch, pr] = await Promise.all([
       supabase.from('cierres_semanales').select('*').order('semana_inicio', { ascending: false }).limit(8),
       supabase.from('clientes').select('*').order('saldo', { ascending: false }),
       supabase.from('stock_actual').select('*'),
       supabase.from('remitos').select('*').order('created_at', { ascending: false }).limit(5),
       supabase.from('gastos').select('*').order('fecha', { ascending: false }).limit(5),
       supabase.from('cheques').select('*').order('fecha_pago', { ascending: true }).limit(20),
+      supabase.from('precios').select('categoria'),
     ])
     setCierres(c.data || [])
     setClientes(cl.data || [])
@@ -41,6 +43,7 @@ export default function Dashboard() {
     setRemitos(r.data || [])
     setGastos(g.data || [])
     setCheques(ch.data || [])
+    setPrecios(pr.data || [])
     setLoading(false)
   }
 
@@ -56,26 +59,30 @@ export default function Dashboard() {
   const totMesGastos = mesActual.reduce((s, c) => s + (c.gastos || 0), 0)
 
   const stockBovino = Math.max(0, stock.bovino_mr || 0)
-const stockPiezas = Math.max(0, (stock.pieza_pierna || 0) + (stock.pieza_cuarto_pistola || 0) + (stock.pieza_costillar || 0) + (stock.pieza_cortito || 0) + (stock.pieza_carre || 0) + (stock.pieza_paleta || 0) + (stock.pieza_parrillero || 0))
-const stockCajas = Math.max(0, (stock.caja_cb || 0) + (stock.caja_pt || 0))
-const stockCortes = Math.max(0, stock.bovino_corte || 0)
-const stockCerdo = Math.max(0, stock.cerdo || 0)
-const stockCerdoPiezas = Math.max(0,
-  (stock.cerdo_pierna || 0) +
-  (stock.cerdo_carre || 0) +
-  (stock.cerdo_pechito || 0) +
-  (stock.cerdo_matambre || 0) +
-  (stock.cerdo_paleta || 0) +
-  (stock.cerdo_parrillero || 0) +
-  (stock.cerdo_bondiola || 0) +
-  (stock.cerdo_tocino || 0) +
-  (stock.cerdo_cuero || 0) +
-  (stock.cerdo_cabeza || 0)
-)
-const stockPollo = Math.max(0, stock.pollo || 0)
-const stockBrosas = Math.max(0, stock.bovino_brosa || 0)
-const stockEmbutido = Math.max(0, stock.embutido || 0)
-const stockRebozado = Math.max(0, stock.rebozado || 0)
+  const stockPiezas = Math.max(0, (stock.pieza_pierna || 0) + (stock.pieza_cuarto_pistola || 0) + (stock.pieza_costillar || 0) + (stock.pieza_cortito || 0) + (stock.pieza_carre || 0) + (stock.pieza_paleta || 0) + (stock.pieza_parrillero || 0))
+  const stockCajas = Math.max(0, (stock.caja_cb || 0) + (stock.caja_pt || 0))
+  const stockCortes = Math.max(0, stock.bovino_corte || 0)
+  const stockCerdo = Math.max(0, stock.cerdo || 0)
+  const stockCerdoPiezas = Math.max(0,
+    (stock.cerdo_pierna || 0) +
+    (stock.cerdo_carre || 0) +
+    (stock.cerdo_pechito || 0) +
+    (stock.cerdo_matambre || 0) +
+    (stock.cerdo_paleta || 0) +
+    (stock.cerdo_parrillero || 0) +
+    (stock.cerdo_bondiola || 0) +
+    (stock.cerdo_tocino || 0) +
+    (stock.cerdo_cuero || 0) +
+    (stock.cerdo_cabeza || 0)
+  )
+  const stockPollo = Math.max(0, stock.pollo || 0)
+  const stockBrosas = Math.max(0, stock.bovino_brosa || 0)
+  const stockEmbutido = Math.max(0, stock.embutido || 0)
+  const stockRebozado = Math.max(0, stock.rebozado || 0)
+
+  // Cantidad de productos por categoría (almacén y bebidas son por unidad, no por kg)
+  const cantAlmacen = precios.filter(p => p.categoria === 'almacen').length
+  const cantBebidas = precios.filter(p => p.categoria === 'bebidas').length
 
   const clientesDeuda = clientes.filter(c => c.saldo > 0).sort((a, b) => b.saldo - a.saldo)
   const totalDeuda = clientesDeuda.reduce((s, c) => s + c.saldo, 0)
@@ -233,20 +240,22 @@ const stockRebozado = Math.max(0, stock.rebozado || 0)
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
           {[
-            { label: '🐄 Bovino Media Res', kg: stockBovino, color: 'var(--gold)', aprox: Math.round(stockBovino / 105) + ' medias', bajo: stockBovino < 100 },
-{ label: '🍖 Piezas Bovinas', kg: stockPiezas, color: 'var(--gold)', aprox: stockPiezas.toFixed(1) + ' kg', bajo: stockPiezas < 30 },
-{ label: '📦 Cajas Bovinas', kg: stockCajas, color: 'var(--gold)', aprox: stockCajas.toFixed(1) + ' kg', bajo: stockCajas < 20 },
-{ label: '🥩 Bovino Cortes', kg: stockCortes, color: 'var(--gold)', aprox: stockCortes.toFixed(1) + ' kg', bajo: stockCortes < 50 },
-{ label: '🐷 Cerdo Capones', kg: stockCerdo, color: 'var(--amber)', aprox: Math.round(stockCerdo / 107) + ' capones', bajo: stockCerdo < 50 },
-{ label: '🐷 Cerdo Piezas', kg: stockCerdoPiezas, color: 'var(--amber)', aprox: stockCerdoPiezas.toFixed(1) + ' kg', bajo: stockCerdoPiezas < 20 },
-{ label: '🍗 Pollo', kg: stockPollo, color: 'var(--blue)', aprox: Math.round(stockPollo / 20) + ' cajones', bajo: stockPollo < 50 },
-{ label: '🫀 Brosas', kg: stockBrosas, color: 'var(--amber)', aprox: stockBrosas.toFixed(1) + ' kg', bajo: stockBrosas < 20 },
-{ label: '🌭 Embutidos', kg: stockEmbutido, color: 'var(--purple)', aprox: stockEmbutido.toFixed(1) + ' kg', bajo: stockEmbutido < 20 },
-{ label: '🧊 Rebozados/Congelados', kg: stockRebozado, color: 'var(--blue)', aprox: stockRebozado.toFixed(1) + ' kg', bajo: stockRebozado < 20 },
-         ].map(s => (
-            <div key={s.label} style={{ background: s.bajo ? '#3a1a1a' : 'var(--surface2)', border: `1px solid ${s.bajo ? 'var(--red-light)' : 'var(--border)'}`, borderRadius: 10, padding: '12px 14px', textAlign: 'center' }}>
+            { label: '🐄 Bovino Media Res', valor: stockBovino.toFixed(1) + ' kg', color: 'var(--gold)', aprox: Math.round(stockBovino / 105) + ' medias', bajo: stockBovino < 100 },
+            { label: '🍖 Piezas Bovinas', valor: stockPiezas.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockPiezas < 30 },
+            { label: '📦 Cajas Bovinas', valor: stockCajas.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockCajas < 20 },
+            { label: '🥩 Bovino Cortes', valor: stockCortes.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockCortes < 50 },
+            { label: '🐷 Cerdo Capones', valor: stockCerdo.toFixed(1) + ' kg', color: 'var(--amber)', aprox: Math.round(stockCerdo / 107) + ' capones', bajo: stockCerdo < 50 },
+            { label: '🐷 Cerdo Piezas', valor: stockCerdoPiezas.toFixed(1) + ' kg', color: 'var(--amber)', aprox: 'al peso', bajo: stockCerdoPiezas < 20 },
+            { label: '🍗 Pollo', valor: stockPollo.toFixed(1) + ' kg', color: 'var(--blue)', aprox: Math.round(stockPollo / 20) + ' cajones', bajo: stockPollo < 50 },
+            { label: '🫀 Brosas', valor: stockBrosas.toFixed(1) + ' kg', color: 'var(--amber)', aprox: 'al peso', bajo: stockBrosas < 20 },
+            { label: '🌭 Embutidos', valor: stockEmbutido.toFixed(1) + ' kg', color: 'var(--purple)', aprox: 'al peso', bajo: stockEmbutido < 20 },
+            { label: '🧊 Rebozados/Congelados', valor: stockRebozado.toFixed(1) + ' kg', color: 'var(--blue)', aprox: 'al peso', bajo: stockRebozado < 20 },
+            { label: '🛒 Almacén', valor: cantAlmacen + ' productos', color: 'var(--gold)', aprox: 'cargados en sistema', bajo: false, esConteo: true },
+            { label: '🥤 Bebidas', valor: cantBebidas + ' productos', color: 'var(--blue)', aprox: 'cargados en sistema', bajo: false, esConteo: true },
+          ].map(s => (
+            <div key={s.label} style={{ background: s.bajo ? '#3a1a1a' : 'var(--surface2)', border: `1px solid ${s.bajo ? 'var(--red-light)' : 'var(--border)'}`, borderRadius: 10, padding: '12px 14px', textAlign: 'center', cursor: s.esConteo ? 'pointer' : 'default' }} onClick={() => s.esConteo && navigate('/admin/precios')}>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>{s.label}</div>
-              <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 26, color: s.bajo ? 'var(--red-light)' : s.color }}>{s.kg.toFixed(1)} kg</div>
+              <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 26, color: s.bajo ? 'var(--red-light)' : s.color }}>{s.valor}</div>
               <div style={{ fontSize: 11, color: 'var(--muted)' }}>{s.aprox}</div>
               {s.bajo && <div style={{ fontSize: 10, color: 'var(--red-light)', fontWeight: 700, marginTop: 4 }}>⚠️ Stock bajo</div>}
             </div>

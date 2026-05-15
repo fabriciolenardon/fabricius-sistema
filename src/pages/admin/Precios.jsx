@@ -12,6 +12,8 @@ const CATEGORIAS = {
   embutido: '🌭 Embutidos',
   pollo: '🍗 Pollo Cajones',
   rebozado: '🧊 Rebozados',
+  almacen: '🛒 Almacén',
+  bebidas: '🥤 Bebidas',
 }
 const VACIO = { categoria: 'bovino_corte', nombre: '', precio_carniceria: '', precio_mayorista: '', precio_minorista: '' }
 const fmt = n => n != null ? '$' + Math.round(n).toLocaleString('es-AR') : '—'
