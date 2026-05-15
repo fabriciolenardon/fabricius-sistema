@@ -1,8 +1,9 @@
 // ═══════════════════════════════════════════════════════════
-// ASISTENTE IA — Componente flotante de chat
+// ASISTENTE IA — Componente flotante de chat — v2
 // ═══════════════════════════════════════════════════════════
-// Botón abajo a la derecha. Click → abre panel con chat.
-// Soporta texto + carga de imágenes + function calling.
+// Cambios v2:
+//   + System prompt actualizado con entradas de depósito y pagos
+//   + Mejor manejo de la detección automática de tipos de documentos
 // ═══════════════════════════════════════════════════════════
 
 import { useState, useRef, useEffect } from 'react'
@@ -20,34 +21,61 @@ import { DEFINICIONES_TOOLS, ejecutarFuncion } from '../lib/asistenteTools'
 // ═══════════════════════════════════════════════════════════
 const SYSTEM_PROMPT = `Sos el asistente de IA de Carnicerías Fabricius, en Río Primero, Córdoba, Argentina.
 
-Tu trabajo es ayudar a Fabricio y su equipo a manejar el sistema de gestión: cargar gastos, consultar deudas, ver stock, leer remitos por foto y más.
+Tu trabajo es ayudar a Fabricio Lenardon y Ariel Garrone (los dos socios) a manejar el sistema de gestión.
 
-REGLAS IMPORTANTES:
+REGLAS DE COMUNICACIÓN:
 1. Hablás en español rioplatense argentino, casual pero profesional. Tuteo ("vos").
 2. Sos breve y directo. Sin explicaciones largas innecesarias.
-3. ANTES de ejecutar cualquier acción que MODIFIQUE datos (cargar gasto, cargar pago, cambiar precio), SIEMPRE mostrá los datos que vas a cargar y pedí confirmación explícita. Ejemplo: "Voy a cargar: gasto de $15.000, categoría combustible, fecha hoy. ¿Confirmás?"
-4. Para CONSULTAS (ver stock, ver deuda, ver precios), podés ejecutarlas directamente sin pedir confirmación.
-5. Cuando el usuario sube una FOTO de un remito, ticket o factura:
-   - Mirá la imagen con atención
-   - Extraé los datos: tipo de documento, proveedor/comercio, fecha, items, montos, total
-   - Mostrale al usuario lo que entendiste de forma clara
-   - Sugerí qué acción tomar (cargar como gasto, cargar como entrada de depósito, etc.)
-   - Esperá confirmación antes de cargar nada
-6. Si no entendés algo o falta información, preguntá. Mejor preguntar que cargar mal.
-7. Montos en pesos argentinos. Formato: $15.000 (sin decimales).
-8. Fechas en formato YYYY-MM-DD para la base de datos. Pero mostralas al usuario como DD/MM/YYYY.
+3. Montos en pesos argentinos. Formato: $15.000 (sin decimales).
+4. Fechas a la base de datos en formato YYYY-MM-DD. Al usuario, en formato DD/MM/YYYY.
 
-NEGOCIO:
-- Carnicerías Fabricius es una empresa que vende media res y cortes a sucursales asociadas.
+REGLAS DE OPERACIÓN:
+1. ANTES de cualquier acción que MODIFIQUE datos (cargar gasto, cargar entrada, cargar pago, cambiar precio), SIEMPRE mostrá los datos que vas a cargar y pedí confirmación explícita ("¿Confirmás?").
+2. Para CONSULTAS (ver stock, ver deuda, ver precios, ver entradas), podés ejecutarlas directamente sin pedir confirmación.
+3. Si no entendés algo o falta información, preguntá. Mejor preguntar que cargar mal.
+4. Si te falta el cliente_id para un pago, USÁ buscar_cliente primero — nunca inventes IDs.
+
+LECTURA DE IMÁGENES (cuando el usuario sube una foto):
+- Mirá la imagen con atención y detectá el TIPO DE DOCUMENTO:
+  * Ticket / factura de servicio (luz, gas, internet, etc.) → cargar_gasto (tipo: fijo)
+  * Ticket de combustible / mantenimiento → cargar_gasto (tipo: variable)
+  * Ticket personal de Ariel o Fabricio → cargar_gasto (tipo: socio)
+  * Remito de compra de media res / cerdo / pollo / embutido → cargar_entrada_deposito
+  * Comprobante de pago de un cliente (transferencia, depósito, recibo) → cargar_pago_cliente
+- Extraé los datos visibles: proveedor/comercio, fecha, items, kg, precios, total.
+- Mostrá al usuario lo que entendiste de forma clara.
+- Sugerí la acción a tomar y pedí confirmación.
+
+NEGOCIO — CARNICERÍAS FABRICIUS:
+- Empresa familiar que vende media res y cortes a sucursales asociadas y mayoristas.
 - Compran media res a ~$9.800/kg y la venden a $10.300/kg (premium novillito/vaquillona).
-- Tienen una casa central y varias sucursales (incluyendo Monte Cristo).
-- Manejan stock de bovino y cerdo (capones).
+- Tienen una casa central en Río Primero y varias sucursales (incluyendo Monte Cristo).
+- Socios: Ariel Garrone y Fabricio Lenardon.
+
+TIPOS DE MERCADERÍA EN DEPÓSITO:
+- bovino_mr: media res bovina (subtipos: novillito, vaquillona, overo_grande, overo_chico, bubalino)
+- cerdo: capones de cerdo
+- pollo: pollo en cajones (peso fijo del cajón)
+- cajon_bovino: cajas de cortes específicos
+- embutido: embutidos al peso (chorizos, salames, morcillas)
+
+TIPOS DE GASTO:
+- fijo: gastos recurrentes (luz, gas, alquiler, sueldos, internet, impuestos)
+- variable: gastos puntuales del negocio (combustible, mantenimiento, repuestos)
+- socio: gastos personales de Ariel o Fabricio (farmacia, comida, ropa)
+
+PAGOS DE CLIENTES:
+- Cuando alguien dice "X me pagó $Y", primero usá buscar_cliente para resolver el cliente_id.
+- Si encuentra UN solo cliente, mostralo y pedí confirmación.
+- Si encuentra VARIOS, listalos y pedí al usuario que elija.
+- Recién después de la confirmación, llamá a cargar_pago_cliente con el cliente_id correcto.
+- El saldo se actualiza automáticamente por trigger en la base de datos.
 `
 
 export default function AsistenteIA() {
   const [abierto, setAbierto] = useState(false)
   const [mensajes, setMensajes] = useState([
-    { rol: 'asistente', texto: '¡Hola! Soy tu asistente. Pedime lo que necesites: cargar gastos, ver deudas, stock, o subí la foto de un remito. ☕' }
+    { rol: 'asistente', texto: '¡Hola! Soy tu asistente. Pedime lo que necesites: cargar gastos, entradas al depósito, registrar pagos, ver deudas, stock, o subí la foto de un remito/ticket. ☕' }
   ])
   const [input, setInput] = useState('')
   const [imagenSeleccionada, setImagenSeleccionada] = useState(null)
@@ -70,7 +98,6 @@ export default function AsistenteIA() {
     setImagenSeleccionada(null)
     setCargando(true)
 
-    // Agregar mensaje del usuario a la UI
     setMensajes(prev => [...prev, {
       rol: 'usuario',
       texto: textoUsuario || '(foto)',
@@ -79,7 +106,6 @@ export default function AsistenteIA() {
     }])
 
     try {
-      // Construir mensaje para Gemini
       const imagenData = imagen ? { data: imagen.data, mimeType: imagen.mimeType } : null
       const mensajeNuevo = construirMensajeUsuario(
         textoUsuario || 'Analizá esta imagen y decime qué es y qué datos puedo extraer.',
@@ -88,9 +114,8 @@ export default function AsistenteIA() {
 
       let historialActualizado = [...historialGemini, mensajeNuevo]
 
-      // Bucle: llamar a Gemini, ejecutar funciones si las pide, hasta que termine con texto
       let intentos = 0
-      while (intentos < 5) {
+      while (intentos < 8) {
         intentos++
         const respuesta = await llamarGemini({
           historial: historialActualizado,
@@ -98,24 +123,19 @@ export default function AsistenteIA() {
           tools: DEFINICIONES_TOOLS
         })
 
-        // Agregar respuesta del modelo al historial
         historialActualizado.push(construirMensajeModelo(respuesta.texto, respuesta.llamadaFuncion))
 
-        // Si hay texto, mostrarlo
         if (respuesta.texto) {
           setMensajes(prev => [...prev, { rol: 'asistente', texto: respuesta.texto }])
         }
 
-        // Si llamó a una función, ejecutarla y mandar el resultado
         if (respuesta.llamadaFuncion) {
           const { nombre, argumentos } = respuesta.llamadaFuncion
           const resultado = await ejecutarFuncion(nombre, argumentos)
           historialActualizado.push(construirMensajeFuncionResultado(nombre, resultado))
-          // Seguir el bucle para que la IA responda al resultado
           continue
         }
 
-        // Si no llamó función, terminamos
         break
       }
 
@@ -135,21 +155,15 @@ export default function AsistenteIA() {
   async function manejarImagen(e) {
     const file = e.target.files?.[0]
     if (!file) return
-    if (!file.type.startsWith('image/')) {
-      alert('Solo se aceptan imágenes.')
-      return
-    }
+    if (!file.type.startsWith('image/')) { alert('Solo se aceptan imágenes.'); return }
     const { data, mimeType } = await archivoABase64(file)
     const preview = URL.createObjectURL(file)
     setImagenSeleccionada({ data, mimeType, preview, nombre: file.name })
-    e.target.value = '' // reset para poder subir la misma foto de nuevo
+    e.target.value = ''
   }
 
   function manejarEnter(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      enviar()
-    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviar() }
   }
 
   function nuevaConversacion() {
@@ -160,21 +174,14 @@ export default function AsistenteIA() {
 
   return (
     <>
-      {/* ═══════════ BOTÓN FLOTANTE ═══════════ */}
       {!abierto && (
-        <button
-          onClick={() => setAbierto(true)}
-          style={estilos.botonFlotante}
-          aria-label="Abrir asistente"
-        >
+        <button onClick={() => setAbierto(true)} style={estilos.botonFlotante} aria-label="Abrir asistente">
           🤖
         </button>
       )}
 
-      {/* ═══════════ PANEL DE CHAT ═══════════ */}
       {abierto && (
         <div style={estilos.panel}>
-          {/* HEADER */}
           <div style={estilos.header}>
             <div>
               <div style={estilos.headerTitulo}>🤖 Asistente Fabricius</div>
@@ -186,7 +193,6 @@ export default function AsistenteIA() {
             </div>
           </div>
 
-          {/* MENSAJES */}
           <div style={estilos.mensajes} ref={mensajesRef}>
             {mensajes.map((m, i) => (
               <div key={i} style={{
@@ -194,9 +200,7 @@ export default function AsistenteIA() {
                 ...(m.rol === 'usuario' ? estilos.mensajeUsuario : estilos.mensajeAsistente),
                 ...(m.esError ? estilos.mensajeError : {})
               }}>
-                {m.imagenPreview && (
-                  <img src={m.imagenPreview} alt="" style={estilos.imagenPreview} />
-                )}
+                {m.imagenPreview && <img src={m.imagenPreview} alt="" style={estilos.imagenPreview} />}
                 <div style={{ whiteSpace: 'pre-wrap' }}>{m.texto}</div>
               </div>
             ))}
@@ -211,7 +215,6 @@ export default function AsistenteIA() {
             )}
           </div>
 
-          {/* PREVIEW IMAGEN SELECCIONADA */}
           {imagenSeleccionada && (
             <div style={estilos.previewBox}>
               <img src={imagenSeleccionada.preview} alt="" style={estilos.previewImagen} />
@@ -220,7 +223,6 @@ export default function AsistenteIA() {
             </div>
           )}
 
-          {/* INPUT */}
           <div style={estilos.inputBox}>
             <input type="file" accept="image/*" ref={fileInputRef} onChange={manejarImagen} style={{ display: 'none' }} />
             <button onClick={() => fileInputRef.current?.click()} style={estilos.botonAdjuntar} title="Subir foto">📎</button>
@@ -240,7 +242,6 @@ export default function AsistenteIA() {
         </div>
       )}
 
-      {/* ANIMACIÓN DE LOS PUNTOS */}
       <style>{`
         @keyframes blink {
           0%, 80%, 100% { opacity: 0.2; }
@@ -251,9 +252,6 @@ export default function AsistenteIA() {
   )
 }
 
-// ═══════════════════════════════════════════════════════════
-// ESTILOS — Coordina con el resto del sistema (oro, oscuro)
-// ═══════════════════════════════════════════════════════════
 const estilos = {
   botonFlotante: {
     position: 'fixed', bottom: 24, right: 24, width: 60, height: 60,
