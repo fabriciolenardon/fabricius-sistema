@@ -871,7 +871,7 @@ async function confirmarDesposteCerdo() {
             </div>
             <div style={{ textAlign: 'right' }}>
               <span style={{ background: e.tipo === 'salame' ? '#2a1a0a' : '#1a2a1a', color: e.tipo === 'salame' ? 'var(--amber)' : 'var(--green)', borderRadius: 6, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>
-                {e.tipo === 'salame' ? e.tipo_embutido?.replace(/_/g, ' ').toUpperCase() : 'EMBUTIDO'}
+                {e.tipo === 'salame' ? 'SALAME' : 'EMBUTIDO'}
               </span>
               <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: 'var(--gold)', marginTop: 4 }}>
                 {e.tipo === 'salame' ? `${(e.kg_elaborado || 0).toFixed(1)} kg salame` : `${(e.kg_final || 0).toFixed(1)} kg`}
