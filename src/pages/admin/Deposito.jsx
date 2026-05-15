@@ -855,7 +855,7 @@ async function confirmarDesposteCerdo() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
             <div>
               <div style={{ fontWeight: 700, fontSize: 13 }}>
-                {e.tipo === 'salame' ? '🥩' : '🌭'} {e.tipo_embutido?.replace(/_/g, ' ').toUpperCase()}
+                {e.tipo === 'salame' ? '🥩 Salame' : '🌭'} {e.tipo === 'embutido' ? e.tipo_embutido?.replace(/_/g, ' ').toUpperCase() : ''}
               </div>
               <div style={{ fontSize: 11, color: 'var(--muted)' }}>
                 {e.fecha} · {(e.kg_carne_cerdo || 0).toFixed(1)} kg cerdo + {(e.kg_carne_bovina || 0).toFixed(1)} kg bovino
@@ -871,10 +871,10 @@ async function confirmarDesposteCerdo() {
             </div>
             <div style={{ textAlign: 'right' }}>
               <span style={{ background: e.tipo === 'salame' ? '#2a1a0a' : '#1a2a1a', color: e.tipo === 'salame' ? 'var(--amber)' : 'var(--green)', borderRadius: 6, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>
-                {e.tipo === 'salame' ? 'SALAME' : 'EMBUTIDO'}
+                {e.tipo === 'salame' ? e.tipo_embutido?.replace(/_/g, ' ').toUpperCase() : 'EMBUTIDO'}
               </span>
               <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: 'var(--gold)', marginTop: 4 }}>
-                {e.tipo === 'salame' ? `${(e.kg_elaborado || 0).toFixed(1)} kg` : `${(e.kg_final || 0).toFixed(1)} kg`}
+                {e.tipo === 'salame' ? `${(e.kg_elaborado || 0).toFixed(1)} kg salame` : `${(e.kg_final || 0).toFixed(1)} kg`}
               </div>
             </div>
           </div>
