@@ -594,26 +594,38 @@ function PLUTab({ precios, ofertas = [] }) {
 
   useEffect(() => { cargarPlus() }, [precios])
 
-  async function cargarPlus() {
+ async function cargarPlus() {
     setLoading(true)
-    const { data } = await supabase.from('plu').select('*').order('codigo')
-    if (data && data.length > 0) {
-      setPlus(data)
-    } else {
-      const plusGenerados = precios
-        .filter(p => p.precio_minorista > 0)
-        .map((p, i) => ({
-          codigo: String(i + 1).padStart(4, '0'),
-          nombre: p.nombre,
-          precio: p.precio_minorista,
-          categoria: p.categoria,
-          precio_id: p.id
-        }))
-      setPlus(plusGenerados)
-    }
+    const { data: plusGuardados } = await supabase.from('plu').select('*').order('codigo')
+    const guardados = plusGuardados || []
+
+    // Detectar productos nuevos que no tienen PLU asignado
+    const idsConPlu = new Set(guardados.map(p => p.precio_id))
+    const productosSinPlu = precios.filter(p =>
+      p.precio_minorista > 0 && !idsConPlu.has(p.id)
+    )
+
+    // Asignar códigos nuevos a partir del último usado
+    const maxCodigo = guardados.reduce((max, p) => {
+      const n = parseInt(p.codigo, 10) || 0
+      return n > max ? n : max
+    }, 0)
+
+    const nuevosPlus = productosSinPlu.map((p, i) => ({
+      codigo: String(maxCodigo + i + 1).padStart(4, '0'),
+      nombre: p.nombre,
+      precio: p.precio_minorista,
+      categoria: p.categoria,
+      precio_id: p.id
+    }))
+
+    // Combinar guardados + nuevos
+    const todos = [...guardados, ...nuevosPlus].sort((a, b) =>
+      (a.codigo || '').localeCompare(b.codigo || '')
+    )
+    setPlus(todos)
     setLoading(false)
   }
-
   async function guardarTodos() {
     await supabase.from('plu').delete().neq('id', '00000000-0000-0000-0000-000000000000')
     for (const p of plus) {
