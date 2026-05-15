@@ -48,23 +48,55 @@ export const DEFINICIONES_TOOLS = [
   },
   {
     name: 'cargar_gasto',
-    description: 'Carga un nuevo gasto en el sistema. SIEMPRE pedir confirmación al usuario antes de llamarla mostrando los datos a cargar.',
+    description: `Carga un nuevo gasto en el sistema de Carnicerías Fabricius.
+
+REGLAS DE NEGOCIO IMPORTANTES:
+- El campo "tipo" es OBLIGATORIO y debe ser uno de estos 3 valores exactos: "fijo", "variable" o "socio".
+  * "fijo" → gastos recurrentes del negocio (luz, gas, alquiler, sueldos, internet, impuestos)
+  * "variable" → gastos puntuales del negocio (combustible, mantenimiento, repuestos, insumos, viáticos)
+  * "socio" → gastos personales de Ariel o Fabricio (farmacia, comida personal, ropa, etc.)
+- El campo "socio" SOLO se llena cuando tipo="socio". Valores permitidos: "Ariel" o "Fabricio".
+- La empresa tiene dos socios: Ariel Garrone y Fabricio Lenardon.
+- SIEMPRE inferí el tipo correcto según el contexto. Si el usuario no aclara y el gasto suena personal, preguntar.
+- ANTES de cargar, mostrá un resumen al usuario y pedí confirmación.`,
     parameters: {
       type: 'object',
       properties: {
-        descripcion: { type: 'string', description: 'Descripción del gasto. Ej: "Combustible camioneta"' },
-        monto: { type: 'number', description: 'Monto en pesos argentinos. Ej: 15000' },
-        categoria: { type: 'string', description: 'Categoría del gasto. Ej: combustible, luz, gas, mantenimiento, sueldos, otros' },
-        fecha: { type: 'string', description: 'Fecha en formato YYYY-MM-DD. Si no se especifica, usar la fecha de hoy.' },
-        sucursal: { type: 'string', description: 'Sucursal a la que se imputa el gasto (opcional)' }
+        tipo: {
+          type: 'string',
+          description: 'Tipo de gasto. OBLIGATORIO. Valores permitidos: "fijo", "variable" o "socio".'
+        },
+        descripcion: {
+          type: 'string',
+          description: 'Descripción clara del gasto. Ej: "Combustible camioneta", "Factura de luz EPEC"'
+        },
+        monto: {
+          type: 'number',
+          description: 'Monto en pesos argentinos. Solo el número, sin signo $ ni puntos. Ej: 15000'
+        },
+        categoria: {
+          type: 'string',
+          description: 'Categoría libre del gasto. Ej: combustible, luz, gas, mantenimiento, sueldos, farmacia, etc.'
+        },
+        fecha: {
+          type: 'string',
+          description: 'Fecha en formato YYYY-MM-DD. Si el usuario no especifica fecha, usar la fecha de hoy.'
+        },
+        socio: {
+          type: 'string',
+          description: 'SOLO se llena si tipo="socio". Valores permitidos: "Ariel" o "Fabricio".'
+        },
+        forma: {
+          type: 'string',
+          description: 'Forma de pago opcional. Ej: efectivo, transferencia, cheque, tarjeta. Solo si el usuario lo menciona.'
+        },
+        notas: {
+          type: 'string',
+          description: 'Notas adicionales opcionales que el usuario haya mencionado.'
+        }
       },
-      required: ['descripcion', 'monto', 'categoria']
+      required: ['tipo', 'descripcion', 'monto']
     }
-  },
-  {
-    name: 'analizar_imagen_remito',
-    description: 'NO se llama directamente. La IA debe extraer los datos del remito/ticket/factura que ve en la imagen y ofrecerle al usuario los datos extraídos para que confirme cuál acción tomar (cargar gasto, cargar entrada de depósito, etc.).',
-    parameters: { type: 'object', properties: {} }
   }
 ]
 
@@ -129,27 +161,63 @@ export async function ejecutarFuncion(nombre, args) {
       }
 
       case 'cargar_gasto': {
+        // Validar tipo
+        const tiposValidos = ['fijo', 'variable', 'socio']
+        const tipo = (args.tipo || '').toLowerCase().trim()
+        if (!tiposValidos.includes(tipo)) {
+          return {
+            resultado: `❌ El tipo "${args.tipo}" no es válido. Tiene que ser: "fijo", "variable" o "socio".`
+          }
+        }
+
+        // Validar socio si corresponde
+        let socio = null
+        if (tipo === 'socio') {
+          const sociosValidos = ['Ariel', 'Fabricio']
+          const socioNormalizado = (args.socio || '').trim()
+          const encontrado = sociosValidos.find(s =>
+            s.toLowerCase() === socioNormalizado.toLowerCase() ||
+            socioNormalizado.toLowerCase().includes(s.toLowerCase())
+          )
+          if (!encontrado) {
+            return {
+              resultado: `❌ Para un gasto de tipo "socio" necesito saber si es de Ariel o Fabricio.`
+            }
+          }
+          socio = encontrado
+        }
+
+        // Construir el registro respetando el esquema real de la tabla
         const gasto = {
+          tipo,
           descripcion: args.descripcion,
           monto: Number(args.monto),
-          categoria: args.categoria,
+          categoria: args.categoria || null,
           fecha: args.fecha || new Date().toISOString().slice(0, 10),
-          sucursal: args.sucursal || null,
+          socio,
+          forma: args.forma || null,
+          notas: args.notas || null,
           creado_por: 'asistente_ia'
         }
+
         const { data, error } = await supabase
           .from('gastos')
           .insert([gasto])
           .select()
         if (error) throw error
-        return {
-          resultado: `✅ Gasto cargado correctamente:\n` +
-                     `- Descripción: ${gasto.descripcion}\n` +
-                     `- Monto: ${formatearPesos(gasto.monto)}\n` +
-                     `- Categoría: ${gasto.categoria}\n` +
-                     `- Fecha: ${gasto.fecha}`,
-          id: data[0]?.id
-        }
+
+        // Armar el resumen amigable
+        let resumen = `✅ Gasto cargado correctamente:\n`
+        resumen += `• Tipo: ${tipo}\n`
+        if (socio) resumen += `• Socio: ${socio}\n`
+        resumen += `• Descripción: ${gasto.descripcion}\n`
+        resumen += `• Monto: ${formatearPesos(gasto.monto)}\n`
+        if (gasto.categoria) resumen += `• Categoría: ${gasto.categoria}\n`
+        resumen += `• Fecha: ${formatearFecha(gasto.fecha)}\n`
+        if (gasto.forma) resumen += `• Forma de pago: ${gasto.forma}\n`
+        if (gasto.notas) resumen += `• Notas: ${gasto.notas}`
+
+        return { resultado: resumen, id: data[0]?.id }
       }
 
       default:
@@ -169,4 +237,10 @@ function formatearPesos(valor) {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0
   }).format(Number(valor))
+}
+
+function formatearFecha(fechaISO) {
+  if (!fechaISO) return ''
+  const [a, m, d] = fechaISO.split('-')
+  return `${d}/${m}/${a}`
 }
