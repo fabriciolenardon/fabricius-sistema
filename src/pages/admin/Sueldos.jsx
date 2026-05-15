@@ -1,6 +1,6 @@
 // Sueldos.jsx
 import { useEffect, useState } from 'react'
-import { supabase } from '../../supabaseClient'
+import { supabase } from '../../lib/supabase'
 
 const EMPLEADOS_DEFAULT = [
   { id: 1, apellido: 'FRONTERA', nombre: 'GERMAN GABRIEL', valor_hora: 6000, modalidad: 'hora', cbu: '' },

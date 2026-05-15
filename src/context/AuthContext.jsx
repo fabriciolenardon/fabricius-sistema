@@ -1,11 +1,12 @@
 import { createContext, useContext, useEffect, useState } from 'react'
-import { supabase } from '../supabaseClient'
+import { supabase } from '../lib/supabase'
 
 const AuthContext = createContext({})
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [profile, setProfile] = useState(null)
+  const [profileMissing, setProfileMissing] = useState(false)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -17,21 +18,20 @@ export function AuthProvider({ children }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null)
       if (session?.user) fetchProfile(session.user.id)
-      else { setProfile(null); setLoading(false) }
+      else { setProfile(null); setProfileMissing(false); setLoading(false) }
     })
     return () => subscription.unsubscribe()
   }, [])
 
   async function fetchProfile(userId) {
-    // Primero intentar sin el join de sucursales
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', userId)
       .maybeSingle()
 
     if (data) {
-      // Si tiene sucursal_id, traer la sucursal por separado
+      setProfileMissing(false)
       if (data.sucursal_id) {
         const { data: sucursal } = await supabase
           .from('sucursales')
@@ -43,9 +43,8 @@ export function AuthProvider({ children }) {
         setProfile(data)
       }
     } else {
-      // Solo si NO hay perfil en la tabla asumimos admin
-      // (esto es para tu usuario principal que puede no tener perfil)
-      setProfile({ id: userId, nombre: 'Admin', rol: 'admin' })
+      setProfile(null)
+      setProfileMissing(true)
     }
     setLoading(false)
   }
@@ -59,13 +58,14 @@ export function AuthProvider({ children }) {
     await supabase.auth.signOut()
     setUser(null)
     setProfile(null)
+    setProfileMissing(false)
   }
 
   const isAdmin = profile?.rol === 'admin'
   const isFranquicia = profile?.rol === 'franquicia'
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, isAdmin, isFranquicia, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, profile, profileMissing, loading, isAdmin, isFranquicia, signIn, signOut }}>
       {children}
     </AuthContext.Provider>
   )

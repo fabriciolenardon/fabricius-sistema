@@ -1,7 +1,7 @@
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useState, useEffect, useRef } from 'react'
-import { supabase } from '../../supabaseClient'
+import { supabase } from '../../lib/supabase'
 
 const navItems = [
   { to: '/admin/dashboard',   icon: '📊', label: 'Dashboard' },
@@ -134,9 +134,19 @@ function ChatbotFlotante() {
     setMsgs(m => [...m, { rol: 'user', texto: pregunta }])
     setLoading(true)
     try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+      if (!token) {
+        setMsgs(m => [...m, { rol: 'ia', texto: '❌ Sesión expirada. Volvé a iniciar sesión.' }])
+        setLoading(false)
+        return
+      }
       const res = await fetch('/api/chat-sistema', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           messages: [
             ...msgs.filter((_, i) => i > 0).map(m => ({ role: m.rol === 'user' ? 'user' : 'assistant', content: m.texto })),

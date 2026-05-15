@@ -18,13 +18,23 @@ import FranquiciaCtaCte from './pages/franquicia/FranquiciaCtaCte'
 import FranquiciaRemitos from './pages/franquicia/FranquiciaRemitos'
 import FranquiciaPrecios from './pages/franquicia/FranquiciaPrecios'
 import AsistenteIA from './components/AsistenteIA'
+import PerfilPendiente from './components/PerfilPendiente'
 
 function ProtectedRoute({ children, requiredRole }) {
-  const { user, profile, loading } = useAuth()
+  const { user, profile, profileMissing, loading } = useAuth()
   if (loading) return <LoadingScreen />
   if (!user) return <Navigate to="/login" replace />
+  if (profileMissing) return <PerfilPendiente />
   if (requiredRole && profile?.rol !== requiredRole) return <Navigate to="/" replace />
   return children
+}
+
+function PerfilPendienteRoute() {
+  const { user, profileMissing, loading } = useAuth()
+  if (loading) return <LoadingScreen />
+  if (!user) return <Navigate to="/login" replace />
+  if (!profileMissing) return <Navigate to="/" replace />
+  return <PerfilPendiente />
 }
 
 function LoadingScreen() {
@@ -37,19 +47,22 @@ function LoadingScreen() {
 }
 
 function RootRedirect() {
-  const { profile, loading } = useAuth()
+  const { user, profile, profileMissing, loading } = useAuth()
   if (loading) return <LoadingScreen />
+  if (!user) return <Navigate to="/login" replace />
+  if (profileMissing) return <Navigate to="/perfil-pendiente" replace />
   if (!profile) return <Navigate to="/login" replace />
   if (profile.rol === 'admin') return <Navigate to="/admin/dashboard" replace />
   return <Navigate to="/franquicia/dashboard" replace />
 }
 
 export default function App() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   return (
     <>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/perfil-pendiente" element={<PerfilPendienteRoute />} />
         <Route path="/" element={<RootRedirect />} />
         <Route path="/admin" element={<ProtectedRoute requiredRole="admin"><AdminLayout /></ProtectedRoute>}>
           <Route path="dashboard" element={<Dashboard />} />
@@ -70,7 +83,7 @@ export default function App() {
           <Route path="precios" element={<FranquiciaPrecios />} />
         </Route>
       </Routes>
-      {user && <AsistenteIA />}
+      {user && profile && <AsistenteIA />}
     </>
   )
 }

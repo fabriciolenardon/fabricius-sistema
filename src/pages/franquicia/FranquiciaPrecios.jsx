@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { supabase } from '../../supabaseClient'
+import { supabase } from '../../lib/supabase'
 
 const CATEGORIAS = {
   bovino_corte: '🥩 Bovinos — Cortes',

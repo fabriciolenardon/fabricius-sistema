@@ -1,6 +1,6 @@
 // Gastos.jsx
 import { useEffect, useState } from 'react'
-import { supabase } from '../../supabaseClient'
+import { supabase } from '../../lib/supabase'
 
 function fmt(n) { return '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR') }
 
