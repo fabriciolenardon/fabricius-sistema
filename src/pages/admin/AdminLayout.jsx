@@ -5,7 +5,8 @@ import { supabase } from '../../supabaseClient'
 
 const navItems = [
   { to: '/admin/dashboard',   icon: '📊', label: 'Dashboard' },
-  { to: '/admin/deposito',    icon: '🏭', label: 'Depósitosss' },
+  { to: '/admin/ventas', icon: '🛒', label: 'Ventas' },
+  { to: '/admin/deposito',    icon: '🏭', label: 'Depósito' },
   { to: '/admin/precios',     icon: '💲', label: 'Precios' },
   { to: '/admin/clientes',    icon: '👥', label: 'Clientes' },
   { to: '/admin/franquicias', icon: '🏪', label: 'Franquicias' },
@@ -13,7 +14,6 @@ const navItems = [
   { to: '/admin/sueldos',     icon: '💰', label: 'Sueldos' },
   { to: '/admin/gastos',      icon: '💸', label: 'Gastos' },
   { to: '/admin/cierre',      icon: '📋', label: 'Cierre' },
-  { to: '/admin/ventas', icon: '🛒', label: 'Ventas' },
 ]
 
 function useNotificaciones() {
