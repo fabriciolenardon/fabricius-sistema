@@ -1711,6 +1711,8 @@ function ProveedoresTab() {
   const [nuevoProveedor, setNuevoProveedor] = useState('')
   const [legajoAbierto, setLegajoAbierto] = useState(null)
   const [editandoLegajo, setEditandoLegajo] = useState(false)
+  const [editandoNombreId, setEditandoNombreId] = useState(null)
+  const [nombreEditando, setNombreEditando] = useState('')
   const [formLegajo, setFormLegajo] = useState({ contacto: '', telefono: '', cuit: '', direccion: '', producto_principal: '', notas: '' })
   const [formCompra, setFormCompra] = useState({ fecha: new Date().toISOString().split('T')[0], semana_inicio: '', semana_fin: '', proveedor_nombre: '', producto: '', kg: '', importe: '' })
   const [formPago, setFormPago] = useState({ fecha: new Date().toISOString().split('T')[0], semana_inicio: '', semana_fin: '', proveedor_nombre: '', importe_compra: '', percepcion: '', saldo_anterior: '', entrega: '', notas: '' })
@@ -1745,6 +1747,45 @@ function ProveedoresTab() {
     await supabase.from('proveedores').delete().eq('id', id)
     showMsg('🗑️ Proveedor eliminado')
     if (legajoAbierto?.id === id) setLegajoAbierto(null)
+    fetchAll()
+  }
+
+  function iniciarEditarNombre(prov) {
+    setEditandoNombreId(prov.id)
+    setNombreEditando(prov.nombre)
+  }
+
+  function cancelarEditarNombre() {
+    setEditandoNombreId(null)
+    setNombreEditando('')
+  }
+
+  async function guardarNombreProveedor(prov) {
+    const nuevoNombre = nombreEditando.trim().toUpperCase()
+    if (!nuevoNombre) { showMsg('El nombre no puede estar vacío', 'error'); return }
+    if (nuevoNombre === prov.nombre) { cancelarEditarNombre(); return }
+    // Verificar duplicado
+    const yaExiste = proveedoresDB.some(p => p.id !== prov.id && p.nombre.toUpperCase() === nuevoNombre)
+    if (yaExiste) { showMsg('❌ Ya existe un proveedor con ese nombre', 'error'); return }
+    if (!confirm(`¿Renombrar "${prov.nombre}" a "${nuevoNombre}"?\n\nSe actualizarán también las compras, pagos, entradas y cheques relacionados.`)) return
+
+    const nombreAnterior = prov.nombre
+    // 1. Actualizar la tabla principal
+    const { error } = await supabase.from('proveedores').update({ nombre: nuevoNombre }).eq('id', prov.id)
+    if (error) { showMsg('❌ Error al actualizar: ' + error.message, 'error'); return }
+
+    // 2. Propagar el cambio a registros históricos (cascada manual porque proveedor_nombre es texto)
+    await Promise.all([
+      supabase.from('compras_proveedores').update({ proveedor_nombre: nuevoNombre }).eq('proveedor_nombre', nombreAnterior),
+      supabase.from('pagos_proveedores_semanal').update({ proveedor_nombre: nuevoNombre }).eq('proveedor_nombre', nombreAnterior),
+      supabase.from('entradas_deposito').update({ proveedor_nombre: nuevoNombre }).eq('proveedor_nombre', nombreAnterior),
+      supabase.from('cheques').update({ proveedor_nombre: nuevoNombre }).eq('proveedor_nombre', nombreAnterior),
+      supabase.from('pagos_proveedores').update({ proveedor_nombre: nuevoNombre }).eq('proveedor_nombre', nombreAnterior)
+    ])
+
+    showMsg('✅ Nombre actualizado en todos los registros')
+    if (legajoAbierto?.id === prov.id) setLegajoAbierto({ ...legajoAbierto, nombre: nuevoNombre })
+    cancelarEditarNombre()
     fetchAll()
   }
 
@@ -1965,12 +2006,31 @@ function ProveedoresTab() {
             <div className="card-title">📋 Proveedores activos ({proveedoresDB.length})</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
               {proveedoresDB.map(p => (
-                <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', border: '1px solid var(--border)' }}>
-                  <div><div style={{ fontWeight: 600, fontSize: 13 }}>{p.nombre}</div>{p.producto_principal && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{p.producto_principal}</div>}</div>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <button onClick={() => abrirLegajo(p)} style={{ background: 'var(--amber)', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#fff' }}>📋</button>
-                    <button onClick={() => eliminarProveedor(p.id, p.nombre)} style={{ background: 'none', border: 'none', color: 'var(--red-light)', cursor: 'pointer', fontSize: 16 }}>🗑️</button>
-                  </div>
+                <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', border: editandoNombreId === p.id ? '1px solid var(--gold)' : '1px solid var(--border)' }}>
+                  {editandoNombreId === p.id ? (
+                    <>
+                      <input
+                        autoFocus
+                        value={nombreEditando}
+                        onChange={e => setNombreEditando(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') guardarNombreProveedor(p); if (e.key === 'Escape') cancelarEditarNombre() }}
+                        style={{ ...inp, flex: 1, marginRight: 6, textTransform: 'uppercase', borderColor: 'var(--gold)' }}
+                      />
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button onClick={() => guardarNombreProveedor(p)} title="Guardar" style={{ background: 'var(--green)', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#fff' }}>✓</button>
+                        <button onClick={cancelarEditarNombre} title="Cancelar" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12, color: 'var(--muted)' }}>✕</button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div><div style={{ fontWeight: 600, fontSize: 13 }}>{p.nombre}</div>{p.producto_principal && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{p.producto_principal}</div>}</div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button onClick={() => iniciarEditarNombre(p)} title="Editar nombre" style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#000' }}>✏️</button>
+                        <button onClick={() => abrirLegajo(p)} title="Ver legajo" style={{ background: 'var(--amber)', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#fff' }}>📋</button>
+                        <button onClick={() => eliminarProveedor(p.id, p.nombre)} title="Eliminar" style={{ background: 'none', border: 'none', color: 'var(--red-light)', cursor: 'pointer', fontSize: 16 }}>🗑️</button>
+                      </div>
+                    </>
+                  )}
                 </div>
               ))}
               {proveedoresDB.length === 0 && <div className="empty" style={{ gridColumn: '1/-1' }}>Sin proveedores registrados</div>}
