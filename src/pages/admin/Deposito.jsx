@@ -1836,8 +1836,26 @@ function ProveedoresTab() {
         {alert && <div style={{ background: alert.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${alert.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: alert.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>{alert.msg}</div>}
         <div style={{ background: 'linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%)', border: '1px solid var(--amber)', borderRadius: 16, padding: 24, marginBottom: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 32, color: 'var(--amber)', letterSpacing: 2 }}>🏭 {legajoAbierto.nombre}</div>
+            <div style={{ flex: 1 }}>
+              {editandoNombreId === legajoAbierto.id ? (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 32 }}>🏭</span>
+                  <input
+                    autoFocus
+                    value={nombreEditando}
+                    onChange={e => setNombreEditando(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') guardarNombreProveedor(legajoAbierto); if (e.key === 'Escape') cancelarEditarNombre() }}
+                    style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 32, color: 'var(--amber)', letterSpacing: 2, background: 'var(--surface)', border: '2px solid var(--gold)', borderRadius: 8, padding: '4px 12px', textTransform: 'uppercase', minWidth: 280 }}
+                  />
+                  <button onClick={() => guardarNombreProveedor(legajoAbierto)} title="Guardar" style={{ background: 'var(--green)', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 14, fontWeight: 700, color: '#fff' }}>✓ Guardar</button>
+                  <button onClick={cancelarEditarNombre} title="Cancelar" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 14, color: 'var(--muted)' }}>✕</button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 32, color: 'var(--amber)', letterSpacing: 2 }}>🏭 {legajoAbierto.nombre}</div>
+                  <button onClick={() => iniciarEditarNombre(legajoAbierto)} title="Editar nombre" style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#000' }}>✏️ Editar nombre</button>
+                </div>
+              )}
               <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>Legajo de proveedor</div>
               {legajoAbierto.producto_principal && <div style={{ fontSize: 12, color: 'var(--gold)', marginTop: 4 }}>🥩 {legajoAbierto.producto_principal}</div>}
             </div>
