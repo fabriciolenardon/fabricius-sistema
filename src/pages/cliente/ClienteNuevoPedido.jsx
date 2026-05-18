@@ -137,10 +137,6 @@ export default function ClienteNuevoPedido() {
 
   function confirmarDia() {
     if (!diaEntrega) { alert('Elegí una fecha'); return }
-    if (diaEntrega < fechaMinimaEntrega()) {
-      alert(`La fecha mínima es ${fechaMinimaEntrega()} (12 horas de anticipación)`)
-      return
-    }
     pushCliente(`Para el día ${diaEntrega}`)
     pushBot('¿Y en qué horario te queda mejor?')
     setPaso('horario')
@@ -310,12 +306,19 @@ export default function ClienteNuevoPedido() {
           {paso === 'dia' && (
             <div className="card">
               <div className="card-title">¿Para qué día necesitás el pedido?</div>
-              <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>📅 Mínimo 12 horas de anticipación. Te avisaremos por WhatsApp cuando esté listo.</div>
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                <input type="date" autoFocus value={diaEntrega} min={fechaMinimaEntrega()} onChange={e => setDiaEntrega(e.target.value)}
+              <div style={{ background: '#1a2a08', border: '1px solid var(--amber)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 12, color: 'var(--amber)' }}>
+                ℹ️ <strong>Aviso:</strong> Recomendamos pedir con al menos 12 horas de anticipación para que podamos preparar el pedido a tiempo. Te avisaremos por WhatsApp cuando esté listo.
+              </div>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                <input type="date" autoFocus value={diaEntrega} onChange={e => setDiaEntrega(e.target.value)}
                   style={{ background: 'var(--surface2)', border: '1px solid var(--gold)', color: 'var(--text)', borderRadius: 8, padding: '10px 14px', fontSize: 14 }} />
                 <button onClick={confirmarDia} className="btn btn-gold">Continuar</button>
               </div>
+              {diaEntrega && diaEntrega < fechaMinimaEntrega() && (
+                <div style={{ marginTop: 10, fontSize: 12, color: 'var(--red-light)', background: '#3a1a1a', borderRadius: 8, padding: '8px 12px', border: '1px solid var(--red-light)' }}>
+                  ⚠️ Estás pidiendo con menos de 12 horas de anticipación. El pedido queda registrado igual, pero confirmá disponibilidad con el local.
+                </div>
+              )}
             </div>
           )}
 
