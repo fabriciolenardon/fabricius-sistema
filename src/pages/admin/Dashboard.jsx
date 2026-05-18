@@ -22,6 +22,11 @@ export default function Dashboard() {
   const [cheques, setCheques] = useState([])
   const [precios, setPrecios] = useState([])
   const [loading, setLoading] = useState(true)
+  // Estado del modal de detalle de stock (entradas y salidas por categoria)
+  const [detalleAbierto, setDetalleAbierto] = useState(null)
+  const [detalleEntradas, setDetalleEntradas] = useState([])
+  const [detalleSalidas, setDetalleSalidas] = useState([])
+  const [loadingDetalle, setLoadingDetalle] = useState(false)
 
   useEffect(() => { fetchData() }, [])
 
@@ -45,6 +50,26 @@ export default function Dashboard() {
     setCheques(ch.data || [])
     setPrecios(pr.data || [])
     setLoading(false)
+  }
+
+  async function abrirDetalle(cat) {
+    setDetalleAbierto(cat)
+    setLoadingDetalle(true)
+    setDetalleEntradas([])
+    setDetalleSalidas([])
+    const [entradasRes, salidasRes] = await Promise.all([
+      supabase.from('entradas_deposito').select('*').in('tipo', cat.tiposEntradas).order('fecha', { ascending: false }).limit(50),
+      supabase.from('salidas_deposito').select('*').in('tipo', cat.tiposSalidas).order('fecha', { ascending: false }).limit(50)
+    ])
+    setDetalleEntradas(entradasRes.data || [])
+    setDetalleSalidas(salidasRes.data || [])
+    setLoadingDetalle(false)
+  }
+
+  function cerrarDetalle() {
+    setDetalleAbierto(null)
+    setDetalleEntradas([])
+    setDetalleSalidas([])
   }
 
   const hora = new Date().getHours()
@@ -240,20 +265,20 @@ export default function Dashboard() {
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
           {[
-            { label: '🐄 Bovino Media Res', valor: stockBovino.toFixed(1) + ' kg', color: 'var(--gold)', aprox: Math.round(stockBovino / 105) + ' medias', bajo: stockBovino < 100 },
-            { label: '🍖 Piezas Bovinas', valor: stockPiezas.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockPiezas < 30 },
-            { label: '📦 Cajas Bovinas', valor: stockCajas.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockCajas < 20 },
-            { label: '🥩 Bovino Cortes', valor: stockCortes.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockCortes < 50 },
-            { label: '🐷 Cerdo Capones', valor: stockCerdo.toFixed(1) + ' kg', color: 'var(--amber)', aprox: Math.round(stockCerdo / 107) + ' capones', bajo: stockCerdo < 50 },
-            { label: '🐷 Cerdo Piezas', valor: stockCerdoPiezas.toFixed(1) + ' kg', color: 'var(--amber)', aprox: 'al peso', bajo: stockCerdoPiezas < 20 },
-            { label: '🍗 Pollo', valor: stockPollo.toFixed(1) + ' kg', color: 'var(--blue)', aprox: Math.round(stockPollo / 20) + ' cajones', bajo: stockPollo < 50 },
-            { label: '🫀 Brosas', valor: stockBrosas.toFixed(1) + ' kg', color: 'var(--amber)', aprox: 'al peso', bajo: stockBrosas < 20 },
-            { label: '🌭 Embutidos', valor: stockEmbutido.toFixed(1) + ' kg', color: 'var(--purple)', aprox: 'al peso', bajo: stockEmbutido < 20 },
-            { label: '🧊 Rebozados/Congelados', valor: stockRebozado.toFixed(1) + ' kg', color: 'var(--blue)', aprox: 'al peso', bajo: stockRebozado < 20 },
+            { label: '🐄 Bovino Media Res', valor: stockBovino.toFixed(1) + ' kg', color: 'var(--gold)', aprox: Math.round(stockBovino / 105) + ' medias', bajo: stockBovino < 100, stockKg: stockBovino, tiposEntradas: ['bovino_mr'], tiposSalidas: ['bovino_mr'] },
+            { label: '🍖 Piezas Bovinas', valor: stockPiezas.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockPiezas < 30, stockKg: stockPiezas, tiposEntradas: ['pieza_pierna','pieza_cuarto_pistola','pieza_costillar','pieza_cortito','pieza_carre','pieza_paleta','pieza_parrillero'], tiposSalidas: ['bovino_pieza','pieza_pierna','pieza_cuarto_pistola','pieza_costillar','pieza_cortito','pieza_carre','pieza_paleta','pieza_parrillero'] },
+            { label: '📦 Cajas Bovinas', valor: stockCajas.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockCajas < 20, stockKg: stockCajas, tiposEntradas: ['caja_cb','caja_pt'], tiposSalidas: ['bovino_caja_cb','bovino_caja_pt','caja_cb','caja_pt'] },
+            { label: '🥩 Bovino Cortes', valor: stockCortes.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockCortes < 50, stockKg: stockCortes, tiposEntradas: ['bovino_corte'], tiposSalidas: ['bovino_corte'] },
+            { label: '🐷 Cerdo Capones', valor: stockCerdo.toFixed(1) + ' kg', color: 'var(--amber)', aprox: Math.round(stockCerdo / 107) + ' capones', bajo: stockCerdo < 50, stockKg: stockCerdo, tiposEntradas: ['cerdo'], tiposSalidas: ['cerdo','cerdo_corte'] },
+            { label: '🐷 Cerdo Piezas', valor: stockCerdoPiezas.toFixed(1) + ' kg', color: 'var(--amber)', aprox: 'al peso', bajo: stockCerdoPiezas < 20, stockKg: stockCerdoPiezas, tiposEntradas: ['cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza'], tiposSalidas: ['cerdo_pieza','cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza'] },
+            { label: '🍗 Pollo', valor: stockPollo.toFixed(1) + ' kg', color: 'var(--blue)', aprox: Math.round(stockPollo / 20) + ' cajones', bajo: stockPollo < 50, stockKg: stockPollo, tiposEntradas: ['pollo'], tiposSalidas: ['pollo'] },
+            { label: '🫀 Brosas', valor: stockBrosas.toFixed(1) + ' kg', color: 'var(--amber)', aprox: 'al peso', bajo: stockBrosas < 20, stockKg: stockBrosas, tiposEntradas: ['bovino_brosa'], tiposSalidas: ['bovino_brosa'] },
+            { label: '🌭 Embutidos', valor: stockEmbutido.toFixed(1) + ' kg', color: 'var(--purple)', aprox: 'al peso', bajo: stockEmbutido < 20, stockKg: stockEmbutido, tiposEntradas: ['embutido'], tiposSalidas: ['embutido'] },
+            { label: '🧊 Rebozados/Congelados', valor: stockRebozado.toFixed(1) + ' kg', color: 'var(--blue)', aprox: 'al peso', bajo: stockRebozado < 20, stockKg: stockRebozado, tiposEntradas: ['rebozado'], tiposSalidas: ['rebozado'] },
             { label: '🛒 Almacén', valor: cantAlmacen + ' productos', color: 'var(--gold)', aprox: 'cargados en sistema', bajo: false, esConteo: true },
             { label: '🥤 Bebidas', valor: cantBebidas + ' productos', color: 'var(--blue)', aprox: 'cargados en sistema', bajo: false, esConteo: true },
           ].map(s => (
-            <div key={s.label} style={{ background: s.bajo ? '#3a1a1a' : 'var(--surface2)', border: `1px solid ${s.bajo ? 'var(--red-light)' : 'var(--border)'}`, borderRadius: 10, padding: '12px 14px', textAlign: 'center', cursor: s.esConteo ? 'pointer' : 'default' }} onClick={() => s.esConteo && navigate('/admin/precios')}>
+            <div key={s.label} style={{ background: s.bajo ? '#3a1a1a' : 'var(--surface2)', border: `1px solid ${s.bajo ? 'var(--red-light)' : 'var(--border)'}`, borderRadius: 10, padding: '12px 14px', textAlign: 'center', cursor: 'pointer', transition: 'transform 0.1s, border-color 0.1s' }} onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--gold)'} onMouseLeave={e => e.currentTarget.style.borderColor = s.bajo ? 'var(--red-light)' : 'var(--border)'} onClick={() => { if (s.esConteo) navigate('/admin/precios'); else if (s.tiposEntradas) abrirDetalle(s) }}>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>{s.label}</div>
               <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 26, color: s.bajo ? 'var(--red-light)' : s.color }}>{s.valor}</div>
               <div style={{ fontSize: 11, color: 'var(--muted)' }}>{s.aprox}</div>
@@ -400,6 +425,81 @@ export default function Dashboard() {
           ))}
         </div>
       </div>
+
+      {/* MODAL DE DETALLE DE STOCK */}
+      {detalleAbierto && (
+        <div onClick={cerrarDetalle} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: 'var(--surface)', border: '1px solid var(--gold)', borderRadius: 16, padding: 24, maxWidth: 1100, width: '100%', maxHeight: '90vh', overflow: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 28, color: 'var(--gold)', letterSpacing: 1 }}>{detalleAbierto.label}</div>
+              <button onClick={cerrarDetalle} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 14, color: 'var(--text)' }}>✕ Cerrar</button>
+            </div>
+
+            {/* Tarjeta de stock disponible */}
+            <div style={{ background: detalleAbierto.bajo ? '#3a1a1a' : 'linear-gradient(135deg, var(--surface2) 0%, var(--surface) 100%)', border: `2px solid ${detalleAbierto.bajo ? 'var(--red-light)' : 'var(--gold)'}`, borderRadius: 12, padding: '18px 22px', marginBottom: 20, textAlign: 'center' }}>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Stock disponible</div>
+              <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 48, color: detalleAbierto.bajo ? 'var(--red-light)' : 'var(--gold)' }}>{(detalleAbierto.stockKg || 0).toFixed(1)} kg</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{detalleAbierto.aprox}</div>
+              {detalleAbierto.bajo && <div style={{ fontSize: 12, color: 'var(--red-light)', fontWeight: 700, marginTop: 6 }}>⚠️ Stock bajo</div>}
+            </div>
+
+            {loadingDetalle ? (
+              <div style={{ textAlign: 'center', padding: 30, color: 'var(--muted)' }}>Cargando movimientos...</div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                {/* ENTRADAS */}
+                <div className="card" style={{ margin: 0 }}>
+                  <div className="card-title" style={{ color: 'var(--green)' }}>📥 Últimas entradas ({detalleEntradas.length})</div>
+                  {detalleEntradas.length === 0 ? (
+                    <div className="empty">Sin entradas registradas</div>
+                  ) : (
+                    <div style={{ maxHeight: 380, overflowY: 'auto' }}>
+                      <table style={{ fontSize: 12 }}>
+                        <thead><tr><th>Fecha</th><th>Descripción</th><th>Proveedor</th><th style={{ textAlign: 'right' }}>Kg</th></tr></thead>
+                        <tbody>
+                          {detalleEntradas.map(e => (
+                            <tr key={e.id}>
+                              <td style={{ whiteSpace: 'nowrap' }}>{e.fecha}</td>
+                              <td>{e.descripcion}</td>
+                              <td style={{ color: 'var(--muted)' }}>{e.proveedor_nombre || '—'}</td>
+                              <td style={{ textAlign: 'right', color: 'var(--green)', fontWeight: 600 }}>{(e.kg_real || e.kg || 0).toFixed(1)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                {/* SALIDAS */}
+                <div className="card" style={{ margin: 0 }}>
+                  <div className="card-title" style={{ color: 'var(--red-light)' }}>📤 Últimas salidas ({detalleSalidas.length})</div>
+                  {detalleSalidas.length === 0 ? (
+                    <div className="empty">Sin salidas registradas</div>
+                  ) : (
+                    <div style={{ maxHeight: 380, overflowY: 'auto' }}>
+                      <table style={{ fontSize: 12 }}>
+                        <thead><tr><th>Fecha</th><th>Descripción</th><th>Cliente</th><th style={{ textAlign: 'right' }}>Kg</th><th style={{ textAlign: 'right' }}>Total</th></tr></thead>
+                        <tbody>
+                          {detalleSalidas.map(s => (
+                            <tr key={s.id}>
+                              <td style={{ whiteSpace: 'nowrap' }}>{s.fecha}</td>
+                              <td>{s.descripcion}</td>
+                              <td style={{ color: 'var(--muted)' }}>{s.cliente_nombre || '—'}</td>
+                              <td style={{ textAlign: 'right', color: 'var(--red-light)', fontWeight: 600 }}>{(s.kg || 0).toFixed(1)}</td>
+                              <td style={{ textAlign: 'right', color: 'var(--gold)' }}>${Math.round(s.total || 0).toLocaleString('es-AR')}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
