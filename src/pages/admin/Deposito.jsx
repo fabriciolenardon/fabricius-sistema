@@ -1139,7 +1139,7 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   useEffect(() => {
     supabase.from('precios').select('*').order('nombre').then(({ data }) => setTodosPrecios(data || []))
     supabase.from('clientes').select('*').order('nombre').then(({ data }) => setClientes(data || []))
-  supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).eq('reservada', false).order('fecha', { ascending: false }).then(({ data }) => setMediasDisponibles(data || []))
+  supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false }).then(({ data }) => setMediasDisponibles(data || []))
   }, [])
 
 const CATEGORIAS = {
@@ -1215,19 +1215,15 @@ const item = {
   precio: parseFloat(form.precio),
   importe: parseFloat(form.kg) * parseFloat(form.precio),
   tipo: form.categoria,
-  stock_origen: prodItem?.stock_origen || null
+  stock_origen: prodItem?.stock_origen || null,
+  media_res_id: mediaSeleccionada?.id || null
 }
     setItems(prev => [...prev, item])
     setForm(f => ({ ...f, kg: '', productoId: '', precio: '', categoria: '' }))
-    if (mediaSeleccionada) {
-      await supabase.from('entradas_deposito').update({ 
-        reservada: true, 
-        reservada_para: 'remito en proceso',
-        reservada_en: new Date().toISOString()
-      }).eq('id', mediaSeleccionada.id)
-      setMediasDisponibles(prev => prev.filter(m => m.id !== mediaSeleccionada.id))
-      setMediaSeleccionada(null)
-    }
+    // IMPORTANTE: la media res NO se descuenta del stock al agregarla al carrito.
+    // Recien se marca como despostada en guardar() cuando se confirma el despacho y se genera el remito.
+    // Si el usuario sale sin confirmar, la media sigue disponible en el stock.
+    if (mediaSeleccionada) setMediaSeleccionada(null)
   }
  
   function quitarItem(idx) { setItems(prev => prev.filter((_, i) => i !== idx)) }
@@ -1267,12 +1263,14 @@ for (const item of items) {
    for (const [tipo, kg] of Object.entries(kgPorTipo)) {
       await actualizarStock(tipo, -kg)
     }
-      if (mediaSeleccionada) {
-      await supabase.from('entradas_deposito').update({ despostada: true }).eq('id', mediaSeleccionada.id)
+      // Recien aca marcamos las medias res como despostadas: el despacho ya se registro.
+      const mediasIds = items.map(it => it.media_res_id).filter(Boolean)
+      if (mediasIds.length > 0) {
+        await supabase.from('entradas_deposito').update({ despostada: true }).in('id', mediasIds)
+      }
       setMediaSeleccionada(null)
-      const { data: medias } = await supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).eq('reservada', false).order('fecha', { ascending: false })
+      const { data: medias } = await supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false })
       setMediasDisponibles(medias || [])
-    }
     const { data: remitoData } = await supabase.from('remitos').insert({     fecha: form.fecha, cliente_nombre: clienteNombre,
       cliente_id: clienteId || null, domicilio,
       items, total, cobro: form.cobro, notas: form.notas
@@ -1316,12 +1314,16 @@ for (const item of items) {
             <input type="date" value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} />
           </div>
         </div>
-{form.categoria === 'bovino_mr' && (
+{form.categoria === 'bovino_mr' && (() => {
+  // Ocultar las medias que ya estan agregadas al carrito (sin descontarlas del stock).
+  const idsEnCarrito = items.map(it => it.media_res_id).filter(Boolean)
+  const mediasVisibles = mediasDisponibles.filter(m => !idsEnCarrito.includes(m.id))
+  return (
   <div style={{ background: '#1a2a1a', border: '1px solid #2d5a2d', borderRadius: 10, padding: '14px 16px', marginBottom: 12 }}>
     <div style={{ fontSize: 12, fontWeight: 700, color: '#7dff7d', marginBottom: 10 }}>🐄 Seleccioná la media res a despachar</div>
-    {mediasDisponibles.length === 0 ? (
+    {mediasVisibles.length === 0 ? (
       <div style={{ fontSize: 12, color: 'var(--muted)' }}>Sin medias reses disponibles</div>
-    ) : mediasDisponibles.map(e => (
+    ) : mediasVisibles.map(e => (
       <div key={e.id} onClick={() => { setMediaSeleccionada(e); setForm(f => ({ ...f, kg: (e.kg_real || e.kg || 0).toString() })) }}
         style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderRadius: 8, marginBottom: 6, cursor: 'pointer', border: `2px solid ${mediaSeleccionada?.id === e.id ? 'var(--gold)' : 'var(--border)'}`, background: mediaSeleccionada?.id === e.id ? 'rgba(201,168,76,0.1)' : 'var(--surface2)' }}>
         <div>
@@ -1332,7 +1334,8 @@ for (const item of items) {
       </div>
     ))}
   </div>
-)}
+  )
+})()}
         {esFranquicia && (
           <div style={{ background: 'var(--surface2)', border: '1px solid var(--gold)', borderRadius: 8, padding: '10px 14px', marginBottom: 12 }}>
             <span style={{ fontSize: 12, color: 'var(--gold)', fontWeight: 600 }}>🏪 Franquicia — el remito se cargará automáticamente en su legajo</span>
