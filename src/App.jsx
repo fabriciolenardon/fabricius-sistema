@@ -17,6 +17,11 @@ import FranquiciaDashboard from './pages/franquicia/FranquiciaDashboard'
 import FranquiciaCtaCte from './pages/franquicia/FranquiciaCtaCte'
 import FranquiciaRemitos from './pages/franquicia/FranquiciaRemitos'
 import FranquiciaPrecios from './pages/franquicia/FranquiciaPrecios'
+import ClienteLayout from './pages/cliente/ClienteLayout'
+import ClienteDashboard from './pages/cliente/ClienteDashboard'
+import ClienteCtaCte from './pages/cliente/ClienteCtaCte'
+import ClienteRemitos from './pages/cliente/ClienteRemitos'
+import ClientePrecios from './pages/cliente/ClientePrecios'
 import AsistenteIA from './components/AsistenteIA'
 import PerfilPendiente from './components/PerfilPendiente'
 
@@ -53,6 +58,7 @@ function RootRedirect() {
   if (profileMissing) return <Navigate to="/perfil-pendiente" replace />
   if (!profile) return <Navigate to="/login" replace />
   if (profile.rol === 'admin') return <Navigate to="/admin/dashboard" replace />
+  if (profile.rol === 'cliente_mayorista') return <Navigate to="/cliente/dashboard" replace />
   return <Navigate to="/franquicia/dashboard" replace />
 }
 
@@ -81,6 +87,12 @@ export default function App() {
           <Route path="ctacte" element={<FranquiciaCtaCte />} />
           <Route path="remitos" element={<FranquiciaRemitos />} />
           <Route path="precios" element={<FranquiciaPrecios />} />
+        </Route>
+        <Route path="/cliente" element={<ProtectedRoute requiredRole="cliente_mayorista"><ClienteLayout /></ProtectedRoute>}>
+          <Route path="dashboard" element={<ClienteDashboard />} />
+          <Route path="ctacte" element={<ClienteCtaCte />} />
+          <Route path="remitos" element={<ClienteRemitos />} />
+          <Route path="precios" element={<ClientePrecios />} />
         </Route>
       </Routes>
       {user && profile && <AsistenteIA />}
