@@ -14,6 +14,8 @@ export function Clientes() {
   const [editandoId, setEditandoId] = useState(null)
   const [pago, setPago] = useState({ importe: '', forma: 'efectivo', fecha: new Date().toISOString().split('T')[0], notas: '' })
   const [form, setForm] = useState({ nombre: '', nombre_fantasia: '', tipo: 'carniceria', telefono: '', localidad: '', domicilio: '', cuit: '', lista_precios: 'carn', notas: '' })
+  // Modal de gestion del portal: { tipo: 'habilitar'|'credenciales'|'revocar', cliente, email, credenciales, loading }
+  const [modalPortal, setModalPortal] = useState(null)
 
   useEffect(() => { fetchClientes() }, [])
 
@@ -67,6 +69,68 @@ async function eliminarMovimiento(mov) {
   setSeleccionado(prev => ({ ...prev, saldo: nuevoSaldo }))
   setClientes(prev => prev.map(c => c.id === seleccionado.id ? { ...c, saldo: nuevoSaldo } : c))
 }
+  // ============================================================
+  // PORTAL DE CLIENTES
+  // ============================================================
+  function abrirModalHabilitarPortal(cliente) {
+    setModalPortal({ tipo: 'habilitar', cliente, email: cliente.email_portal || '', loading: false })
+  }
+
+  function abrirModalRevocarPortal(cliente) {
+    setModalPortal({ tipo: 'revocar', cliente, loading: false })
+  }
+
+  async function habilitarPortal() {
+    if (!modalPortal?.cliente) return
+    const email = (modalPortal.email || '').trim().toLowerCase()
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      alert('Email inválido')
+      return
+    }
+    setModalPortal(m => ({ ...m, loading: true }))
+    const { data, error } = await supabase.functions.invoke('crear-acceso-cliente', {
+      body: { cliente_id: modalPortal.cliente.id, email }
+    })
+    if (error || !data?.ok) {
+      const msg = data?.error || error?.message || 'Error desconocido al habilitar portal'
+      alert('❌ ' + msg)
+      setModalPortal(m => ({ ...m, loading: false }))
+      return
+    }
+    // Mostrar credenciales y refrescar lista
+    setModalPortal({ tipo: 'credenciales', cliente: modalPortal.cliente, credenciales: { email: data.email, password: data.password }, loading: false })
+    await fetchClientes()
+    if (seleccionado?.id === modalPortal.cliente.id) {
+      setSeleccionado(prev => ({ ...prev, tiene_portal: true, email_portal: data.email }))
+    }
+  }
+
+  async function revocarPortal() {
+    if (!modalPortal?.cliente) return
+    setModalPortal(m => ({ ...m, loading: true }))
+    const { data, error } = await supabase.functions.invoke('revocar-acceso-cliente', {
+      body: { cliente_id: modalPortal.cliente.id }
+    })
+    if (error || !data?.ok) {
+      const msg = data?.error || error?.message || 'Error desconocido al revocar portal'
+      alert('❌ ' + msg)
+      setModalPortal(m => ({ ...m, loading: false }))
+      return
+    }
+    await fetchClientes()
+    if (seleccionado?.id === modalPortal.cliente.id) {
+      setSeleccionado(prev => ({ ...prev, tiene_portal: false, email_portal: null }))
+    }
+    setModalPortal(null)
+    alert('✅ Portal revocado')
+  }
+
+  function copiarTexto(texto) {
+    navigator.clipboard.writeText(texto).then(() => {
+      // feedback visual breve
+    }).catch(() => alert('No se pudo copiar al portapapeles'))
+  }
+
   function abrirFormNuevo() {
     setEditandoId(null)
     setForm({ nombre: '', nombre_fantasia: '', tipo: 'carniceria', telefono: '', localidad: '', domicilio: '', cuit: '', lista_precios: 'carn', notas: '' })
@@ -269,6 +333,7 @@ async function eliminarMovimiento(mov) {
                 <div style={{ fontSize: 11, color: 'var(--muted)' }}>{c.nombre_fantasia ? `"${c.nombre_fantasia}" · ` : ''}{c.localidad} · {c.tipo}</div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {c.tiene_portal && <span title="Portal habilitado" style={{ fontSize: 13, color: 'var(--green)' }}>📱</span>}
                 <span style={{ color: c.saldo > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 700, fontSize: 13 }}>
                   {c.saldo > 0 ? fmt(c.saldo) + ' debe' : c.saldo < 0 ? fmt(Math.abs(c.saldo)) + ' a favor' : '✅ Al día'}
                 </span>
@@ -310,6 +375,27 @@ async function eliminarMovimiento(mov) {
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{d.val}</div>
                   </div>
                 ))}
+              </div>
+
+              {/* PORTAL DEL CLIENTE */}
+              <div style={{ background: seleccionado.tiene_portal ? '#1a2a1a' : 'var(--surface2)', border: `1px solid ${seleccionado.tiene_portal ? '#2d5a2d' : 'var(--border)'}`, borderRadius: 10, padding: '12px 14px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: seleccionado.tiene_portal ? 'var(--green)' : 'var(--muted)', marginBottom: 4 }}>
+                    {seleccionado.tiene_portal ? '📱 Portal HABILITADO' : '📱 Portal de cliente'}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                    {seleccionado.tiene_portal
+                      ? `Ingresa con: ${seleccionado.email_portal}`
+                      : 'Permite que este cliente vea su cuenta y remitos online.'}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {seleccionado.tiene_portal ? (
+                    <button onClick={() => abrirModalRevocarPortal(seleccionado)} style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--red-light)' }}>❌ Revocar acceso</button>
+                  ) : (
+                    <button onClick={() => abrirModalHabilitarPortal(seleccionado)} style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#000' }}>📱 Habilitar portal</button>
+                  )}
+                </div>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
@@ -376,6 +462,85 @@ async function eliminarMovimiento(mov) {
           </div>
         )}
       </div>
+
+      {/* MODAL DE PORTAL DE CLIENTE */}
+      {modalPortal && (
+        <div onClick={() => !modalPortal.loading && setModalPortal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: 'var(--surface)', border: '1px solid var(--gold)', borderRadius: 16, padding: 24, maxWidth: 520, width: '100%' }}>
+            {modalPortal.tipo === 'habilitar' && (
+              <>
+                <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 24, color: 'var(--gold)', letterSpacing: 1, marginBottom: 8 }}>📱 Habilitar portal — {modalPortal.cliente.nombre}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>
+                  Ingresá un email para el cliente. El sistema generará una contraseña aleatoria que vas a poder copiar y pasarle por WhatsApp.
+                </div>
+                <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Email del cliente</label>
+                <input
+                  type="email"
+                  autoFocus
+                  placeholder="cliente@ejemplo.com"
+                  value={modalPortal.email}
+                  onChange={e => setModalPortal(m => ({ ...m, email: e.target.value }))}
+                  style={{ background: 'var(--surface2)', border: '1px solid var(--gold)', color: 'var(--text)', borderRadius: 8, padding: '10px 14px', fontSize: 14, width: '100%', boxSizing: 'border-box', marginBottom: 16 }}
+                />
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                  <button onClick={() => setModalPortal(null)} disabled={modalPortal.loading} className="btn btn-ghost">Cancelar</button>
+                  <button onClick={habilitarPortal} disabled={modalPortal.loading || !modalPortal.email} className="btn btn-gold">
+                    {modalPortal.loading ? 'Creando...' : '✅ Crear acceso'}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {modalPortal.tipo === 'credenciales' && (
+              <>
+                <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 24, color: 'var(--green)', letterSpacing: 1, marginBottom: 8 }}>✅ Portal habilitado</div>
+                <div style={{ fontSize: 13, marginBottom: 4 }}>Cliente: <strong>{modalPortal.cliente.nombre}</strong></div>
+                <div style={{ background: '#2a1a0a', border: '1px solid var(--gold)', borderRadius: 10, padding: 16, marginTop: 14, marginBottom: 14 }}>
+                  <div style={{ fontSize: 11, color: 'var(--gold)', fontWeight: 700, marginBottom: 8 }}>⚠️ COPIÁ ESTOS DATOS AHORA — la contraseña no se vuelve a mostrar</div>
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 10, color: 'var(--muted)' }}>Email</div>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <div style={{ fontFamily: 'monospace', fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>{modalPortal.credenciales.email}</div>
+                      <button onClick={() => copiarTexto(modalPortal.credenciales.email)} style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', fontSize: 11 }}>📋 Copiar</button>
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 10, color: 'var(--muted)' }}>Contraseña</div>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <div style={{ fontFamily: 'monospace', fontSize: 16, fontWeight: 700, color: 'var(--gold)', letterSpacing: 1 }}>{modalPortal.credenciales.password}</div>
+                      <button onClick={() => copiarTexto(modalPortal.credenciales.password)} style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', fontSize: 11 }}>📋 Copiar</button>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => copiarTexto(`Hola ${modalPortal.cliente.nombre}, te habilité tu portal de cliente.\n\n🔐 Acceso:\nEmail: ${modalPortal.credenciales.email}\nContraseña: ${modalPortal.credenciales.password}\n\nPodés ver tu saldo, remitos y movimientos.`)}
+                    style={{ background: '#0f4220', border: '1px solid var(--green)', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--green)', marginTop: 12 }}
+                  >💬 Copiar mensaje para WhatsApp</button>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <button onClick={() => setModalPortal(null)} className="btn btn-gold">Listo</button>
+                </div>
+              </>
+            )}
+
+            {modalPortal.tipo === 'revocar' && (
+              <>
+                <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 24, color: 'var(--red-light)', letterSpacing: 1, marginBottom: 8 }}>❌ Revocar acceso</div>
+                <div style={{ fontSize: 13, marginBottom: 16 }}>
+                  Vas a revocar el acceso al portal de <strong>{modalPortal.cliente.nombre}</strong>. El cliente ya no podrá ingresar.
+                  <br /><br />
+                  El historial de cuenta corriente y remitos NO se borra. Podés volver a habilitarlo cuando quieras.
+                </div>
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                  <button onClick={() => setModalPortal(null)} disabled={modalPortal.loading} className="btn btn-ghost">Cancelar</button>
+                  <button onClick={revocarPortal} disabled={modalPortal.loading} style={{ background: 'var(--red-light)', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#fff' }}>
+                    {modalPortal.loading ? 'Revocando...' : '❌ Revocar acceso'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
