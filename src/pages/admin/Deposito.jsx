@@ -1166,6 +1166,7 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   const [mostrarClientes, setMostrarClientes] = useState(false)
   const [mediasDisponibles, setMediasDisponibles] = useState([])
   const [mediaSeleccionada, setMediaSeleccionada] = useState(null)
+  const [formManual, setFormManual] = useState({ descripcion: '', importe: '' })
   useEffect(() => {
     supabase.from('precios').select('*').order('nombre').then(({ data }) => setTodosPrecios(data || []))
     supabase.from('clientes').select('*').order('nombre').then(({ data }) => setClientes(data || []))
@@ -1257,6 +1258,24 @@ const item = {
   }
  
   function quitarItem(idx) { setItems(prev => prev.filter((_, i) => i !== idx)) }
+
+  function agregarItemManual() {
+    const desc = formManual.descripcion.trim()
+    const imp = parseFloat(formManual.importe)
+    if (!desc) { showAlert({ type: 'error', msg: 'Ingresá una descripción' }); return }
+    if (!imp || imp <= 0) { showAlert({ type: 'error', msg: 'Ingresá un importe válido' }); return }
+    setItems(prev => [...prev, {
+      descripcion: desc,
+      kg: 0,
+      precio: 0,
+      importe: imp,
+      tipo: 'manual',
+      stock_origen: null,
+      media_res_id: null,
+      manual: true
+    }])
+    setFormManual({ descripcion: '', importe: '' })
+  }
   const total = items.reduce((s, i) => s + i.importe, 0)
 
   async function guardar() {
@@ -1287,6 +1306,7 @@ const item = {
 
     const kgPorTipo = {}
 for (const item of items) {
+  if (item.manual) continue  // los items manuales (descartables/insumos) no descuentan stock
   const tipoStock = item.stock_origen || CATEGORIA_A_STOCK[item.tipo] || item.tipo
   kgPorTipo[tipoStock] = (kgPorTipo[tipoStock] || 0) + item.kg
 }
@@ -1432,7 +1452,23 @@ for (const item of items) {
           </div>
         </div>
 
-        <button className="btn btn-ghost" onClick={agregarItem} style={{ marginBottom: 16 }}>➕ Agregar producto al remito</button>
+        <button className="btn btn-ghost" onClick={agregarItem} style={{ marginBottom: 12 }}>➕ Agregar producto al remito</button>
+
+        <div style={{ background: 'var(--surface2)', border: '1px dashed var(--border)', borderRadius: 10, padding: '12px 14px', marginBottom: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 8 }}>📦 Otro ítem manual (descartables, insumos, etc.)</div>
+          <div className="form-row" style={{ marginBottom: 0 }}>
+            <div className="form-group" style={{ flex: 2 }}><label>Descripción</label>
+              <input placeholder="Ej: Bolsas N°2, Cinta, Bandejas..." value={formManual.descripcion} onChange={e => setFormManual(f => ({ ...f, descripcion: e.target.value }))} onKeyDown={e => e.key === 'Enter' && agregarItemManual()} />
+            </div>
+            <div className="form-group" style={{ flex: 1 }}><label>Importe $</label>
+              <input type="number" step="0.01" placeholder="0" value={formManual.importe} onChange={e => setFormManual(f => ({ ...f, importe: e.target.value }))} onKeyDown={e => e.key === 'Enter' && agregarItemManual()} />
+            </div>
+            <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end' }}>
+              <button onClick={agregarItemManual} className="btn btn-ghost" style={{ whiteSpace: 'nowrap' }}>➕ Agregar al remito</button>
+            </div>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>No descuenta stock — solo se suma al total del remito.</div>
+        </div>
 
         {items.length > 0 && (
           <div style={{ marginBottom: 16 }}>
@@ -1441,9 +1477,9 @@ for (const item of items) {
               <tbody>
                 {items.map((item, i) => (
                   <tr key={i}>
-                    <td>{item.descripcion}</td>
-                    <td>{item.kg} kg</td>
-                    <td>${Math.round(item.precio).toLocaleString('es-AR')}</td>
+                    <td>{item.manual && <span style={{ fontSize: 10, color: 'var(--muted)', marginRight: 4 }}>📦</span>}{item.descripcion}</td>
+                    <td>{item.manual ? '—' : `${item.kg} kg`}</td>
+                    <td>{item.manual ? '—' : `$${Math.round(item.precio).toLocaleString('es-AR')}`}</td>
                     <td style={{ color: 'var(--gold)' }}>${Math.round(item.importe).toLocaleString('es-AR')}</td>
                     <td><button onClick={() => quitarItem(i)} style={{ background: 'none', border: 'none', color: 'var(--red-light)', cursor: 'pointer' }}>🗑️</button></td>
                   </tr>
