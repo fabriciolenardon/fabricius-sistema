@@ -887,7 +887,7 @@ async function confirmarDesposteCerdo() {
   )
 }
 function EntradaForm({ onSaved, showAlert, proveedores }) {
-  const [form, setForm] = useState({ tipo: '', proveedor: '', descripcion: '', fecha: new Date().toISOString().split('T')[0], kg: '', precioKg: '9800', merma: '', destino: 'DEPOSITO', importe: '' })
+  const [form, setForm] = useState({ tipo: '', proveedor: '', descripcion: '', fecha: new Date().toISOString().split('T')[0], kg: '', precioKg: '9800', merma: '', destino: 'DEPOSITO', importe: '', cantidad: '1' })
   const [historial, setHistorial] = useState([])
   const [editando, setEditando] = useState(null)
   const [formEdit, setFormEdit] = useState({})
@@ -899,28 +899,42 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     setHistorial(data || [])
   }
 
+  // Tipos que vienen en unidades discretas (cajones, cajas).
+  // Para estos, el campo "Kg" representa los KG POR UNIDAD y se multiplica por la cantidad.
+  const TIPOS_EN_UNIDADES = ['pollo', 'caja_cb', 'caja_pt']
+
   async function guardar() {
     if (!form.tipo || !form.proveedor || !form.kg) { showAlert({ type: 'error', msg: 'Completá los campos requeridos' }); return }
-    const kgReal = parseFloat(form.kg) * (1 - (parseFloat(form.merma) || 0) / 100)
+    const esEnUnidades = TIPOS_EN_UNIDADES.includes(form.tipo)
+    const cantidad = esEnUnidades ? Math.max(1, parseInt(form.cantidad) || 1) : 1
+    const kgUnidad = parseFloat(form.kg) || 0
+    const kgTotal = kgUnidad * cantidad
+    const kgReal = kgTotal * (1 - (parseFloat(form.merma) || 0) / 100)
     const importe = form.tipo === 'bovino_mr'
-      ? parseFloat(form.kg) * parseFloat(form.precioKg)
+      ? kgTotal * parseFloat(form.precioKg)
       : parseFloat(form.importe) || 0
+    const descripcionFinal = esEnUnidades && cantidad > 1
+      ? `${form.descripcion || form.tipo} ×${cantidad}`
+      : (form.descripcion || form.tipo)
     const { error } = await supabase.from('entradas_deposito').insert({
       fecha: form.fecha, tipo: form.tipo, proveedor_nombre: form.proveedor,
-      descripcion: form.descripcion || form.tipo, kg: parseFloat(form.kg), kg_real: kgReal,
+      descripcion: descripcionFinal, kg: kgTotal, kg_real: kgReal,
       merma_pct: parseFloat(form.merma) || 0, precio_kg: parseFloat(form.precioKg) || 0,
-      importe, destino: form.destino, cantidad: 1
+      importe, destino: form.destino, cantidad
     })
     if (error) { showAlert({ type: 'error', msg: error.message }); return }
-    const kgSumar = form.tipo === 'bovino_mr' ? kgReal : parseFloat(form.kg)
+    const kgSumar = form.tipo === 'bovino_mr' ? kgReal : kgTotal
     await actualizarStock(form.tipo, kgSumar)
     await supabase.from('compras_proveedores').insert({
       fecha: form.fecha, proveedor_nombre: form.proveedor,
-      producto: form.descripcion || form.tipo,
-      kg: parseFloat(form.kg), importe
+      producto: descripcionFinal,
+      kg: kgTotal, importe
     })
-    showAlert({ type: 'success', msg: '✅ Entrada registrada — Stock actualizado' })
-    setForm(f => ({ ...f, descripcion: '', kg: '', importe: '', precioKg: '9800' }))
+    const msgOK = esEnUnidades && cantidad > 1
+      ? `✅ ${cantidad} unidades registradas — ${kgTotal.toFixed(1)} kg al stock`
+      : '✅ Entrada registrada — Stock actualizado'
+    showAlert({ type: 'success', msg: msgOK })
+    setForm(f => ({ ...f, descripcion: '', kg: '', importe: '', precioKg: '9800', cantidad: '1' }))
     onSaved()
     cargarHistorial()
     setTimeout(() => showAlert(null), 3000)
@@ -1036,8 +1050,24 @@ async function eliminar(entrada) {
             <input placeholder="Ej: Novillito Premium..." value={form.descripcion} onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))} />
           </div>
         </div>
+        {TIPOS_EN_UNIDADES.includes(form.tipo) && (
+          <div className="form-row">
+            <div className="form-group"><label>Cantidad de unidades</label>
+              <input type="number" min="1" step="1" placeholder="Ej: 14" value={form.cantidad} onChange={e => setForm(f => ({ ...f, cantidad: e.target.value }))} style={{ borderColor: 'var(--gold)' }} />
+            </div>
+            <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end' }}>
+              <div style={{ fontSize: 12, color: 'var(--muted)', paddingBottom: 8 }}>
+                {(() => {
+                  const cant = Math.max(1, parseInt(form.cantidad) || 1)
+                  const kgU = parseFloat(form.kg) || 0
+                  return kgU > 0 ? `📦 Total: ${cant} × ${kgU} kg = ${(cant * kgU).toFixed(1)} kg al stock` : '📦 Ingresá kg por unidad para ver el total'
+                })()}
+              </div>
+            </div>
+          </div>
+        )}
         <div className="form-row">
-          <div className="form-group"><label>Kg</label>
+          <div className="form-group"><label>{TIPOS_EN_UNIDADES.includes(form.tipo) ? 'Kg por unidad' : 'Kg'}</label>
             <input type="number" step="0.1" placeholder="0" value={form.kg} onChange={e => setForm(f => ({ ...f, kg: e.target.value }))} />
           </div>
           <div className="form-group"><label>Precio/kg ($)</label>
