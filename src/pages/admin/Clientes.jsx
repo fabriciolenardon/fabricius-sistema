@@ -80,6 +80,10 @@ async function eliminarMovimiento(mov) {
     setModalPortal({ tipo: 'revocar', cliente, loading: false })
   }
 
+  function abrirModalCompartirAcceso(cliente) {
+    setModalPortal({ tipo: 'compartir', cliente, password: '' })
+  }
+
   async function habilitarPortal() {
     if (!modalPortal?.cliente) return
     const email = (modalPortal.email || '').trim().toLowerCase()
@@ -391,7 +395,10 @@ async function eliminarMovimiento(mov) {
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   {seleccionado.tiene_portal ? (
-                    <button onClick={() => abrirModalRevocarPortal(seleccionado)} style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--red-light)' }}>❌ Revocar acceso</button>
+                    <>
+                      <button onClick={() => abrirModalCompartirAcceso(seleccionado)} style={{ background: '#0f4220', border: '1px solid var(--green)', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--green)' }}>💬 Compartir acceso</button>
+                      <button onClick={() => abrirModalRevocarPortal(seleccionado)} style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--red-light)' }}>❌ Revocar acceso</button>
+                    </>
                   ) : (
                     <button onClick={() => abrirModalHabilitarPortal(seleccionado)} style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#000' }}>📱 Habilitar portal</button>
                   )}
@@ -525,6 +532,46 @@ async function eliminarMovimiento(mov) {
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   <button onClick={() => setModalPortal(null)} className="btn btn-gold">Listo</button>
+                </div>
+              </>
+            )}
+
+            {modalPortal.tipo === 'compartir' && (
+              <>
+                <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 24, color: 'var(--gold)', letterSpacing: 1, marginBottom: 8 }}>💬 Compartir acceso — {modalPortal.cliente.nombre}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
+                  El portal ya está habilitado. Escribí la contraseña que le diste al cliente para armar el mensaje de WhatsApp con todos los datos.
+                  <br /><br />
+                  <strong>La contraseña no se guarda</strong> — solo se usa para armar el mensaje.
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Email del cliente</div>
+                <div style={{ fontFamily: 'monospace', fontSize: 13, color: 'var(--text)', background: 'var(--surface2)', borderRadius: 6, padding: '8px 12px', marginBottom: 12 }}>{modalPortal.cliente.email_portal}</div>
+
+                <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Contraseña que le diste al cliente</label>
+                <input
+                  type="text"
+                  autoFocus
+                  placeholder="Escribí la contraseña..."
+                  value={modalPortal.password}
+                  onChange={e => setModalPortal(m => ({ ...m, password: e.target.value }))}
+                  style={{ background: 'var(--surface2)', border: '1px solid var(--gold)', color: 'var(--text)', borderRadius: 8, padding: '10px 14px', fontSize: 14, width: '100%', boxSizing: 'border-box', marginBottom: 12, fontFamily: 'monospace' }}
+                />
+
+                <div style={{ background: '#2a1a0a', border: '1px solid var(--gold)', borderRadius: 10, padding: 14, marginBottom: 14 }}>
+                  <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>Link del portal</div>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <div style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--text)', wordBreak: 'break-all', flex: 1 }}>{window.location.origin}/login</div>
+                    <button onClick={() => copiarTexto(window.location.origin + '/login')} style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', fontSize: 11, whiteSpace: 'nowrap' }}>📋 Copiar</button>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                  <button onClick={() => setModalPortal(null)} className="btn btn-ghost">Cerrar</button>
+                  <button
+                    onClick={() => copiarTexto(`Hola ${modalPortal.cliente.nombre}, te habilité tu portal de cliente en Fabricius Carnes.\n\n🔗 Ingresá acá:\n${window.location.origin}/login\n\n🔐 Tus datos:\nEmail: ${modalPortal.cliente.email_portal}\nContraseña: ${modalPortal.password}\n\nVas a poder ver tu saldo, remitos y movimientos cuando quieras.`)}
+                    disabled={!modalPortal.password.trim()}
+                    style={{ background: modalPortal.password.trim() ? 'var(--green)' : 'var(--surface2)', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: modalPortal.password.trim() ? 'pointer' : 'not-allowed', fontSize: 13, fontWeight: 700, color: modalPortal.password.trim() ? '#fff' : 'var(--muted)' }}
+                  >💬 Copiar mensaje para WhatsApp</button>
                 </div>
               </>
             )}
