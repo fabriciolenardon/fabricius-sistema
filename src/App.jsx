@@ -22,6 +22,9 @@ import ClienteDashboard from './pages/cliente/ClienteDashboard'
 import ClienteCtaCte from './pages/cliente/ClienteCtaCte'
 import ClienteRemitos from './pages/cliente/ClienteRemitos'
 import ClientePrecios from './pages/cliente/ClientePrecios'
+import ClienteNuevoPedido from './pages/cliente/ClienteNuevoPedido'
+import ClientePedidos from './pages/cliente/ClientePedidos'
+import Pedidos from './pages/admin/Pedidos'
 import AsistenteIA from './components/AsistenteIA'
 import PerfilPendiente from './components/PerfilPendiente'
 
@@ -75,6 +78,7 @@ export default function App() {
           <Route path="deposito" element={<Deposito />} />
           <Route path="precios" element={<Precios />} />
           <Route path="clientes" element={<Clientes />} />
+          <Route path="pedidos" element={<Pedidos />} />
           <Route path="cheques" element={<Cheques />} />
           <Route path="sueldos" element={<Sueldos />} />
           <Route path="gastos" element={<Gastos />} />
@@ -93,6 +97,8 @@ export default function App() {
           <Route path="ctacte" element={<ClienteCtaCte />} />
           <Route path="remitos" element={<ClienteRemitos />} />
           <Route path="precios" element={<ClientePrecios />} />
+          <Route path="nuevo-pedido" element={<ClienteNuevoPedido />} />
+          <Route path="pedidos" element={<ClientePedidos />} />
         </Route>
       </Routes>
       {user && profile && <AsistenteIA />}

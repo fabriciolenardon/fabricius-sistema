@@ -9,6 +9,7 @@ const navItems = [
   { to: '/admin/deposito',    icon: '🏭', label: 'Depósito' },
   { to: '/admin/precios',     icon: '💲', label: 'Precios' },
   { to: '/admin/clientes',    icon: '👥', label: 'Clientes' },
+  { to: '/admin/pedidos',     icon: '📥', label: 'Pedidos' },
   { to: '/admin/franquicias', icon: '🏪', label: 'Franquicias' },
   { to: '/admin/cheques',     icon: '📄', label: 'Cheques' },
   { to: '/admin/sueldos',     icon: '💰', label: 'Sueldos' },
@@ -65,6 +66,22 @@ function useNotificaciones() {
     cargar()
   }, [])
   return notifs
+}
+
+function usePedidosPendientes() {
+  const [count, setCount] = useState(0)
+  useEffect(() => {
+    async function cargar() {
+      const { count: c } = await supabase.from('pedidos').select('id', { count: 'exact', head: true }).eq('estado', 'pendiente')
+      setCount(c || 0)
+    }
+    cargar()
+    const canal = supabase.channel('pedidos-count-admin')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => cargar())
+      .subscribe()
+    return () => supabase.removeChannel(canal)
+  }, [])
+  return count
 }
 
 function CampanaNotificaciones({ notifs }) {
@@ -245,7 +262,7 @@ function MenuMobile({ onClose }) {
               <NavLink key={item.to} to={item.to} onClick={onClose}
                 style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 10, marginBottom: 4, fontSize: 14, fontWeight: 600, textDecoration: 'none', background: isActive ? 'var(--gold)' : 'transparent', color: isActive ? '#000' : 'var(--text2)', transition: 'all 0.15s' }}>
                 <span style={{ fontSize: 18 }}>{item.icon}</span>
-                {item.label}
+                <span style={{ flex: 1 }}>{item.label}</span>
               </NavLink>
             )
           })}
@@ -266,6 +283,7 @@ export default function AdminLayout() {
   const { profile, signOut } = useAuth()
   const navigate = useNavigate()
   const notifs = useNotificaciones()
+  const pedidosPendientes = usePedidosPendientes()
   const [menuAbierto, setMenuAbierto] = useState(false)
   const [isMobile, setIsMobile] = useState(window.innerWidth < 900)
 
@@ -308,8 +326,11 @@ export default function AdminLayout() {
             <nav style={{ display: 'flex', gap: 2, flex: 1, overflowX: 'auto' }}>
               {navItems.map(item => (
                 <NavLink key={item.to} to={item.to}
-                  style={({ isActive }) => ({ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 11px', borderRadius: 8, fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', textDecoration: 'none', transition: 'all 0.2s', border: '1px solid transparent', background: isActive ? 'var(--gold)' : 'transparent', color: isActive ? '#000' : 'var(--muted)' })}>
+                  style={({ isActive }) => ({ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 11px', borderRadius: 8, fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', textDecoration: 'none', transition: 'all 0.2s', border: '1px solid transparent', background: isActive ? 'var(--gold)' : 'transparent', color: isActive ? '#000' : 'var(--muted)', position: 'relative' })}>
                   <span>{item.icon}</span>{item.label}
+                  {item.to === '/admin/pedidos' && pedidosPendientes > 0 && (
+                    <span style={{ background: 'var(--red-light)', color: '#fff', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{pedidosPendientes}</span>
+                  )}
                 </NavLink>
               ))}
             </nav>

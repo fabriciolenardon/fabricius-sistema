@@ -7,8 +7,10 @@ export default function ClienteLayout() {
   const navigate = useNavigate()
   const navItems = [
     { to: '/cliente/dashboard', icon: '📊', label: 'Mi cuenta' },
+    { to: '/cliente/nuevo-pedido', icon: '📥', label: 'Hacer pedido' },
+    { to: '/cliente/pedidos', icon: '📋', label: 'Mis pedidos' },
     { to: '/cliente/ctacte', icon: '💳', label: 'Cuenta corriente' },
-    { to: '/cliente/remitos', icon: '📋', label: 'Mis remitos' },
+    { to: '/cliente/remitos', icon: '🧾', label: 'Mis remitos' },
     { to: '/cliente/precios', icon: '💲', label: 'Lista de precios' },
   ]
   async function handleLogout() { await signOut(); navigate('/login') }
