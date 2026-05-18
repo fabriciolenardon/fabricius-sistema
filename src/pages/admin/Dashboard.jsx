@@ -12,7 +12,7 @@ function fmt(n) {
 function fmtFull(n) { return '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR') }
 
 export default function Dashboard() {
-  const { profile } = useAuth()
+  const { profile, isAdmin } = useAuth()
   const navigate = useNavigate()
   const [cierres, setCierres] = useState([])
   const [clientes, setClientes] = useState([])
@@ -27,6 +27,7 @@ export default function Dashboard() {
   const [detalleEntradas, setDetalleEntradas] = useState([])
   const [detalleSalidas, setDetalleSalidas] = useState([])
   const [loadingDetalle, setLoadingDetalle] = useState(false)
+  const [fechaCorte, setFechaCorte] = useState('')
 
   useEffect(() => { fetchData() }, [])
 
@@ -57,13 +58,61 @@ export default function Dashboard() {
     setLoadingDetalle(true)
     setDetalleEntradas([])
     setDetalleSalidas([])
+    setFechaCorte('')
+    // Sin limite - traemos todo el historial
     const [entradasRes, salidasRes] = await Promise.all([
-      supabase.from('entradas_deposito').select('*').in('tipo', cat.tiposEntradas).order('fecha', { ascending: false }).limit(50),
-      supabase.from('salidas_deposito').select('*').in('tipo', cat.tiposSalidas).order('fecha', { ascending: false }).limit(50)
+      supabase.from('entradas_deposito').select('*').in('tipo', cat.tiposEntradas).order('fecha', { ascending: false }),
+      supabase.from('salidas_deposito').select('*').in('tipo', cat.tiposSalidas).order('fecha', { ascending: false })
     ])
     setDetalleEntradas(entradasRes.data || [])
     setDetalleSalidas(salidasRes.data || [])
     setLoadingDetalle(false)
+  }
+
+  async function borrarHistorialAnterior() {
+    if (!isAdmin) { alert('Solo el administrador puede borrar historial'); return }
+    if (!detalleAbierto) return
+    if (!fechaCorte) { alert('Seleccioná una fecha de corte primero'); return }
+    const cat = detalleAbierto
+    // Contar cuantos registros serian afectados
+    const entradasAfectadas = detalleEntradas.filter(e => e.fecha < fechaCorte).length
+    const salidasAfectadas = detalleSalidas.filter(s => s.fecha < fechaCorte).length
+    if (entradasAfectadas === 0 && salidasAfectadas === 0) {
+      alert('No hay registros anteriores a esa fecha')
+      return
+    }
+    const conf1 = confirm(
+      `⚠️ ATENCIÓN — Acción IRREVERSIBLE
+
+` +
+      `Vas a borrar permanentemente de la categoría "${cat.label}":
+` +
+      `• ${entradasAfectadas} entradas anteriores al ${fechaCorte}
+` +
+      `• ${salidasAfectadas} salidas anteriores al ${fechaCorte}
+
+` +
+      `El stock actual NO se modifica. Solo se elimina el historial.
+
+` +
+      `¿Continuar?`
+    )
+    if (!conf1) return
+    const conf2 = prompt(`Para confirmar, escribí BORRAR en mayúsculas:`)
+    if (conf2 !== 'BORRAR') { alert('Cancelado. Texto de confirmación incorrecto.'); return }
+    setLoadingDetalle(true)
+    const [delE, delS] = await Promise.all([
+      supabase.from('entradas_deposito').delete().in('tipo', cat.tiposEntradas).lt('fecha', fechaCorte),
+      supabase.from('salidas_deposito').delete().in('tipo', cat.tiposSalidas).lt('fecha', fechaCorte)
+    ])
+    if (delE.error || delS.error) {
+      alert('❌ Error al borrar: ' + (delE.error?.message || delS.error?.message))
+      setLoadingDetalle(false)
+      return
+    }
+    alert(`✅ Historial limpiado: ${entradasAfectadas} entradas y ${salidasAfectadas} salidas eliminadas`)
+    // Recargar el modal
+    await abrirDetalle(cat)
   }
 
   function cerrarDetalle() {
@@ -449,7 +498,7 @@ export default function Dashboard() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                 {/* ENTRADAS */}
                 <div className="card" style={{ margin: 0 }}>
-                  <div className="card-title" style={{ color: 'var(--green)' }}>📥 Últimas entradas ({detalleEntradas.length})</div>
+                  <div className="card-title" style={{ color: 'var(--green)' }}>📥 Entradas registradas ({detalleEntradas.length})</div>
                   {detalleEntradas.length === 0 ? (
                     <div className="empty">Sin entradas registradas</div>
                   ) : (
@@ -473,7 +522,7 @@ export default function Dashboard() {
 
                 {/* SALIDAS */}
                 <div className="card" style={{ margin: 0 }}>
-                  <div className="card-title" style={{ color: 'var(--red-light)' }}>📤 Últimas salidas ({detalleSalidas.length})</div>
+                  <div className="card-title" style={{ color: 'var(--red-light)' }}>📤 Salidas registradas ({detalleSalidas.length})</div>
                   {detalleSalidas.length === 0 ? (
                     <div className="empty">Sin salidas registradas</div>
                   ) : (
@@ -494,6 +543,21 @@ export default function Dashboard() {
                       </table>
                     </div>
                   )}
+                </div>
+              </div>
+            )}
+
+            {/* SECCION DE ADMIN: borrado de historial anterior a una fecha */}
+            {isAdmin && (
+              <div style={{ marginTop: 20, padding: '14px 18px', background: '#2a1a1a', border: '1px solid #5a2a2a', borderRadius: 10 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--red-light)', marginBottom: 8 }}>🗑️ Limpieza de historial (solo administrador)</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
+                  Borra entradas y salidas de esta categoría anteriores a la fecha que elijas. Acción IRREVERSIBLE. El stock actual no se altera.
+                </div>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <label style={{ fontSize: 12, color: 'var(--muted)' }}>Borrar registros anteriores a:</label>
+                  <input type="date" value={fechaCorte} onChange={e => setFechaCorte(e.target.value)} style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '6px 10px', fontSize: 13 }} />
+                  <button onClick={borrarHistorialAnterior} disabled={!fechaCorte || loadingDetalle} style={{ background: fechaCorte ? 'var(--red-light)' : 'var(--surface2)', border: 'none', borderRadius: 6, padding: '6px 14px', cursor: fechaCorte ? 'pointer' : 'not-allowed', fontSize: 12, fontWeight: 700, color: '#fff', opacity: fechaCorte ? 1 : 0.5 }}>🗑️ Borrar historial anterior</button>
                 </div>
               </div>
             )}
