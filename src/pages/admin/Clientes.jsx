@@ -4,6 +4,9 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 
+// URL publica de produccion del portal — NO usar window.location.origin para evitar URLs de preview de Vercel
+const PORTAL_URL = 'https://fabricius-sistema.vercel.app/login'
+
 export function Clientes() {
   const [clientes, setClientes] = useState([])
   const [seleccionado, setSeleccionado] = useState(null)
@@ -521,12 +524,12 @@ async function eliminarMovimiento(mov) {
                   <div style={{ marginTop: 10 }}>
                     <div style={{ fontSize: 10, color: 'var(--muted)' }}>Link del portal</div>
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                      <div style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--text)', wordBreak: 'break-all' }}>{window.location.origin}/login</div>
-                      <button onClick={() => copiarTexto(window.location.origin + '/login')} style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', fontSize: 11, whiteSpace: 'nowrap' }}>📋 Copiar</button>
+                      <div style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--text)', wordBreak: 'break-all' }}>{PORTAL_URL}</div>
+                      <button onClick={() => copiarTexto(PORTAL_URL)} style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', fontSize: 11, whiteSpace: 'nowrap' }}>📋 Copiar</button>
                     </div>
                   </div>
                   <button
-                    onClick={() => copiarTexto(`Hola ${modalPortal.cliente.nombre}, te habilité tu portal de cliente en Fabricius Carnes.\n\n🔗 Ingresá acá:\n${window.location.origin}/login\n\n🔐 Tus datos:\nEmail: ${modalPortal.credenciales.email}\nContraseña: ${modalPortal.credenciales.password}\n\nVas a poder ver tu saldo, remitos y movimientos cuando quieras.`)}
+                    onClick={() => copiarTexto(`Hola ${modalPortal.cliente.nombre}, te habilité tu portal de cliente en Fabricius Carnes.\n\n🔗 Ingresá acá:\n${PORTAL_URL}\n\n🔐 Tus datos:\nEmail: ${modalPortal.credenciales.email}\nContraseña: ${modalPortal.credenciales.password}\n\nVas a poder ver tu saldo, remitos y movimientos cuando quieras.`)}
                     style={{ background: '#0f4220', border: '1px solid var(--green)', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--green)', marginTop: 12 }}
                   >💬 Copiar mensaje completo para WhatsApp</button>
                 </div>
@@ -560,15 +563,15 @@ async function eliminarMovimiento(mov) {
                 <div style={{ background: '#2a1a0a', border: '1px solid var(--gold)', borderRadius: 10, padding: 14, marginBottom: 14 }}>
                   <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>Link del portal</div>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <div style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--text)', wordBreak: 'break-all', flex: 1 }}>{window.location.origin}/login</div>
-                    <button onClick={() => copiarTexto(window.location.origin + '/login')} style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', fontSize: 11, whiteSpace: 'nowrap' }}>📋 Copiar</button>
+                    <div style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--text)', wordBreak: 'break-all', flex: 1 }}>{PORTAL_URL}</div>
+                    <button onClick={() => copiarTexto(PORTAL_URL)} style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', fontSize: 11, whiteSpace: 'nowrap' }}>📋 Copiar</button>
                   </div>
                 </div>
 
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
                   <button onClick={() => setModalPortal(null)} className="btn btn-ghost">Cerrar</button>
                   <button
-                    onClick={() => copiarTexto(`Hola ${modalPortal.cliente.nombre}, te habilité tu portal de cliente en Fabricius Carnes.\n\n🔗 Ingresá acá:\n${window.location.origin}/login\n\n🔐 Tus datos:\nEmail: ${modalPortal.cliente.email_portal}\nContraseña: ${modalPortal.password}\n\nVas a poder ver tu saldo, remitos y movimientos cuando quieras.`)}
+                    onClick={() => copiarTexto(`Hola ${modalPortal.cliente.nombre}, te habilité tu portal de cliente en Fabricius Carnes.\n\n🔗 Ingresá acá:\n${PORTAL_URL}\n\n🔐 Tus datos:\nEmail: ${modalPortal.cliente.email_portal}\nContraseña: ${modalPortal.password}\n\nVas a poder ver tu saldo, remitos y movimientos cuando quieras.`)}
                     disabled={!modalPortal.password.trim()}
                     style={{ background: modalPortal.password.trim() ? 'var(--green)' : 'var(--surface2)', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: modalPortal.password.trim() ? 'pointer' : 'not-allowed', fontSize: 13, fontWeight: 700, color: modalPortal.password.trim() ? '#fff' : 'var(--muted)' }}
                   >💬 Copiar mensaje para WhatsApp</button>
