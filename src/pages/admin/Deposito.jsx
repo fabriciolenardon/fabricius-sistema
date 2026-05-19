@@ -127,6 +127,8 @@ const [kgCarneBovinaEmbutido, setKgCarneBovinaEmbutido] = useState('')
 const [kgQuesoEmbutido, setKgQuesoEmbutido] = useState('')
 const [pctAumentoEmbutido, setPctAumentoEmbutido] = useState(10)
 const [elaboraciones, setElaboraciones] = useState([])
+const [piezasIndividuales, setPiezasIndividuales] = useState([])
+const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(null)
   const MERMAS_KILO = {
     novillo:  { label: 'Novillo / Novillito', merma: 0.24, color: 'var(--gold)' },
     ternera:  { label: 'Ternera',             merma: 0.30, color: 'var(--amber)' },
@@ -136,17 +138,19 @@ const [elaboraciones, setElaboraciones] = useState([])
   useEffect(() => { cargarDatos() }, [])
 
   async function cargarDatos() {
-    const [{ data: entradas }, { data: despostesData }, { data: preciosData }, { data: stockData }, { data: caponesData }, { data: elaboracionesData }] = await Promise.all([
+    const [{ data: entradas }, { data: despostesData }, { data: preciosData }, { data: stockData }, { data: caponesData }, { data: elaboracionesData }, { data: piezasIndivData }] = await Promise.all([
   supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).eq('reservada', false).order('fecha', { ascending: false }),
   supabase.from('despostes').select('*').order('fecha', { ascending: false }).limit(20),
   supabase.from('precios').select('*').eq('categoria', 'bovino_pieza'),
   supabase.from('stock_actual').select('*'),
   supabase.from('entradas_deposito').select('*').eq('tipo', 'cerdo').eq('despostada', false).order('fecha', { ascending: false }),
-  supabase.from('elaboraciones_embutidos').select('*').order('fecha', { ascending: false }).limit(20)
+  supabase.from('elaboraciones_embutidos').select('*').order('fecha', { ascending: false }).limit(20),
+  supabase.from('piezas_stock').select('*').order('fecha_ingreso', { ascending: false }).order('id', { ascending: false })
 ])
 setMediasRes(entradas || [])
 setDespostes(despostesData || [])
 setPrecios(preciosData || [])
+setPiezasIndividuales(piezasIndivData || [])
 const stockMap = {}
 ;(stockData || []).forEach(r => stockMap[r.tipo] = r.kg_disponible)
 setPiezasStock(stockMap)
@@ -220,7 +224,28 @@ console.log('STOCK CARGADO:', stockMap)
       if (error) throw error
       await supabase.from('entradas_deposito').update({ despostada: true, desposte_id: desposteData.id }).eq('id', seleccionada.id)
       await actualizarStock('bovino_mr', -kgBase)
+      // Stock agregado (compat) — sigue sumando al total bovino_pieza
       for (const pieza of piezas) { await actualizarStock('bovino_pieza', pieza.kg_editado) }
+      // Stock individual: una fila por pieza para trazabilidad completa
+      const filasPiezas = piezas
+        .filter(p => (p.kg_editado || 0) > 0)
+        .map(p => ({
+          desposte_id: desposteData.id,
+          entrada_id: seleccionada.id,
+          tipo_pieza: p.nombre,
+          tipo_stock: p.tipo_stock || 'bovino_pieza',
+          kg: p.kg_editado,
+          precio_costo_kg: p.precio_costo_kg || seleccionada.precio_kg || null,
+          fecha_ingreso: fecha,
+          proveedor_origen: seleccionada.proveedor_nombre || null,
+          descripcion_origen: (seleccionada.descripcion || 'Media Res') + ' (' + (seleccionada.kg_real || seleccionada.kg || 0).toFixed(1) + ' kg)',
+          modelo_desposte: modelo,
+          estado: 'disponible',
+        }))
+      if (filasPiezas.length > 0) {
+        const { error: errPiezas } = await supabase.from('piezas_stock').insert(filasPiezas)
+        if (errPiezas) console.warn('No se pudieron registrar piezas individuales:', errPiezas.message)
+      }
       showAlert('✅ Desposte en piezas completado — ' + piezas.length + ' piezas al stock')
       setSeleccionada(null); setPiezas([]); setNotas('')
       await cargarDatos(); onSaved()
@@ -377,16 +402,27 @@ async function confirmarDesposteCerdo() {
   setLoading(true)
   try {
     await supabase.from('despostes').insert({
-      fecha, entrada_id: null, modelo: 'PIEZA_KILO',
+      fecha, entrada_id: piezaIndividualSeleccionada?.entrada_id || null, modelo: 'PIEZA_KILO',
       tipo_desposte: 'pieza_kilo', tipo_animal: tipoAnimalPieza,
       kg_media_res: kg, merma_pct: merma * 100, kg_neto: kgNeto,
-      piezas: [{ nombre: nombrePieza, kg: kgNeto, precio_costo_kg: parseFloat(precioCostoPieza) || 0 }],
+      piezas: [{ nombre: nombrePieza, kg: kgNeto, precio_costo_kg: parseFloat(precioCostoPieza) || 0, pieza_origen_id: piezaIndividualSeleccionada?.id || null }],
       notas
     })
     await actualizarStock(tipoStock, -kg)
     await actualizarStock('bovino_corte', kgNeto)
+    // Si la conversión vino desde una pieza individual seleccionada del stock, la marcamos como convertida
+    if (piezaIndividualSeleccionada?.id) {
+      const { error: errMark } = await supabase.from('piezas_stock').update({
+        estado: 'convertida_cortes',
+        destino: 'cortes',
+        fecha_salida: fecha,
+        notas_salida: 'Convertida a cortes (' + kgNeto.toFixed(1) + ' kg netos, merma ' + (merma * 100).toFixed(1) + '%)',
+      }).eq('id', piezaIndividualSeleccionada.id)
+      if (errMark) console.warn('No se pudo marcar la pieza individual como convertida:', errMark.message)
+    }
     showAlert('✅ ' + nombrePieza + ' convertida — ' + kgNeto.toFixed(1) + ' kg al stock')
     setKgPiezaConvertir(''); setNombrePieza(''); setPrecioCostoPieza(''); setNotas('')
+    setPiezaIndividualSeleccionada(null)
     await cargarDatos(); onSaved()
   } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
   setLoading(false)
@@ -579,33 +615,53 @@ async function confirmarDesposteCerdo() {
       )}
 
      {subtab === 'pieza_kilo' && (
-  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+  <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr', gap: 16 }}>
     <div>
       <div style={{ background: '#1a1a2a', border: '1px solid #2a2a5a', borderRadius: 10, padding: '12px 16px', marginBottom: 16 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: '#7db5ff', marginBottom: 6 }}>🔄 Convertir Pieza a Cortes</div>
-        <div style={{ fontSize: 12, color: 'var(--muted)' }}>Seleccioná una pieza del stock, ingresá los kg a convertir y los kg netos van a <strong style={{ color: 'var(--gold)' }}>Bovino Cortes</strong>.</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)' }}>Seleccioná una pieza individual del stock. Al confirmar, esa pieza específica pasa a <strong style={{ color: 'var(--gold)' }}>Bovino Cortes</strong> y queda registrada como "convertida" en el historial.</div>
       </div>
       <div className="card">
-        <div className="card-title">📦 Stock actual de piezas</div>
-        {[
-          { tipo: 'pieza_pierna', label: '🦵 Pierna con hueso' },
-          { tipo: 'pieza_cuarto_pistola', label: '🥩 Cuarto pistola' },
-          { tipo: 'pieza_costillar', label: '🍖 Costillar completo' },
-          { tipo: 'pieza_cortito', label: '🥩 Cortito' },
-          { tipo: 'pieza_carre', label: '🥩 Carré sin lomo' },
-          { tipo: 'pieza_paleta', label: '🥩 Paleta entera' },
-          { tipo: 'pieza_parrillero', label: '🥩 Parrillero' },
-          { tipo: 'caja_cb', label: '📦 Caja CB' },
-          { tipo: 'caja_pt', label: '📦 Caja PT' },
-        ].map(p => (
-          <div key={p.tipo} onClick={() => { setNombrePieza(p.label); setTipoPiezaSeleccionada(p.tipo); setKgPiezaConvertir((piezasStock[p.tipo] || 0).toString()); }}
-            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 8px', borderBottom: '1px solid var(--border)', cursor: 'pointer', borderRadius: 6, background: nombrePieza === p.label ? 'rgba(201,168,76,0.08)' : 'transparent', border: nombrePieza === p.label ? '1px solid var(--gold)' : '1px solid transparent' }}>
-            <span style={{ fontSize: 13, fontWeight: 600 }}>{p.label}</span>
-            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: (piezasStock[p.tipo] || 0) > 0 ? 'var(--gold)' : 'var(--muted)' }}>
-              {(piezasStock[p.tipo] || 0).toFixed(1)} kg
-            </span>
-          </div>
-        ))}
+        <div className="card-title">📦 Piezas disponibles ({piezasIndividuales.filter(pz => pz.estado === 'disponible').length})</div>
+        {(() => {
+          const disponibles = piezasIndividuales.filter(pz => pz.estado === 'disponible')
+          if (disponibles.length === 0) return <div className="empty">No hay piezas individuales en stock. Despostá una media res para generar piezas.</div>
+          const porTipo = {}
+          disponibles.forEach(pz => { (porTipo[pz.tipo_pieza] = porTipo[pz.tipo_pieza] || []).push(pz) })
+          return Object.entries(porTipo).map(([tipo, lista]) => (
+            <div key={tipo} style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6, paddingBottom: 4, borderBottom: '1px dashed var(--border)' }}>
+                {tipo} <span style={{ color: 'var(--gold)' }}>· {lista.length} {lista.length === 1 ? 'pieza' : 'piezas'} · {lista.reduce((s, x) => s + (x.kg || 0), 0).toFixed(1)} kg total</span>
+              </div>
+              {lista.map(pz => {
+                const sel = piezaIndividualSeleccionada?.id === pz.id
+                return (
+                  <div key={pz.id}
+                    onClick={() => {
+                      setPiezaIndividualSeleccionada(pz)
+                      setNombrePieza(pz.tipo_pieza)
+                      setTipoPiezaSeleccionada(pz.tipo_stock || 'bovino_pieza')
+                      setKgPiezaConvertir(String(pz.kg))
+                      setPrecioCostoPieza(pz.precio_costo_kg ? String(pz.precio_costo_kg) : '')
+                    }}
+                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderRadius: 8, cursor: 'pointer', background: sel ? 'rgba(201,168,76,0.12)' : 'var(--surface2)', border: sel ? '2px solid var(--gold)' : '1px solid var(--border)', marginBottom: 6 }}>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>#{pz.id} · {pz.tipo_pieza}</div>
+                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                        {pz.proveedor_origen || '—'} · MR del {pz.fecha_ingreso}
+                        {pz.modelo_desposte && <span> · Mod. {pz.modelo_desposte}</span>}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{(pz.kg || 0).toFixed(1)} kg</div>
+                      {pz.precio_costo_kg > 0 && <div style={{ fontSize: 10, color: 'var(--amber)' }}>${Math.round(pz.precio_costo_kg).toLocaleString('es-AR')}/kg costo</div>}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ))
+        })()}
       </div>
     </div>
     <div className="card">
