@@ -40,7 +40,7 @@ export default function Precios() {
 
   // Ofertas
   const [ofertas, setOfertas] = useState([])
-  const [ofertaForm, setOfertaForm] = useState({ precio_id: '', precio_oferta: '', fecha_inicio: new Date().toISOString().split('T')[0], fecha_fin: '', notas: '' })
+  const [ofertaForm, setOfertaForm] = useState({ precio_id: '', precio_oferta: '', fecha_inicio: new Date().toISOString().split('T')[0], fecha_fin: '', notas: '', aplica_carniceria: true, aplica_mayorista: true, aplica_minorista: true })
   const [ofertaLoading, setOfertaLoading] = useState(false)
   const [busquedaOferta, setBusquedaOferta] = useState('')
   const [mostrarDropdown, setMostrarDropdown] = useState(false)
@@ -140,6 +140,9 @@ export default function Precios() {
     if (new Date(ofertaForm.fecha_fin) < new Date(ofertaForm.fecha_inicio)) {
       mostrarMsg('❌ La fecha de fin debe ser posterior al inicio'); return
     }
+    if (!ofertaForm.aplica_carniceria && !ofertaForm.aplica_mayorista && !ofertaForm.aplica_minorista) {
+      mostrarMsg('❌ Tildá al menos una lista (carnicería, mayorista o minorista)'); return
+    }
     setOfertaLoading(true)
     await supabase.from('ofertas').insert({
       precio_id: ofertaForm.precio_id,
@@ -151,11 +154,14 @@ export default function Precios() {
       fecha_inicio: ofertaForm.fecha_inicio,
       fecha_fin: ofertaForm.fecha_fin,
       activa: true,
-      notas: ofertaForm.notas
+      notas: ofertaForm.notas,
+      aplica_carniceria: ofertaForm.aplica_carniceria,
+      aplica_mayorista: ofertaForm.aplica_mayorista,
+      aplica_minorista: ofertaForm.aplica_minorista,
     })
     setOfertaLoading(false)
     mostrarMsg('✅ Oferta registrada correctamente')
-    setOfertaForm({ precio_id: '', precio_oferta: '', fecha_inicio: new Date().toISOString().split('T')[0], fecha_fin: '', notas: '' })
+    setOfertaForm({ precio_id: '', precio_oferta: '', fecha_inicio: new Date().toISOString().split('T')[0], fecha_fin: '', notas: '', aplica_carniceria: true, aplica_mayorista: true, aplica_minorista: true })
     setBusquedaOferta(''); setProductoSeleccionado(null)
     await cargarOfertas()
   }
@@ -172,10 +178,23 @@ export default function Precios() {
   const productosFiltrados = precios.filter(p => p.categoria === filtro)
   const productosBusqueda = precios.filter(p => p.nombre.toLowerCase().includes(busquedaOferta.toLowerCase()))
 
-  // Precios vigentes aplicando ofertas
+  // Precios vigentes aplicando ofertas (selectivamente según las listas marcadas)
   const preciosConOfertas = precios.map(p => {
     const oferta = ofertasVigentes.find(o => o.precio_id === p.id)
-    if (oferta) return { ...p, precio_carniceria: oferta.precio_oferta, precio_mayorista: oferta.precio_oferta, precio_minorista: oferta.precio_oferta, enOferta: true, oferta }
+    if (oferta) {
+      // Las viejas ofertas sin flags se tratan como aplicables a todas (default DB es TRUE)
+      const aC = oferta.aplica_carniceria !== false
+      const aMa = oferta.aplica_mayorista !== false
+      const aMi = oferta.aplica_minorista !== false
+      return {
+        ...p,
+        precio_carniceria: aC ? oferta.precio_oferta : p.precio_carniceria,
+        precio_mayorista:  aMa ? oferta.precio_oferta : p.precio_mayorista,
+        precio_minorista:  aMi ? oferta.precio_oferta : p.precio_minorista,
+        enOferta: true,
+        oferta,
+      }
+    }
     return p
   })
   const productosFiltradosConOfertas = preciosConOfertas.filter(p => p.categoria === filtro)
@@ -484,6 +503,31 @@ export default function Precios() {
               <input value={ofertaForm.notas} onChange={e => setOfertaForm(f => ({ ...f, notas: e.target.value }))} placeholder="Ej: Oferta de semana santa, liquidación..." style={inp} />
             </div>
 
+            {/* Selector de listas a las que aplica la oferta */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 8 }}>📋 Aplicar esta oferta a las listas:</label>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                {[
+                  { key: 'aplica_carniceria', label: '🔴 Carnicería', color: '#ff6b6b' },
+                  { key: 'aplica_mayorista',  label: '🟡 Mayorista',  color: 'var(--amber)' },
+                  { key: 'aplica_minorista',  label: '🟢 Minorista',  color: 'var(--green)' },
+                ].map(opt => {
+                  const checked = !!ofertaForm[opt.key]
+                  return (
+                    <label key={opt.key}
+                      onClick={() => setOfertaForm(f => ({ ...f, [opt.key]: !f[opt.key] }))}
+                      style={{ flex: '1 1 150px', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 8, cursor: 'pointer', border: `2px solid ${checked ? opt.color : 'var(--border)'}`, background: checked ? opt.color + '22' : 'var(--surface2)', color: checked ? opt.color : 'var(--muted)', fontWeight: 600, fontSize: 13 }}>
+                      <input type="checkbox" checked={checked} readOnly style={{ accentColor: opt.color }} />
+                      {opt.label}
+                    </label>
+                  )
+                })}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
+                ℹ️ El precio de oferta solo se aplica a las listas tildadas. Las no tildadas mantienen su precio original.
+              </div>
+            </div>
+
             {productoSeleccionado && ofertaForm.precio_oferta && (
               <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, marginBottom: 16, fontSize: 13 }}>
                 <span style={{ color: 'var(--muted)' }}>Precio actual: </span>
@@ -509,11 +553,23 @@ export default function Precios() {
             <div className="card" style={{ marginBottom: 16, borderColor: '#4a8a2a' }}>
               <div className="card-title">✅ Ofertas vigentes ahora</div>
               <table>
-                <thead><tr><th>Producto</th><th>Precio oferta</th><th>Precio original</th><th>Descuento</th><th>Vigencia</th><th>Acciones</th></tr></thead>
+                <thead><tr><th>Producto</th><th>Aplica a</th><th>Precio oferta</th><th>Precio original</th><th>Descuento</th><th>Vigencia</th><th>Acciones</th></tr></thead>
                 <tbody>
-                  {ofertasVigentes.map(o => (
+                  {ofertasVigentes.map(o => {
+                    const listas = []
+                    if (o.aplica_carniceria !== false) listas.push({ l: '🔴 Carn', c: '#ff6b6b' })
+                    if (o.aplica_mayorista  !== false) listas.push({ l: '🟡 May',  c: 'var(--amber)' })
+                    if (o.aplica_minorista  !== false) listas.push({ l: '🟢 Min',  c: 'var(--green)' })
+                    return (
                     <tr key={o.id}>
                       <td style={{ fontWeight: 600 }}>{o.producto_nombre}</td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                          {listas.map((x, i) => (
+                            <span key={i} style={{ background: x.c + '22', color: x.c, borderRadius: 4, padding: '2px 6px', fontSize: 10, fontWeight: 700 }}>{x.l}</span>
+                          ))}
+                        </div>
+                      </td>
                       <td style={{ color: 'var(--green)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(o.precio_oferta)}</td>
                       <td style={{ color: 'var(--muted)', textDecoration: 'line-through' }}>{fmt(o.precio_original_carniceria)}</td>
                       <td>
@@ -531,7 +587,7 @@ export default function Precios() {
                         </button>
                       </td>
                     </tr>
-                  ))}
+                  )})}
                 </tbody>
               </table>
             </div>
@@ -650,7 +706,8 @@ function PLUTab({ precios, ofertas = [] }) {
       o.precio_id === p.precio_id && 
       o.activa && 
       o.fecha_inicio <= hoy && 
-      o.fecha_fin >= hoy
+      o.fecha_fin >= hoy &&
+      o.aplica_minorista !== false
     )
     const precioFinal = ofertaVigente ? ofertaVigente.precio_oferta : p.precio
     return `${p.codigo},"${p.nombre}",${precioFinal}`
