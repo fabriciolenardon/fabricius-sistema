@@ -460,6 +460,24 @@ async function confirmarDesposteCerdo() {
     })
     await actualizarStock(tipoStock, -kg)
     await actualizarStock('bovino_corte', kgNeto)
+    // Registrar la conversión en salidas_deposito para que aparezca en el historial del Dashboard
+    const descripcionSalida = piezaIndividualSeleccionada
+      ? `${piezaIndividualSeleccionada.tipo_pieza} #${piezaIndividualSeleccionada.id} (${piezaIndividualSeleccionada.proveedor_origen || 's/proveedor'}) → Bovino Cortes — ${kgNeto.toFixed(2)} kg netos (merma ${(merma * 100).toFixed(1)}%)`
+      : `${nombrePieza} → Bovino Cortes — ${kgNeto.toFixed(2)} kg netos (merma ${(merma * 100).toFixed(1)}%)`
+    const costoKg = piezaIndividualSeleccionada?.precio_costo_kg || parseFloat(precioCostoPieza) || 0
+    const { error: errSalida } = await supabase.from('salidas_deposito').insert({
+      fecha,
+      cliente_nombre: 'CONVERSIÓN A CORTES',
+      tipo: tipoStock,
+      descripcion: descripcionSalida,
+      kg,
+      precio_kg: costoKg,
+      total: kg * costoKg,
+      lista: 'desposte',
+      cobro: 'interno',
+      notas: 'Conversión de pieza a cortes por kilo'
+    })
+    if (errSalida) console.warn('No se pudo registrar salida por conversión:', errSalida.message)
     // Si la conversión vino desde una pieza individual seleccionada del stock, la marcamos como convertida
     if (piezaIndividualSeleccionada?.id) {
       const { error: errMark } = await supabase.from('piezas_stock').update({
