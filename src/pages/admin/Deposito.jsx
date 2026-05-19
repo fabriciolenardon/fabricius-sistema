@@ -11,17 +11,37 @@ async function actualizarStock(tipo, kg) {
 }
 
 const MODELOS_DESPOSTE = {
-  A: { piezas: [
-    { nombre: 'Cuarto delantero', pct: 0.45, tipo_stock: 'bovino_pieza', busqueda_precio: 'delantero' },
-    { nombre: 'Cuarto trasero', pct: 0.45, tipo_stock: 'bovino_pieza', busqueda_precio: 'trasero' },
-    { nombre: 'Costillar', pct: 0.10, tipo_stock: 'bovino_pieza', busqueda_precio: 'costilla' },
-  ]},
-  B: { piezas: [
-    { nombre: 'Pierna', pct: 0.35, tipo_stock: 'bovino_pieza', busqueda_precio: 'pierna' },
-    { nombre: 'Paleta', pct: 0.30, tipo_stock: 'bovino_pieza', busqueda_precio: 'paleta' },
-    { nombre: 'Lomo', pct: 0.20, tipo_stock: 'bovino_pieza', busqueda_precio: 'lomo' },
-    { nombre: 'Costillar', pct: 0.15, tipo_stock: 'bovino_pieza', busqueda_precio: 'costilla' },
-  ]},
+  A: {
+    nombre: 'Cuarto Pistola + Costillar Completo + Cortito',
+    icono: '🅰️',
+    merma_desposte_pct: 0.03,
+    piezas: [
+      { nombre: 'Cuarto Pistola', pct: 0.44, tipo_stock: 'bovino_pieza', busqueda_precio: 'pistola' },
+      { nombre: 'Cortito', pct: 0.33, tipo_stock: 'bovino_pieza', busqueda_precio: 'cortito' },
+      { nombre: 'Costillar Completo', pct: 0.20, tipo_stock: 'bovino_pieza', busqueda_precio: 'costilla' },
+    ],
+  },
+  B: {
+    nombre: 'Pierna + Costeletal con Lomo + Costillar Completo + Cortito',
+    icono: '🅱️',
+    merma_desposte_pct: 0.03,
+    piezas: [
+      { nombre: 'Pierna', pct: 0.30, tipo_stock: 'bovino_pieza', busqueda_precio: 'pierna' },
+      { nombre: 'Costeletal con Lomo', pct: 0.14, tipo_stock: 'bovino_pieza', busqueda_precio: 'lomo' },
+      { nombre: 'Cortito', pct: 0.33, tipo_stock: 'bovino_pieza', busqueda_precio: 'cortito' },
+      { nombre: 'Costillar Completo', pct: 0.20, tipo_stock: 'bovino_pieza', busqueda_precio: 'costilla' },
+    ],
+  },
+  C: {
+    nombre: 'Pierna + Parrillero + Cortito',
+    icono: '🅲',
+    merma_desposte_pct: 0.02,
+    piezas: [
+      { nombre: 'Pierna', pct: 0.30, tipo_stock: 'bovino_pieza', busqueda_precio: 'pierna' },
+      { nombre: 'Parrillero', pct: 0.35, tipo_stock: 'bovino_pieza', busqueda_precio: 'parrillero' },
+      { nombre: 'Cortito', pct: 0.33, tipo_stock: 'bovino_pieza', busqueda_precio: 'cortito' },
+    ],
+  },
 }
 
 const fmt = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
@@ -166,6 +186,12 @@ console.log('STOCK CARGADO:', stockMap)
   }
 
   function cambiarModelo(m) {
+    if (m === modelo) return
+    const hayKilosManualmenteCargados = piezas.some(p => Math.abs((p.kg_editado || 0) - (p.kg || 0)) > 0.01)
+    if (hayKilosManualmenteCargados) {
+      const ok = window.confirm('¿Cambiar de modelo? Se van a perder los kilos cargados.')
+      if (!ok) return
+    }
     setModelo(m)
     if (seleccionada) setPiezas(calcularPiezas(seleccionada, m))
   }
@@ -368,7 +394,13 @@ async function confirmarDesposteCerdo() {
   const kgBase = seleccionada ? (seleccionada.kg_real || seleccionada.kg || 0) : 0
   const kgNetoPiezas = kgBase * 0.975
   const kgTotalPiezas = piezas.reduce((s, p) => s + (p.kg_editado || 0), 0)
-  const diferencia = kgNetoPiezas - kgTotalPiezas
+  // Merma de desposte REAL = lo que sobra del kg neto después de pesar todas las piezas
+  // (huesos, recortes, sangre, pérdidas de corte). Antes se llamaba "Diferencia".
+  const mermaDesposteKg = kgNetoPiezas - kgTotalPiezas
+  const mermaDesposteRealPct = kgNetoPiezas > 0 ? (mermaDesposteKg / kgNetoPiezas) * 100 : 0
+  const mermaDesposteSugeridaPct = (MODELOS_DESPOSTE[modelo]?.merma_desposte_pct || 0) * 100
+  // Alias para no romper referencias previas
+  const diferencia = mermaDesposteKg
   const mermaKilo = MERMAS_KILO[tipoAnimal]
   const kgNetoKilo = kgBase * (1 - mermaKilo.merma)
   const precioCostoKilo = seleccionada?.precio_kg > 0 ? (seleccionada.precio_kg / (1 - mermaKilo.merma)).toFixed(0) : 0
@@ -424,35 +456,52 @@ async function confirmarDesposteCerdo() {
               </div>
               <div style={{ marginBottom: 14 }}>
                 <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Modelo</label>
-                <div style={{ display: 'flex', gap: 10 }}>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                   {Object.entries(MODELOS_DESPOSTE).map(([id, m]) => (
                     <button key={id} onClick={() => cambiarModelo(id)}
-                      style={{ flex: 1, padding: '10px 14px', borderRadius: 10, border: `2px solid ${modelo === id ? 'var(--gold)' : 'var(--border)'}`, background: modelo === id ? 'rgba(201,168,76,0.1)' : 'var(--surface2)', color: modelo === id ? 'var(--gold)' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12, textAlign: 'left' }}>
-                      <div style={{ fontSize: 15, marginBottom: 3 }}>{id === 'A' ? '🅰️' : '🅱️'} Modelo {id}</div>
-                      <div style={{ fontSize: 11, opacity: 0.8 }}>{m.piezas.map(p => p.nombre).join(' + ')}</div>
+                      style={{ flex: '1 1 200px', padding: '10px 14px', borderRadius: 10, border: `2px solid ${modelo === id ? 'var(--gold)' : 'var(--border)'}`, background: modelo === id ? 'rgba(201,168,76,0.1)' : 'var(--surface2)', color: modelo === id ? 'var(--gold)' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12, textAlign: 'left' }}>
+                      <div style={{ fontSize: 15, marginBottom: 3 }}>{m.icono || id} Modelo {id}</div>
+                      <div style={{ fontSize: 11, opacity: 0.85, marginBottom: 4 }}>{m.nombre || m.piezas.map(p => p.nombre).join(' + ')}</div>
+                      <div style={{ fontSize: 10, opacity: 0.7 }}>Merma desposte sug.: {(m.merma_desposte_pct * 100).toFixed(0)}%</div>
                     </button>
                   ))}
                 </div>
               </div>
               <table style={{ marginBottom: 14 }}>
-                <thead><tr><th>Pieza</th><th>%</th><th>Kg sugerido</th><th>Kg real</th><th style={{ color: 'var(--gold)' }}>Precio/kg</th><th style={{ color: 'var(--green)' }}>Valor</th></tr></thead>
+                <thead><tr><th>Pieza</th><th>% sug.</th><th>Kg sugerido</th><th>Kg real</th><th>% real</th><th style={{ color: 'var(--gold)' }}>Precio/kg</th><th style={{ color: 'var(--green)' }}>Valor</th></tr></thead>
                 <tbody>
-                  {piezas.map((p, i) => (
+                  {piezas.map((p, i) => {
+                    const pctReal = kgNetoPiezas > 0 ? ((p.kg_editado || 0) / kgNetoPiezas) * 100 : 0
+                    return (
                     <tr key={i}>
                       <td style={{ fontWeight: 600 }}>{p.nombre}</td>
                       <td style={{ color: 'var(--muted)', fontSize: 11 }}>{(MODELOS_DESPOSTE[modelo].piezas[i]?.pct * 100).toFixed(1)}%</td>
                       <td style={{ color: 'var(--muted)', fontSize: 11 }}>{p.kg.toFixed(1)} kg</td>
                       <td><input type="number" step="0.1" value={p.kg_editado} onChange={e => editarKg(i, e.target.value)} style={{ ...inp, width: 75, borderColor: Math.abs(p.kg_editado - p.kg) > 2 ? 'var(--amber)' : 'var(--border)' }} /></td>
+                      <td style={{ color: 'var(--gold)', fontSize: 11, fontWeight: 600 }}>{pctReal.toFixed(1)}%</td>
                       <td><input type="number" value={p.precio_venta} onChange={e => editarPrecio(i, e.target.value)} style={{ ...inp, width: 100, borderColor: 'var(--gold)' }} /></td>
                       <td style={{ color: 'var(--green)', fontWeight: 600, fontSize: 12 }}>${Math.round((p.kg_editado || 0) * (p.precio_venta || 0)).toLocaleString('es-AR')}</td>
                     </tr>
-                  ))}
+                  )})}
                 </tbody>
               </table>
               <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
-                <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg en piezas</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{kgTotalPiezas.toFixed(1)} kg</div></div>
-                <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Diferencia</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: Math.abs(diferencia) > 5 ? 'var(--red-light)' : 'var(--green)' }}>{diferencia >= 0 ? '+' : ''}{diferencia.toFixed(1)} kg</div></div>
-                <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Valor total</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--green)' }}>${Math.round(piezas.reduce((s, p) => s + (p.kg_editado || 0) * (p.precio_venta || 0), 0)).toLocaleString('es-AR')}</div></div>
+                <div>
+                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg en piezas</div>
+                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{kgTotalPiezas.toFixed(1)} kg</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>
+                    Merma desposte <span style={{ opacity: 0.7 }}>(sug. {mermaDesposteSugeridaPct.toFixed(0)}%)</span>
+                  </div>
+                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: Math.abs(mermaDesposteRealPct - mermaDesposteSugeridaPct) > 3 ? 'var(--red-light)' : (Math.abs(mermaDesposteRealPct - mermaDesposteSugeridaPct) > 1.5 ? 'var(--amber)' : 'var(--green)') }}>
+                    {mermaDesposteKg.toFixed(1)} kg · {mermaDesposteRealPct.toFixed(1)}%
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>Valor total</div>
+                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--green)' }}>${Math.round(piezas.reduce((s, p) => s + (p.kg_editado || 0) * (p.precio_venta || 0), 0)).toLocaleString('es-AR')}</div>
+                </div>
               </div>
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
                 <button className="btn btn-ghost" onClick={() => { setSeleccionada(null); setPiezas([]) }}>Cancelar</button>
