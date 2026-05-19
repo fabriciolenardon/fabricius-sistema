@@ -69,6 +69,7 @@ export function Deposito() {
           { id: 'entradas', label: '📥 Entradas' },
           { id: 'salidas', label: '📤 Despachos' },
           { id: 'desposte', label: '🔪 Desposte' },
+          { id: 'piezas', label: '🥩 Piezas' },
           { id: 'remitos', label: '🧾 Remitos' },
           { id: 'proveedores', label: '🏭 Proveedores' },
         ].map(t => (
@@ -81,6 +82,7 @@ export function Deposito() {
       {tab === 'entradas' && <EntradaForm onSaved={() => {}} showAlert={showAlert} proveedores={proveedores} />}
       {tab === 'salidas' && <SalidaForm onSaved={() => {}} showAlert={showAlert} onRemito={setRemitoActual} setTab={setTab} />}
         {tab === 'desposte' && <DesposteTab key={tab} onSaved={() => {}} />}    
+{tab === 'piezas' && <PiezasTab key={tab} />}
 {tab === 'remitos' && <RemitosTab remitoActual={remitoActual} />}
       {tab === 'proveedores' && <ProveedoresTab />}
     </div>
@@ -2230,6 +2232,199 @@ function ProveedoresTab() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+
+// =============================================
+// PESTAÑA HISTORIAL/STOCK DE PIEZAS INDIVIDUALES
+// =============================================
+function PiezasTab() {
+  const [piezas, setPiezas] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [filtroEstado, setFiltroEstado] = useState('todas')
+  const [filtroTipo, setFiltroTipo] = useState('todos')
+  const [filtroProveedor, setFiltroProveedor] = useState('todos')
+  const [busqueda, setBusqueda] = useState('')
+
+  useEffect(() => { cargar() }, [])
+
+  async function cargar() {
+    setLoading(true)
+    const { data, error } = await supabase
+      .from('piezas_stock')
+      .select('*')
+      .order('fecha_ingreso', { ascending: false })
+      .order('id', { ascending: false })
+    if (error) console.warn('Error cargando piezas_stock:', error.message)
+    setPiezas(data || [])
+    setLoading(false)
+  }
+
+  const ESTADO_INFO = {
+    disponible:        { label: 'Disponible',   color: 'var(--green)',     bg: 'rgba(60,180,75,0.12)' },
+    convertida_cortes: { label: 'A cortes',     color: 'var(--blue)',      bg: 'rgba(41,128,185,0.12)' },
+    vendida:           { label: 'Vendida',      color: 'var(--gold)',      bg: 'rgba(201,168,76,0.12)' },
+    anulada:           { label: 'Anulada',      color: 'var(--muted)',     bg: 'rgba(127,127,127,0.10)' },
+  }
+
+  // datos derivados para filtros
+  const tiposUnicos = [...new Set(piezas.map(p => p.tipo_pieza).filter(Boolean))].sort()
+  const proveedoresUnicos = [...new Set(piezas.map(p => p.proveedor_origen).filter(Boolean))].sort()
+
+  const piezasFiltradas = piezas.filter(p => {
+    if (filtroEstado !== 'todas' && p.estado !== filtroEstado) return false
+    if (filtroTipo !== 'todos' && p.tipo_pieza !== filtroTipo) return false
+    if (filtroProveedor !== 'todos' && p.proveedor_origen !== filtroProveedor) return false
+    if (busqueda.trim()) {
+      const q = busqueda.toLowerCase()
+      const blob = [p.tipo_pieza, p.proveedor_origen, p.descripcion_origen, p.cliente_nombre, p.destino, p.notas_salida, p.id].filter(Boolean).join(' ').toLowerCase()
+      if (!blob.includes(q)) return false
+    }
+    return true
+  })
+
+  // stats agregadas
+  const stats = {
+    total: piezas.length,
+    disponibles: piezas.filter(p => p.estado === 'disponible').length,
+    convertidas: piezas.filter(p => p.estado === 'convertida_cortes').length,
+    vendidas:    piezas.filter(p => p.estado === 'vendida').length,
+    kgDisp:      piezas.filter(p => p.estado === 'disponible').reduce((s, p) => s + (p.kg || 0), 0),
+    kgConv:      piezas.filter(p => p.estado === 'convertida_cortes').reduce((s, p) => s + (p.kg || 0), 0),
+    kgVend:      piezas.filter(p => p.estado === 'vendida').reduce((s, p) => s + (p.kg || 0), 0),
+    valorVend:   piezas.filter(p => p.estado === 'vendida').reduce((s, p) => s + (p.total_venta || 0), 0),
+  }
+
+  const card = { background: 'var(--surface2)', borderRadius: 10, padding: '12px 16px', border: '1px solid var(--border)' }
+  const inp = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, padding: '8px 10px', color: 'var(--text)', fontSize: 12, width: '100%' }
+
+  return (
+    <div>
+      {/* Stats top */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 20 }}>
+        <div style={card}>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Total piezas registradas</div>
+          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 28 }}>{stats.total}</div>
+        </div>
+        <div style={{ ...card, borderColor: 'var(--green)' }}>
+          <div style={{ fontSize: 11, color: 'var(--green)', marginBottom: 4 }}>Disponibles</div>
+          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 28, color: 'var(--green)' }}>{stats.disponibles}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{stats.kgDisp.toFixed(1)} kg en stock</div>
+        </div>
+        <div style={{ ...card, borderColor: 'var(--blue)' }}>
+          <div style={{ fontSize: 11, color: 'var(--blue)', marginBottom: 4 }}>Convertidas a cortes</div>
+          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 28, color: 'var(--blue)' }}>{stats.convertidas}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{stats.kgConv.toFixed(1)} kg</div>
+        </div>
+        <div style={{ ...card, borderColor: 'var(--gold)' }}>
+          <div style={{ fontSize: 11, color: 'var(--gold)', marginBottom: 4 }}>Vendidas enteras</div>
+          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 28, color: 'var(--gold)' }}>{stats.vendidas}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{stats.kgVend.toFixed(1)} kg · ${Math.round(stats.valorVend).toLocaleString('es-AR')}</div>
+        </div>
+      </div>
+
+      {/* Filtros */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-title">🔎 Filtros</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+          <div>
+            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Estado</label>
+            <select value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)} style={inp}>
+              <option value="todas">Todas</option>
+              <option value="disponible">Disponibles</option>
+              <option value="convertida_cortes">A cortes</option>
+              <option value="vendida">Vendidas</option>
+              <option value="anulada">Anuladas</option>
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Tipo de pieza</label>
+            <select value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)} style={inp}>
+              <option value="todos">Todos</option>
+              {tiposUnicos.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Proveedor origen</label>
+            <select value={filtroProveedor} onChange={e => setFiltroProveedor(e.target.value)} style={inp}>
+              <option value="todos">Todos</option>
+              {proveedoresUnicos.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Buscar</label>
+            <input value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="ID, cliente, notas..." style={inp} />
+          </div>
+        </div>
+      </div>
+
+      {/* Tabla */}
+      <div className="card">
+        <div className="card-title">📋 {piezasFiltradas.length} {piezasFiltradas.length === 1 ? 'pieza' : 'piezas'} {piezasFiltradas.length !== piezas.length && <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(de {piezas.length} totales)</span>}</div>
+        {loading ? <div className="empty">Cargando...</div> : piezasFiltradas.length === 0 ? <div className="empty">Sin piezas con los filtros aplicados</div> : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%' }}>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Tipo</th>
+                  <th>Kg</th>
+                  <th>Origen (MR)</th>
+                  <th>Ingreso</th>
+                  <th>Estado</th>
+                  <th>Destino / Cliente</th>
+                  <th>Salida</th>
+                  <th>$ Venta</th>
+                </tr>
+              </thead>
+              <tbody>
+                {piezasFiltradas.map(p => {
+                  const info = ESTADO_INFO[p.estado] || ESTADO_INFO.anulada
+                  const disabled = p.estado !== 'disponible'
+                  return (
+                    <tr key={p.id} style={{ opacity: disabled ? 0.65 : 1 }}>
+                      <td style={{ color: 'var(--muted)', fontSize: 11 }}>#{p.id}</td>
+                      <td style={{ fontWeight: 600 }}>{p.tipo_pieza}</td>
+                      <td style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 16, color: 'var(--gold)' }}>{(p.kg || 0).toFixed(1)}</td>
+                      <td style={{ fontSize: 11 }}>
+                        <div style={{ color: 'var(--text)' }}>{p.proveedor_origen || '—'}</div>
+                        <div style={{ color: 'var(--muted)' }}>{p.descripcion_origen || ''}{p.modelo_desposte && ' · Mod. ' + p.modelo_desposte}</div>
+                      </td>
+                      <td style={{ fontSize: 11, color: 'var(--muted)' }}>{p.fecha_ingreso || '—'}</td>
+                      <td>
+                        <span style={{ background: info.bg, color: info.color, borderRadius: 4, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>
+                          {info.label}
+                        </span>
+                      </td>
+                      <td style={{ fontSize: 11 }}>
+                        {p.destino === 'cortes' && <span style={{ color: 'var(--blue)' }}>→ Bovino Cortes</span>}
+                        {p.destino && p.destino !== 'cortes' && (
+                          <div>
+                            <div style={{ color: 'var(--text)', fontWeight: 600 }}>{p.cliente_nombre || p.destino}</div>
+                            <div style={{ color: 'var(--muted)' }}>{p.destino !== p.cliente_nombre ? p.destino : ''}</div>
+                          </div>
+                        )}
+                        {!p.destino && <span style={{ color: 'var(--muted)' }}>—</span>}
+                      </td>
+                      <td style={{ fontSize: 11, color: 'var(--muted)' }}>{p.fecha_salida || '—'}</td>
+                      <td style={{ fontSize: 11, color: 'var(--green)', fontWeight: 700 }}>
+                        {p.total_venta ? '$' + Math.round(p.total_venta).toLocaleString('es-AR') : (p.precio_venta_kg ? '$' + Math.round(p.precio_venta_kg).toLocaleString('es-AR') + '/kg' : '—')}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {!loading && (
+          <div style={{ marginTop: 12, padding: 12, background: 'var(--surface2)', borderRadius: 8, fontSize: 11, color: 'var(--muted)' }}>
+            ℹ️ Las piezas convertidas o vendidas se mantienen en este historial pero no pueden seleccionarse para nuevas operaciones (están bloqueadas, solo lectura). Esto te da trazabilidad completa de cada pieza desde que entró hasta que salió.
+          </div>
+        )}
+      </div>
     </div>
   )
 }
