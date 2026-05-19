@@ -1274,14 +1274,22 @@ function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   const [mediasDisponibles, setMediasDisponibles] = useState([])
   const [mediaSeleccionada, setMediaSeleccionada] = useState(null)
   const [formManual, setFormManual] = useState({ descripcion: '', importe: '' })
+  const [piezasDispVenta, setPiezasDispVenta] = useState([])
+  const [piezaEnteraSeleccionada, setPiezaEnteraSeleccionada] = useState(null)
+  async function recargarPiezasDispVenta() {
+    const { data } = await supabase.from('piezas_stock').select('*').eq('estado', 'disponible').order('fecha_ingreso', { ascending: true }).order('id', { ascending: true })
+    setPiezasDispVenta(data || [])
+  }
   useEffect(() => {
     supabase.from('precios').select('*').order('nombre').then(({ data }) => setTodosPrecios(data || []))
     supabase.from('clientes').select('*').order('nombre').then(({ data }) => setClientes(data || []))
   supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false }).then(({ data }) => setMediasDisponibles(data || []))
+  recargarPiezasDispVenta()
   }, [])
 
 const CATEGORIAS = {
     bovino_mr: '🐄 Media Reses',
+    pieza_entera: '🥩 Pieza entera (del stock individual)',
     bovino_corte: '🥩 Bovinos — Cortes',
     bovino_brosa: '🫀 Brosas',
     bovino_pieza: '🍖 Piezas',
@@ -1341,27 +1349,35 @@ const CATEGORIA_A_STOCK = {
   }
 async function agregarItem() {
     if (!form.kg || !form.precio) { showAlert({ type: 'error', msg: 'Completá kg y precio' }); return }
-    if (form.categoria !== 'bovino_mr' && !form.productoId) { showAlert({ type: 'error', msg: 'Seleccioná un producto' }); return }
+    if (form.categoria === 'pieza_entera' && !piezaEnteraSeleccionada) { showAlert({ type: 'error', msg: 'Seleccioná una pieza del stock' }); return }
+    if (form.categoria !== 'bovino_mr' && form.categoria !== 'pieza_entera' && !form.productoId) { showAlert({ type: 'error', msg: 'Seleccioná un producto' }); return }
     const prod = todosPrecios.find(p => p.id === form.productoId)
-    const descripcion = form.categoria === 'bovino_mr' 
-      ? (mediaSeleccionada ? `Media Res — ${mediaSeleccionada.descripcion || mediaSeleccionada.proveedor_nombre}` : 'Media Res')
-      : (prod?.nombre || '')
-    const prodItem = form.categoria !== 'bovino_mr' ? todosPrecios.find(p => p.id === form.productoId) : null
+    let descripcion
+    if (form.categoria === 'bovino_mr') {
+      descripcion = mediaSeleccionada ? `Media Res — ${mediaSeleccionada.descripcion || mediaSeleccionada.proveedor_nombre}` : 'Media Res'
+    } else if (form.categoria === 'pieza_entera') {
+      descripcion = `${piezaEnteraSeleccionada.tipo_pieza} #${piezaEnteraSeleccionada.id} (${piezaEnteraSeleccionada.proveedor_origen || 's/proveedor'})`
+    } else {
+      descripcion = prod?.nombre || ''
+    }
+    const prodItem = (form.categoria !== 'bovino_mr' && form.categoria !== 'pieza_entera') ? todosPrecios.find(p => p.id === form.productoId) : null
 const item = {
   descripcion,
   kg: parseFloat(form.kg),
   precio: parseFloat(form.precio),
   importe: parseFloat(form.kg) * parseFloat(form.precio),
   tipo: form.categoria,
-  stock_origen: prodItem?.stock_origen || null,
-  media_res_id: mediaSeleccionada?.id || null
+  stock_origen: form.categoria === 'pieza_entera' ? 'bovino_pieza' : (prodItem?.stock_origen || null),
+  media_res_id: mediaSeleccionada?.id || null,
+  pieza_id: form.categoria === 'pieza_entera' ? piezaEnteraSeleccionada?.id : null,
+  pieza_tipo: form.categoria === 'pieza_entera' ? piezaEnteraSeleccionada?.tipo_pieza : null,
 }
     setItems(prev => [...prev, item])
     setForm(f => ({ ...f, kg: '', productoId: '', precio: '', categoria: '' }))
     // IMPORTANTE: la media res NO se descuenta del stock al agregarla al carrito.
     // Recien se marca como despostada en guardar() cuando se confirma el despacho y se genera el remito.
-    // Si el usuario sale sin confirmar, la media sigue disponible en el stock.
     if (mediaSeleccionada) setMediaSeleccionada(null)
+    if (piezaEnteraSeleccionada) setPiezaEnteraSeleccionada(null)
   }
  
   function quitarItem(idx) { setItems(prev => prev.filter((_, i) => i !== idx)) }
@@ -1433,6 +1449,23 @@ for (const item of items) {
       items, total, cobro: form.cobro, notas: form.notas
     }).select().single()
 
+    // Marcar piezas individuales vendidas (de cualquier item con tipo='pieza_entera')
+    const itemsPiezaEntera = items.filter(it => it.tipo === 'pieza_entera' && it.pieza_id)
+    for (const it of itemsPiezaEntera) {
+      const { error: errVend } = await supabase.from('piezas_stock').update({
+        estado: 'vendida',
+        destino: form.destino,
+        cliente_id: clienteId || null,
+        cliente_nombre: clienteNombre,
+        precio_venta_kg: it.precio,
+        total_venta: it.importe,
+        fecha_salida: form.fecha,
+        notas_salida: 'Vendida entera en remito N° ' + String(remitoData?.numero || remitoData?.id || '').padStart(5, '0'),
+      }).eq('id', it.pieza_id)
+      if (errVend) console.warn('No se pudo marcar pieza vendida:', errVend.message)
+    }
+    if (itemsPiezaEntera.length > 0) await recargarPiezasDispVenta()
+
     if (clienteId) {
       const { data: clienteActual } = await supabase.from('clientes').select('saldo').eq('id', clienteId).single()
       const nuevoSaldo = (clienteActual?.saldo || 0) + total
@@ -1488,6 +1521,36 @@ for (const item of items) {
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.fecha} · {e.proveedor_nombre}</div>
         </div>
         <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{(e.kg_real || e.kg || 0).toFixed(1)} kg</div>
+      </div>
+    ))}
+  </div>
+  )
+})()}
+{form.categoria === 'pieza_entera' && (() => {
+  const idsEnCarrito = items.filter(it => it.tipo === 'pieza_entera').map(it => it.pieza_id).filter(Boolean)
+  const piezasVisibles = piezasDispVenta.filter(p => !idsEnCarrito.includes(p.id))
+  // agrupadas por tipo
+  const porTipo = {}
+  piezasVisibles.forEach(pz => { (porTipo[pz.tipo_pieza] = porTipo[pz.tipo_pieza] || []).push(pz) })
+  return (
+  <div style={{ background: '#2a1f1a', border: '1px solid #5a3d2d', borderRadius: 10, padding: '14px 16px', marginBottom: 12 }}>
+    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--gold)', marginBottom: 10 }}>🥩 Seleccioná la pieza entera a vender</div>
+    {piezasVisibles.length === 0 ? (
+      <div style={{ fontSize: 12, color: 'var(--muted)' }}>Sin piezas individuales disponibles. Despostá una media res primero.</div>
+    ) : Object.entries(porTipo).map(([tipo, lista]) => (
+      <div key={tipo} style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>{tipo} ({lista.length})</div>
+        {lista.map(pz => (
+          <div key={pz.id}
+            onClick={() => { setPiezaEnteraSeleccionada(pz); setForm(f => ({ ...f, kg: String(pz.kg) })) }}
+            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', borderRadius: 8, marginBottom: 4, cursor: 'pointer', border: `2px solid ${piezaEnteraSeleccionada?.id === pz.id ? 'var(--gold)' : 'var(--border)'}`, background: piezaEnteraSeleccionada?.id === pz.id ? 'rgba(201,168,76,0.12)' : 'var(--surface2)' }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 12 }}>#{pz.id} · {pz.tipo_pieza}</div>
+              <div style={{ fontSize: 10, color: 'var(--muted)' }}>{pz.proveedor_origen || '—'} · MR del {pz.fecha_ingreso}{pz.modelo_desposte && ' · Mod. ' + pz.modelo_desposte}</div>
+            </div>
+            <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{(pz.kg || 0).toFixed(1)} kg</div>
+          </div>
+        ))}
       </div>
     ))}
   </div>
