@@ -248,6 +248,36 @@ console.log('STOCK CARGADO:', stockMap)
         const { error: errPiezas } = await supabase.from('piezas_stock').insert(filasPiezas)
         if (errPiezas) console.warn('No se pudieron registrar piezas individuales:', errPiezas.message)
       }
+      // Registrar cada pieza como entrada para que aparezca en el historial del Dashboard
+      // Mapeo nombre de pieza -> tipo granular usado por el Dashboard
+      const NOMBRE_A_TIPO = {
+        'Cuarto Pistola': 'pieza_cuarto_pistola',
+        'Costillar Completo': 'pieza_costillar',
+        'Cortito': 'pieza_cortito',
+        'Pierna': 'pieza_pierna',
+        'Costeletal con Lomo': 'pieza_carre',
+        'Parrillero': 'pieza_parrillero',
+        'Paleta': 'pieza_paleta',
+      }
+      const filasEntradasBovino = piezas
+        .filter(p => (p.kg_editado || 0) > 0)
+        .map(p => ({
+          fecha,
+          tipo: NOMBRE_A_TIPO[p.nombre] || 'bovino_pieza',
+          proveedor_nombre: seleccionada.proveedor_nombre || null,
+          descripcion: `${p.nombre} de MR #${seleccionada.id} (${seleccionada.descripcion || 'Media Res'})`,
+          kg: p.kg_editado,
+          kg_real: p.kg_editado,
+          merma_pct: 0,
+          precio_kg: p.precio_costo_kg || seleccionada.precio_kg || 0,
+          importe: 0,
+          destino: 'desposte',
+          cantidad: 1,
+        }))
+      if (filasEntradasBovino.length > 0) {
+        const { error: errEntradasBov } = await supabase.from('entradas_deposito').insert(filasEntradasBovino)
+        if (errEntradasBov) console.warn('No se pudieron registrar entradas por pieza bovina:', errEntradasBov.message)
+      }
       showAlert('✅ Desposte en piezas completado — ' + piezas.length + ' piezas al stock')
       setSeleccionada(null); setPiezas([]); setNotas('')
       await cargarDatos(); onSaved()
@@ -373,6 +403,24 @@ async function confirmarDesposteCerdo() {
     await actualizarStock('cerdo', -kgCapon)
     for (const pieza of piezasRegistradas) {
       await actualizarStock(pieza.stock, pieza.kg)
+    }
+    // Registrar cada pieza como entrada para que aparezca en el historial del Dashboard
+    const filasEntradasCerdo = piezasRegistradas.map(p => ({
+      fecha,
+      tipo: p.stock,
+      proveedor_nombre: caponSeleccionado.proveedor_nombre || null,
+      descripcion: `${p.nombre} de Capón #${caponSeleccionado.id} (${caponSeleccionado.descripcion || 'Capón'})`,
+      kg: p.kg,
+      kg_real: p.kg,
+      merma_pct: 0,
+      precio_kg: 0,
+      importe: 0,
+      destino: 'desposte',
+      cantidad: 1,
+    }))
+    if (filasEntradasCerdo.length > 0) {
+      const { error: errEntradas } = await supabase.from('entradas_deposito').insert(filasEntradasCerdo)
+      if (errEntradas) console.warn('No se pudieron registrar entradas por pieza de cerdo:', errEntradas.message)
     }
     showAlert('✅ Capón despostado — piezas al stock')
     setCaponSeleccionado(null)

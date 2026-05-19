@@ -133,7 +133,9 @@ export default function Dashboard() {
   const totMesGastos = mesActual.reduce((s, c) => s + (c.gastos || 0), 0)
 
   const stockBovino = Math.max(0, stock.bovino_mr || 0)
-  const stockPiezas = Math.max(0, (stock.pieza_pierna || 0) + (stock.pieza_cuarto_pistola || 0) + (stock.pieza_costillar || 0) + (stock.pieza_cortito || 0) + (stock.pieza_carre || 0) + (stock.pieza_paleta || 0) + (stock.pieza_parrillero || 0))
+  // El desposte acumula el stock real en 'bovino_pieza' (genérico). Si por algún flujo
+  // legacy hay stock acumulado en los tipos granulares, lo sumamos como fallback.
+  const stockPiezas = Math.max(0, (stock.bovino_pieza || 0) + (stock.pieza_pierna || 0) + (stock.pieza_cuarto_pistola || 0) + (stock.pieza_costillar || 0) + (stock.pieza_cortito || 0) + (stock.pieza_carre || 0) + (stock.pieza_paleta || 0) + (stock.pieza_parrillero || 0))
   const stockCajas = Math.max(0, (stock.caja_cb || 0) + (stock.caja_pt || 0))
   const stockCortes = Math.max(0, stock.bovino_corte || 0)
   const stockCerdo = Math.max(0, stock.cerdo || 0)
@@ -315,7 +317,7 @@ export default function Dashboard() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
           {[
             { label: '🐄 Bovino Media Res', valor: stockBovino.toFixed(1) + ' kg', color: 'var(--gold)', aprox: Math.round(stockBovino / 105) + ' medias', bajo: stockBovino < 100, stockKg: stockBovino, tiposEntradas: ['bovino_mr'], tiposSalidas: ['bovino_mr'] },
-            { label: '🍖 Piezas Bovinas', valor: stockPiezas.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockPiezas < 30, stockKg: stockPiezas, tiposEntradas: ['pieza_pierna','pieza_cuarto_pistola','pieza_costillar','pieza_cortito','pieza_carre','pieza_paleta','pieza_parrillero'], tiposSalidas: ['bovino_pieza','pieza_pierna','pieza_cuarto_pistola','pieza_costillar','pieza_cortito','pieza_carre','pieza_paleta','pieza_parrillero'] },
+            { label: '🍖 Piezas Bovinas', valor: stockPiezas.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockPiezas < 30, stockKg: stockPiezas, tiposEntradas: ['bovino_pieza','pieza_pierna','pieza_cuarto_pistola','pieza_costillar','pieza_cortito','pieza_carre','pieza_paleta','pieza_parrillero'], tiposSalidas: ['bovino_pieza','pieza_pierna','pieza_cuarto_pistola','pieza_costillar','pieza_cortito','pieza_carre','pieza_paleta','pieza_parrillero'] },
             { label: '📦 Cajas Bovinas', valor: stockCajas.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockCajas < 20, stockKg: stockCajas, tiposEntradas: ['caja_cb','caja_pt'], tiposSalidas: ['bovino_caja_cb','bovino_caja_pt','caja_cb','caja_pt'] },
             { label: '🥩 Bovino Cortes', valor: stockCortes.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockCortes < 50, stockKg: stockCortes, tiposEntradas: ['bovino_corte'], tiposSalidas: ['bovino_corte'] },
             { label: '🐷 Cerdo Capones', valor: stockCerdo.toFixed(1) + ' kg', color: 'var(--amber)', aprox: Math.round(stockCerdo / 107) + ' capones', bajo: stockCerdo < 50, stockKg: stockCerdo, tiposEntradas: ['cerdo'], tiposSalidas: ['cerdo','cerdo_corte'] },
