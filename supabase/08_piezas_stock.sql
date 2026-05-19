@@ -12,8 +12,8 @@ CREATE TABLE IF NOT EXISTS piezas_stock (
   id              BIGSERIAL PRIMARY KEY,
 
   -- Origen: de qu� desposte y de qu� media res sali� la pieza
-  desposte_id     BIGINT REFERENCES despostes(id) ON DELETE SET NULL,
-  entrada_id     BIGINT REFERENCES entradas_deposito(id) ON DELETE SET NULL,
+  desposte_id     UUID REFERENCES despostes(id) ON DELETE SET NULL,
+  entrada_id      UUID REFERENCES entradas_deposito(id) ON DELETE SET NULL,
 
   -- Datos de la pieza
   tipo_pieza      TEXT NOT NULL,        -- 'Cuarto Pistola', 'Pierna', 'Costillar Completo', etc.
@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS piezas_stock (
   estado          TEXT NOT NULL DEFAULT 'disponible',
                   -- 'disponible' | 'convertida_cortes' | 'vendida' | 'anulada'
   destino         TEXT,                   -- 'cortes' | 'franquicia' | 'mayorista' | 'minorista' | 'carniceria'
-  cliente_id      BIGINT,                  -- FK opcional (no forzamos en DDL por compat con clientes)
+  cliente_id      UUID,                    -- FK opcional (no forzamos en DDL por compat con clientes)
   cliente_nombre  TEXT,
   precio_venta_kg NUMERIC(12,2),
   total_venta     NUMERIC(14,2),
