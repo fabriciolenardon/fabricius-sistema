@@ -144,7 +144,7 @@ export default function Precios() {
       mostrarMsg('❌ Tildá al menos una lista (carnicería, mayorista o minorista)'); return
     }
     setOfertaLoading(true)
-    await supabase.from('ofertas').insert({
+    const { error } = await supabase.from('ofertas').insert({
       precio_id: ofertaForm.precio_id,
       producto_nombre: productoSeleccionado?.nombre,
       precio_original_carniceria: productoSeleccionado?.precio_carniceria,
@@ -160,6 +160,11 @@ export default function Precios() {
       aplica_minorista: ofertaForm.aplica_minorista,
     })
     setOfertaLoading(false)
+    if (error) {
+      mostrarMsg('❌ Error al guardar la oferta: ' + error.message)
+      console.error('Insert oferta error:', error)
+      return
+    }
     mostrarMsg('✅ Oferta registrada correctamente')
     setOfertaForm({ precio_id: '', precio_oferta: '', fecha_inicio: new Date().toISOString().split('T')[0], fecha_fin: '', notas: '', aplica_carniceria: true, aplica_mayorista: true, aplica_minorista: true })
     setBusquedaOferta(''); setProductoSeleccionado(null)
