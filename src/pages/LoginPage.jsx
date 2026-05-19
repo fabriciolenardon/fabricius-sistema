@@ -66,22 +66,32 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--border)' }}>
-            <div style={{ fontSize: 10, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 10 }}>
-              Usuarios del sistema
+          <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--border)', textAlign: 'center' }}>
+            <div style={{ fontSize: 10, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 12 }}>
+              ¿No tenés acceso?
             </div>
-            {[
-              { nombre: 'Fabricio Lenardon', rol: 'Admin' },
-              { nombre: 'Ariel Garrone', rol: 'Admin' },
-              { nombre: 'Giuliana Frontera', rol: 'Admin' },
-              { nombre: 'Sucursal Alvear', rol: 'Franquicia' },
-              { nombre: 'Sucursal Monte Cristo', rol: 'Franquicia' },
-            ].map(u => (
-              <div key={u.nombre} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '4px 0', color: 'var(--muted2)' }}>
-                <span style={{ color: 'var(--text2)' }}>{u.nombre}</span>
-                <span className={`badge ${u.rol === 'Admin' ? 'badge-gold' : 'badge-teal'}`}>{u.rol}</span>
-              </div>
-            ))}
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14, lineHeight: 1.5 }}>
+              Si sos cliente mayorista y querés acceder al portal,<br />contactanos por WhatsApp para activarlo.
+            </div>
+            <a
+              href="https://wa.me/5493574400346?text=Hola%2C%20quisiera%20solicitar%20acceso%20al%20portal%20de%20cliente%20mayorista%20de%20Fabricius."
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                padding: '10px 18px', background: '#25D366', color: '#fff',
+                borderRadius: 10, textDecoration: 'none', fontSize: 13, fontWeight: 700,
+                fontFamily: "'DM Sans', sans-serif", letterSpacing: 0.5,
+                boxShadow: '0 0 16px rgba(37,211,102,0.3)',
+                transition: 'transform 0.15s'
+              }}
+              onMouseOver={e => e.currentTarget.style.transform = 'scale(1.04)'}
+              onMouseOut={e => e.currentTarget.style.transform = 'scale(1)'}>
+              💬 Escribinos al 3574 400346
+            </a>
+            <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 14 }}>
+              📍 Av. Mitre 670 — Río Primero, Córdoba
+            </div>
           </div>
         </div>
       </div>

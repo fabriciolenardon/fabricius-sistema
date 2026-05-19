@@ -59,11 +59,14 @@ serve(async (req) => {
       return jsonError('Solo el administrador puede habilitar accesos', 403)
     }
 
-    // 2) Parsear payload
+    // 2) Parsear payload — cliente_id es UUID (string)
     const body = await req.json().catch(() => ({}))
-    const cliente_id = Number(body.cliente_id)
+    const cliente_id = String(body.cliente_id || '').trim()
     const email = String(body.email || '').trim().toLowerCase()
     if (!cliente_id || !email) return jsonError('cliente_id y email son obligatorios')
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cliente_id)) {
+      return jsonError('cliente_id no es un UUID válido')
+    }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jsonError('Email inválido')
 
     // 3) Cliente admin (service_role) — saltea RLS y permite crear usuarios

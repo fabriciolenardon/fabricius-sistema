@@ -46,10 +46,13 @@ serve(async (req) => {
       return jsonError('Solo el administrador puede revocar accesos', 403)
     }
 
-    // Parsear payload
+    // Parsear payload — cliente_id es UUID (string)
     const body = await req.json().catch(() => ({}))
-    const cliente_id = Number(body.cliente_id)
+    const cliente_id = String(body.cliente_id || '').trim()
     if (!cliente_id) return jsonError('cliente_id es obligatorio')
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cliente_id)) {
+      return jsonError('cliente_id no es un UUID válido')
+    }
 
     const supabaseAdmin = createClient(supabaseUrl, serviceKey, {
       auth: { autoRefreshToken: false, persistSession: false },
