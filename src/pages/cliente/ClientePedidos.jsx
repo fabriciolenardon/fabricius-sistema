@@ -9,6 +9,8 @@ const fmt = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
 const ESTADO_INFO = {
   pendiente:  { label: '🟡 Pendiente',   color: 'var(--amber)',     bg: '#2a2410' },
   confirmado: { label: '🟢 Confirmado',  color: 'var(--green)',     bg: '#1a3a1a' },
+  incompleto: { label: '🟠 Incompleto',  color: '#ff9d3a',          bg: '#2a1a08' },
+  despachado: { label: '🚚 Despachado',  color: 'var(--blue)',      bg: '#1a2030' },
   rechazado:  { label: '🔴 Rechazado',   color: 'var(--red-light)', bg: '#3a1a1a' },
   cancelado:  { label: '⚫ Cancelado',    color: 'var(--muted)',     bg: 'var(--surface2)' },
 }
@@ -95,20 +97,53 @@ export default function ClientePedidos() {
                     <table style={{ width: '100%', marginBottom: 14 }}>
                       <thead><tr><th>Producto</th><th>Kg</th><th>Precio/kg</th><th style={{ textAlign: 'right' }}>Subtotal</th></tr></thead>
                       <tbody>
-                        {(p.items || []).map((it, i) => (
-                          <tr key={i}>
-                            <td>{it.nombre}</td>
-                            <td>{it.kg} kg</td>
-                            <td>{fmt(it.precio_unitario)}</td>
-                            <td style={{ textAlign: 'right', color: 'var(--gold)', fontWeight: 600 }}>{fmt(it.subtotal)}</td>
-                          </tr>
-                        ))}
+                        {(p.items || []).map((it, i) => {
+                          const u = (it.unidad || 'kg') === 'unidad' ? 'u' : 'kg'
+                          return (
+                            <tr key={i}>
+                              <td>{it.nombre}</td>
+                              <td>{it.kg} {u}</td>
+                              <td>{fmt(it.precio_unitario)}/{u}</td>
+                              <td style={{ textAlign: 'right', color: 'var(--gold)', fontWeight: 600 }}>{fmt(it.subtotal)}</td>
+                            </tr>
+                          )
+                        })}
                         <tr style={{ borderTop: '2px solid var(--gold)' }}>
                           <td colSpan={3} style={{ textAlign: 'right', fontWeight: 700 }}>TOTAL</td>
                           <td style={{ textAlign: 'right', fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{fmt(p.total_estimado)}</td>
                         </tr>
                       </tbody>
                     </table>
+
+                    {/* Items pendientes (si esta incompleto) */}
+                    {(p.items_pendientes || []).length > 0 && (
+                      <div style={{ background: '#2a1a08', border: '1px solid #ff9d3a', borderRadius: 8, padding: '10px 14px', marginBottom: 14 }}>
+                        <div style={{ fontSize: 11, color: '#ff9d3a', fontWeight: 700, marginBottom: 6 }}>📦 PENDIENTE DE DESPACHO</div>
+                        {(p.items_pendientes || []).map((it, i) => {
+                          const u = (it.unidad || 'kg') === 'unidad' ? 'u' : 'kg'
+                          return (
+                            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '2px 0' }}>
+                              <span>{it.nombre} — {it.kg_pendiente} {u}</span>
+                              <span style={{ color: 'var(--gold)' }}>{fmt(it.subtotal_pendiente)}</span>
+                            </div>
+                          )
+                        })}
+                        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>Te avisaremos cuando podamos completar tu pedido.</div>
+                      </div>
+                    )}
+
+                    {/* Remitos enlazados */}
+                    {(p.remitos_enlazados || []).length > 0 && (
+                      <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', marginBottom: 14 }}>
+                        <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>🧾 Remitos enlazados</div>
+                        {(p.remitos_enlazados || []).map((r, i) => (
+                          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '2px 0' }}>
+                            <span>N° {String(r.numero).padStart(5,'0')} — {r.fecha} <span style={{ color: 'var(--muted)' }}>({r.tipo})</span></span>
+                            <span style={{ color: 'var(--gold)' }}>{fmt(r.total)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
 
                     {/* Notas */}
                     {p.notas_cliente && (

@@ -33,11 +33,12 @@ export default function ClienteNuevoPedido() {
   const [loading, setLoading] = useState(true)
 
   // Estado del wizard
-  const [paso, setPaso] = useState('inicio')  // inicio | categoria | producto | cantidad | otro | dia | horario | notas | resumen | enviando | enviado
+  const [paso, setPaso] = useState('inicio')  // inicio | categoria | producto | unidad | cantidad | otro | dia | horario | notas | resumen | enviando | enviado
   const [carrito, setCarrito] = useState([])  // items agregados
   const [categoriaSel, setCategoriaSel] = useState(null)
   const [productoSel, setProductoSel] = useState(null)
   const [kgInput, setKgInput] = useState('')
+  const [unidadSel, setUnidadSel] = useState('')  // 'kg' | 'unidad'
   const [diaEntrega, setDiaEntrega] = useState('')
   const [horarioTipo, setHorarioTipo] = useState('')  // 'manana' | 'tarde' | 'especifico'
   const [horarioEspecifico, setHorarioEspecifico] = useState('')
@@ -96,27 +97,40 @@ export default function ClienteNuevoPedido() {
   function seleccionarProducto(prod) {
     setProductoSel(prod)
     pushCliente(`Elijo: ${prod.nombre}`)
-    pushBot(`¿Cuántos kilos de ${prod.nombre} querés? El precio es ${fmt(prod[listaPrecioField])}/kg.`)
+    pushBot(`¿Cómo querés pedir ${prod.nombre}? ¿Por KILOS o por UNIDADES?`)
+    setUnidadSel('')
+    setPaso('unidad')
+  }
+
+  function seleccionarUnidad(u) {
+    setUnidadSel(u)
+    const etiqueta = u === 'kg' ? 'kilos' : 'unidades'
+    pushCliente(`Por ${etiqueta}`)
+    pushBot(`Perfecto. ¿Cuántos ${etiqueta} de ${productoSel.nombre}? El precio es ${fmt(productoSel[listaPrecioField])}/${u === 'kg' ? 'kg' : 'unidad'}.`)
     setPaso('cantidad')
   }
 
   function agregarAlCarrito() {
-    const kg = parseFloat(kgInput)
-    if (!kg || kg <= 0) { alert('Ingresá una cantidad válida en kg'); return }
+    const cant = parseFloat(kgInput)
+    if (!cant || cant <= 0) { alert('Ingresá una cantidad válida'); return }
+    if (!unidadSel) { alert('Falta indicar si es por kilos o por unidades'); return }
     const precio_unitario = productoSel[listaPrecioField] || 0
-    const subtotal = kg * precio_unitario
+    const subtotal = cant * precio_unitario
+    const unidadLabel = unidadSel === 'kg' ? 'kg' : 'u'
     const item = {
       producto_id: productoSel.id,
       nombre: productoSel.nombre,
       categoria: productoSel.categoria,
-      kg,
+      kg: cant,            // se mantiene el nombre 'kg' por compatibilidad con todo el sistema
+      unidad: unidadSel,   // 'kg' o 'unidad'
       precio_unitario,
       subtotal,
     }
     setCarrito(c => [...c, item])
-    pushCliente(`${kg} kg de ${productoSel.nombre}`)
-    pushBot(`Listo, agregué ${kg} kg de ${productoSel.nombre} (${fmt(subtotal)}). ¿Querés agregar otro producto o seguir con el pedido?`)
+    pushCliente(`${cant} ${unidadLabel} de ${productoSel.nombre}`)
+    pushBot(`Listo, agregué ${cant} ${unidadLabel} de ${productoSel.nombre} (${fmt(subtotal)}). ¿Querés agregar otro producto o seguir con el pedido?`)
     setKgInput('')
+    setUnidadSel('')
     setProductoSel(null)
     setCategoriaSel(null)
     setPaso('otro')
@@ -274,20 +288,37 @@ export default function ClienteNuevoPedido() {
             </div>
           )}
 
+          {paso === 'unidad' && (
+            <div className="card">
+              <div className="card-title">¿Cómo querés pedir {productoSel.nombre}?</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>Elegí si lo querés por peso (kilos) o por cantidad de unidades enteras (ej. cajones).</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <button onClick={() => seleccionarUnidad('kg')}
+                  style={{ padding: '18px', borderRadius: 12, border: '2px solid var(--gold)', background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer', fontSize: 14, fontWeight: 700 }}>
+                  ⚖️ Por KILOS<br /><span style={{ fontSize: 11, fontWeight: 400, color: 'var(--muted)' }}>al peso</span>
+                </button>
+                <button onClick={() => seleccionarUnidad('unidad')}
+                  style={{ padding: '18px', borderRadius: 12, border: '2px solid var(--gold)', background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer', fontSize: 14, fontWeight: 700 }}>
+                  📦 Por UNIDADES<br /><span style={{ fontSize: 11, fontWeight: 400, color: 'var(--muted)' }}>cajones / piezas enteras</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {paso === 'cantidad' && (
             <div className="card">
-              <div className="card-title">¿Cuántos kg de {productoSel.nombre}?</div>
+              <div className="card-title">¿Cuántas {unidadSel === 'kg' ? 'kilos' : 'unidades'} de {productoSel.nombre}?</div>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                <input type="number" step="0.1" min="0.1" autoFocus value={kgInput} onChange={e => setKgInput(e.target.value)}
+                <input type="number" step={unidadSel === 'kg' ? '0.1' : '1'} min="0.1" autoFocus value={kgInput} onChange={e => setKgInput(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && agregarAlCarrito()}
-                  placeholder="Ej: 5"
+                  placeholder={unidadSel === 'kg' ? 'Ej: 5' : 'Ej: 14'}
                   style={{ background: 'var(--surface2)', border: '1px solid var(--gold)', color: 'var(--text)', borderRadius: 8, padding: '10px 14px', fontSize: 18, width: 120, textAlign: 'center' }} />
-                <span style={{ fontSize: 14, color: 'var(--muted)' }}>kg</span>
+                <span style={{ fontSize: 14, color: 'var(--muted)' }}>{unidadSel === 'kg' ? 'kg' : 'unidades'}</span>
                 <button onClick={agregarAlCarrito} className="btn btn-gold">✅ Agregar al pedido</button>
               </div>
               {kgInput && parseFloat(kgInput) > 0 && (
                 <div style={{ marginTop: 10, fontSize: 13, color: 'var(--muted)' }}>
-                  Subtotal: <strong style={{ color: 'var(--gold)' }}>{fmt(parseFloat(kgInput) * (productoSel[listaPrecioField] || 0))}</strong>
+                  {parseFloat(kgInput)} {unidadSel === 'kg' ? 'kg' : 'u'} × {fmt(productoSel[listaPrecioField] || 0)} = <strong style={{ color: 'var(--gold)' }}>{fmt(parseFloat(kgInput) * (productoSel[listaPrecioField] || 0))}</strong>
                 </div>
               )}
             </div>
@@ -371,7 +402,7 @@ export default function ClienteNuevoPedido() {
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>📦 Productos</div>
                 {carrito.map((it, i) => (
                   <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 13 }}>
-                    <span>{it.nombre} — {it.kg} kg</span>
+                    <span>{it.nombre} — {it.kg} {(it.unidad || 'kg') === 'unidad' ? 'u' : 'kg'}</span>
                     <span style={{ color: 'var(--gold)', fontWeight: 600 }}>{fmt(it.subtotal)}</span>
                   </div>
                 ))}
@@ -433,7 +464,7 @@ export default function ClienteNuevoPedido() {
                 <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
                   <div>
                     <div style={{ fontWeight: 600 }}>{it.nombre}</div>
-                    <div style={{ color: 'var(--muted)', fontSize: 11 }}>{it.kg} kg × {fmt(it.precio_unitario)}/kg</div>
+                    <div style={{ color: 'var(--muted)', fontSize: 11 }}>{it.kg} {(it.unidad || 'kg') === 'unidad' ? 'u' : 'kg'} × {fmt(it.precio_unitario)}/{(it.unidad || 'kg') === 'unidad' ? 'u' : 'kg'}</div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span style={{ color: 'var(--gold)', fontWeight: 700 }}>{fmt(it.subtotal)}</span>
