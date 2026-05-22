@@ -29,6 +29,7 @@ import ClientePedidos from './pages/cliente/ClientePedidos'
 import Pedidos from './pages/admin/Pedidos'
 import AsistenteIA from './components/AsistenteIA'
 import PerfilPendiente from './components/PerfilPendiente'
+import CajeroLayout from './pages/cajero/CajeroLayout'
 
 function ProtectedRoute({ children, requiredRole }) {
   const { user, profile, profileMissing, loading } = useAuth()
@@ -64,6 +65,7 @@ function RootRedirect() {
   if (!profile) return <Navigate to="/login" replace />
   if (profile.rol === 'admin') return <Navigate to="/admin/dashboard" replace />
   if (profile.rol === 'cliente_mayorista') return <Navigate to="/cliente/dashboard" replace />
+  if (profile.rol === 'cajero') return <Navigate to="/cajero/caja" replace />
   return <Navigate to="/franquicia/dashboard" replace />
 }
 
@@ -104,8 +106,11 @@ export default function App() {
           <Route path="nuevo-pedido" element={<ClienteNuevoPedido />} />
           <Route path="pedidos" element={<ClientePedidos />} />
         </Route>
+        <Route path="/cajero" element={<ProtectedRoute requiredRole="cajero"><CajeroLayout /></ProtectedRoute>}>
+          <Route path="caja" element={<Caja />} />
+        </Route>
       </Routes>
-      {user && profile && <AsistenteIA />}
+      {user && profile && profile.rol !== 'cajero' && <AsistenteIA />}
     </>
   )
 }
