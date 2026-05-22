@@ -12,6 +12,7 @@
 // ============================================================
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
+import { useAuth } from '../../context/AuthContext'
 
 const fmt$ = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
 const fmtKg = n => (Number(n) || 0).toFixed(3) + ' kg'
@@ -78,6 +79,7 @@ function rangoFechas(modo) {
 }
 
 export default function HistorialCaja() {
+  const { isAdmin } = useAuth()
   const [ventas, setVentas] = useState([])
   const [loading, setLoading] = useState(true)
   const [modo, setModo] = useState('hoy')
@@ -108,6 +110,10 @@ export default function HistorialCaja() {
 
   // === Anular venta: revertir stock + borrar de ventas_minoristas ===
   async function anularVenta(venta) {
+    if (!isAdmin) {
+      alert('Solo los administradores pueden anular ventas.')
+      return
+    }
     const total = Number(venta.total) || 0
     const cantItems = Array.isArray(venta.items) ? venta.items.length : 0
     if (!confirm(
@@ -185,6 +191,28 @@ export default function HistorialCaja() {
     }
     const ticketPromedio = ventas.length > 0 ? totalPlata / ventas.length : 0
     return { totalPlata, totalKg, totalItems, ticketPromedio, porPago, porGrupo }
+  }, [ventas])
+
+  // === Top productos del rango ===
+  const productosRanking = useMemo(() => {
+    const map = new Map() // descripcion → { kg, plata, count }
+    for (const v of ventas) {
+      const items = Array.isArray(v.items) ? v.items : []
+      for (const it of items) {
+        const key = it.descripcion || '(sin nombre)'
+        if (!map.has(key)) map.set(key, { descripcion: key, categoria: it.categoria, kg: 0, plata: 0, count: 0 })
+        const r = map.get(key)
+        r.kg    += Number(it.kg) || 0
+        r.plata += Number(it.importe) || 0
+        r.count += 1
+      }
+    }
+    const arr = Array.from(map.values())
+    return {
+      masPlata: [...arr].sort((a, b) => b.plata - a.plata).slice(0, 10),
+      menosPlata: [...arr].sort((a, b) => a.plata - b.plata).slice(0, 10),
+      masKg: [...arr].sort((a, b) => b.kg - a.kg).slice(0, 10),
+    }
   }, [ventas])
 
   // === Agrupar ventas por día ===
@@ -315,6 +343,68 @@ export default function HistorialCaja() {
             )}
           </div>
 
+          {/* TOP PRODUCTOS */}
+          {productosRanking.masPlata.length > 0 && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+              {/* Más vendidos */}
+              <div className="card" style={{ margin: 0 }}>
+                <div className="card-title" style={{ color: '#7dff7d' }}>🏆 Top 10 más vendidos (por plata)</div>
+                <table style={{ width: '100%', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase' }}>
+                      <th style={{ width: 24, textAlign: 'center' }}>#</th>
+                      <th style={{ textAlign: 'left' }}>Producto</th>
+                      <th style={{ textAlign: 'right' }}>Veces</th>
+                      <th style={{ textAlign: 'right' }}>Kg/Unid.</th>
+                      <th style={{ textAlign: 'right' }}>Facturado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {productosRanking.masPlata.map((p, i) => (
+                      <tr key={p.descripcion} style={{ borderTop: '1px solid var(--border)' }}>
+                        <td style={{ textAlign: 'center', padding: '6px 4px', fontWeight: 700, color: i === 0 ? '#ffd17a' : 'var(--muted)' }}>{i + 1}</td>
+                        <td style={{ padding: '6px 4px', fontWeight: 500 }}>{p.descripcion}</td>
+                        <td style={{ textAlign: 'right', padding: '6px 4px', color: 'var(--muted)' }}>{p.count}</td>
+                        <td style={{ textAlign: 'right', padding: '6px 4px' }}>{fmtKg(p.kg)}</td>
+                        <td style={{ textAlign: 'right', padding: '6px 4px', color: '#7dff7d', fontWeight: 700 }}>{fmt$(p.plata)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Menos vendidos */}
+              <div className="card" style={{ margin: 0 }}>
+                <div className="card-title" style={{ color: '#ff8b8b' }}>🐌 Top 10 menos vendidos (que igual se vendieron)</div>
+                <table style={{ width: '100%', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase' }}>
+                      <th style={{ width: 24, textAlign: 'center' }}>#</th>
+                      <th style={{ textAlign: 'left' }}>Producto</th>
+                      <th style={{ textAlign: 'right' }}>Veces</th>
+                      <th style={{ textAlign: 'right' }}>Kg/Unid.</th>
+                      <th style={{ textAlign: 'right' }}>Facturado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {productosRanking.menosPlata.map((p, i) => (
+                      <tr key={p.descripcion} style={{ borderTop: '1px solid var(--border)' }}>
+                        <td style={{ textAlign: 'center', padding: '6px 4px', fontWeight: 700, color: 'var(--muted)' }}>{i + 1}</td>
+                        <td style={{ padding: '6px 4px', fontWeight: 500 }}>{p.descripcion}</td>
+                        <td style={{ textAlign: 'right', padding: '6px 4px', color: 'var(--muted)' }}>{p.count}</td>
+                        <td style={{ textAlign: 'right', padding: '6px 4px' }}>{fmtKg(p.kg)}</td>
+                        <td style={{ textAlign: 'right', padding: '6px 4px', color: '#ff8b8b', fontWeight: 700 }}>{fmt$(p.plata)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8, fontStyle: 'italic' }}>
+                  Tip: los productos del sistema que NO aparecen acá es porque no se vendieron en el rango. Revisalos desde Precios.
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* TABLA POR DÍA */}
           <div className="card">
             <div className="card-title">📅 Ventas por día</div>
@@ -356,11 +446,15 @@ export default function HistorialCaja() {
                           <td style={{ textAlign: 'right', padding: 4, color: v.debito > 0 ? '#7a9dff' : 'var(--muted)' }}>{v.debito > 0 ? fmt$(v.debito) : '—'}</td>
                           <td style={{ textAlign: 'right', padding: 4, color: v.transferencia > 0 ? '#ffd17a' : 'var(--muted)' }}>{v.transferencia > 0 ? fmt$(v.transferencia) : '—'}</td>
                           <td style={{ textAlign: 'right', padding: 4 }}>
-                            <button onClick={() => anularVenta(v)}
-                              title="Anular venta y devolver stock"
-                              style={{ padding: '3px 10px', background: 'transparent', border: '1px solid #5a2a2a', color: '#ff8b8b', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
-                              🗑️ Anular
-                            </button>
+                            {isAdmin ? (
+                              <button onClick={() => anularVenta(v)}
+                                title="Anular venta y devolver stock"
+                                style={{ padding: '3px 10px', background: 'transparent', border: '1px solid #5a2a2a', color: '#ff8b8b', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                                🗑️ Anular
+                              </button>
+                            ) : (
+                              <span style={{ fontSize: 10, color: 'var(--muted)' }}>—</span>
+                            )}
                           </td>
                         </tr>
                       ))}
