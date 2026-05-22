@@ -113,6 +113,8 @@ export default function LimpiezaDuplicados() {
   const [accionEnCurso, setAccionEnCurso] = useState(null) // id en proceso
   const [batchEnCurso, setBatchEnCurso] = useState(false)
   const [batchProgreso, setBatchProgreso] = useState({ procesados: 0, total: 0, exitos: 0, errores: 0 })
+  const [seleccionEstrictos, setSeleccionEstrictos] = useState(new Set()) // ids del sin-PLU seleccionados
+  const [mostrarSeleccion, setMostrarSeleccion] = useState(false)
   const [ignorados, setIgnorados] = useState(() => {
     try { return new Set(JSON.parse(localStorage.getItem(IGNORADOS_KEY) || '[]')) }
     catch { return new Set() }
@@ -247,21 +249,15 @@ export default function LimpiezaDuplicados() {
     setAccionEnCurso(null)
   }
 
-  // Batch específico: limpia SOLO los duplicados de alta confianza detectados
-  // por la heurística estricta. Migra PLU al viejo y borra el del PDF.
-  async function limpiezaAltaConfianza() {
-    if (duplicadosEstrictos.length === 0) {
-      showMsg('No hay duplicados de alta confianza para limpiar.', 'error')
+  // Batch específico: limpia SOLO los duplicados SELECCIONADOS por el usuario.
+  async function limpiezaSeleccionados() {
+    const pares = duplicadosEstrictos.filter(p => seleccionEstrictos.has(p.sinPlu.id))
+    if (pares.length === 0) {
+      showMsg('Tildá al menos un duplicado para procesar.', 'error')
       return
     }
-    const preview = duplicadosEstrictos.slice(0, 8).map(p =>
-      `  • "${p.sinPlu.nombre}" ≈ PLU ${p.conPlu.codigo_balanza} "${p.conPlu.nombre}"`
-    ).join('\n')
-    const extra = duplicadosEstrictos.length > 8 ? `\n  ...y ${duplicadosEstrictos.length - 8} más` : ''
-
     if (!confirm(
-      `🚀 LIMPIEZA AUTOMÁTICA — ALTA CONFIANZA\n\n` +
-      `Se detectaron ${duplicadosEstrictos.length} duplicados con coincidencia estricta:\n\n${preview}${extra}\n\n` +
+      `Vas a procesar ${pares.length} duplicado(s) seleccionado(s).\n\n` +
       `Para cada uno:\n` +
       `  1. El PLU pasa al producto del SISTEMA (preserva tus precios)\n` +
       `  2. El producto del PDF se BORRA\n\n` +
@@ -269,11 +265,11 @@ export default function LimpiezaDuplicados() {
     )) return
 
     setBatchEnCurso(true)
-    setBatchProgreso({ procesados: 0, total: duplicadosEstrictos.length, exitos: 0, errores: 0 })
+    setBatchProgreso({ procesados: 0, total: pares.length, exitos: 0, errores: 0 })
     let exitos = 0, errores = 0
     const erroresDetalle = []
-    for (let i = 0; i < duplicadosEstrictos.length; i++) {
-      const { sinPlu, conPlu } = duplicadosEstrictos[i]
+    for (let i = 0; i < pares.length; i++) {
+      const { sinPlu, conPlu } = pares[i]
       try {
         const { error: e1 } = await supabase.from('precios').update({ codigo_balanza: null }).eq('id', conPlu.id)
         if (e1) throw e1
@@ -286,9 +282,10 @@ export default function LimpiezaDuplicados() {
         errores++
         erroresDetalle.push(`• "${sinPlu.nombre}" → ${e.message || e}`)
       }
-      setBatchProgreso({ procesados: i + 1, total: duplicadosEstrictos.length, exitos, errores })
+      setBatchProgreso({ procesados: i + 1, total: pares.length, exitos, errores })
     }
     setBatchEnCurso(false)
+    setSeleccionEstrictos(new Set())
     await cargar()
     let resumen = `✅ Limpieza completada: ${exitos} duplicados eliminados, ${errores} con error.`
     if (errores > 0) {
@@ -297,6 +294,22 @@ export default function LimpiezaDuplicados() {
     } else {
       showMsg(resumen, 'success')
     }
+  }
+
+  function toggleSeleccion(id) {
+    setSeleccionEstrictos(s => {
+      const n = new Set(s)
+      if (n.has(id)) n.delete(id); else n.add(id)
+      return n
+    })
+  }
+
+  function tildarTodos() {
+    setSeleccionEstrictos(new Set(duplicadosEstrictos.map(p => p.sinPlu.id)))
+  }
+
+  function destildarTodos() {
+    setSeleccionEstrictos(new Set())
   }
 
   // Batch: para cada producto sin PLU con candidato fuerte (>= umbralBatch),
@@ -446,21 +459,81 @@ export default function LimpiezaDuplicados() {
         </div>
       </div>
 
-      {/* Botón destacado: limpieza automática de alta confianza */}
+      {/* Panel: duplicados detectados con checkboxes para selección manual */}
       {duplicadosEstrictos.length > 0 && (
-        <div className="card" style={{ marginBottom: 16, background: 'linear-gradient(135deg, #1a2a1a, #2d5a2d)', border: '2px solid #7dff7d' }}>
-          <div style={{ fontSize: 18, fontWeight: 800, color: '#7dff7d', marginBottom: 8 }}>
-            🚀 Limpieza automática recomendada
+        <div className="card" style={{ marginBottom: 16, background: 'linear-gradient(135deg, #1a2a1a, #1a3a1a)', border: '2px solid #7dff7d' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: '#7dff7d' }}>
+              🟢 Duplicados detectados ({duplicadosEstrictos.length})
+            </div>
+            <button
+              onClick={() => setMostrarSeleccion(v => !v)}
+              style={{ padding: '6px 14px', background: 'transparent', border: '1px solid #7dff7d', color: '#7dff7d', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
+              {mostrarSeleccion ? '▲ Ocultar lista' : '▼ Mostrar lista para revisar'}
+            </button>
           </div>
           <p style={{ color: '#cfc', fontSize: 13, lineHeight: 1.5, marginBottom: 12 }}>
-            Detecté <strong>{duplicadosEstrictos.length} duplicados con alta confianza</strong>: productos del sistema que matchean exactamente con un PLU del PDF (mismo primer token, prefijo idéntico, o ya iguales). Click el botón y se eliminan todos preservando tus precios originales del sistema.
+            Tildá los que querés limpiar. Por cada tilde: el PLU pasa al producto del SISTEMA (preserva tus precios) y el producto del PDF se BORRA. Los que no tildes quedan como están.
           </p>
-          <button
-            onClick={limpiezaAltaConfianza}
-            disabled={batchEnCurso}
-            style={{ padding: '12px 24px', borderRadius: 8, border: 'none', background: '#7dff7d', color: '#000', cursor: batchEnCurso ? 'not-allowed' : 'pointer', fontWeight: 800, fontSize: 14, fontFamily: "'DM Sans',sans-serif", opacity: batchEnCurso ? 0.6 : 1 }}>
-            🚀 Limpiar los {duplicadosEstrictos.length} duplicados detectados
-          </button>
+
+          {mostrarSeleccion && (
+            <>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                <button onClick={tildarTodos} style={{ padding: '6px 12px', background: '#2d5a2d', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+                  ☑️ Tildar todos
+                </button>
+                <button onClick={destildarTodos} style={{ padding: '6px 12px', background: 'transparent', color: '#aaa', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+                  ☐ Destildar todos
+                </button>
+                <span style={{ alignSelf: 'center', color: 'var(--muted)', fontSize: 12 }}>
+                  {seleccionEstrictos.size} de {duplicadosEstrictos.length} tildados
+                </span>
+              </div>
+
+              <div style={{ maxHeight: 500, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8, background: 'rgba(0,0,0,0.2)' }}>
+                <table style={{ width: '100%', fontSize: 13 }}>
+                  <thead style={{ position: 'sticky', top: 0, background: '#1a2a1a' }}>
+                    <tr>
+                      <th style={{ width: 40, padding: '8px' }}></th>
+                      <th style={{ textAlign: 'left', padding: '8px' }}>Producto del SISTEMA (se conserva)</th>
+                      <th style={{ width: 80, padding: '8px' }}>PLU</th>
+                      <th style={{ textAlign: 'left', padding: '8px' }}>Producto del PDF (se BORRA)</th>
+                      <th style={{ padding: '8px' }}>Razón</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {duplicadosEstrictos.map(p => (
+                      <tr key={p.sinPlu.id} style={{ borderTop: '1px solid var(--border)', background: seleccionEstrictos.has(p.sinPlu.id) ? 'rgba(125,255,125,0.06)' : 'transparent' }}>
+                        <td style={{ textAlign: 'center', padding: '6px' }}>
+                          <input
+                            type="checkbox"
+                            checked={seleccionEstrictos.has(p.sinPlu.id)}
+                            onChange={() => toggleSeleccion(p.sinPlu.id)}
+                            style={{ width: 18, height: 18, cursor: 'pointer' }}
+                          />
+                        </td>
+                        <td style={{ padding: '6px' }}>{p.sinPlu.nombre}</td>
+                        <td style={{ padding: '6px', textAlign: 'center' }}>
+                          <span style={chip('var(--gold)')}>PLU {p.conPlu.codigo_balanza}</span>
+                        </td>
+                        <td style={{ padding: '6px', color: '#ff9999' }}>{p.conPlu.nombre}</td>
+                        <td style={{ padding: '6px', fontSize: 11, color: 'var(--muted)' }}>{p.razon}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                <button
+                  onClick={limpiezaSeleccionados}
+                  disabled={batchEnCurso || seleccionEstrictos.size === 0}
+                  style={{ padding: '12px 24px', borderRadius: 8, border: 'none', background: seleccionEstrictos.size === 0 ? '#444' : '#7dff7d', color: seleccionEstrictos.size === 0 ? '#888' : '#000', cursor: batchEnCurso || seleccionEstrictos.size === 0 ? 'not-allowed' : 'pointer', fontWeight: 800, fontSize: 14, fontFamily: "'DM Sans',sans-serif", opacity: batchEnCurso ? 0.6 : 1 }}>
+                  🚀 Limpiar los {seleccionEstrictos.size} duplicados tildados
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
 

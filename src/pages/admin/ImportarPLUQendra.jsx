@@ -156,7 +156,13 @@ export default function ImportarPLUQendra() {
     showMsg(`✅ CSV cargado: ${filas.length} filas. ${Object.keys(auto).length} matches automáticos.`, 'success')
   }
 
-  // Datos derivados
+  // Datos derivados — TODOS los productos (con o sin PLU), excluyendo ZZ_DUPLICADO
+  const todosLosProductos = useMemo(() =>
+    productos.filter(p => !p.nombre?.startsWith('ZZ_')),
+    [productos]
+  )
+
+  // Mantenemos `sinPLUDisponibles` para el pre-matching automático
   const sinPLUDisponibles = useMemo(() =>
     productos.filter(p => p.codigo_balanza == null && !p.nombre?.startsWith('ZZ_')),
     [productos]
@@ -177,22 +183,21 @@ export default function ImportarPLUQendra() {
 
   function candidatosParaPlu(filaCsv, query) {
     const q = (query || '').toLowerCase().trim()
-    // Si hay query, filtrar por substring (búsqueda manual del usuario)
+    // Mostramos TODOS los productos (incluso los que ya tienen otro PLU).
+    // Si Fabri elige uno que ya tiene PLU, el aplicar va a liberar el viejo
+    // antes de asignar el nuevo.
     if (q) {
-      return sinPLUDisponibles
+      return todosLosProductos
         .filter(p => p.nombre.toLowerCase().includes(q))
-        .slice(0, 30)
+        .slice(0, 50)
     }
-    // Sin query: ordenar por similitud al nombre del CSV (los más parecidos arriba)
-    return sinPLUDisponibles
+    return todosLosProductos
       .map(p => ({ ...p, _score: scoreSimilitud(p.nombre, filaCsv.nombre) }))
       .sort((a, b) => {
-        // Primero por similitud descendente
         if (b._score !== a._score) return b._score - a._score
-        // Después por nombre
         return a.nombre.localeCompare(b.nombre)
       })
-      .slice(0, 30)
+      .slice(0, 50)
   }
 
   async function aplicar() {
@@ -217,6 +222,18 @@ export default function ImportarPLUQendra() {
       const [pluStr, productoId] = asignacionesValidas[i]
       const plu = parseInt(pluStr, 10)
       try {
+        // 1. Si EL PLU ya está asignado a OTRO producto, liberarlo primero
+        const { data: existePlu } = await supabase.from('precios')
+          .select('id').eq('codigo_balanza', plu).neq('id', productoId).maybeSingle()
+        if (existePlu) {
+          await supabase.from('precios').update({ codigo_balanza: null }).eq('id', existePlu.id)
+        }
+        // 2. Si el producto destino YA TIENE otro PLU, también liberarlo
+        const prodDestino = getProducto(productoId)
+        if (prodDestino?.codigo_balanza != null && prodDestino.codigo_balanza !== plu) {
+          await supabase.from('precios').update({ codigo_balanza: null }).eq('id', productoId)
+        }
+        // 3. Asignar el PLU
         const { error } = await supabase.from('precios')
           .update({ codigo_balanza: plu, updated_at: new Date().toISOString() })
           .eq('id', productoId)
@@ -290,6 +307,9 @@ export default function ImportarPLUQendra() {
               ✕ Limpiar
             </button>
           )}
+          <button onClick={cargarProductos} style={{ padding: '8px 14px', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>
+            🔄 Recargar productos del sistema ({productos.length})
+          </button>
         </div>
       </div>
 
@@ -369,9 +389,10 @@ export default function ImportarPLUQendra() {
                               <option value="">— Sin asignar —</option>
                               {candidatos.map(p => {
                                 const pctTxt = p._score > 0 ? ` — ${Math.round(p._score * 100)}% match` : ''
+                                const pluTxt = p.codigo_balanza != null ? ` ⚠️ ya tiene PLU ${p.codigo_balanza}` : ''
                                 return (
                                   <option key={p.id} value={p.id}>
-                                    {p.nombre} ({p.categoria}){pctTxt}
+                                    {p.nombre} ({p.categoria}){pctTxt}{pluTxt}
                                   </option>
                                 )
                               })}
