@@ -682,6 +682,8 @@ export default function Precios() {
       {tab === 'importar_plu' && <ImportarPLUQendra />}
     </div>
   )
+}
+
 function PLUTab({ precios, ofertas = [] }) {
   const [msg, setMsg] = useState('')
 
