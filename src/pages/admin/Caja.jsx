@@ -14,6 +14,22 @@ import { decodificarEANBalanza, esCodigoBalanza } from '../../lib/balanzaEAN'
 
 const fmt = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
 
+// Categorías que por defecto NO se venden por kg (se venden por unidad/paquete)
+const CATEGORIAS_NO_PESABLES = new Set([
+  'almacen', 'bebidas',
+  'pollo_cajon', 'rebozado_cajon',
+  'bovino_caja_cb', 'bovino_caja_pt',
+])
+
+function esPesable(producto) {
+  if (!producto) return true
+  // Si el flag está explícito en BD, respetarlo
+  if (producto.pesable === false) return false
+  if (producto.pesable === true) return true
+  // Fallback por categoría
+  return !CATEGORIAS_NO_PESABLES.has(producto.categoria)
+}
+
 const CATEGORIAS = {
   bovino_corte: '🥩 Bovino Cortes',
   bovino_pieza: '🍖 Piezas',
@@ -112,8 +128,8 @@ export default function Caja() {
     // 2) Si no es código de balanza, intentar buscar por EAN común
     const prod = precios.find(p => p.ean === clean)
     if (prod) {
-      // Producto sin peso embebido — pedir cantidad
-      const cant = prompt(`Producto: ${prod.nombre}\n¿Cantidad/kg?`, '1')
+      const unidadLabel = esPesable(prod) ? 'kg' : 'unidades'
+      const cant = prompt(`Producto: ${prod.nombre}\n¿Cantidad en ${unidadLabel}?`, '1')
       if (cant && parseFloat(cant) > 0) {
         agregarItem(prod, parseFloat(cant))
       }
@@ -123,18 +139,22 @@ export default function Caja() {
     showMsg(`❌ Código ${clean} no reconocido`, 'error', 3000)
   }
 
-  function agregarItem(producto, kg, precioOverride = null) {
+  function agregarItem(producto, cantidad, precioOverride = null) {
     const precio = precioOverride || producto.precio_minorista || producto.precio_carniceria || 0
+    const pesable = esPesable(producto)
+    const cant = parseFloat(cantidad)
     setCarrito(c => [...c, {
       id: Date.now() + Math.random(),
       producto_id: producto.id,
       descripcion: producto.nombre,
       categoria: producto.categoria,
-      kg: parseFloat(kg),
+      kg: cant,            // se sigue llamando "kg" para no romper el resto; representa la cantidad
+      unidad: pesable ? 'kg' : 'u',
       precio: parseFloat(precio),
-      importe: parseFloat(kg) * parseFloat(precio),
+      importe: cant * parseFloat(precio),
     }])
-    showMsg(`✅ ${producto.nombre} — ${kg.toFixed(3)} kg`)
+    const unidadTxt = pesable ? `${cant.toFixed(3)} kg` : `${cant} u`
+    showMsg(`✅ ${producto.nombre} — ${unidadTxt}`)
   }
 
   // Cuando la balanza embebe el importe (no el peso), usamos esta función
@@ -181,7 +201,8 @@ export default function Caja() {
   }, [busqueda, precios])
 
   function agregarManual(producto) {
-    const cant = prompt(`Producto: ${producto.nombre}\n¿Cantidad/kg?`, '1')
+    const unidadLabel = esPesable(producto) ? 'kg' : 'unidades'
+    const cant = prompt(`Producto: ${producto.nombre}\n¿Cantidad en ${unidadLabel}?`, '1')
     if (cant && parseFloat(cant) > 0) {
       agregarItem(producto, parseFloat(cant))
       setMostrarBuscador(false)
@@ -407,8 +428,8 @@ export default function Caja() {
                   <thead style={{ position: 'sticky', top: 0, background: 'var(--bg)' }}>
                     <tr>
                       <th style={{ textAlign: 'left', fontSize: 10, color: 'var(--muted)', padding: '6px 4px' }}>PRODUCTO</th>
-                      <th style={{ textAlign: 'right', fontSize: 10, color: 'var(--muted)', padding: '6px 4px' }}>KG</th>
-                      <th style={{ textAlign: 'right', fontSize: 10, color: 'var(--muted)', padding: '6px 4px' }}>$/KG</th>
+                      <th style={{ textAlign: 'right', fontSize: 10, color: 'var(--muted)', padding: '6px 4px' }}>CANT</th>
+                      <th style={{ textAlign: 'right', fontSize: 10, color: 'var(--muted)', padding: '6px 4px' }}>PRECIO</th>
                       <th style={{ textAlign: 'right', fontSize: 10, color: 'var(--muted)', padding: '6px 4px' }}>IMPORTE</th>
                       <th style={{ width: 30 }} />
                     </tr>
@@ -421,11 +442,14 @@ export default function Caja() {
                           <div style={{ fontSize: 10, color: 'var(--muted)' }}>{CATEGORIAS[item.categoria] || item.categoria}</div>
                         </td>
                         <td style={{ textAlign: 'right', padding: '8px 4px' }}>
-                          <input
-                            type="number" step="0.001" value={item.kg}
-                            onChange={e => editarKg(item.id, e.target.value)}
-                            style={{ width: 70, textAlign: 'right', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '4px 6px', fontSize: 13 }}
-                          />
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'flex-end' }}>
+                            <input
+                              type="number" step={item.unidad === 'u' ? '1' : '0.001'} value={item.kg}
+                              onChange={e => editarKg(item.id, e.target.value)}
+                              style={{ width: 70, textAlign: 'right', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '4px 6px', fontSize: 13 }}
+                            />
+                            <span style={{ fontSize: 10, color: 'var(--muted)', minWidth: 18 }}>{item.unidad || 'kg'}</span>
+                          </div>
                         </td>
                         <td style={{ textAlign: 'right', padding: '8px 4px', fontSize: 13 }}>{fmt(item.precio)}</td>
                         <td style={{ textAlign: 'right', padding: '8px 4px', fontSize: 14, fontWeight: 700, color: 'var(--gold)' }}>{fmt(item.importe)}</td>

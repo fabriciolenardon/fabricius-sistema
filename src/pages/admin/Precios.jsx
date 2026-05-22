@@ -69,23 +69,53 @@ export default function Precios() {
   async function guardar() {
     if (!form.nombre.trim()) return mostrarMsg('❌ El nombre es obligatorio')
     setLoading(true)
+    const nuevoPlu = form.codigo_balanza === '' ? null : Number(form.codigo_balanza)
     const datos = {
       categoria: form.categoria, nombre: form.nombre,
       precio_carniceria: form.precio_carniceria === '' ? null : Number(form.precio_carniceria),
       precio_mayorista: form.precio_mayorista === '' ? null : Number(form.precio_mayorista),
       precio_minorista: form.precio_minorista === '' ? null : Number(form.precio_minorista),
-      codigo_balanza: form.codigo_balanza === '' ? null : Number(form.codigo_balanza),
+      codigo_balanza: nuevoPlu,
       dias_vencimiento: form.dias_vencimiento === '' ? 3 : Number(form.dias_vencimiento),
       descripcion_etiqueta: form.descripcion_etiqueta || null,
       pesable: form.pesable !== false,
     }
-    if (editando) {
-      await supabase.from('precios').update(datos).eq('id', editando)
-      mostrarMsg('✅ Precio actualizado')
-    } else {
-      await supabase.from('precios').insert(datos)
-      mostrarMsg('✅ Producto agregado')
+
+    // Si está asignando un PLU, verificar si ya está ocupado por OTRO producto
+    if (nuevoPlu != null) {
+      const { data: conflicto } = await supabase
+        .from('precios')
+        .select('id, nombre')
+        .eq('codigo_balanza', nuevoPlu)
+        .neq('id', editando || '00000000-0000-0000-0000-000000000000')
+        .maybeSingle()
+      if (conflicto) {
+        const ok = confirm(
+          `⚠️ El PLU ${nuevoPlu} ya está asignado a "${conflicto.nombre}".\n\n` +
+          `Si confirmás, ese PLU se LIBERA del otro producto y se asigna acá.\n\n` +
+          `¿Continuar?`
+        )
+        if (!ok) { setLoading(false); return }
+        // Liberar PLU del producto que lo tenía
+        const { error: eLib } = await supabase.from('precios').update({ codigo_balanza: null }).eq('id', conflicto.id)
+        if (eLib) { mostrarMsg('❌ Error liberando PLU: ' + eLib.message); setLoading(false); return }
+      }
     }
+
+    let error
+    if (editando) {
+      const r = await supabase.from('precios').update(datos).eq('id', editando)
+      error = r.error
+    } else {
+      const r = await supabase.from('precios').insert(datos)
+      error = r.error
+    }
+    if (error) {
+      mostrarMsg('❌ Error al guardar: ' + error.message)
+      setLoading(false)
+      return
+    }
+    mostrarMsg(editando ? '✅ Precio actualizado' : '✅ Producto agregado')
     setForm(VACIO); setEditando(null)
     await cargar(); setLoading(false)
   }
