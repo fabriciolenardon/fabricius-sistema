@@ -6,7 +6,7 @@ import { supabase } from '../../lib/supabase'
 const navItems = [
   { to: '/admin/dashboard',   icon: '📊', label: 'Dashboard' },
   { to: '/admin/caja',        icon: '💵', label: 'Caja' },
-  { to: '/admin/ventas', icon: '🛒', label: 'Ventas' },
+  { to: '/admin/ventas', icon: '📋', label: 'Mayorista' },
   { to: '/admin/deposito',    icon: '🏭', label: 'Depósito' },
   { to: '/admin/precios',     icon: '💲', label: 'Precios' },
   { to: '/admin/etiquetas',   icon: '🏷️', label: 'Etiquetas' },

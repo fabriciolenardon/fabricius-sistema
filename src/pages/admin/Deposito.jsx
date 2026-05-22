@@ -62,12 +62,11 @@ export function Deposito() {
   return (
     <div>
       <div className="page-title">DEPÓSITO</div>
-      <div className="page-sub">Stock, entradas, despachos, desposte y proveedores</div>
+      <div className="page-sub">Stock, entradas, desposte, piezas y proveedores</div>
       {alert && <div className={`alert alert-${alert?.type || 'success'}`}>{alert?.msg || alert}</div>}
       <div style={{ display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap' }}>
         {[
           { id: 'entradas', label: '📥 Entradas' },
-          { id: 'salidas', label: '📤 Despachos' },
           { id: 'desposte', label: '🔪 Desposte' },
           { id: 'piezas', label: '🥩 Piezas' },
           { id: 'remitos', label: '🧾 Remitos' },
@@ -80,8 +79,7 @@ export function Deposito() {
         ))}
       </div>
       {tab === 'entradas' && <EntradaForm onSaved={() => {}} showAlert={showAlert} proveedores={proveedores} />}
-      {tab === 'salidas' && <SalidaForm onSaved={() => {}} showAlert={showAlert} onRemito={setRemitoActual} setTab={setTab} />}
-        {tab === 'desposte' && <DesposteTab key={tab} onSaved={() => {}} />}    
+        {tab === 'desposte' && <DesposteTab key={tab} onSaved={() => {}} />}
 {tab === 'piezas' && <PiezasTab key={tab} />}
 {tab === 'remitos' && <RemitosTab remitoActual={remitoActual} />}
       {tab === 'proveedores' && <ProveedoresTab />}
@@ -1330,7 +1328,7 @@ async function eliminar(entrada) {
   )
 }
 
-function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
+export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   const [form, setForm] = useState({ destino: 'MITRE', clienteId: '', clienteNombre: '', domicilio: '', fecha: new Date().toISOString().split('T')[0], categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
   const [items, setItems] = useState([])
   const [todosPrecios, setTodosPrecios] = useState([])
@@ -1748,7 +1746,7 @@ for (const item of items) {
   )
 }
 
-function RemitosTab({ remitoActual }) {
+export function RemitosTab({ remitoActual }) {
   const [remitos, setRemitos] = useState([])
   const [seleccionado, setSeleccionado] = useState(remitoActual)
   const [anulando, setAnulando] = useState(false)

@@ -1,3 +1,4 @@
+// Precios — gestión completa de listas, PLUs e importadores
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import LimpiezaDuplicados from './LimpiezaDuplicados'
