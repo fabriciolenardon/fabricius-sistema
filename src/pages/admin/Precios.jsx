@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
+import LimpiezaDuplicados from './LimpiezaDuplicados'
 const CATEGORIAS = {
   bovino_mr: '🐄 Media Reses',
   bovino_corte: '🥩 Bovinos — Cortes',
@@ -265,6 +266,7 @@ export default function Precios() {
         {tabBtn('ofertas', `🏷️ Ofertas${ofertasVigentes.length > 0 ? ` (${ofertasVigentes.length})` : ''}`)}
         {tabBtn('chat', '🤖 Asistente IA')}
 {tabBtn('plu', '🏷️ PLU / Balanza')}
+{tabBtn('limpieza', '🧹 Limpieza duplicados')}
       </div>
       {msg && <div style={{ background: msg.includes('❌') ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${msg.includes('❌') ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: msg.includes('❌') ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>{msg}</div>}
 
@@ -673,7 +675,9 @@ export default function Precios() {
 
      {tab === 'plu' && (
   <PLUTab precios={precios} ofertas={ofertas} />
-)}    </div>
+)}
+      {tab === 'limpieza' && <LimpiezaDuplicados />}
+    </div>
   )
 function PLUTab({ precios, ofertas = [] }) {
   const [plus, setPlus] = useState([])
