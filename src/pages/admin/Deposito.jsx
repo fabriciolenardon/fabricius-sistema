@@ -1070,17 +1070,26 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     setHistorial(data || [])
   }
 
-  // Tipos que vienen en unidades discretas (cajones, cajas, almacén, bebidas).
-  // Para estos, el campo "Kg" representa los KG POR UNIDAD (o 1 para productos
-  // por unidad) y se multiplica por la cantidad de unidades.
-  // Para almacén/bebidas: poner Kg=1 y en Cantidad la cantidad de unidades.
+  // Tipos que vienen en unidades discretas (cajones, cajas).
+  // Para estos, el campo "Kg" representa los KG POR UNIDAD y se multiplica
+  // por la cantidad de unidades.
   const TIPOS_EN_UNIDADES = ['pollo', 'caja_cb', 'caja_pt', 'almacen', 'bebidas']
 
+  // Tipos que son por unidad PURA (no se pesan, no se manejan en kg).
+  // Para estos no se muestra Kg ni Precio/kg — solo Cantidad e Importe total.
+  // El cálculo interno usa Kg=1 para sumar las unidades al stock directo.
+  const TIPOS_SOLO_UNIDADES = ['almacen', 'bebidas']
+  const esSoloUnidades = TIPOS_SOLO_UNIDADES.includes(form.tipo)
+
   async function guardar() {
-    if (!form.tipo || !form.proveedor || !form.kg) { showAlert({ type: 'error', msg: 'Completá los campos requeridos' }); return }
+    const esSoloUnid = TIPOS_SOLO_UNIDADES.includes(form.tipo)
+    if (!form.tipo || !form.proveedor) { showAlert({ type: 'error', msg: 'Completá los campos requeridos' }); return }
+    if (esSoloUnid && !form.cantidad) { showAlert({ type: 'error', msg: 'Ingresá la cantidad de unidades' }); return }
+    if (!esSoloUnid && !form.kg) { showAlert({ type: 'error', msg: 'Completá los campos requeridos' }); return }
     const esEnUnidades = TIPOS_EN_UNIDADES.includes(form.tipo)
     const cantidad = esEnUnidades ? Math.max(1, parseInt(form.cantidad) || 1) : 1
-    const kgUnidad = parseFloat(form.kg) || 0
+    // Para almacén/bebidas: kg por unidad = 1, así la cantidad se suma directo al stock
+    const kgUnidad = esSoloUnid ? 1 : (parseFloat(form.kg) || 0)
     const kgTotal = kgUnidad * cantidad
     const kgReal = kgTotal * (1 - (parseFloat(form.merma) || 0) / 100)
     const importe = form.tipo === 'bovino_mr'
@@ -1227,13 +1236,14 @@ async function eliminar(entrada) {
         </div>
         {TIPOS_EN_UNIDADES.includes(form.tipo) && (
           <div className="form-row">
-            <div className="form-group"><label>Cantidad de unidades</label>
-              <input type="number" min="1" step="1" placeholder="Ej: 14" value={form.cantidad} onChange={e => setForm(f => ({ ...f, cantidad: e.target.value }))} style={{ borderColor: 'var(--gold)' }} />
+            <div className="form-group"><label>{esSoloUnidades ? '📦 Cantidad de unidades' : 'Cantidad de unidades'}</label>
+              <input type="number" min="1" step="1" placeholder={esSoloUnidades ? 'Ej: 24' : 'Ej: 14'} value={form.cantidad} onChange={e => setForm(f => ({ ...f, cantidad: e.target.value }))} style={{ borderColor: 'var(--gold)' }} />
             </div>
             <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end' }}>
               <div style={{ fontSize: 12, color: 'var(--muted)', paddingBottom: 8 }}>
                 {(() => {
                   const cant = Math.max(1, parseInt(form.cantidad) || 1)
+                  if (esSoloUnidades) return `📦 Se sumarán ${cant} unidades al stock`
                   const kgU = parseFloat(form.kg) || 0
                   return kgU > 0 ? `📦 Total: ${cant} × ${kgU} kg = ${(cant * kgU).toFixed(1)} kg al stock` : '📦 Ingresá kg por unidad para ver el total'
                 })()}
@@ -1241,14 +1251,16 @@ async function eliminar(entrada) {
             </div>
           </div>
         )}
-        <div className="form-row">
-          <div className="form-group"><label>{TIPOS_EN_UNIDADES.includes(form.tipo) ? 'Kg por unidad' : 'Kg'}</label>
-            <input type="number" step="0.1" placeholder="0" value={form.kg} onChange={e => setForm(f => ({ ...f, kg: e.target.value }))} />
+        {!esSoloUnidades && (
+          <div className="form-row">
+            <div className="form-group"><label>{TIPOS_EN_UNIDADES.includes(form.tipo) ? 'Kg por unidad' : 'Kg'}</label>
+              <input type="number" step="0.1" placeholder="0" value={form.kg} onChange={e => setForm(f => ({ ...f, kg: e.target.value }))} />
+            </div>
+            <div className="form-group"><label>Precio/kg ($)</label>
+              <input type="number" value={form.precioKg} onChange={e => setForm(f => ({ ...f, precioKg: e.target.value }))} placeholder="Precio por kg" />
+            </div>
           </div>
-          <div className="form-group"><label>Precio/kg ($)</label>
-            <input type="number" value={form.precioKg} onChange={e => setForm(f => ({ ...f, precioKg: e.target.value }))} placeholder="Precio por kg" />
-          </div>
-        </div>
+        )}
         <div className="form-row">
           {form.tipo === 'bovino_mr' && (
             <div className="form-group"><label>Merma % (opcional)</label>
