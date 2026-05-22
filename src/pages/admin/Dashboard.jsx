@@ -495,7 +495,11 @@ export default function Dashboard() {
             {/* Tarjeta de stock disponible */}
             <div style={{ background: detalleAbierto.bajo ? '#3a1a1a' : 'linear-gradient(135deg, var(--surface2) 0%, var(--surface) 100%)', border: `2px solid ${detalleAbierto.bajo ? 'var(--red-light)' : 'var(--gold)'}`, borderRadius: 12, padding: '18px 22px', marginBottom: 20, textAlign: 'center' }}>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Stock disponible</div>
-              <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 48, color: detalleAbierto.bajo ? 'var(--red-light)' : 'var(--gold)' }}>{(detalleAbierto.stockKg || 0).toFixed(1)} kg</div>
+              <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 48, color: detalleAbierto.bajo ? 'var(--red-light)' : 'var(--gold)' }}>
+                {(detalleAbierto.tiposEntradas && (detalleAbierto.tiposEntradas[0] === 'almacen' || detalleAbierto.tiposEntradas[0] === 'bebidas'))
+                  ? Math.round(detalleAbierto.stockKg || 0) + ' u'
+                  : (detalleAbierto.stockKg || 0).toFixed(1) + ' kg'}
+              </div>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{detalleAbierto.aprox}</div>
               {detalleAbierto.bajo && <div style={{ fontSize: 12, color: 'var(--red-light)', fontWeight: 700, marginTop: 6 }}>⚠️ Stock bajo</div>}
             </div>
@@ -512,16 +516,20 @@ export default function Dashboard() {
                   ) : (
                     <div style={{ maxHeight: 380, overflowY: 'auto' }}>
                       <table style={{ fontSize: 12 }}>
-                        <thead><tr><th>Fecha</th><th>Descripción</th><th>Proveedor</th><th style={{ textAlign: 'right' }}>Kg</th></tr></thead>
+                        <thead><tr><th>Fecha</th><th>Descripción</th><th>Proveedor</th><th style={{ textAlign: 'right' }}>{(detalleAbierto.tiposEntradas && (detalleAbierto.tiposEntradas[0] === 'almacen' || detalleAbierto.tiposEntradas[0] === 'bebidas')) ? 'Unid.' : 'Kg'}</th></tr></thead>
                         <tbody>
-                          {detalleEntradas.map(e => (
-                            <tr key={e.id}>
-                              <td style={{ whiteSpace: 'nowrap' }}>{e.fecha}</td>
-                              <td>{e.descripcion}</td>
-                              <td style={{ color: 'var(--muted)' }}>{e.proveedor_nombre || '—'}</td>
-                              <td style={{ textAlign: 'right', color: 'var(--green)', fontWeight: 600 }}>{(e.kg_real || e.kg || 0).toFixed(1)}</td>
-                            </tr>
-                          ))}
+                          {detalleEntradas.map(e => {
+                            const esUnid = detalleAbierto.tiposEntradas && (detalleAbierto.tiposEntradas[0] === 'almacen' || detalleAbierto.tiposEntradas[0] === 'bebidas')
+                            const val = e.kg_real || e.kg || 0
+                            return (
+                              <tr key={e.id}>
+                                <td style={{ whiteSpace: 'nowrap' }}>{e.fecha}</td>
+                                <td>{e.descripcion}</td>
+                                <td style={{ color: 'var(--muted)' }}>{e.proveedor_nombre || '—'}</td>
+                                <td style={{ textAlign: 'right', color: 'var(--green)', fontWeight: 600 }}>{esUnid ? Math.round(val) + ' u' : val.toFixed(1)}</td>
+                              </tr>
+                            )
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -536,17 +544,21 @@ export default function Dashboard() {
                   ) : (
                     <div style={{ maxHeight: 380, overflowY: 'auto' }}>
                       <table style={{ fontSize: 12 }}>
-                        <thead><tr><th>Fecha</th><th>Descripción</th><th>Cliente</th><th style={{ textAlign: 'right' }}>Kg</th><th style={{ textAlign: 'right' }}>Total</th></tr></thead>
+                        <thead><tr><th>Fecha</th><th>Descripción</th><th>Cliente</th><th style={{ textAlign: 'right' }}>{(detalleAbierto.tiposEntradas && (detalleAbierto.tiposEntradas[0] === 'almacen' || detalleAbierto.tiposEntradas[0] === 'bebidas')) ? 'Unid.' : 'Kg'}</th><th style={{ textAlign: 'right' }}>Total</th></tr></thead>
                         <tbody>
-                          {detalleSalidas.map(s => (
-                            <tr key={s.id}>
-                              <td style={{ whiteSpace: 'nowrap' }}>{s.fecha}</td>
-                              <td>{s.descripcion}</td>
-                              <td style={{ color: 'var(--muted)' }}>{s.cliente_nombre || '—'}</td>
-                              <td style={{ textAlign: 'right', color: 'var(--red-light)', fontWeight: 600 }}>{(s.kg || 0).toFixed(1)}</td>
-                              <td style={{ textAlign: 'right', color: 'var(--gold)' }}>${Math.round(s.total || 0).toLocaleString('es-AR')}</td>
-                            </tr>
-                          ))}
+                          {detalleSalidas.map(s => {
+                            const esUnid = detalleAbierto.tiposEntradas && (detalleAbierto.tiposEntradas[0] === 'almacen' || detalleAbierto.tiposEntradas[0] === 'bebidas')
+                            const val = s.kg || 0
+                            return (
+                              <tr key={s.id}>
+                                <td style={{ whiteSpace: 'nowrap' }}>{s.fecha}</td>
+                                <td>{s.descripcion}</td>
+                                <td style={{ color: 'var(--muted)' }}>{s.cliente_nombre || '—'}</td>
+                                <td style={{ textAlign: 'right', color: 'var(--red-light)', fontWeight: 600 }}>{esUnid ? Math.round(val) + ' u' : val.toFixed(1)}</td>
+                                <td style={{ textAlign: 'right', color: 'var(--gold)' }}>${Math.round(s.total || 0).toLocaleString('es-AR')}</td>
+                              </tr>
+                            )
+                          })}
                         </tbody>
                       </table>
                     </div>
