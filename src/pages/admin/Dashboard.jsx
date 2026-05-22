@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
+import DashboardCajaWidget from './DashboardCajaWidget'
 
 function fmt(n) {
   const abs = Math.abs(Math.round(n || 0))
@@ -189,6 +190,9 @@ export default function Dashboard() {
         <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>Sistema de gestión · Carnicerías Fabricius · Río Primero, Córdoba</div>
       </div>
+
+      {/* WIDGET CAJA RÁPIDA — Ventas minoristas del día */}
+      <DashboardCajaWidget />
 
       {/* ALERTAS */}
       {(chequesPorVencer.length > 0 || totalDeuda > 0) && (
