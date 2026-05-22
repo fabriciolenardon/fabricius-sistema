@@ -48,6 +48,64 @@ function similitudJaccard(tokensA, tokensB) {
   return union > 0 ? inter / union : 0
 }
 
+// === DETECCIÓN ESTRICTA DE DUPLICADOS (alta confianza) ===
+// Normaliza nombres: mayúsculas, sin acentos, sin contenido entre paréntesis,
+// signos a espacios, espacios colapsados, trim.
+function normalizarFuerte(nombre) {
+  return (nombre || '')
+    .toUpperCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/[^A-Z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// Considera "iguales" dos tokens si difieren en sufijo corto (singular/plural,
+// COSTILLA vs COSTILLAR). Exige al menos 6 chars de prefijo común y diff ≤ 2.
+function tokensRaizIgual(a, b) {
+  if (a === b) return true
+  if (a.length < 5 || b.length < 5) return false
+  const prefLen = Math.min(a.length, b.length) - 1
+  if (prefLen < 6) return false
+  if (a.slice(0, prefLen) !== b.slice(0, prefLen)) return false
+  return Math.abs(a.length - b.length) <= 2
+}
+
+// Detecta si dos nombres son "muy probablemente el mismo producto".
+// Devuelve { match: bool, razon: string }.
+function esDuplicadoEstricto(nombreA, nombreB) {
+  const na = normalizarFuerte(nombreA)
+  const nb = normalizarFuerte(nombreB)
+  if (!na || !nb) return { match: false }
+  if (na === nb) return { match: true, razon: 'nombre idéntico' }
+
+  // Tokens significativos (4+ letras): descarta "DE", "CON", "Y", etc.
+  const ta = na.split(' ').filter(t => t.length >= 4)
+  const tb = nb.split(' ').filter(t => t.length >= 4)
+  if (ta.length === 0 || tb.length === 0) return { match: false }
+
+  // Prefijo de la cadena entera: uno es prefijo del otro
+  if (na.startsWith(nb + ' ') || nb.startsWith(na + ' ')) {
+    return { match: true, razon: 'prefijo exacto' }
+  }
+  if (na.startsWith(nb) && (na.length - nb.length) <= 3) return { match: true, razon: 'prefijo' }
+  if (nb.startsWith(na) && (nb.length - na.length) <= 3) return { match: true, razon: 'prefijo' }
+
+  // Primer token significativo coincide (con tolerancia singular/plural)
+  // Y los segundos también coinciden, O uno tiene solo 1 token.
+  const t1Igual = tokensRaizIgual(ta[0], tb[0])
+  if (!t1Igual) return { match: false }
+
+  if (ta.length === 1 || tb.length === 1) {
+    return { match: true, razon: 'mismo primer token, uno es de 1 palabra' }
+  }
+  if (tokensRaizIgual(ta[1], tb[1])) {
+    return { match: true, razon: 'primeros 2 tokens coinciden' }
+  }
+  return { match: false }
+}
+
 export default function LimpiezaDuplicados() {
   const [productos, setProductos] = useState([])
   const [loading, setLoading] = useState(true)
@@ -99,6 +157,21 @@ export default function LimpiezaDuplicados() {
       .map(p => ({ ...p, _tokens: tokenizar(p.nombre) })),
     [productos]
   )
+
+  // Duplicados de ALTA CONFIANZA (detección estricta)
+  const duplicadosEstrictos = useMemo(() => {
+    const pares = []
+    for (const sp of sinPLU) {
+      for (const cp of conPLU) {
+        const det = esDuplicadoEstricto(sp.nombre, cp.nombre)
+        if (det.match) {
+          pares.push({ sinPlu: sp, conPlu: cp, razon: det.razon })
+          break // un sin-PLU solo se empareja con un con-PLU
+        }
+      }
+    }
+    return pares
+  }, [sinPLU, conPLU])
 
   // Para cada producto sin PLU, calcular sus mejores candidatos
   const filas = useMemo(() => {
@@ -172,6 +245,58 @@ export default function LimpiezaDuplicados() {
       showMsg('❌ Error: ' + (e.message || e), 'error')
     }
     setAccionEnCurso(null)
+  }
+
+  // Batch específico: limpia SOLO los duplicados de alta confianza detectados
+  // por la heurística estricta. Migra PLU al viejo y borra el del PDF.
+  async function limpiezaAltaConfianza() {
+    if (duplicadosEstrictos.length === 0) {
+      showMsg('No hay duplicados de alta confianza para limpiar.', 'error')
+      return
+    }
+    const preview = duplicadosEstrictos.slice(0, 8).map(p =>
+      `  • "${p.sinPlu.nombre}" ≈ PLU ${p.conPlu.codigo_balanza} "${p.conPlu.nombre}"`
+    ).join('\n')
+    const extra = duplicadosEstrictos.length > 8 ? `\n  ...y ${duplicadosEstrictos.length - 8} más` : ''
+
+    if (!confirm(
+      `🚀 LIMPIEZA AUTOMÁTICA — ALTA CONFIANZA\n\n` +
+      `Se detectaron ${duplicadosEstrictos.length} duplicados con coincidencia estricta:\n\n${preview}${extra}\n\n` +
+      `Para cada uno:\n` +
+      `  1. El PLU pasa al producto del SISTEMA (preserva tus precios)\n` +
+      `  2. El producto del PDF se BORRA\n\n` +
+      `¿Continuar?`
+    )) return
+
+    setBatchEnCurso(true)
+    setBatchProgreso({ procesados: 0, total: duplicadosEstrictos.length, exitos: 0, errores: 0 })
+    let exitos = 0, errores = 0
+    const erroresDetalle = []
+    for (let i = 0; i < duplicadosEstrictos.length; i++) {
+      const { sinPlu, conPlu } = duplicadosEstrictos[i]
+      try {
+        const { error: e1 } = await supabase.from('precios').update({ codigo_balanza: null }).eq('id', conPlu.id)
+        if (e1) throw e1
+        const { error: e2 } = await supabase.from('precios').update({ codigo_balanza: conPlu.codigo_balanza }).eq('id', sinPlu.id)
+        if (e2) throw e2
+        const { error: e3 } = await supabase.from('precios').delete().eq('id', conPlu.id)
+        if (e3) throw e3
+        exitos++
+      } catch (e) {
+        errores++
+        erroresDetalle.push(`• "${sinPlu.nombre}" → ${e.message || e}`)
+      }
+      setBatchProgreso({ procesados: i + 1, total: duplicadosEstrictos.length, exitos, errores })
+    }
+    setBatchEnCurso(false)
+    await cargar()
+    let resumen = `✅ Limpieza completada: ${exitos} duplicados eliminados, ${errores} con error.`
+    if (errores > 0) {
+      resumen += '\n\nDetalle:\n' + erroresDetalle.slice(0, 10).join('\n')
+      alert(resumen)
+    } else {
+      showMsg(resumen, 'success')
+    }
   }
 
   // Batch: para cada producto sin PLU con candidato fuerte (>= umbralBatch),
@@ -321,9 +446,27 @@ export default function LimpiezaDuplicados() {
         </div>
       </div>
 
+      {/* Botón destacado: limpieza automática de alta confianza */}
+      {duplicadosEstrictos.length > 0 && (
+        <div className="card" style={{ marginBottom: 16, background: 'linear-gradient(135deg, #1a2a1a, #2d5a2d)', border: '2px solid #7dff7d' }}>
+          <div style={{ fontSize: 18, fontWeight: 800, color: '#7dff7d', marginBottom: 8 }}>
+            🚀 Limpieza automática recomendada
+          </div>
+          <p style={{ color: '#cfc', fontSize: 13, lineHeight: 1.5, marginBottom: 12 }}>
+            Detecté <strong>{duplicadosEstrictos.length} duplicados con alta confianza</strong>: productos del sistema que matchean exactamente con un PLU del PDF (mismo primer token, prefijo idéntico, o ya iguales). Click el botón y se eliminan todos preservando tus precios originales del sistema.
+          </p>
+          <button
+            onClick={limpiezaAltaConfianza}
+            disabled={batchEnCurso}
+            style={{ padding: '12px 24px', borderRadius: 8, border: 'none', background: '#7dff7d', color: '#000', cursor: batchEnCurso ? 'not-allowed' : 'pointer', fontWeight: 800, fontSize: 14, fontFamily: "'DM Sans',sans-serif", opacity: batchEnCurso ? 0.6 : 1 }}>
+            🚀 Limpiar los {duplicadosEstrictos.length} duplicados detectados
+          </button>
+        </div>
+      )}
+
       {/* Panel de acciones masivas */}
       <div className="card" style={{ marginBottom: 16, background: 'linear-gradient(180deg, rgba(255,209,122,0.06), rgba(255,209,122,0))', border: '1px solid #6a5a2a' }}>
-        <div className="card-title">⚡ Acciones masivas</div>
+        <div className="card-title">⚡ Acciones masivas (por umbral de similitud)</div>
         <p style={{ color: 'var(--muted)', fontSize: 13, lineHeight: 1.5, marginBottom: 12 }}>
           Aplica la misma acción a TODOS los productos que tengan al menos un candidato con similitud ≥ umbral. Procesa de a uno secuencialmente. Si algo falla, sigue con los demás y te muestra el detalle al final.
         </p>
