@@ -156,6 +156,8 @@ export default function Dashboard() {
   const stockBrosas = Math.max(0, stock.bovino_brosa || 0)
   const stockEmbutido = Math.max(0, stock.embutido || 0)
   const stockRebozado = Math.max(0, stock.rebozado || 0)
+  const stockAlmacen = Math.max(0, stock.almacen || 0)
+  const stockBebidas = Math.max(0, stock.bebidas || 0)
 
   // Cantidad de productos por categoría (almacén y bebidas son por unidad, no por kg)
   const cantAlmacen = precios.filter(p => p.categoria === 'almacen').length
@@ -330,8 +332,8 @@ export default function Dashboard() {
             { label: '🫀 Brosas', valor: stockBrosas.toFixed(1) + ' kg', color: 'var(--amber)', aprox: 'al peso', bajo: stockBrosas < 20, stockKg: stockBrosas, tiposEntradas: ['bovino_brosa'], tiposSalidas: ['bovino_brosa'] },
             { label: '🌭 Embutidos', valor: stockEmbutido.toFixed(1) + ' kg', color: 'var(--purple)', aprox: 'al peso', bajo: stockEmbutido < 20, stockKg: stockEmbutido, tiposEntradas: ['embutido'], tiposSalidas: ['embutido'] },
             { label: '🧊 Rebozados/Congelados', valor: stockRebozado.toFixed(1) + ' kg', color: 'var(--blue)', aprox: 'al peso', bajo: stockRebozado < 20, stockKg: stockRebozado, tiposEntradas: ['rebozado'], tiposSalidas: ['rebozado'] },
-            { label: '🛒 Almacén', valor: cantAlmacen + ' productos', color: 'var(--gold)', aprox: 'cargados en sistema', bajo: false, esConteo: true },
-            { label: '🥤 Bebidas', valor: cantBebidas + ' productos', color: 'var(--blue)', aprox: 'cargados en sistema', bajo: false, esConteo: true },
+            { label: '🛒 Almacén', valor: Math.round(stockAlmacen) + ' u', color: 'var(--gold)', aprox: cantAlmacen + ' productos cargados', bajo: stockAlmacen < 10, stockKg: stockAlmacen, tiposEntradas: ['almacen'], tiposSalidas: ['almacen'] },
+            { label: '🥤 Bebidas', valor: Math.round(stockBebidas) + ' u', color: 'var(--blue)', aprox: cantBebidas + ' productos cargados', bajo: stockBebidas < 10, stockKg: stockBebidas, tiposEntradas: ['bebidas'], tiposSalidas: ['bebidas'] },
           ].map(s => (
             <div key={s.label} style={{ background: s.bajo ? '#3a1a1a' : 'var(--surface2)', border: `1px solid ${s.bajo ? 'var(--red-light)' : 'var(--border)'}`, borderRadius: 10, padding: '12px 14px', textAlign: 'center', cursor: 'pointer', transition: 'transform 0.1s, border-color 0.1s' }} onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--gold)'} onMouseLeave={e => e.currentTarget.style.borderColor = s.bajo ? 'var(--red-light)' : 'var(--border)'} onClick={() => { if (s.esConteo) navigate('/admin/precios'); else if (s.tiposEntradas) abrirDetalle(s) }}>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>{s.label}</div>
