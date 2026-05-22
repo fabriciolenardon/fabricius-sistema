@@ -11,6 +11,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { decodificarEANBalanza, esCodigoBalanza } from '../../lib/balanzaEAN'
+import HistorialCaja from './HistorialCaja'
 
 const fmt = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
 
@@ -56,6 +57,7 @@ export default function Caja() {
   const [mostrarCierre, setMostrarCierre] = useState(false)
   const [ultimaVenta, setUltimaVenta] = useState(null)
   const [ventasHoy, setVentasHoy] = useState([])
+  const [vistaCaja, setVistaCaja] = useState('vender') // 'vender' | 'historial'
 
   const codigoRef = useRef(null)
   const busquedaRef = useRef(null)
@@ -356,8 +358,36 @@ export default function Caja() {
     <div style={{ minHeight: 'calc(100vh - 100px)' }}>
       <div className="page-title">🛒 CAJA RÁPIDA</div>
       <div className="page-sub">
-        Escaneá la etiqueta de la balanza · F2 buscar · F4 cobrar · ESC cancelar
+        {vistaCaja === 'vender'
+          ? 'Escaneá la etiqueta de la balanza · F2 buscar · F4 cobrar · ESC cancelar'
+          : 'Historial de ventas minoristas con desglose por categoría y forma de pago'}
       </div>
+
+      {/* Tabs Vender / Historial */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, marginTop: 8 }}>
+        <button onClick={() => setVistaCaja('vender')}
+          style={{
+            padding: '9px 20px', borderRadius: 8, border: 'none',
+            background: vistaCaja === 'vender' ? 'var(--gold)' : 'var(--surface)',
+            color: vistaCaja === 'vender' ? '#000' : 'var(--muted)',
+            cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: "'DM Sans',sans-serif",
+          }}>
+          💵 Vender
+        </button>
+        <button onClick={() => setVistaCaja('historial')}
+          style={{
+            padding: '9px 20px', borderRadius: 8, border: 'none',
+            background: vistaCaja === 'historial' ? 'var(--gold)' : 'var(--surface)',
+            color: vistaCaja === 'historial' ? '#000' : 'var(--muted)',
+            cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: "'DM Sans',sans-serif",
+          }}>
+          📊 Historial
+        </button>
+      </div>
+
+      {vistaCaja === 'historial' && <HistorialCaja />}
+      {/* Vista vender: se oculta con display:none para no desmontar el estado/foco */}
+      <div style={{ display: vistaCaja === 'vender' ? 'block' : 'none' }}>
 
       {msg && (
         <div style={{
@@ -685,6 +715,7 @@ export default function Caja() {
           </div>
         </div>
       )}
+      </div>
     </div>
   )
 }
