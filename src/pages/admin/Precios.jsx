@@ -683,59 +683,22 @@ export default function Precios() {
     </div>
   )
 function PLUTab({ precios, ofertas = [] }) {
-  const [plus, setPlus] = useState([])
-  const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState('')
 
-  useEffect(() => { cargarPlus() }, [precios])
-
- async function cargarPlus() {
-    setLoading(true)
-    const { data: plusGuardados } = await supabase.from('plu').select('*').order('codigo')
-    const guardados = plusGuardados || []
-
-    // Detectar productos nuevos que no tienen PLU asignado
-    const idsConPlu = new Set(guardados.map(p => p.precio_id))
-    const productosSinPlu = precios.filter(p =>
-      p.precio_minorista > 0 && !idsConPlu.has(p.id)
-    )
-
-    // Asignar códigos nuevos a partir del último usado
-    const maxCodigo = guardados.reduce((max, p) => {
-      const n = parseInt(p.codigo, 10) || 0
-      return n > max ? n : max
-    }, 0)
-
-    const nuevosPlus = productosSinPlu.map((p, i) => ({
-      codigo: String(maxCodigo + i + 1).padStart(4, '0'),
+  // PLUs REALES: productos en `precios` que tienen codigo_balanza asignado.
+  // El código viene de la asignación que hizo Fabri (vía Importar PLUs CSV
+  // o editando manualmente desde Administrar). Ordenados por PLU.
+  const plus = (precios || [])
+    .filter(p => p.codigo_balanza != null && !p.nombre?.startsWith('ZZ_'))
+    .map(p => ({
+      codigo: String(p.codigo_balanza).padStart(4, '0'),
+      codigoNum: p.codigo_balanza,
       nombre: p.nombre,
-      precio: p.precio_minorista,
+      precio: p.precio_minorista || 0,
       categoria: p.categoria,
-      precio_id: p.id
+      precio_id: p.id,
     }))
-
-    // Combinar guardados + nuevos
-    const todos = [...guardados, ...nuevosPlus].sort((a, b) =>
-      (a.codigo || '').localeCompare(b.codigo || '')
-    )
-    setPlus(todos)
-    setLoading(false)
-  }
-  async function guardarTodos() {
-    await supabase.from('plu').delete().neq('id', '00000000-0000-0000-0000-000000000000')
-    for (const p of plus) {
-      await supabase.from('plu').insert({
-        codigo: p.codigo,
-        nombre: p.nombre,
-        precio: p.precio,
-        categoria: p.categoria,
-        precio_id: p.precio_id
-      })
-    }
-    setMsg('✅ PLU guardados correctamente')
-    setTimeout(() => setMsg(''), 3000)
-    cargarPlus()
-  }
+    .sort((a, b) => a.codigoNum - b.codigoNum)
 
   // Mapeo de categorías Fabricius a Sectores de la balanza
   function categoriaASector(cat) {
@@ -809,49 +772,49 @@ function PLUTab({ precios, ofertas = [] }) {
     a.click()
     URL.revokeObjectURL(url)
   }
-  function editarPrecio(idx, valor) {
-    setPlus(prev => prev.map((p, i) => i === idx ? { ...p, precio: parseFloat(valor) || 0 } : p))
-  }
-
-  function editarNombre(idx, valor) {
-    setPlus(prev => prev.map((p, i) => i === idx ? { ...p, nombre: valor } : p))
-  }
-
-  function editarCodigo(idx, valor) {
-    setPlus(prev => prev.map((p, i) => i === idx ? { ...p, codigo: valor } : p))
-  }
-
-  const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '5px 8px', fontFamily: "'DM Sans',sans-serif", fontSize: 12 }
-
   return (
     <div>
       <div className="card" style={{ marginBottom: 16, borderColor: 'var(--gold)' }}>
         <div className="card-title">🏷️ PLU para Balanza Cuora Max</div>
         <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
-          Estos son los códigos PLU que se cargan en la balanza. Podés editar el código, nombre y precio, y exportar el archivo para importar en Qendra.
+          Estos son los productos que tienen PLU asignado en el sistema (de la balanza Cuora Max). Para cambiar nombre o precio, editá el producto desde la pestaña <strong>✏️ Administrar</strong>. Para asignar más PLUs, usá <strong>📥 Importar PLUs CSV</strong>.
         </div>
-        {msg && <div style={{ background: '#1a2a1a', border: '1px solid #2d5a2d', borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: '#7dff7d', fontWeight: 600 }}>{msg}</div>}
-        <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
-          <button onClick={guardarTodos} className="btn btn-gold">💾 Guardar PLU</button>
-          <button onClick={exportarCSV} className="btn btn-ghost">📥 Exportar CSV simple</button>
-          <button onClick={exportarQendra} className="btn btn-ghost" style={{ background: 'var(--gold)', color: '#000', fontWeight: 700 }}>⚖️ Exportar para Qendra (completo)</button>
+        {plus.length === 0 && (
+          <div style={{ background: '#3a2a1a', border: '1px solid #6a5a2a', color: '#ffd17a', padding: '12px 16px', borderRadius: 8, marginBottom: 12 }}>
+            ⚠️ Todavía no hay productos con PLU asignado. Andá a <strong>📥 Importar PLUs CSV</strong> para asignar.
+          </div>
+        )}
+        {plus.length > 0 && (
+          <div style={{ fontSize: 13, color: 'var(--text)', marginBottom: 12 }}>
+            <strong>{plus.length}</strong> productos con PLU asignado.
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+          <button onClick={exportarCSV} className="btn btn-ghost" disabled={plus.length === 0}>📥 Exportar CSV simple</button>
+          <button onClick={exportarQendra} className="btn btn-ghost" style={{ background: 'var(--gold)', color: '#000', fontWeight: 700 }} disabled={plus.length === 0}>⚖️ Exportar para Qendra (completo)</button>
         </div>
-        {loading ? <div style={{ color: 'var(--muted)' }}>Cargando...</div> : (
+        {plus.length > 0 && (
           <table>
             <thead>
               <tr>
                 <th style={{ width: 80 }}>Código PLU</th>
-                <th>Nombre en balanza</th>
-                <th style={{ width: 120 }}>Precio minorista</th>
+                <th>Nombre</th>
+                <th style={{ width: 140 }}>Precio minorista</th>
                 <th>Categoría</th>
               </tr>
             </thead>
             <tbody>
-              {plus.map((p, i) => (
-                <tr key={i}>
-                  <td><input value={p.codigo} onChange={e => editarCodigo(i, e.target.value)} style={{ ...inp, width: 70, textAlign: 'center', fontWeight: 700, color: 'var(--gold)' }} /></td>
-                  <td><input value={p.nombre} onChange={e => editarNombre(i, e.target.value)} style={{ ...inp, width: '100%' }} /></td>
-                  <td><input type="number" value={p.precio} onChange={e => editarPrecio(i, e.target.value)} style={{ ...inp, width: 100, borderColor: 'var(--green)' }} /></td>
+              {plus.map((p) => (
+                <tr key={p.precio_id}>
+                  <td>
+                    <span style={{ background: 'var(--gold)', color: '#000', padding: '3px 10px', borderRadius: 4, fontFamily: 'monospace', fontSize: 12, fontWeight: 700 }}>
+                      {p.codigo}
+                    </span>
+                  </td>
+                  <td style={{ fontWeight: 500 }}>{p.nombre}</td>
+                  <td style={{ color: 'var(--green)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>
+                    ${Number(p.precio || 0).toLocaleString('es-AR')}
+                  </td>
                   <td style={{ fontSize: 11, color: 'var(--muted)' }}>{p.categoria}</td>
                 </tr>
               ))}
@@ -861,5 +824,4 @@ function PLUTab({ precios, ofertas = [] }) {
       </div>
     </div>
   )
-}
 }
