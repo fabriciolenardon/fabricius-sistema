@@ -50,7 +50,7 @@ export default function Caja() {
 
   async function cargarTodo() {
     const [{ data: pre }, { data: cfg }, { data: ventas }] = await Promise.all([
-      supabase.from('precios').select('*').eq('activo', true).order('nombre'),
+      supabase.from('precios').select('*').order('nombre'),
       supabase.from('config_sistema').select('*').eq('clave', 'ean13_formato').maybeSingle(),
       supabase.from('ventas_minoristas').select('*')
         .eq('fecha', new Date().toISOString().split('T')[0])

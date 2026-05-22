@@ -93,7 +93,7 @@ export default function Etiquetas() {
 
   async function cargar() {
     const [{ data: pre }, { data: cfg }] = await Promise.all([
-      supabase.from('precios').select('*').eq('activo', true).order('nombre'),
+      supabase.from('precios').select('*').order('nombre'),
       supabase.from('config_sistema').select('*').eq('clave', 'ean13_formato').maybeSingle(),
     ])
     setPrecios(pre || [])
