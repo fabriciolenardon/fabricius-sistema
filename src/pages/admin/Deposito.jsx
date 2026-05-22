@@ -1261,6 +1261,22 @@ async function eliminar(entrada) {
             </div>
           </div>
         )}
+        {esSoloUnidades && (
+          <div className="form-row">
+            <div className="form-group"><label>Precio por unidad ($)</label>
+              <input type="number" value={form.precioKg} onChange={e => setForm(f => ({ ...f, precioKg: e.target.value }))} placeholder="Ej: 1200" />
+            </div>
+            <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end' }}>
+              <div style={{ fontSize: 12, color: 'var(--muted)', paddingBottom: 8 }}>
+                {(() => {
+                  const cant = Math.max(1, parseInt(form.cantidad) || 1)
+                  const pu = parseFloat(form.precioKg) || 0
+                  return pu > 0 ? `💰 Sugerido: ${cant} × $${pu.toLocaleString('es-AR')} = $${(cant * pu).toLocaleString('es-AR')}` : 'Cargá el precio por unidad para ver el total sugerido'
+                })()}
+              </div>
+            </div>
+          </div>
+        )}
         <div className="form-row">
           {form.tipo === 'bovino_mr' && (
             <div className="form-group"><label>Merma % (opcional)</label>
