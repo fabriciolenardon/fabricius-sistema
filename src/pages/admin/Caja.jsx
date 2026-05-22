@@ -261,20 +261,27 @@ export default function Caja() {
       return
     }
 
-    // Descontar stock - mapeo robusto de categorías de precios a stock_actual
+    // Descontar stock — mapeo explícito de cada categoría a su tipo en stock_actual.
+    // Las categorías que NO se trackean en kg (almacén, bebidas, cajones, rebozados)
+    // devuelven null → no se descuenta nada para ese item.
     function mapearStock(cat) {
-      if (!cat) return 'bovino_corte'
-      if (cat === 'bovino_mr') return 'bovino_mr'
-      if (cat === 'bovino_pieza' || cat === 'bovino_caja_cb' || cat === 'bovino_caja_pt') return 'bovino_pieza'
-      if (cat === 'bovino_brosa') return 'bovino_brosa'
-      if (cat === 'cerdo' || cat === 'cerdo_corte' || cat === 'cerdo_pieza') return 'cerdo'
-      if (cat === 'pollo') return 'pollo'
-      if (cat === 'embutido') return 'embutido'
-      // Cortes bovinos y cualquier otra categoría → bovino_corte
-      return 'bovino_corte'
+      if (!cat) return null
+      if (cat === 'bovino_mr')        return 'bovino_mr'
+      if (cat === 'bovino_corte')     return 'bovino_corte'
+      if (cat === 'bovino_pieza')     return 'bovino_pieza'
+      if (cat === 'bovino_brosa')     return 'bovino_brosa'
+      if (cat === 'cerdo_corte' || cat === 'cerdo_pieza' || cat === 'cerdo') return 'cerdo'
+      if (cat === 'pollo')            return 'pollo'
+      if (cat === 'embutido')         return 'embutido'
+      // Categorías SIN tracking de kg:
+      //   - bovino_caja_cb / bovino_caja_pt → cajas envasadas (otra gestión)
+      //   - pollo_cajon / rebozado / rebozado_cajon → productos por unidad/caja
+      //   - almacen / bebidas → no son por kg
+      return null
     }
     for (const item of carrito) {
       const tipoStock = mapearStock(item.categoria)
+      if (!tipoStock) continue  // categoría sin tracking de stock → saltar
       const { data: stock } = await supabase.from('stock_actual').select('*').eq('tipo', tipoStock).maybeSingle()
       if (stock) {
         await supabase.from('stock_actual')
