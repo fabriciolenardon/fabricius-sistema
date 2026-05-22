@@ -53,12 +53,15 @@ export default function LimpiezaDuplicados() {
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState(null)
   const [accionEnCurso, setAccionEnCurso] = useState(null) // id en proceso
+  const [batchEnCurso, setBatchEnCurso] = useState(false)
+  const [batchProgreso, setBatchProgreso] = useState({ procesados: 0, total: 0, exitos: 0, errores: 0 })
   const [ignorados, setIgnorados] = useState(() => {
     try { return new Set(JSON.parse(localStorage.getItem(IGNORADOS_KEY) || '[]')) }
     catch { return new Set() }
   })
   const [mostrarIgnorados, setMostrarIgnorados] = useState(false)
   const [umbralSimilitud, setUmbralSimilitud] = useState(0.3)
+  const [umbralBatch, setUmbralBatch] = useState(0.5)
 
   useEffect(() => { cargar() }, [])
 
@@ -171,6 +174,87 @@ export default function LimpiezaDuplicados() {
     setAccionEnCurso(null)
   }
 
+  // Batch: para cada producto sin PLU con candidato fuerte (>= umbralBatch),
+  // tomar el mejor candidato y aplicar la acción indicada. Se procesa
+  // SECUENCIALMENTE para evitar colisiones con el UNIQUE de codigo_balanza.
+  async function ejecutarBatch(accion) {
+    // Releer la lista actual con el umbral del batch (más estricto que el de la UI)
+    const objetivos = sinPLU
+      .map(p => {
+        const tokensP = tokenizar(p.nombre)
+        const cands = conPLU
+          .map(c => ({ ...c, _sim: similitudJaccard(tokensP, c._tokens) }))
+          .filter(c => c._sim >= umbralBatch)
+          .sort((a, b) => b._sim - a._sim)
+        return cands.length > 0 ? { sinPlu: p, conPlu: cands[0] } : null
+      })
+      .filter(Boolean)
+
+    if (objetivos.length === 0) {
+      showMsg(`No hay productos con candidatos al ${(umbralBatch*100).toFixed(0)}% o más.`, 'error')
+      return
+    }
+
+    const accionLabel = accion === 'migrar' ? 'Migrar PLU al producto viejo' : 'Fusionar (borrar viejo, conservar PLU)'
+    const advertencia = accion === 'migrar'
+      ? '⚠️ Esto va a tomar el PLU del producto del PDF y pasárselo al producto viejo. Después borra el del PDF.\n\nUsalo si los nombres del SISTEMA son los correctos y los del PDF son los duplicados.'
+      : '⚠️ Esto va a borrar los productos viejos y conservar los del PDF.\n\nUsalo si los nombres del PDF son los correctos.'
+
+    if (!confirm(`${accionLabel} para ${objetivos.length} producto(s)\n\nUmbral de similitud: ${(umbralBatch*100).toFixed(0)}%\n\n${advertencia}\n\n¿Continuar?`)) return
+
+    setBatchEnCurso(true)
+    setBatchProgreso({ procesados: 0, total: objetivos.length, exitos: 0, errores: 0 })
+
+    let exitos = 0, errores = 0
+    const erroresDetalle = []
+    for (let i = 0; i < objetivos.length; i++) {
+      const { sinPlu, conPlu } = objetivos[i]
+      try {
+        if (accion === 'migrar') {
+          // 1. Liberar PLU del con-PLU
+          const { error: e1 } = await supabase.from('precios').update({ codigo_balanza: null }).eq('id', conPlu.id)
+          if (e1) throw e1
+          // 2. Asignar PLU al sin-PLU
+          const { error: e2 } = await supabase.from('precios').update({ codigo_balanza: conPlu.codigo_balanza }).eq('id', sinPlu.id)
+          if (e2) throw e2
+          // 3. Borrar el que era con-PLU
+          const { error: e3 } = await supabase.from('precios').delete().eq('id', conPlu.id)
+          if (e3) throw e3
+        } else {
+          // Fusionar
+          const updates = {}
+          for (const c of ['precio_minorista', 'precio_mayorista', 'precio_carniceria']) {
+            const valNuevo = Number(conPlu[c]) || 0
+            const valViejo = Number(sinPlu[c]) || 0
+            if (valNuevo === 0 && valViejo > 0) updates[c] = valViejo
+          }
+          if (Object.keys(updates).length > 0) {
+            const { error: eu } = await supabase.from('precios').update(updates).eq('id', conPlu.id)
+            if (eu) throw eu
+          }
+          const { error: ed } = await supabase.from('precios').delete().eq('id', sinPlu.id)
+          if (ed) throw ed
+        }
+        exitos++
+      } catch (e) {
+        errores++
+        erroresDetalle.push(`• "${sinPlu.nombre}" → ${e.message || e}`)
+      }
+      setBatchProgreso({ procesados: i + 1, total: objetivos.length, exitos, errores })
+    }
+
+    setBatchEnCurso(false)
+    await cargar()
+    let resumen = `✅ Batch terminado: ${exitos} exitosos, ${errores} con error.`
+    if (errores > 0) {
+      resumen += '\n\nDetalle:\n' + erroresDetalle.slice(0, 10).join('\n')
+      if (erroresDetalle.length > 10) resumen += `\n...y ${erroresDetalle.length - 10} más`
+      alert(resumen)
+    } else {
+      showMsg(resumen, 'success')
+    }
+  }
+
   function ignorar(sinPlu) {
     const nuevo = new Set(ignorados)
     nuevo.add(sinPlu.id)
@@ -235,6 +319,47 @@ export default function LimpiezaDuplicados() {
           </label>
           <button onClick={cargar} style={btn('var(--surface)', '#444')}>🔄 Recargar</button>
         </div>
+      </div>
+
+      {/* Panel de acciones masivas */}
+      <div className="card" style={{ marginBottom: 16, background: 'linear-gradient(180deg, rgba(255,209,122,0.06), rgba(255,209,122,0))', border: '1px solid #6a5a2a' }}>
+        <div className="card-title">⚡ Acciones masivas</div>
+        <p style={{ color: 'var(--muted)', fontSize: 13, lineHeight: 1.5, marginBottom: 12 }}>
+          Aplica la misma acción a TODOS los productos que tengan al menos un candidato con similitud ≥ umbral. Procesa de a uno secuencialmente. Si algo falla, sigue con los demás y te muestra el detalle al final.
+        </p>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+          <label style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+            Umbral mínimo para batch:
+            <input type="range" min="0.3" max="0.95" step="0.05" value={umbralBatch}
+              onChange={e => setUmbralBatch(parseFloat(e.target.value))} style={{ width: 120 }} disabled={batchEnCurso} />
+            <span style={{ fontFamily: 'monospace', fontWeight: 700, color: 'var(--gold)' }}>{(umbralBatch * 100).toFixed(0)}%</span>
+          </label>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            onClick={() => ejecutarBatch('migrar')}
+            disabled={batchEnCurso || loading}
+            style={{ padding: '10px 18px', borderRadius: 8, border: 'none', background: '#ffd17a', color: '#000', cursor: batchEnCurso ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 13, fontFamily: "'DM Sans',sans-serif", opacity: batchEnCurso ? 0.6 : 1 }}>
+            🟡 Migrar PLU al viejo — TODOS
+          </button>
+          <button
+            onClick={() => ejecutarBatch('fusionar')}
+            disabled={batchEnCurso || loading}
+            style={{ padding: '10px 18px', borderRadius: 8, border: 'none', background: '#7dff7d', color: '#000', cursor: batchEnCurso ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 13, fontFamily: "'DM Sans',sans-serif", opacity: batchEnCurso ? 0.6 : 1 }}>
+            🟢 Fusionar (conservar PDF) — TODOS
+          </button>
+        </div>
+        {batchEnCurso && (
+          <div style={{ marginTop: 12, padding: '10px 14px', background: 'rgba(125,255,125,0.08)', border: '1px solid #2d5a2d', borderRadius: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>⏳ Procesando batch...</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+              {batchProgreso.procesados} / {batchProgreso.total} · ✅ {batchProgreso.exitos} OK · ❌ {batchProgreso.errores} con error
+            </div>
+            <div style={{ background: '#222', borderRadius: 4, height: 6, marginTop: 8, overflow: 'hidden' }}>
+              <div style={{ background: 'var(--gold)', height: '100%', width: `${batchProgreso.total > 0 ? (batchProgreso.procesados / batchProgreso.total * 100) : 0}%`, transition: 'width 0.2s' }} />
+            </div>
+          </div>
+        )}
       </div>
 
       {loading && <p style={{ color: 'var(--muted)' }}>Cargando productos...</p>}
