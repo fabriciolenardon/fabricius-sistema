@@ -262,8 +262,8 @@ export default function Caja() {
     }
 
     // Descontar stock — mapeo explícito de cada categoría a su tipo en stock_actual.
-    // Las categorías que NO se trackean en kg (almacén, bebidas, cajones, rebozados)
-    // devuelven null → no se descuenta nada para ese item.
+    // Para almacén y bebidas, la unidad es "cantidad" (no kg). Para carnes es kg.
+    // En ambos casos se suma/resta sobre el mismo campo kg_disponible.
     function mapearStock(cat) {
       if (!cat) return null
       if (cat === 'bovino_mr')        return 'bovino_mr'
@@ -273,10 +273,10 @@ export default function Caja() {
       if (cat === 'cerdo_corte' || cat === 'cerdo_pieza' || cat === 'cerdo') return 'cerdo'
       if (cat === 'pollo')            return 'pollo'
       if (cat === 'embutido')         return 'embutido'
-      // Categorías SIN tracking de kg:
-      //   - bovino_caja_cb / bovino_caja_pt → cajas envasadas (otra gestión)
-      //   - pollo_cajon / rebozado / rebozado_cajon → productos por unidad/caja
-      //   - almacen / bebidas → no son por kg
+      if (cat === 'almacen')          return 'almacen'
+      if (cat === 'bebidas')          return 'bebidas'
+      // Sin tracking todavía: bovino_caja_cb, bovino_caja_pt,
+      // pollo_cajon, rebozado, rebozado_cajon (manejados por separado).
       return null
     }
     for (const item of carrito) {

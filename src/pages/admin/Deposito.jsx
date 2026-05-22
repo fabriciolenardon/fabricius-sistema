@@ -1204,6 +1204,8 @@ async function eliminar(entrada) {
 <option value="pollo">🍗 Pollo — Cajón</option>
 <option value="embutido">🌭 Embutido</option>
 <option value="rebozado">🧊 Rebozado/Congelado</option>
+<option value="almacen">🛒 Almacén (por unidad)</option>
+<option value="bebidas">🥤 Bebidas (por unidad)</option>
             </select>
           </div>
           <div className="form-group"><label>Fecha</label>
