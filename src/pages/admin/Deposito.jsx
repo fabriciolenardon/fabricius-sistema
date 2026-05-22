@@ -1070,9 +1070,11 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     setHistorial(data || [])
   }
 
-  // Tipos que vienen en unidades discretas (cajones, cajas).
-  // Para estos, el campo "Kg" representa los KG POR UNIDAD y se multiplica por la cantidad.
-  const TIPOS_EN_UNIDADES = ['pollo', 'caja_cb', 'caja_pt']
+  // Tipos que vienen en unidades discretas (cajones, cajas, almacén, bebidas).
+  // Para estos, el campo "Kg" representa los KG POR UNIDAD (o 1 para productos
+  // por unidad) y se multiplica por la cantidad de unidades.
+  // Para almacén/bebidas: poner Kg=1 y en Cantidad la cantidad de unidades.
+  const TIPOS_EN_UNIDADES = ['pollo', 'caja_cb', 'caja_pt', 'almacen', 'bebidas']
 
   async function guardar() {
     if (!form.tipo || !form.proveedor || !form.kg) { showAlert({ type: 'error', msg: 'Completá los campos requeridos' }); return }
