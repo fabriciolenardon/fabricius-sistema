@@ -36,6 +36,17 @@ export default function AlertasAnomalias() {
 
   useEffect(() => { cargar() }, [])
 
+  // Realtime: recargar alertas cuando hay ventas o arqueos nuevos
+  useEffect(() => {
+    const canal = supabase
+      .channel('alertas-anomalias-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'ventas_minoristas' }, () => cargar())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'arqueos_caja' }, () => cargar())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_actual' }, () => cargar())
+      .subscribe()
+    return () => supabase.removeChannel(canal)
+  }, [])
+
   async function cargar() {
     setLoading(true)
     const desde = fechaHaceDias(7)

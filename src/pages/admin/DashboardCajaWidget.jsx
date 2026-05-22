@@ -54,9 +54,32 @@ export default function DashboardCajaWidget() {
   const [hoy, setHoy] = useState([])
   const [ayer, setAyer] = useState([])
   const [loading, setLoading] = useState(true)
+  const [toast, setToast] = useState(null)
   const navigate = useNavigate()
 
   useEffect(() => { cargar() }, [])
+
+  // Realtime: suscripción a ventas_minoristas
+  useEffect(() => {
+    const canal = supabase
+      .channel('dashboard-caja-realtime')
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'ventas_minoristas' },
+        payload => {
+          const v = payload.new
+          if (v?.origen === 'caja') {
+            const total = Number(v.total) || 0
+            setToast({ texto: `🛎️ Nueva venta: $${Math.round(total).toLocaleString('es-AR')}`, id: Date.now() })
+            setTimeout(() => setToast(null), 4500)
+          }
+          cargar()
+        })
+      .on('postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'ventas_minoristas' },
+        () => cargar())
+      .subscribe()
+    return () => supabase.removeChannel(canal)
+  }, [])
 
   async function cargar() {
     setLoading(true)
@@ -98,9 +121,23 @@ export default function DashboardCajaWidget() {
   )
 
   return (
-    <div style={{ ...card, marginBottom: 20 }}>
+    <div style={{ ...card, marginBottom: 20, position: 'relative' }}>
+      {/* Toast de nueva venta */}
+      {toast && (
+        <div key={toast.id} style={{
+          position: 'absolute', top: -12, right: 12, zIndex: 50,
+          background: 'linear-gradient(135deg, #2d5a2d, #1a3a1a)',
+          border: '2px solid #7dff7d', borderRadius: 8,
+          padding: '10px 18px', fontWeight: 700, color: '#7dff7d',
+          fontSize: 13, boxShadow: '0 4px 12px rgba(125,255,125,0.3)',
+          animation: 'slideIn 0.3s ease-out',
+        }}>
+          {toast.texto}
+        </div>
+      )}
+
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-        <div className="card-title" style={{ margin: 0 }}>💵 Caja Rápida — Hoy</div>
+        <div className="card-title" style={{ margin: 0 }}>💵 Caja Rápida — Hoy <span style={{ fontSize: 9, color: '#7dff7d', marginLeft: 8 }}>● EN VIVO</span></div>
         <button onClick={() => navigate('/admin/caja')}
           style={{ padding: '6px 14px', background: 'transparent', border: '1px solid var(--gold)', color: 'var(--gold)', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
           📊 Ver historial completo

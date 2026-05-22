@@ -177,6 +177,7 @@ tr:hover td { background: var(--surface2); }
 /* ANIMATIONS */
 @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes slideIn { from { opacity: 0; transform: translate(20px, -8px); } to { opacity: 1; transform: translate(0, 0); } }
 .fade-in { animation: fadeIn 0.3s ease; }
 .fade-up { animation: fadeUp 0.5s ease; }
 

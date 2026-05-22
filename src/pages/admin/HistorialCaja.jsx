@@ -88,6 +88,17 @@ export default function HistorialCaja() {
 
   useEffect(() => { cargar() }, [rango.desde, rango.hasta])
 
+  // Realtime: recargar cuando cambian las ventas (inserts/deletes/updates)
+  useEffect(() => {
+    const canal = supabase
+      .channel('historial-caja-realtime')
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'ventas_minoristas' },
+        () => cargar())
+      .subscribe()
+    return () => supabase.removeChannel(canal)
+  }, [rango.desde, rango.hasta])
+
   async function cargar() {
     setLoading(true)
     const { data, error } = await supabase
