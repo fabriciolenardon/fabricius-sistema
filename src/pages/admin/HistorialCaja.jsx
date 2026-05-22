@@ -30,6 +30,21 @@ function grupoDeCategoria(cat) {
   return 'otros'
 }
 
+// Mapeo categoría → tipo en stock_actual (igual al de Caja.jsx para mantener coherencia)
+function mapearStockTipo(cat) {
+  if (!cat) return null
+  if (cat === 'bovino_mr')        return 'bovino_mr'
+  if (cat === 'bovino_corte')     return 'bovino_corte'
+  if (cat === 'bovino_pieza')     return 'bovino_pieza'
+  if (cat === 'bovino_brosa')     return 'bovino_brosa'
+  if (cat === 'cerdo_corte' || cat === 'cerdo_pieza' || cat === 'cerdo') return 'cerdo'
+  if (cat === 'pollo')            return 'pollo'
+  if (cat === 'embutido')         return 'embutido'
+  if (cat === 'almacen')          return 'almacen'
+  if (cat === 'bebidas')          return 'bebidas'
+  return null
+}
+
 const GRUPOS = {
   bovino:    { label: '🥩 Bovino',     color: '#ff6b6b' },
   cerdo:     { label: '🐷 Cerdo',      color: '#ffa07a' },
@@ -89,6 +104,58 @@ export default function HistorialCaja() {
   function aplicarModo(m) {
     setModo(m)
     if (m !== 'custom') setRango(rangoFechas(m))
+  }
+
+  // === Anular venta: revertir stock + borrar de ventas_minoristas ===
+  async function anularVenta(venta) {
+    const total = Number(venta.total) || 0
+    const cantItems = Array.isArray(venta.items) ? venta.items.length : 0
+    if (!confirm(
+      `⚠️ ANULAR VENTA — ACCIÓN IRREVERSIBLE\n\n` +
+      `Venta #${venta.id} del ${venta.fecha}\n` +
+      `Total: $${Math.round(total).toLocaleString('es-AR')}\n` +
+      `Items: ${cantItems}\n\n` +
+      `Se va a:\n` +
+      `  1. Devolver al stock cada item vendido\n` +
+      `  2. Borrar la venta del historial\n\n` +
+      `¿Confirmar?`
+    )) return
+    const conf2 = prompt('Para confirmar, escribí ANULAR en mayúsculas:')
+    if (conf2 !== 'ANULAR') {
+      alert('Cancelado. Texto incorrecto.')
+      return
+    }
+
+    // 1) Reponer stock por cada item
+    const items = Array.isArray(venta.items) ? venta.items : []
+    const errores = []
+    for (const item of items) {
+      const tipoStock = mapearStockTipo(item.categoria)
+      if (!tipoStock) continue
+      try {
+        const { data: stock } = await supabase.from('stock_actual').select('*').eq('tipo', tipoStock).maybeSingle()
+        if (stock) {
+          await supabase.from('stock_actual')
+            .update({ kg_disponible: (Number(stock.kg_disponible) || 0) + (Number(item.kg) || 0) })
+            .eq('tipo', tipoStock)
+        }
+      } catch (e) {
+        errores.push(`${item.descripcion}: ${e.message}`)
+      }
+    }
+
+    // 2) Borrar la venta
+    const { error } = await supabase.from('ventas_minoristas').delete().eq('id', venta.id)
+    if (error) {
+      alert(`❌ Stock revertido pero NO se pudo borrar la venta:\n${error.message}`)
+      await cargar()
+      return
+    }
+
+    let msg = `✅ Venta #${venta.id} anulada — stock devuelto`
+    if (errores.length > 0) msg += `\n\n⚠️ Algunos items tuvieron error al revertir stock:\n${errores.join('\n')}`
+    alert(msg)
+    await cargar()
   }
 
   // === Cálculos agregados ===
@@ -274,6 +341,7 @@ export default function HistorialCaja() {
                         <th style={{ textAlign: 'right', padding: 4 }}>Efectivo</th>
                         <th style={{ textAlign: 'right', padding: 4 }}>Débito</th>
                         <th style={{ textAlign: 'right', padding: 4 }}>Transf.</th>
+                        <th style={{ width: 80 }}></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -287,6 +355,13 @@ export default function HistorialCaja() {
                           <td style={{ textAlign: 'right', padding: 4, color: v.efectivo > 0 ? '#7dff7d' : 'var(--muted)' }}>{v.efectivo > 0 ? fmt$(v.efectivo) : '—'}</td>
                           <td style={{ textAlign: 'right', padding: 4, color: v.debito > 0 ? '#7a9dff' : 'var(--muted)' }}>{v.debito > 0 ? fmt$(v.debito) : '—'}</td>
                           <td style={{ textAlign: 'right', padding: 4, color: v.transferencia > 0 ? '#ffd17a' : 'var(--muted)' }}>{v.transferencia > 0 ? fmt$(v.transferencia) : '—'}</td>
+                          <td style={{ textAlign: 'right', padding: 4 }}>
+                            <button onClick={() => anularVenta(v)}
+                              title="Anular venta y devolver stock"
+                              style={{ padding: '3px 10px', background: 'transparent', border: '1px solid #5a2a2a', color: '#ff8b8b', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                              🗑️ Anular
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
