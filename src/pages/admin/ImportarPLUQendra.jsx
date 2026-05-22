@@ -59,6 +59,21 @@ function esMatchEstricto(nombreA, nombreB) {
   return false
 }
 
+// Tokens significativos (3+ caracteres) para similitud Jaccard
+function tokensSignif(nombre) {
+  return normalizarFuerte(nombre).split(' ').filter(t => t.length >= 3)
+}
+
+// Score de similitud para ranking del dropdown (0..1, mayor = más parecido)
+function scoreSimilitud(nombreA, nombreB) {
+  const ta = new Set(tokensSignif(nombreA))
+  const tb = new Set(tokensSignif(nombreB))
+  if (ta.size === 0 || tb.size === 0) return 0
+  let inter = 0
+  for (const t of ta) if (tb.has(t)) inter++
+  return inter / new Set([...ta, ...tb]).size
+}
+
 // === Parser CSV Qendra ===
 // Formato: SECTOR;PLU;NOMBRE;...
 // Separador `;`. Maneja BOM. Comillas dobles para campos con `;` dentro.
@@ -162,9 +177,22 @@ export default function ImportarPLUQendra() {
 
   function candidatosParaPlu(filaCsv, query) {
     const q = (query || '').toLowerCase().trim()
+    // Si hay query, filtrar por substring (búsqueda manual del usuario)
+    if (q) {
+      return sinPLUDisponibles
+        .filter(p => p.nombre.toLowerCase().includes(q))
+        .slice(0, 30)
+    }
+    // Sin query: ordenar por similitud al nombre del CSV (los más parecidos arriba)
     return sinPLUDisponibles
-      .filter(p => !q || p.nombre.toLowerCase().includes(q))
-      .slice(0, 12)
+      .map(p => ({ ...p, _score: scoreSimilitud(p.nombre, filaCsv.nombre) }))
+      .sort((a, b) => {
+        // Primero por similitud descendente
+        if (b._score !== a._score) return b._score - a._score
+        // Después por nombre
+        return a.nombre.localeCompare(b.nombre)
+      })
+      .slice(0, 30)
   }
 
   async function aplicar() {
@@ -339,9 +367,14 @@ export default function ImportarPLUQendra() {
                               value={idAsignado || ''}
                               style={{ ...inp, width: '100%' }}>
                               <option value="">— Sin asignar —</option>
-                              {candidatos.map(p => (
-                                <option key={p.id} value={p.id}>{p.nombre} ({p.categoria})</option>
-                              ))}
+                              {candidatos.map(p => {
+                                const pctTxt = p._score > 0 ? ` — ${Math.round(p._score * 100)}% match` : ''
+                                return (
+                                  <option key={p.id} value={p.id}>
+                                    {p.nombre} ({p.categoria}){pctTxt}
+                                  </option>
+                                )
+                              })}
                             </select>
                           </div>
                         )}
