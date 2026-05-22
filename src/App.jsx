@@ -1,4 +1,6 @@
 import Ventas from './pages/admin/Ventas'
+import Caja from './pages/admin/Caja'
+import Etiquetas from './pages/admin/Etiquetas'
 import Franquicias from './pages/admin/Franquicias'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
@@ -85,6 +87,8 @@ export default function App() {
           <Route path="cierre" element={<Cierre />} />
           <Route path="franquicias" element={<Franquicias />} />
           <Route path="ventas" element={<Ventas />} />
+          <Route path="caja" element={<Caja />} />
+          <Route path="etiquetas" element={<Etiquetas />} />
         </Route>
         <Route path="/franquicia" element={<ProtectedRoute requiredRole="franquicia"><FranquiciaLayout /></ProtectedRoute>}>
           <Route path="dashboard" element={<FranquiciaDashboard />} />

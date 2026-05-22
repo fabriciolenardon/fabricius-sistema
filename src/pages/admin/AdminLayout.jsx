@@ -5,9 +5,11 @@ import { supabase } from '../../lib/supabase'
 
 const navItems = [
   { to: '/admin/dashboard',   icon: '📊', label: 'Dashboard' },
+  { to: '/admin/caja',        icon: '💵', label: 'Caja' },
   { to: '/admin/ventas', icon: '🛒', label: 'Ventas' },
   { to: '/admin/deposito',    icon: '🏭', label: 'Depósito' },
   { to: '/admin/precios',     icon: '💲', label: 'Precios' },
+  { to: '/admin/etiquetas',   icon: '🏷️', label: 'Etiquetas' },
   { to: '/admin/clientes',    icon: '👥', label: 'Clientes' },
   { to: '/admin/pedidos',     icon: '📥', label: 'Pedidos' },
   { to: '/admin/franquicias', icon: '🏪', label: 'Franquicias' },

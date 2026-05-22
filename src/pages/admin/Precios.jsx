@@ -15,7 +15,7 @@ const CATEGORIAS = {
   almacen: '🛒 Almacén',
   bebidas: '🥤 Bebidas',
 }
-const VACIO = { categoria: 'bovino_corte', nombre: '', precio_carniceria: '', precio_mayorista: '', precio_minorista: '' }
+const VACIO = { categoria: 'bovino_corte', nombre: '', precio_carniceria: '', precio_mayorista: '', precio_minorista: '', codigo_balanza: '', dias_vencimiento: '3', descripcion_etiqueta: '', pesable: true }
 const fmt = n => n != null ? '$' + Math.round(n).toLocaleString('es-AR') : '—'
 const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }
 
@@ -70,6 +70,10 @@ export default function Precios() {
       precio_carniceria: form.precio_carniceria === '' ? null : Number(form.precio_carniceria),
       precio_mayorista: form.precio_mayorista === '' ? null : Number(form.precio_mayorista),
       precio_minorista: form.precio_minorista === '' ? null : Number(form.precio_minorista),
+      codigo_balanza: form.codigo_balanza === '' ? null : Number(form.codigo_balanza),
+      dias_vencimiento: form.dias_vencimiento === '' ? 3 : Number(form.dias_vencimiento),
+      descripcion_etiqueta: form.descripcion_etiqueta || null,
+      pesable: form.pesable !== false,
     }
     if (editando) {
       await supabase.from('precios').update(datos).eq('id', editando)
@@ -90,7 +94,16 @@ export default function Precios() {
 
   function editar(p) {
     setEditando(p.id)
-    setForm({ categoria: p.categoria, nombre: p.nombre, precio_carniceria: p.precio_carniceria ?? '', precio_mayorista: p.precio_mayorista ?? '', precio_minorista: p.precio_minorista ?? '' })
+    setForm({
+      categoria: p.categoria, nombre: p.nombre,
+      precio_carniceria: p.precio_carniceria ?? '',
+      precio_mayorista: p.precio_mayorista ?? '',
+      precio_minorista: p.precio_minorista ?? '',
+      codigo_balanza: p.codigo_balanza ?? '',
+      dias_vencimiento: p.dias_vencimiento ?? 3,
+      descripcion_etiqueta: p.descripcion_etiqueta ?? '',
+      pesable: p.pesable !== false,
+    })
     setFiltro(p.categoria)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -329,6 +342,18 @@ export default function Precios() {
                   <input type="number" value={form[campo]} onChange={e => setForm({ ...form, [campo]: e.target.value })} placeholder="Vacío = —" style={inp} />
                 </div>
               ))}
+              <div>
+                <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>⚖️ PLU Balanza (1-9999)</label>
+                <input type="number" min="1" max="9999" value={form.codigo_balanza} onChange={e => setForm({ ...form, codigo_balanza: e.target.value })} placeholder="Ej: 1" style={inp} />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>📅 Días vencimiento</label>
+                <input type="number" min="0" value={form.dias_vencimiento} onChange={e => setForm({ ...form, dias_vencimiento: e.target.value })} placeholder="3" style={inp} />
+              </div>
+              <div style={{ gridColumn: '1/-1' }}>
+                <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>🏷️ Descripción para etiqueta (opcional)</label>
+                <input value={form.descripcion_etiqueta} onChange={e => setForm({ ...form, descripcion_etiqueta: e.target.value })} placeholder="Ej: Asado de tira premium" style={inp} />
+              </div>
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
               <button onClick={guardar} disabled={loading}
@@ -356,6 +381,7 @@ export default function Precios() {
             <table>
               <thead><tr>
                 <th>Producto</th>
+                <th style={{ width: 70 }}>⚖️ PLU</th>
                 <th style={{ color: 'var(--red-light)' }}>🔴 Carn.</th>
                 <th style={{ color: 'var(--amber)' }}>🟡 May.</th>
                 <th style={{ color: 'var(--green)' }}>🟢 Min.</th>
@@ -365,6 +391,7 @@ export default function Precios() {
                 {productosFiltrados.map(p => (
                   <tr key={p.id}>
                     <td style={{ fontWeight: 500 }}>{p.nombre}</td>
+                    <td>{p.codigo_balanza ? <span style={{ background: 'var(--gold)', color: '#000', padding: '2px 8px', borderRadius: 4, fontFamily: 'monospace', fontSize: 12, fontWeight: 700 }}>{p.codigo_balanza}</span> : <span style={{ color: 'var(--muted)', fontSize: 11 }}>—</span>}</td>
                     <td style={{ color: 'var(--red-light)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_carniceria)}</td>
                     <td style={{ color: 'var(--amber)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_mayorista)}</td>
                     <td style={{ color: 'var(--green)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_minorista)}</td>
@@ -703,27 +730,78 @@ function PLUTab({ precios, ofertas = [] }) {
     cargarPlus()
   }
 
+  // Mapeo de categorías Fabricius a Sectores de la balanza
+  function categoriaASector(cat) {
+    const map = {
+      bovino_mr: 1, bovino_corte: 2, bovino_brosa: 3, bovino_pieza: 4,
+      bovino_caja_cb: 5, bovino_caja_pt: 5,
+      cerdo_corte: 6, cerdo_pieza: 6,
+      embutido: 7, pollo: 8, rebozado: 9, almacen: 10, bebidas: 11,
+    }
+    return map[cat] || 1
+  }
+
+  // Días de vencimiento sugeridos por categoría
+  function diasVencDefault(cat) {
+    if (cat?.startsWith('bovino_pieza') || cat?.startsWith('bovino_caja')) return 7
+    if (cat?.startsWith('bovino') || cat?.startsWith('cerdo')) return 3
+    if (cat === 'pollo') return 2
+    if (cat === 'embutido') return 10
+    return 5
+  }
+
   function exportarCSV() {
-  const hoy = new Date().toISOString().split('T')[0]
-  const header = 'Codigo,Nombre,Precio\n'
-  const rows = plus.map(p => {
-    const ofertaVigente = ofertas?.find(o => 
-      o.precio_id === p.precio_id && 
-      o.activa && 
-      o.fecha_inicio <= hoy && 
-      o.fecha_fin >= hoy &&
-      o.aplica_minorista !== false
-    )
-    const precioFinal = ofertaVigente ? ofertaVigente.precio_oferta : p.precio
-    return `${p.codigo},"${p.nombre}",${precioFinal}`
-  }).join('\n')
-  const blob = new Blob([header + rows], { type: 'text/csv' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = 'PLU_Fabricius.csv'
-  a.click()
-}
+    const hoy = new Date().toISOString().split('T')[0]
+
+    // Formato simple (compatible con muchos importadores)
+    const header = 'Codigo,Nombre,Precio\n'
+    const rows = plus.map(p => {
+      const ofertaVigente = ofertas?.find(o =>
+        o.precio_id === p.precio_id &&
+        o.activa &&
+        o.fecha_inicio <= hoy &&
+        o.fecha_fin >= hoy &&
+        o.aplica_minorista !== false
+      )
+      const precioFinal = ofertaVigente ? ofertaVigente.precio_oferta : p.precio
+      return `${p.codigo},"${p.nombre}",${precioFinal}`
+    }).join('\n')
+    descargar(header + rows, 'PLU_Fabricius_simple.csv')
+  }
+
+  // Formato Qendra extendido (con sector, tipo, vencimiento, etc.)
+  function exportarQendra() {
+    const hoy = new Date().toISOString().split('T')[0]
+    // Header con formato Qendra: separador punto y coma, más campos
+    const header = 'codigo;descripcion;precio_lista1;tipo;tara;sector;dias_vencimiento;origen\n'
+    const rows = plus.map(p => {
+      const ofertaVigente = ofertas?.find(o =>
+        o.precio_id === p.precio_id &&
+        o.activa &&
+        o.fecha_inicio <= hoy &&
+        o.fecha_fin >= hoy &&
+        o.aplica_minorista !== false
+      )
+      const precio = ofertaVigente ? ofertaVigente.precio_oferta : p.precio
+      const sector = categoriaASector(p.categoria)
+      const diasVenc = diasVencDefault(p.categoria)
+      const nombre = (p.nombre || '').replace(/"/g, '').replace(/;/g, ',').toUpperCase().slice(0, 32)
+      return `${p.codigo};${nombre};${Number(precio).toFixed(2)};P;0.000;${sector};${diasVenc};ARGENTINA`
+    }).join('\n')
+    descargar(header + rows, 'PLU_Fabricius_Qendra.csv')
+  }
+
+  function descargar(contenido, nombre) {
+    // BOM para que Excel/Qendra abran con acentos correctamente
+    const bom = '\uFEFF'
+    const blob = new Blob([bom + contenido], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = nombre
+    a.click()
+    URL.revokeObjectURL(url)
+  }
   function editarPrecio(idx, valor) {
     setPlus(prev => prev.map((p, i) => i === idx ? { ...p, precio: parseFloat(valor) || 0 } : p))
   }
@@ -748,7 +826,8 @@ function PLUTab({ precios, ofertas = [] }) {
         {msg && <div style={{ background: '#1a2a1a', border: '1px solid #2d5a2d', borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: '#7dff7d', fontWeight: 600 }}>{msg}</div>}
         <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
           <button onClick={guardarTodos} className="btn btn-gold">💾 Guardar PLU</button>
-          <button onClick={exportarCSV} className="btn btn-ghost">📥 Exportar CSV para Qendra</button>
+          <button onClick={exportarCSV} className="btn btn-ghost">📥 Exportar CSV simple</button>
+          <button onClick={exportarQendra} className="btn btn-ghost" style={{ background: 'var(--gold)', color: '#000', fontWeight: 700 }}>⚖️ Exportar para Qendra (completo)</button>
         </div>
         {loading ? <div style={{ color: 'var(--muted)' }}>Cargando...</div> : (
           <table>
