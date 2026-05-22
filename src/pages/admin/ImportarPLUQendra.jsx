@@ -22,6 +22,17 @@
 import { useState, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 
+// Categorías que NO se venden por balanza — excluidas del matching automático
+// y mostradas al final del dropdown manual (no se ocultan totalmente porque
+// alguna excepción podría querer asignarse a mano).
+const CATEGORIAS_NO_BALANZA = new Set([
+  'bovino_caja_cb',
+  'bovino_caja_pt',
+  'bovino_mr',
+  'bebidas',
+  'almacen',
+])
+
 // === Utilidades de normalización (mismas que LimpiezaDuplicados) ===
 function normalizarFuerte(nombre) {
   return (nombre || '')
@@ -149,7 +160,12 @@ export default function ImportarPLUQendra() {
 
     const auto = {}
     for (const fila of filas) {
-      const match = prods.find(p => p.codigo_balanza == null && esMatchEstricto(p.nombre, fila.nombre))
+      // Match automático: solo entre productos sin PLU y EN categorías de balanza
+      const match = prods.find(p =>
+        p.codigo_balanza == null
+        && !CATEGORIAS_NO_BALANZA.has(p.categoria)
+        && esMatchEstricto(p.nombre, fila.nombre)
+      )
       if (match) auto[fila.plu] = match.id
     }
     setAsignaciones(auto)
@@ -184,17 +200,29 @@ export default function ImportarPLUQendra() {
   function candidatosParaPlu(filaCsv, query) {
     const q = (query || '').toLowerCase().trim()
     // Mostramos TODOS los productos (incluso los que ya tienen otro PLU).
-    // Si Fabri elige uno que ya tiene PLU, el aplicar va a liberar el viejo
-    // antes de asignar el nuevo.
+    // Las categorías "no balanza" van al final (cajas, medias res, bebidas, almacén)
+    // para que Fabri no las elija por accidente, pero siguen disponibles si las busca.
     if (q) {
       return todosLosProductos
         .filter(p => p.nombre.toLowerCase().includes(q))
+        .sort((a, b) => {
+          const aNoBal = CATEGORIAS_NO_BALANZA.has(a.categoria) ? 1 : 0
+          const bNoBal = CATEGORIAS_NO_BALANZA.has(b.categoria) ? 1 : 0
+          if (aNoBal !== bNoBal) return aNoBal - bNoBal // balanza primero
+          return a.nombre.localeCompare(b.nombre)
+        })
         .slice(0, 50)
     }
     return todosLosProductos
       .map(p => ({ ...p, _score: scoreSimilitud(p.nombre, filaCsv.nombre) }))
       .sort((a, b) => {
+        // 1. Categorías de balanza primero
+        const aNoBal = CATEGORIAS_NO_BALANZA.has(a.categoria) ? 1 : 0
+        const bNoBal = CATEGORIAS_NO_BALANZA.has(b.categoria) ? 1 : 0
+        if (aNoBal !== bNoBal) return aNoBal - bNoBal
+        // 2. Después por similitud descendente
         if (b._score !== a._score) return b._score - a._score
+        // 3. Por nombre alfabético
         return a.nombre.localeCompare(b.nombre)
       })
       .slice(0, 50)
@@ -390,9 +418,10 @@ export default function ImportarPLUQendra() {
                               {candidatos.map(p => {
                                 const pctTxt = p._score > 0 ? ` — ${Math.round(p._score * 100)}% match` : ''
                                 const pluTxt = p.codigo_balanza != null ? ` ⚠️ ya tiene PLU ${p.codigo_balanza}` : ''
+                                const noBalTxt = CATEGORIAS_NO_BALANZA.has(p.categoria) ? ' 🚫 NO BALANZA' : ''
                                 return (
                                   <option key={p.id} value={p.id}>
-                                    {p.nombre} ({p.categoria}){pctTxt}{pluTxt}
+                                    {p.nombre} ({p.categoria}){pctTxt}{pluTxt}{noBalTxt}
                                   </option>
                                 )
                               })}
