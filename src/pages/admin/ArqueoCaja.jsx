@@ -266,21 +266,30 @@ export default function ArqueoCaja() {
               <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--gold)', fontFamily: "'Bebas Neue',cursive" }}>{fmt$(totalContado)}</div>
             </div>
 
-            <div style={{ padding: '14px 16px', background: diferencia === 0 ? 'rgba(125,255,125,0.06)' : diferencia > 0 ? 'rgba(255,209,122,0.06)' : 'rgba(255,107,107,0.06)', borderRadius: 8, border: `2px solid ${colorDif}`, marginBottom: 14 }}>
-              <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>DIFERENCIA EFECTIVO</div>
-              <div style={{ fontSize: 28, fontWeight: 800, color: colorDif, fontFamily: "'Bebas Neue',cursive" }}>
-                {diferencia === 0
-                  ? '✅ Cuadrado'
-                  : diferencia > 0
-                    ? `⚠️ Sobrante: +${fmt$(diferencia)}`
-                    : `❌ Faltante: ${fmt$(diferencia)}`}
-              </div>
-              {diferencia !== 0 && (
-                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-                  {diferencia > 0 ? 'Hay más plata de la esperada — revisá si te dieron de más o pagaron sin registrar' : 'Falta plata — revisá errores de vuelto o ventas sin registrar'}
+            {totalContado === 0 ? (
+              <div style={{ padding: '14px 16px', background: 'var(--surface2)', borderRadius: 8, border: '2px dashed var(--border)', marginBottom: 14 }}>
+                <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>DIFERENCIA EFECTIVO</div>
+                <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--muted)', marginTop: 4 }}>
+                  ⏳ Empezá a contar billetes y monedas arriba para ver la diferencia
                 </div>
-              )}
-            </div>
+              </div>
+            ) : (
+              <div style={{ padding: '14px 16px', background: diferencia === 0 ? 'rgba(125,255,125,0.06)' : diferencia > 0 ? 'rgba(255,209,122,0.06)' : 'rgba(255,107,107,0.06)', borderRadius: 8, border: `2px solid ${colorDif}`, marginBottom: 14 }}>
+                <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>DIFERENCIA EFECTIVO</div>
+                <div style={{ fontSize: 28, fontWeight: 800, color: colorDif, fontFamily: "'Bebas Neue',cursive" }}>
+                  {diferencia === 0
+                    ? '✅ Cuadrado'
+                    : diferencia > 0
+                      ? `⚠️ Sobrante: +${fmt$(diferencia)}`
+                      : `❌ Faltante: ${fmt$(diferencia)}`}
+                </div>
+                {diferencia !== 0 && (
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                    {diferencia > 0 ? 'Hay más plata de la esperada — revisá si te dieron de más o pagaron sin registrar' : 'Falta plata — revisá errores de vuelto o ventas sin registrar'}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* CONFIRMACION MANUAL DEBITO/QR Y TRANSFERENCIA */}
             <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>
