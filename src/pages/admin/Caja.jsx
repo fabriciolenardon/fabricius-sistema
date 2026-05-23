@@ -43,6 +43,8 @@ const CATEGORIAS = {
 
 export default function Caja() {
   const [precios, setPrecios] = useState([])
+  const [ofertas, setOfertas] = useState([])
+  const [listaPrecio, setListaPrecio] = useState('minorista') // 'minorista' | 'mayorista'
   const [configEAN, setConfigEAN] = useState({
     // Formato REAL Cuora Max Fabricius — verificado con tickets el 2026-05-22:
     // "2" + PLU(6) + IMPORTE_PESOS(5) + check = 13 dígitos
@@ -68,16 +70,46 @@ export default function Caja() {
   useEffect(() => { cargarTodo() }, [])
 
   async function cargarTodo() {
-    const [{ data: pre }, { data: cfg }, { data: ventas }] = await Promise.all([
+    const hoy = new Date().toISOString().split('T')[0]
+    const [{ data: pre }, { data: cfg }, { data: ventas }, { data: ofs }] = await Promise.all([
       supabase.from('precios').select('*').order('nombre'),
       supabase.from('config_sistema').select('*').eq('clave', 'ean13_formato').maybeSingle(),
       supabase.from('ventas_minoristas').select('*')
-        .eq('fecha', new Date().toISOString().split('T')[0])
+        .eq('fecha', hoy)
         .eq('origen', 'caja').order('created_at', { ascending: false }),
+      supabase.from('ofertas').select('*')
+        .eq('activa', true)
+        .lte('fecha_inicio', hoy)
+        .gte('fecha_fin', hoy),
     ])
     setPrecios(pre || [])
     if (cfg?.valor) setConfigEAN(cfg.valor)
     setVentasHoy(ventas || [])
+    setOfertas(ofs || [])
+  }
+
+  // ---- Resuelve el precio final de un producto según lista activa + ofertas ----
+  // Devuelve { precio, precioBase, oferta }. Si hay oferta vigente que aplica a la
+  // lista activa, descuenta usando descuento_pct (si existe) o usa precio_oferta.
+  function resolverPrecio(producto) {
+    if (!producto) return { precio: 0, precioBase: 0, oferta: null }
+    const precioBase = listaPrecio === 'mayorista'
+      ? Number(producto.precio_mayorista || producto.precio_minorista || producto.precio_carniceria || 0)
+      : Number(producto.precio_minorista || producto.precio_carniceria || 0)
+
+    const flagLista = listaPrecio === 'mayorista' ? 'aplica_mayorista' : 'aplica_minorista'
+    // Ofertas viejas sin flags se asumen aplicables (default DB es TRUE).
+    const oferta = ofertas.find(o => o.precio_id === producto.id && o[flagLista] !== false)
+
+    let precio = precioBase
+    if (oferta) {
+      if (oferta.descuento_pct != null && Number(oferta.descuento_pct) > 0) {
+        precio = Math.round(precioBase * (1 - Number(oferta.descuento_pct) / 100))
+      } else if (oferta.precio_oferta != null && Number(oferta.precio_oferta) > 0) {
+        precio = Number(oferta.precio_oferta)
+      }
+    }
+    return { precio, precioBase, oferta }
   }
 
   // ---- Auto-focus en input de código ----
@@ -115,15 +147,18 @@ export default function Caja() {
         showMsg(`❌ PLU ${decoded.plu} no encontrado. Asignalo en Precios.`, 'error', 4000)
         return
       }
-      const precioKg = prod.precio_minorista || prod.precio_carniceria || 0
+      // Importante: usamos SIEMPRE el precio del SISTEMA (que respeta lista
+      // activa + ofertas), no el precio que tiene cargado la balanza. La balanza
+      // solo nos sirve para obtener el PESO real del producto.
       if (configEAN.tipo === 'precio' || configEAN.tipo === 'precio_pesos') {
-        // La balanza nos dio el importe total — calculamos kg al revés
-        const importe = decoded.precio || 0
-        const kg = precioKg > 0 ? importe / precioKg : 0
-        agregarItemConImporte(prod, kg, precioKg, importe)
+        // La balanza nos dio el importe — derivamos el peso usando SU precio
+        // (asumimos que la balanza está sincronizada con precio_minorista del sistema).
+        const importeBalanza = decoded.precio || 0
+        const precioMinoristaSistema = Number(prod.precio_minorista || prod.precio_carniceria || 0)
+        const kg = precioMinoristaSistema > 0 ? importeBalanza / precioMinoristaSistema : 0
+        agregarItem(prod, kg)
       } else {
-        // Peso embebido — calculamos importe
-        agregarItem(prod, decoded.peso_kg, precioKg)
+        agregarItem(prod, decoded.peso_kg)
       }
       return
     }
@@ -143,7 +178,9 @@ export default function Caja() {
   }
 
   function agregarItem(producto, cantidad, precioOverride = null) {
-    const precio = precioOverride || producto.precio_minorista || producto.precio_carniceria || 0
+    const resuelto = resolverPrecio(producto)
+    const precio = precioOverride != null ? Number(precioOverride) : resuelto.precio
+    const tieneOferta = !!resuelto.oferta && precio < resuelto.precioBase
     const pesable = esPesable(producto)
     const cant = parseFloat(cantidad)
     setCarrito(c => [...c, {
@@ -154,10 +191,16 @@ export default function Caja() {
       kg: cant,            // se sigue llamando "kg" para no romper el resto; representa la cantidad
       unidad: pesable ? 'kg' : 'u',
       precio: parseFloat(precio),
+      precio_base: parseFloat(resuelto.precioBase),
+      tiene_oferta: tieneOferta,
+      oferta_pct: tieneOferta && resuelto.oferta?.descuento_pct ? Number(resuelto.oferta.descuento_pct) : null,
+      lista: listaPrecio,
       importe: cant * parseFloat(precio),
     }])
     const unidadTxt = pesable ? `${cant.toFixed(3)} kg` : `${cant} u`
-    showMsg(`✅ ${producto.nombre} — ${unidadTxt}`)
+    const badge = tieneOferta ? ' 🏷️ OFERTA' : ''
+    const listaTxt = listaPrecio === 'mayorista' ? ' [MAY]' : ''
+    showMsg(`✅ ${producto.nombre} — ${unidadTxt}${badge}${listaTxt}`)
   }
 
   // Cuando la balanza embebe el importe (no el peso), usamos esta función
@@ -395,6 +438,45 @@ export default function Caja() {
       {/* Vista vender: se oculta con display:none para no desmontar el estado/foco */}
       <div style={{ display: vistaCaja === 'vender' ? 'block' : 'none' }}>
 
+      {/* ============ TOGGLE LISTA DE PRECIO ============ */}
+      <div style={{
+        display: 'flex', gap: 10, alignItems: 'center', marginBottom: 12,
+        padding: '10px 14px', background: 'var(--surface)', borderRadius: 10,
+        border: `1px solid ${listaPrecio === 'mayorista' ? '#7a9dff' : 'var(--gold)'}`,
+      }}>
+        <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 1 }}>LISTA:</div>
+        <button onClick={() => setListaPrecio('minorista')}
+          style={{
+            padding: '8px 18px', borderRadius: 8, border: 'none',
+            background: listaPrecio === 'minorista' ? 'var(--gold)' : 'var(--surface2)',
+            color: listaPrecio === 'minorista' ? '#000' : 'var(--muted)',
+            cursor: 'pointer', fontWeight: 800, fontSize: 13, letterSpacing: 1,
+            fontFamily: "'DM Sans',sans-serif",
+          }}>
+          🛍️ MINORISTA
+        </button>
+        <button onClick={() => setListaPrecio('mayorista')}
+          style={{
+            padding: '8px 18px', borderRadius: 8, border: 'none',
+            background: listaPrecio === 'mayorista' ? '#7a9dff' : 'var(--surface2)',
+            color: listaPrecio === 'mayorista' ? '#000' : 'var(--muted)',
+            cursor: 'pointer', fontWeight: 800, fontSize: 13, letterSpacing: 1,
+            fontFamily: "'DM Sans',sans-serif",
+          }}>
+          📦 MAYORISTA
+        </button>
+        {carrito.length > 0 && (
+          <div style={{ fontSize: 10, color: '#ffb86b', marginLeft: 6 }}>
+            ⚠️ cambiar lista no recalcula los items ya cargados
+          </div>
+        )}
+        {ofertas.length > 0 && (
+          <div style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--green)', fontWeight: 700 }}>
+            🏷️ {ofertas.length} oferta(s) vigente(s)
+          </div>
+        )}
+      </div>
+
       {msg && (
         <div style={{
           position: 'fixed', top: 70, right: 20, zIndex: 1000,
@@ -487,7 +569,26 @@ export default function Caja() {
                             <span style={{ fontSize: 10, color: 'var(--muted)', minWidth: 18 }}>{item.unidad || 'kg'}</span>
                           </div>
                         </td>
-                        <td style={{ textAlign: 'right', padding: '8px 4px', fontSize: 13 }}>{fmt(item.precio)}</td>
+                        <td style={{ textAlign: 'right', padding: '8px 4px', fontSize: 13 }}>
+                          {item.tiene_oferta && item.precio_base > item.precio ? (
+                            <div>
+                              <div style={{ fontSize: 10, color: 'var(--muted)', textDecoration: 'line-through' }}>{fmt(item.precio_base)}</div>
+                              <div style={{ color: '#7dff7d', fontWeight: 700 }}>{fmt(item.precio)}</div>
+                              {item.oferta_pct ? (
+                                <div style={{ fontSize: 9, color: '#7dff7d' }}>🏷️ -{item.oferta_pct}%</div>
+                              ) : (
+                                <div style={{ fontSize: 9, color: '#7dff7d' }}>🏷️ OFERTA</div>
+                              )}
+                            </div>
+                          ) : (
+                            <>
+                              {fmt(item.precio)}
+                              {item.lista === 'mayorista' && (
+                                <div style={{ fontSize: 9, color: '#7a9dff' }}>📦 MAY</div>
+                              )}
+                            </>
+                          )}
+                        </td>
                         <td style={{ textAlign: 'right', padding: '8px 4px', fontSize: 14, fontWeight: 700, color: 'var(--gold)' }}>{fmt(item.importe)}</td>
                         <td style={{ textAlign: 'center', padding: '8px 4px' }}>
                           <button onClick={() => quitarItem(item.id)} style={{ background: 'none', border: 'none', color: '#ff6b6b', cursor: 'pointer', fontSize: 16 }}>×</button>
@@ -636,8 +737,27 @@ export default function Caja() {
                       {p.codigo_balanza ? ` · PLU ${p.codigo_balanza}` : ''}
                     </div>
                   </div>
-                  <div style={{ fontWeight: 700, color: 'var(--gold)', fontSize: 14 }}>
-                    {fmt(p.precio_minorista || p.precio_carniceria || 0)}/kg
+                  <div style={{ textAlign: 'right' }}>
+                    {(() => {
+                      const r = resolverPrecio(p)
+                      const hayOferta = r.oferta && r.precio < r.precioBase
+                      return (
+                        <>
+                          {hayOferta && (
+                            <div style={{ fontSize: 10, color: 'var(--muted)', textDecoration: 'line-through' }}>
+                              {fmt(r.precioBase)}
+                            </div>
+                          )}
+                          <div style={{ fontWeight: 700, color: hayOferta ? '#7dff7d' : 'var(--gold)', fontSize: 14 }}>
+                            {fmt(r.precio)}/kg
+                            {hayOferta && r.oferta?.descuento_pct ? ` 🏷️ -${r.oferta.descuento_pct}%` : (hayOferta ? ' 🏷️' : '')}
+                          </div>
+                          <div style={{ fontSize: 9, color: listaPrecio === 'mayorista' ? '#7a9dff' : 'var(--muted)' }}>
+                            {listaPrecio === 'mayorista' ? '📦 MAYORISTA' : '🛍️ MINORISTA'}
+                          </div>
+                        </>
+                      )
+                    })()}
                   </div>
                 </div>
               ))}

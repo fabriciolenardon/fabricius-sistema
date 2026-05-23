@@ -45,7 +45,7 @@ export default function Precios() {
 
   // Ofertas
   const [ofertas, setOfertas] = useState([])
-  const [ofertaForm, setOfertaForm] = useState({ precio_id: '', precio_oferta: '', fecha_inicio: new Date().toISOString().split('T')[0], fecha_fin: '', notas: '', aplica_carniceria: true, aplica_mayorista: true, aplica_minorista: true })
+  const [ofertaForm, setOfertaForm] = useState({ precio_id: '', tipo: 'fijo', precio_oferta: '', descuento_pct: '', fecha_inicio: new Date().toISOString().split('T')[0], fecha_fin: '', notas: '', aplica_carniceria: true, aplica_mayorista: true, aplica_minorista: true })
   const [ofertaLoading, setOfertaLoading] = useState(false)
   const [busquedaOferta, setBusquedaOferta] = useState('')
   const [mostrarDropdown, setMostrarDropdown] = useState(false)
@@ -182,8 +182,20 @@ export default function Precios() {
   }
 
   async function guardarOferta() {
-    if (!ofertaForm.precio_id || !ofertaForm.precio_oferta || !ofertaForm.fecha_inicio || !ofertaForm.fecha_fin) {
-      mostrarMsg('❌ Completá todos los campos de la oferta'); return
+    if (!ofertaForm.precio_id || !ofertaForm.fecha_inicio || !ofertaForm.fecha_fin) {
+      mostrarMsg('❌ Completá producto y fechas'); return
+    }
+    if (ofertaForm.tipo === 'fijo' && !ofertaForm.precio_oferta) {
+      mostrarMsg('❌ Ingresá el precio de oferta'); return
+    }
+    if (ofertaForm.tipo === 'porcentaje' && !ofertaForm.descuento_pct) {
+      mostrarMsg('❌ Ingresá el % de descuento'); return
+    }
+    if (ofertaForm.tipo === 'porcentaje') {
+      const pct = parseFloat(ofertaForm.descuento_pct)
+      if (isNaN(pct) || pct <= 0 || pct >= 100) {
+        mostrarMsg('❌ El % debe estar entre 1 y 99'); return
+      }
     }
     if (new Date(ofertaForm.fecha_fin) < new Date(ofertaForm.fecha_inicio)) {
       mostrarMsg('❌ La fecha de fin debe ser posterior al inicio'); return
@@ -198,7 +210,8 @@ export default function Precios() {
       precio_original_carniceria: productoSeleccionado?.precio_carniceria,
       precio_original_mayorista: productoSeleccionado?.precio_mayorista,
       precio_original_minorista: productoSeleccionado?.precio_minorista,
-      precio_oferta: parseFloat(ofertaForm.precio_oferta),
+      precio_oferta: ofertaForm.tipo === 'fijo' ? parseFloat(ofertaForm.precio_oferta) : null,
+      descuento_pct: ofertaForm.tipo === 'porcentaje' ? parseFloat(ofertaForm.descuento_pct) : null,
       fecha_inicio: ofertaForm.fecha_inicio,
       fecha_fin: ofertaForm.fecha_fin,
       activa: true,
@@ -214,7 +227,7 @@ export default function Precios() {
       return
     }
     mostrarMsg('✅ Oferta registrada correctamente')
-    setOfertaForm({ precio_id: '', precio_oferta: '', fecha_inicio: new Date().toISOString().split('T')[0], fecha_fin: '', notas: '', aplica_carniceria: true, aplica_mayorista: true, aplica_minorista: true })
+    setOfertaForm({ precio_id: '', tipo: 'fijo', precio_oferta: '', descuento_pct: '', fecha_inicio: new Date().toISOString().split('T')[0], fecha_fin: '', notas: '', aplica_carniceria: true, aplica_mayorista: true, aplica_minorista: true })
     setBusquedaOferta(''); setProductoSeleccionado(null)
     await cargarOfertas()
   }
@@ -231,7 +244,18 @@ export default function Precios() {
   const productosFiltrados = precios.filter(p => p.categoria === filtro)
   const productosBusqueda = precios.filter(p => p.nombre.toLowerCase().includes(busquedaOferta.toLowerCase()))
 
-  // Precios vigentes aplicando ofertas (selectivamente según las listas marcadas)
+  // Precios vigentes aplicando ofertas (selectivamente según las listas marcadas).
+  // Soporta dos modos: precio fijo (precio_oferta) o porcentaje (descuento_pct).
+  function aplicarOferta(precioBase, oferta) {
+    if (!precioBase || precioBase <= 0) return precioBase
+    if (oferta.descuento_pct != null && Number(oferta.descuento_pct) > 0) {
+      return Math.round(precioBase * (1 - Number(oferta.descuento_pct) / 100))
+    }
+    if (oferta.precio_oferta != null && Number(oferta.precio_oferta) > 0) {
+      return Number(oferta.precio_oferta)
+    }
+    return precioBase
+  }
   const preciosConOfertas = precios.map(p => {
     const oferta = ofertasVigentes.find(o => o.precio_id === p.id)
     if (oferta) {
@@ -241,9 +265,9 @@ export default function Precios() {
       const aMi = oferta.aplica_minorista !== false
       return {
         ...p,
-        precio_carniceria: aC ? oferta.precio_oferta : p.precio_carniceria,
-        precio_mayorista:  aMa ? oferta.precio_oferta : p.precio_mayorista,
-        precio_minorista:  aMi ? oferta.precio_oferta : p.precio_minorista,
+        precio_carniceria: aC ? aplicarOferta(p.precio_carniceria, oferta) : p.precio_carniceria,
+        precio_mayorista:  aMa ? aplicarOferta(p.precio_mayorista,  oferta) : p.precio_mayorista,
+        precio_minorista:  aMi ? aplicarOferta(p.precio_minorista,  oferta) : p.precio_minorista,
         enOferta: true,
         oferta,
       }
@@ -520,7 +544,7 @@ export default function Precios() {
           <div className="card" style={{ marginBottom: 20, borderColor: '#4a8a2a' }}>
             <div className="card-title">🏷️ Nueva oferta semanal</div>
             <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
-              El precio de oferta aplica igual para todas las listas (carnicería, mayorista y minorista) durante la vigencia.
+              Podés cargar la oferta como precio fijo nuevo (ej: $16.000) o como % de descuento (ej: -20%). El descuento se aplica solo a las listas tildadas más abajo.
             </div>
 
             <div style={{ position: 'relative', marginBottom: 12 }}>
@@ -552,11 +576,47 @@ export default function Precios() {
               )}
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
-              <div>
-                <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>💥 Precio de oferta ($)</label>
-                <input type="number" value={ofertaForm.precio_oferta} onChange={e => setOfertaForm(f => ({ ...f, precio_oferta: e.target.value }))} placeholder="Precio promocional" style={{ ...inp, borderColor: 'var(--green)' }} />
+            {/* Selector tipo de oferta */}
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>Tipo de oferta</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="button"
+                  onClick={() => setOfertaForm(f => ({ ...f, tipo: 'fijo', descuento_pct: '' }))}
+                  style={{
+                    flex: 1, padding: '10px 14px', borderRadius: 8,
+                    border: `2px solid ${ofertaForm.tipo === 'fijo' ? 'var(--green)' : 'var(--border)'}`,
+                    background: ofertaForm.tipo === 'fijo' ? 'var(--green)22' : 'var(--surface2)',
+                    color: ofertaForm.tipo === 'fijo' ? 'var(--green)' : 'var(--muted)',
+                    cursor: 'pointer', fontWeight: 700, fontSize: 13,
+                  }}>
+                  💰 Precio fijo nuevo
+                </button>
+                <button type="button"
+                  onClick={() => setOfertaForm(f => ({ ...f, tipo: 'porcentaje', precio_oferta: '' }))}
+                  style={{
+                    flex: 1, padding: '10px 14px', borderRadius: 8,
+                    border: `2px solid ${ofertaForm.tipo === 'porcentaje' ? 'var(--gold)' : 'var(--border)'}`,
+                    background: ofertaForm.tipo === 'porcentaje' ? 'var(--gold)22' : 'var(--surface2)',
+                    color: ofertaForm.tipo === 'porcentaje' ? 'var(--gold)' : 'var(--muted)',
+                    cursor: 'pointer', fontWeight: 700, fontSize: 13,
+                  }}>
+                  📉 % de descuento
+                </button>
               </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
+              {ofertaForm.tipo === 'fijo' ? (
+                <div>
+                  <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>💥 Precio de oferta ($)</label>
+                  <input type="number" value={ofertaForm.precio_oferta} onChange={e => setOfertaForm(f => ({ ...f, precio_oferta: e.target.value }))} placeholder="Ej: 16000" style={{ ...inp, borderColor: 'var(--green)' }} />
+                </div>
+              ) : (
+                <div>
+                  <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>📉 % de descuento</label>
+                  <input type="number" min="1" max="99" step="1" value={ofertaForm.descuento_pct} onChange={e => setOfertaForm(f => ({ ...f, descuento_pct: e.target.value }))} placeholder="Ej: 20" style={{ ...inp, borderColor: 'var(--gold)' }} />
+                </div>
+              )}
               <div>
                 <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>📅 Fecha inicio</label>
                 <input type="date" value={ofertaForm.fecha_inicio} onChange={e => setOfertaForm(f => ({ ...f, fecha_inicio: e.target.value }))} style={inp} />
@@ -597,19 +657,50 @@ export default function Precios() {
               </div>
             </div>
 
-            {productoSeleccionado && ofertaForm.precio_oferta && (
-              <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, marginBottom: 16, fontSize: 13 }}>
-                <span style={{ color: 'var(--muted)' }}>Precio actual: </span>
-                <span style={{ textDecoration: 'line-through', color: 'var(--red-light)' }}>{fmt(productoSeleccionado.precio_carniceria)}</span>
-                <span style={{ color: 'var(--muted)', margin: '0 8px' }}>→</span>
-                <span style={{ color: 'var(--green)', fontWeight: 700, fontSize: 16 }}>{fmt(parseFloat(ofertaForm.precio_oferta))}</span>
-                {productoSeleccionado.precio_carniceria > 0 && (
-                  <span style={{ marginLeft: 8, background: '#4a8a2a', color: '#fff', borderRadius: 4, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>
-                    -{Math.round((1 - parseFloat(ofertaForm.precio_oferta) / productoSeleccionado.precio_carniceria) * 100)}%
-                  </span>
-                )}
-              </div>
-            )}
+            {productoSeleccionado && (ofertaForm.precio_oferta || ofertaForm.descuento_pct) && (() => {
+              const calcular = (base) => {
+                if (!base || base <= 0) return null
+                if (ofertaForm.tipo === 'porcentaje' && ofertaForm.descuento_pct) {
+                  const pct = parseFloat(ofertaForm.descuento_pct)
+                  if (isNaN(pct) || pct <= 0) return null
+                  return { precio: Math.round(base * (1 - pct / 100)), pct }
+                }
+                if (ofertaForm.tipo === 'fijo' && ofertaForm.precio_oferta) {
+                  const nuevo = parseFloat(ofertaForm.precio_oferta)
+                  return { precio: nuevo, pct: Math.round((1 - nuevo / base) * 100) }
+                }
+                return null
+              }
+              const filas = [
+                { key: 'aplica_carniceria', label: '🔴 Carnicería', base: productoSeleccionado.precio_carniceria },
+                { key: 'aplica_mayorista',  label: '🟡 Mayorista',  base: productoSeleccionado.precio_mayorista },
+                { key: 'aplica_minorista',  label: '🟢 Minorista',  base: productoSeleccionado.precio_minorista },
+              ].filter(f => ofertaForm[f.key])
+              return (
+                <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, marginBottom: 16, fontSize: 13 }}>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8, letterSpacing: 1 }}>VISTA PREVIA</div>
+                  {filas.map(f => {
+                    const r = calcular(f.base)
+                    return (
+                      <div key={f.key} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                        <span style={{ minWidth: 110 }}>{f.label}</span>
+                        <span style={{ textDecoration: 'line-through', color: 'var(--muted)' }}>{fmt(f.base || 0)}</span>
+                        <span style={{ color: 'var(--muted)' }}>→</span>
+                        <span style={{ color: 'var(--green)', fontWeight: 700, fontSize: 15 }}>{r ? fmt(r.precio) : '—'}</span>
+                        {r && r.pct > 0 && (
+                          <span style={{ background: '#4a8a2a', color: '#fff', borderRadius: 4, padding: '2px 8px', fontSize: 10, fontWeight: 700 }}>
+                            -{r.pct}%
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })}
+                  {filas.length === 0 && (
+                    <div style={{ color: '#ff6b6b' }}>⚠️ No hay listas tildadas: la oferta no se aplica a ningún precio.</div>
+                  )}
+                </div>
+              )
+            })()}
 
             <button onClick={guardarOferta} disabled={ofertaLoading}
               style={{ padding: '10px 24px', background: '#4a8a2a', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>
@@ -622,13 +713,21 @@ export default function Precios() {
             <div className="card" style={{ marginBottom: 16, borderColor: '#4a8a2a' }}>
               <div className="card-title">✅ Ofertas vigentes ahora</div>
               <table>
-                <thead><tr><th>Producto</th><th>Aplica a</th><th>Precio oferta</th><th>Precio original</th><th>Descuento</th><th>Vigencia</th><th>Acciones</th></tr></thead>
+                <thead><tr><th>Producto</th><th>Aplica a</th><th>Tipo</th><th>Descuento</th><th>Resulta en</th><th>Vigencia</th><th>Acciones</th></tr></thead>
                 <tbody>
                   {ofertasVigentes.map(o => {
                     const listas = []
                     if (o.aplica_carniceria !== false) listas.push({ l: '🔴 Carn', c: '#ff6b6b' })
                     if (o.aplica_mayorista  !== false) listas.push({ l: '🟡 May',  c: 'var(--amber)' })
                     if (o.aplica_minorista  !== false) listas.push({ l: '🟢 Min',  c: 'var(--green)' })
+                    const esPct = o.descuento_pct != null && Number(o.descuento_pct) > 0
+                    const baseRef = o.precio_original_minorista || o.precio_original_carniceria || o.precio_original_mayorista || 0
+                    const resultante = esPct
+                      ? Math.round(baseRef * (1 - Number(o.descuento_pct) / 100))
+                      : Number(o.precio_oferta || 0)
+                    const pctMostrado = esPct
+                      ? Number(o.descuento_pct)
+                      : (baseRef > 0 ? Math.round((1 - resultante / baseRef) * 100) : null)
                     return (
                     <tr key={o.id}>
                       <td style={{ fontWeight: 600 }}>{o.producto_nombre}</td>
@@ -639,14 +738,21 @@ export default function Precios() {
                           ))}
                         </div>
                       </td>
-                      <td style={{ color: 'var(--green)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(o.precio_oferta)}</td>
-                      <td style={{ color: 'var(--muted)', textDecoration: 'line-through' }}>{fmt(o.precio_original_carniceria)}</td>
                       <td>
-                        {o.precio_original_carniceria > 0 && (
+                        <span style={{ background: esPct ? 'var(--gold)22' : 'var(--green)22', color: esPct ? 'var(--gold)' : 'var(--green)', borderRadius: 4, padding: '2px 8px', fontSize: 10, fontWeight: 700 }}>
+                          {esPct ? '📉 %' : '💰 FIJO'}
+                        </span>
+                      </td>
+                      <td>
+                        {pctMostrado != null && (
                           <span style={{ background: '#4a8a2a', color: '#fff', borderRadius: 4, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>
-                            -{Math.round((1 - o.precio_oferta / o.precio_original_carniceria) * 100)}%
+                            -{pctMostrado}%
                           </span>
                         )}
+                      </td>
+                      <td>
+                        <div style={{ color: 'var(--muted)', textDecoration: 'line-through', fontSize: 11 }}>{fmt(baseRef)}</div>
+                        <div style={{ color: 'var(--green)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(resultante)}</div>
                       </td>
                       <td style={{ fontSize: 11, color: 'var(--muted)' }}>{o.fecha_inicio} → {o.fecha_fin}</td>
                       <td>
@@ -667,16 +773,21 @@ export default function Precios() {
             <div className="card">
               <div className="card-title">📁 Historial de ofertas</div>
               <table>
-                <thead><tr><th>Producto</th><th>Precio oferta</th><th>Vigencia</th><th>Estado</th></tr></thead>
+                <thead><tr><th>Producto</th><th>Descuento</th><th>Vigencia</th><th>Estado</th></tr></thead>
                 <tbody>
-                  {ofertasVencidas.map(o => (
-                    <tr key={o.id} style={{ opacity: 0.6 }}>
-                      <td>{o.producto_nombre}</td>
-                      <td style={{ color: 'var(--muted)' }}>{fmt(o.precio_oferta)}</td>
-                      <td style={{ fontSize: 11, color: 'var(--muted)' }}>{o.fecha_inicio} → {o.fecha_fin}</td>
-                      <td><span style={{ background: '#3a1a1a', color: '#ff6b6b', borderRadius: 4, padding: '2px 8px', fontSize: 11 }}>Vencida</span></td>
-                    </tr>
-                  ))}
+                  {ofertasVencidas.map(o => {
+                    const esPct = o.descuento_pct != null && Number(o.descuento_pct) > 0
+                    return (
+                      <tr key={o.id} style={{ opacity: 0.6 }}>
+                        <td>{o.producto_nombre}</td>
+                        <td style={{ color: 'var(--muted)' }}>
+                          {esPct ? `📉 -${o.descuento_pct}%` : `💰 ${fmt(o.precio_oferta)}`}
+                        </td>
+                        <td style={{ fontSize: 11, color: 'var(--muted)' }}>{o.fecha_inicio} → {o.fecha_fin}</td>
+                        <td><span style={{ background: '#3a1a1a', color: '#ff6b6b', borderRadius: 4, padding: '2px 8px', fontSize: 11 }}>Vencida</span></td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
