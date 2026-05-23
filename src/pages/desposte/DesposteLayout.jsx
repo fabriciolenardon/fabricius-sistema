@@ -29,7 +29,7 @@ export default function DesposteLayout() {
       }}>
         <div style={{ flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            <LogoFabricius size="medium" />
+            <LogoFabricius variant="full" size="medium" />
             <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 26, color: 'var(--gold)', letterSpacing: 2 }}>
               🔪 SECTOR DESPOSTE
             </div>

@@ -1,25 +1,36 @@
 // ============================================================
 // LogoFabricius — muestra el logo si existe, sino el texto
 // ============================================================
-// El usuario debe guardar el archivo como `public/logo.png`
-// (o .jpg, .svg, .webp — cambiar la ruta abajo si usa otra extensión).
-// Si la imagen no carga (404 o cualquier error), automáticamente
-// hace fallback al texto "🥩 FABRICIUS".
+// Variantes:
+//   variant="header"  → /logo.png       (horizontal SAS — header)
+//   variant="full"    → /logo-full.png  (circular toro — login/desposte)
+// Si la imagen no carga, fallback automático al texto.
 // ============================================================
 import { useState } from 'react'
 
+const FUENTES = {
+  header: '/logo.png',
+  full:   '/logo-full.png',
+}
+
 export default function LogoFabricius({
-  size = 'medium',  // 'small' | 'medium' | 'large'
-  src = '/logo.png',
-  invertido = false, // si la imagen es para fondo claro pero queremos verla en fondo oscuro
+  variant = 'header',
+  size = 'medium',
+  src,
+  invertido = false,
 }) {
   const [error, setError] = useState(false)
 
-  const altos = { small: 28, medium: 42, large: 80 }
-  const alto = altos[size] || 42
+  const altos = {
+    small:  variant === 'full' ? 60  : 32,
+    medium: variant === 'full' ? 110 : 44,
+    large:  variant === 'full' ? 220 : 60,
+  }
+  const alto = altos[size] || 44
 
-  if (error || !src) {
-    // Fallback: texto con estilo de marca
+  const fuente = src || FUENTES[variant] || FUENTES.header
+
+  if (error || !fuente) {
     return (
       <div style={{
         fontFamily: "'Bebas Neue', cursive",
@@ -35,8 +46,8 @@ export default function LogoFabricius({
 
   return (
     <img
-      src={src}
-      alt="Carnicerías Fabricius"
+      src={fuente}
+      alt="Carnicerías Fabricius SAS"
       onError={() => setError(true)}
       style={{
         height: alto,
