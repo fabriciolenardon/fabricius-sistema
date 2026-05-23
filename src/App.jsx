@@ -37,6 +37,16 @@ import DesposteLayout from './pages/desposte/DesposteLayout'
 import DesposteCapones from './pages/desposte/DesposteCapones'
 import DesposteMediaRes from './pages/desposte/DesposteMediaRes'
 
+function SoloCEO({ children }) {
+  const { user, profile, profileMissing, loading } = useAuth()
+  if (loading) return <LoadingScreen />
+  if (!user) return <Navigate to="/login" replace />
+  if (profileMissing) return <PerfilPendiente />
+  if (profile?.rol !== 'admin') return <Navigate to="/" replace />
+  if (user?.email !== 'fabriciolenardon@gmail.com') return <Navigate to="/admin/dashboard" replace />
+  return children
+}
+
 function ProtectedRoute({ children, requiredRole }) {
   const { user, profile, profileMissing, loading } = useAuth()
   if (loading) return <LoadingScreen />
@@ -100,7 +110,7 @@ export default function App() {
           <Route path="etiquetas" element={<Etiquetas />} />
           <Route path="facturacion" element={<Facturacion />} />
           <Route path="auditoria" element={<Auditoria />} />
-          <Route path="ejecutivo" element={<DashboardEjecutivo />} />
+          <Route path="ejecutivo" element={<SoloCEO><DashboardEjecutivo /></SoloCEO>} />
         </Route>
         <Route path="/franquicia" element={<ProtectedRoute requiredRole="franquicia"><FranquiciaLayout /></ProtectedRoute>}>
           <Route path="dashboard" element={<FranquiciaDashboard />} />
