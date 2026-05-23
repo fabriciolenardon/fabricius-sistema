@@ -4,6 +4,8 @@ import { supabase } from '../../lib/supabase'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 import LimpiezaDuplicados from './LimpiezaDuplicados'
 import ImportarPLUQendra from './ImportarPLUQendra'
+import { abrirVentanaImprimible } from '../../lib/pdfPrintable'
+import { enviarWhatsapp } from '../../lib/whatsapp'
 const CATEGORIAS = {
   bovino_mr: '🐄 Media Reses',
   bovino_corte: '🥩 Bovino Cortes',
@@ -240,6 +242,64 @@ export default function Precios() {
   }
 
   const hoy = new Date().toISOString().split('T')[0]
+  function catalogoPDF() {
+    const precsActivos = preciosConOfertas.filter(p => (p.precio_minorista || p.precio_carniceria || 0) > 0)
+    const porCat = {}
+    precsActivos.forEach(p => {
+      const cat = p.categoria || 'otros'
+      if (!porCat[cat]) porCat[cat] = []
+      porCat[cat].push(p)
+    })
+    const fechaTxt = new Date().toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' })
+    let html = `<div class="badge">CARNICERÍAS FABRICIUS</div>`
+    html += `<h1 class="h1">🥩 Catálogo de Precios</h1>`
+    html += `<div class="sub">Río Primero, Córdoba · Vigente al ${fechaTxt}</div>`
+    Object.entries(porCat).forEach(([catKey, items]) => {
+      const catLabel = CATEGORIAS[catKey] || catKey
+      html += `<h2 class="h2">${catLabel}</h2>`
+      html += '<table><thead><tr><th>Producto</th><th class="right">Minorista</th><th class="right">Mayorista</th><th class="center">PLU</th></tr></thead><tbody>'
+      items.sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '')).forEach(p => {
+        const tieneOferta = p.enOferta
+        html += '<tr>'
+        html += `<td class="bold">${p.nombre}${tieneOferta ? '<span class="oferta-badge">OFERTA</span>' : ''}</td>`
+        html += `<td class="right ${tieneOferta ? 'precio-new' : ''}">${fmt(p.precio_minorista) || '—'}</td>`
+        html += `<td class="right">${fmt(p.precio_mayorista) || '—'}</td>`
+        html += `<td class="center" style="color:#999;font-size:11px">${p.codigo_balanza || '—'}</td>`
+        html += '</tr>'
+      })
+      html += '</tbody></table>'
+    })
+    html += `<div class="footer">Generado desde el sistema de Carnicerías Fabricius · ${new Date().toLocaleString('es-AR')}</div>`
+    abrirVentanaImprimible({ titulo: `Catálogo Fabricius ${fechaTxt}`, contenidoHtml: html })
+  }
+
+  function enviarCatalogoWhatsapp() {
+    const fechaTxt = new Date().toLocaleDateString('es-AR', { day: 'numeric', month: 'long' })
+    let msg = `🥩 *Carnicerías Fabricius — Lista de precios*\n`
+    msg += `📅 Vigente al ${fechaTxt}\n\n`
+    const precsActivos = preciosConOfertas.filter(p => (p.precio_minorista || p.precio_carniceria || 0) > 0)
+    const porCat = {}
+    precsActivos.forEach(p => {
+      const cat = p.categoria || 'otros'
+      if (!porCat[cat]) porCat[cat] = []
+      porCat[cat].push(p)
+    })
+    Object.entries(porCat).forEach(([catKey, items]) => {
+      msg += `*${CATEGORIAS[catKey] || catKey}*\n`
+      items.sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '')).forEach(p => {
+        const precio = p.precio_minorista || p.precio_carniceria || 0
+        if (precio > 0) {
+          msg += `· ${p.nombre}: ${fmt(precio)}${p.enOferta ? ' 🏷️' : ''}\n`
+        }
+      })
+      msg += `\n`
+    })
+    msg += `_Mensaje generado automáticamente desde el sistema._`
+    const tel = prompt('¿A qué WhatsApp lo querés mandar? (dejá vacío para elegir contacto al abrir Whats)', '')
+    if (tel === null) return
+    enviarWhatsapp(tel, msg)
+  }
+
   const ofertasVigentes = ofertas.filter(o => o.activa && o.fecha_inicio <= hoy && o.fecha_fin >= hoy)
   const ofertasVencidas = ofertas.filter(o => !o.activa || o.fecha_fin < hoy)
   const productosFiltrados = precios.filter(p => p.categoria === filtro)
@@ -330,6 +390,18 @@ export default function Precios() {
       </div>
       {msg && <div style={{ background: msg.includes('❌') ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${msg.includes('❌') ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: msg.includes('❌') ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>{msg}</div>}
 
+      {tab === 'ver' && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+          <button onClick={catalogoPDF}
+            style={{ padding: '8px 14px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+            📄 Catálogo PDF (imprimible)
+          </button>
+          <button onClick={enviarCatalogoWhatsapp}
+            style={{ padding: '8px 14px', background: '#25D366', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+            📱 Enviar precios por WhatsApp
+          </button>
+        </div>
+      )}
       {tab === 'ver' && (
         <div>
           {ofertasVigentes.length > 0 && (

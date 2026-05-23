@@ -3,9 +3,11 @@ import { useAuth } from '../../context/AuthContext'
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useFlujoNotificaciones } from '../../lib/useFlujoNotificaciones'
+import BuscadorGlobal from '../../components/BuscadorGlobal'
 
 const navItems = [
   { to: '/admin/dashboard',   icon: '📊', label: 'Dashboard' },
+  { to: '/admin/ejecutivo',   icon: '⚡', label: 'Ejecutivo' },
   { to: '/admin/caja',        icon: '💵', label: 'Caja' },
   { to: '/admin/ventas', icon: '📋', label: 'Mayorista' },
   { to: '/admin/deposito',    icon: '🏭', label: 'Depósito' },
@@ -19,6 +21,7 @@ const navItems = [
   { to: '/admin/gastos',      icon: '💸', label: 'Gastos' },
   { to: '/admin/facturacion', icon: '📑', label: 'Facturación' },
   { to: '/admin/cierre',      icon: '📋', label: 'Cierre' },
+  { to: '/admin/auditoria',   icon: '🔍', label: 'Auditoría' },
 ]
 
 function useNotificaciones() {
@@ -410,6 +413,7 @@ export default function AdminLayout() {
       <main style={{ paddingTop: 56, minHeight: '100vh' }}>
         <div style={{ padding: isMobile ? '16px 12px' : '24px 28px' }} className="fade-in">
           <Outlet />
+      <BuscadorGlobal />
         </div>
       </main>
 
