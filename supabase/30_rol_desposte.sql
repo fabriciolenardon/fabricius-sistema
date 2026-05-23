@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS flujo_deposito (
   id              SERIAL PRIMARY KEY,
   fecha           DATE NOT NULL DEFAULT CURRENT_DATE,
   hora            TIME DEFAULT CURRENT_TIME,
-  empleado_id     UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  empleado_id     UUID,  -- sin FK explícita (auth.users en schema auth)
   empleado_nombre TEXT,                                       -- snapshot del nombre
   tipo            TEXT NOT NULL CHECK (tipo IN (
     'media_res_piezas',       -- elige modelo A/B/C
@@ -39,13 +39,13 @@ CREATE TABLE IF NOT EXISTS flujo_deposito (
     'media_res_mayorista',    -- entera mayorista
     'media_res_minorista'     -- entera minorista
   )),
-  entrada_id      INT REFERENCES entradas_deposito(id) ON DELETE SET NULL,
+  entrada_id      UUID,  -- referencia lógica a entradas_deposito (sin FK por compatibilidad de tipos)
   kg_media_res    NUMERIC(12,2),                              -- kg de la media res
   modelo          TEXT,                                       -- 'A' | 'B' | 'C' | null
   payload         JSONB DEFAULT '{}'::jsonb,                  -- detalle adicional
   estado          TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado IN ('pendiente','aprobado','rechazado')),
-  desposte_id     INT REFERENCES despostes(id) ON DELETE SET NULL,  -- al aprobar
-  aprobado_por    UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  desposte_id     INT,  -- referencia lógica a despostes (sin FK por compatibilidad de tipos)
+  aprobado_por    UUID,  -- sin FK explícita
   aprobado_at     TIMESTAMPTZ,
   notas           TEXT,
   notas_admin     TEXT,
@@ -113,7 +113,7 @@ DO $$ BEGIN
   -- precios: leer (para ver nombres de cortes)
   IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'precios_desposte_read') THEN
     CREATE POLICY precios_desposte_read ON precios FOR SELECT
-      USING (public.is_desposte() OR public.is_admin() OR public.is_franquicia());
+      USING (public.is_desposte() OR public.is_admin());  -- is_franquicia() no existe en algunas bases
   END IF;
 END $$;
 
