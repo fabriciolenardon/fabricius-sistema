@@ -2,6 +2,7 @@ import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
+import { useFlujoNotificaciones } from '../../lib/useFlujoNotificaciones'
 
 const navItems = [
   { to: '/admin/dashboard',   icon: '📊', label: 'Dashboard' },
@@ -297,6 +298,12 @@ function MenuMobile({ onClose }) {
                 style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 10, marginBottom: 4, fontSize: 14, fontWeight: 600, textDecoration: 'none', background: isActive ? 'var(--gold)' : 'transparent', color: isActive ? '#000' : 'var(--text2)', transition: 'all 0.15s' }}>
                 <span style={{ fontSize: 18 }}>{item.icon}</span>
                 <span style={{ flex: 1 }}>{item.label}</span>
+                {item.to === '/admin/deposito' && (window.__flujosPendientes > 0) && (
+                  <span style={{ background: '#ef4444', color: '#fff', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{window.__flujosPendientes}</span>
+                )}
+                {item.to === '/admin/pedidos' && (window.__pedidosPendientes > 0) && (
+                  <span style={{ background: '#ef4444', color: '#fff', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{window.__pedidosPendientes}</span>
+                )}
               </NavLink>
             )
           })}
@@ -318,6 +325,11 @@ export default function AdminLayout() {
   const navigate = useNavigate()
   const notifs = useNotificaciones()
   const pedidosPendientes = usePedidosPendientes()
+  const { pendientes: flujosPendientes } = useFlujoNotificaciones()
+  // Exponer en window para que el sidebar mobile pueda mostrar los badges
+  // (el sidebar mobile es un componente separado que no recibe estos valores como props)
+  useEffect(() => { window.__flujosPendientes = flujosPendientes }, [flujosPendientes])
+  useEffect(() => { window.__pedidosPendientes = pedidosPendientes }, [pedidosPendientes])
   const [menuAbierto, setMenuAbierto] = useState(false)
   const [isMobile, setIsMobile] = useState(window.innerWidth < 900)
 
@@ -364,6 +376,9 @@ export default function AdminLayout() {
                   <span>{item.icon}</span>{item.label}
                   {item.to === '/admin/pedidos' && pedidosPendientes > 0 && (
                     <span style={{ background: 'var(--red-light)', color: '#fff', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{pedidosPendientes}</span>
+                  )}
+                  {item.to === '/admin/deposito' && flujosPendientes > 0 && (
+                    <span title="Flujos de desposte pendientes" style={{ background: '#ef4444', color: '#fff', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{flujosPendientes}</span>
                   )}
                 </NavLink>
               ))}
