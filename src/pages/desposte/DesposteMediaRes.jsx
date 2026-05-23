@@ -37,6 +37,7 @@ export default function DesposteMediaRes() {
   const [seleccionada, setSeleccionada] = useState(null)
   const [kgManual, setKgManual] = useState('')
   const [modelo, setModelo] = useState('A')
+  const [piezasKg, setPiezasKg] = useState({})  // { nombrePieza: kg } para modo piezas
   const [notas, setNotas] = useState('')
   const [guardando, setGuardando] = useState(false)
   const [misEnvios, setMisEnvios] = useState([])
@@ -67,6 +68,7 @@ export default function DesposteMediaRes() {
     setKgManual('')
     setModelo('A')
     setNotas('')
+    setPiezasKg({})
   }
 
   function reset() {
@@ -75,6 +77,7 @@ export default function DesposteMediaRes() {
     setKgManual('')
     setModelo('A')
     setNotas('')
+    setPiezasKg({})
   }
 
   async function enviar() {
@@ -90,6 +93,14 @@ export default function DesposteMediaRes() {
     if (submodo === 'piezas') {
       payload.modelo = modelo
       payload.modelo_nombre = MODELOS_DESPOSTE[modelo]?.nombre
+      // Incluir las piezas con sus kilos cargados
+      const piezasDetalle = MODELOS_DESPOSTE[modelo].piezas.map(p => ({
+        nombre: p.nombre,
+        kg: Number(piezasKg[p.nombre]) || 0,
+        tipo_stock: p.tipo_stock,
+      })).filter(p => p.kg > 0)
+      payload.piezas = piezasDetalle
+      payload.kg_piezas_total = piezasDetalle.reduce((s, p) => s + p.kg, 0)
     }
     if (seleccionada) {
       payload.entrada_fecha = seleccionada.fecha
@@ -219,7 +230,7 @@ export default function DesposteMediaRes() {
             {Object.entries(MODELOS_DESPOSTE).map(([id, m]) => {
               const activo = modelo === id
               return (
-                <button key={id} onClick={() => setModelo(id)}
+                <button key={id} onClick={() => { setModelo(id); setPiezasKg({}) }}
                   style={{
                     padding: 14, background: activo ? 'var(--gold)22' : 'var(--surface)',
                     border: `2px solid ${activo ? 'var(--gold)' : 'var(--border)'}`,
@@ -232,6 +243,54 @@ export default function DesposteMediaRes() {
                 </button>
               )
             })}
+          </div>
+
+          {/* Inputs de kilos por pieza */}
+          <div style={{ marginTop: 14, padding: 14, background: 'var(--surface)', borderRadius: 12 }}>
+            <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 10, fontWeight: 600 }}>
+              ⚖️ Kilos por pieza del Modelo {modelo}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
+              {MODELOS_DESPOSTE[modelo].piezas.map(p => (
+                <div key={p.nombre} style={{ padding: 10, background: 'var(--surface2)', borderRadius: 8 }}>
+                  <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                    {p.nombre}
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <input type="number" inputMode="decimal" step="0.01" min="0"
+                      value={piezasKg[p.nombre] || ''}
+                      onChange={e => setPiezasKg(pk => ({ ...pk, [p.nombre]: e.target.value }))}
+                      placeholder="0"
+                      style={{ ...inp, fontSize: 16 }} />
+                    <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 700 }}>kg</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {/* Totales */}
+            {(() => {
+              const sumaPiezas = MODELOS_DESPOSTE[modelo].piezas.reduce((s, p) => s + (Number(piezasKg[p.nombre]) || 0), 0)
+              const kgMR = Number(kgManual) || 0
+              const merma = kgMR - sumaPiezas
+              const mermaPct = kgMR > 0 ? (merma / kgMR) * 100 : 0
+              if (sumaPiezas === 0 && kgMR === 0) return null
+              return (
+                <div style={{ marginTop: 10, padding: 10, background: 'var(--surface2)', borderRadius: 8, fontSize: 13 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Suma de piezas:</span>
+                    <strong style={{ color: '#7dff7d' }}>{fmt(sumaPiezas)} kg</strong>
+                  </div>
+                  {kgMR > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+                      <span>Merma vs media res ({fmt(kgMR)} kg):</span>
+                      <strong style={{ color: merma < 0 ? '#ff8b8b' : mermaPct > 8 ? '#ffd17a' : '#7dff7d' }}>
+                        {fmt(Math.abs(merma))} kg ({Math.abs(mermaPct).toFixed(1)}%)
+                      </strong>
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
           </div>
         </div>
       )}
