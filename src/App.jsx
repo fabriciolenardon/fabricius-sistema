@@ -31,6 +31,9 @@ import Pedidos from './pages/admin/Pedidos'
 import AsistenteIA from './components/AsistenteIA'
 import PerfilPendiente from './components/PerfilPendiente'
 import CajeroLayout from './pages/cajero/CajeroLayout'
+import DesposteLayout from './pages/desposte/DesposteLayout'
+import DesposteCapones from './pages/desposte/DesposteCapones'
+import DesposteMediaRes from './pages/desposte/DesposteMediaRes'
 
 function ProtectedRoute({ children, requiredRole }) {
   const { user, profile, profileMissing, loading } = useAuth()
@@ -67,6 +70,7 @@ function RootRedirect() {
   if (profile.rol === 'admin') return <Navigate to="/admin/dashboard" replace />
   if (profile.rol === 'cliente_mayorista') return <Navigate to="/cliente/dashboard" replace />
   if (profile.rol === 'cajero') return <Navigate to="/cajero/caja" replace />
+  if (profile.rol === 'desposte') return <Navigate to="/desposte/capones" replace />
   return <Navigate to="/franquicia/dashboard" replace />
 }
 
@@ -111,8 +115,12 @@ export default function App() {
         <Route path="/cajero" element={<ProtectedRoute requiredRole="cajero"><CajeroLayout /></ProtectedRoute>}>
           <Route path="caja" element={<Caja />} />
         </Route>
+        <Route path="/desposte" element={<ProtectedRoute requiredRole="desposte"><DesposteLayout /></ProtectedRoute>}>
+          <Route path="capones" element={<DesposteCapones />} />
+          <Route path="media-res" element={<DesposteMediaRes />} />
+        </Route>
       </Routes>
-      {user && profile && profile.rol !== 'cajero' && <AsistenteIA />}
+      {user && profile && profile.rol !== 'cajero' && profile.rol !== 'desposte' && <AsistenteIA />}
     </>
   )
 }

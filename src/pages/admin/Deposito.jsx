@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
+import FlujoDeposito from './FlujoDeposito'
 
 async function actualizarStock(tipo, kg) {
   const { data } = await supabase.from('stock_actual').select('*').eq('tipo', tipo).maybeSingle()
@@ -69,6 +70,7 @@ export function Deposito() {
           { id: 'entradas', label: '📥 Entradas' },
           { id: 'desposte', label: '🔪 Desposte' },
           { id: 'piezas', label: '🥩 Piezas' },
+          { id: 'flujo', label: '📥 Flujo Depósito' },
           { id: 'remitos', label: '🧾 Remitos' },
           { id: 'proveedores', label: '🏭 Proveedores' },
         ].map(t => (
@@ -82,6 +84,7 @@ export function Deposito() {
         {tab === 'desposte' && <DesposteTab key={tab} onSaved={() => {}} />}
 {tab === 'piezas' && <PiezasTab key={tab} />}
 {tab === 'remitos' && <RemitosTab remitoActual={remitoActual} />}
+      {tab === 'flujo' && <FlujoDeposito />}
       {tab === 'proveedores' && <ProveedoresTab />}
     </div>
   )
