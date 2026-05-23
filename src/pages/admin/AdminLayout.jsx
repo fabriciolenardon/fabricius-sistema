@@ -16,6 +16,7 @@ const navItems = [
   { to: '/admin/cheques',     icon: '📄', label: 'Cheques' },
   { to: '/admin/sueldos',     icon: '💰', label: 'Sueldos' },
   { to: '/admin/gastos',      icon: '💸', label: 'Gastos' },
+  { to: '/admin/facturacion', icon: '📑', label: 'Facturación' },
   { to: '/admin/cierre',      icon: '📋', label: 'Cierre' },
 ]
 
