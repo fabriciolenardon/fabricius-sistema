@@ -13,6 +13,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
+import Paginador, { usePaginacion } from '../../components/Paginador'
 
 const fmt$ = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
 const fmtKg = n => (Number(n) || 0).toFixed(3) + ' kg'
@@ -416,65 +417,85 @@ export default function HistorialCaja() {
             </div>
           )}
 
-          {/* TABLA POR DÍA */}
-          <div className="card">
-            <div className="card-title">📅 Ventas por día</div>
-            {ventasPorDia.length === 0 ? (
-              <p style={{ color: 'var(--muted)', fontSize: 13 }}>Sin ventas en el rango.</p>
-            ) : ventasPorDia.map(dia => (
-              <div key={dia.fecha} style={{ borderTop: '1px solid var(--border)', padding: '10px 0' }}>
-                <div onClick={() => setExpandido(expandido === dia.fecha ? null : dia.fecha)}
-                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', padding: '4px 0' }}>
-                  <div>
-                    <span style={{ marginRight: 8 }}>{expandido === dia.fecha ? '▼' : '▶'}</span>
-                    <strong>{dia.fecha}</strong>
-                    <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--muted)' }}>· {dia.cant} venta{dia.cant === 1 ? '' : 's'}</span>
-                  </div>
-                  <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--gold)', fontFamily: "'Bebas Neue',cursive" }}>{fmt$(dia.total)}</div>
+          {/* TABLA POR DÍA — paginada */}
+          <DiasPaginados
+            ventasPorDia={ventasPorDia}
+            expandido={expandido}
+            setExpandido={setExpandido}
+            anularVenta={anularVenta}
+            isAdmin={isAdmin}
+          />
+        </>
+      )}
+    </div>
+  )
+}
+
+// Sub-componente: pagina la lista de días para evitar filas interminables.
+// Cada día queda colapsable; al expandir muestra todas las ventas del día.
+function DiasPaginados({ ventasPorDia, expandido, setExpandido, anularVenta, isAdmin }) {
+  const pag = usePaginacion(ventasPorDia, 20)
+  return (
+    <div className="card">
+      <div className="card-title">📅 Ventas por día</div>
+      {ventasPorDia.length === 0 ? (
+        <p style={{ color: 'var(--muted)', fontSize: 13 }}>Sin ventas en el rango.</p>
+      ) : (
+        <>
+          {pag.items.map(dia => (
+            <div key={dia.fecha} style={{ borderTop: '1px solid var(--border)', padding: '10px 0' }}>
+              <div onClick={() => setExpandido(expandido === dia.fecha ? null : dia.fecha)}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', padding: '4px 0' }}>
+                <div>
+                  <span style={{ marginRight: 8 }}>{expandido === dia.fecha ? '▼' : '▶'}</span>
+                  <strong>{dia.fecha}</strong>
+                  <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--muted)' }}>· {dia.cant} venta{dia.cant === 1 ? '' : 's'}</span>
                 </div>
-                {expandido === dia.fecha && (
-                  <table style={{ width: '100%', marginTop: 8, fontSize: 12 }}>
-                    <thead>
-                      <tr style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase' }}>
-                        <th style={{ textAlign: 'left', padding: 4 }}>Hora</th>
-                        <th style={{ textAlign: 'left', padding: 4 }}>Items</th>
-                        <th style={{ textAlign: 'right', padding: 4 }}>Total</th>
-                        <th style={{ textAlign: 'right', padding: 4 }}>Efectivo</th>
-                        <th style={{ textAlign: 'right', padding: 4 }}>Débito</th>
-                        <th style={{ textAlign: 'right', padding: 4 }}>Transf.</th>
-                        <th style={{ width: 80 }}></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {dia.ventas.map(v => (
-                        <tr key={v.id} style={{ borderTop: '1px solid var(--border)' }}>
-                          <td style={{ padding: 4 }}>{v.hora || '—'}</td>
-                          <td style={{ padding: 4, color: 'var(--muted)', fontSize: 11 }}>
-                            {Array.isArray(v.items) ? `${v.items.length} item${v.items.length === 1 ? '' : 's'}` : '—'}
-                          </td>
-                          <td style={{ textAlign: 'right', padding: 4, fontWeight: 600 }}>{fmt$(v.total)}</td>
-                          <td style={{ textAlign: 'right', padding: 4, color: v.efectivo > 0 ? '#7dff7d' : 'var(--muted)' }}>{v.efectivo > 0 ? fmt$(v.efectivo) : '—'}</td>
-                          <td style={{ textAlign: 'right', padding: 4, color: v.debito > 0 ? '#7a9dff' : 'var(--muted)' }}>{v.debito > 0 ? fmt$(v.debito) : '—'}</td>
-                          <td style={{ textAlign: 'right', padding: 4, color: v.transferencia > 0 ? '#ffd17a' : 'var(--muted)' }}>{v.transferencia > 0 ? fmt$(v.transferencia) : '—'}</td>
-                          <td style={{ textAlign: 'right', padding: 4 }}>
-                            {isAdmin ? (
-                              <button onClick={() => anularVenta(v)}
-                                title="Anular venta y devolver stock"
-                                style={{ padding: '3px 10px', background: 'transparent', border: '1px solid #5a2a2a', color: '#ff8b8b', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
-                                🗑️ Anular
-                              </button>
-                            ) : (
-                              <span style={{ fontSize: 10, color: 'var(--muted)' }}>—</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
+                <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--gold)', fontFamily: "'Bebas Neue',cursive" }}>{fmt$(dia.total)}</div>
               </div>
-            ))}
-          </div>
+              {expandido === dia.fecha && (
+                <table style={{ width: '100%', marginTop: 8, fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase' }}>
+                      <th style={{ textAlign: 'left', padding: 4 }}>Hora</th>
+                      <th style={{ textAlign: 'left', padding: 4 }}>Items</th>
+                      <th style={{ textAlign: 'right', padding: 4 }}>Total</th>
+                      <th style={{ textAlign: 'right', padding: 4 }}>Efectivo</th>
+                      <th style={{ textAlign: 'right', padding: 4 }}>Débito</th>
+                      <th style={{ textAlign: 'right', padding: 4 }}>Transf.</th>
+                      <th style={{ width: 80 }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dia.ventas.map(v => (
+                      <tr key={v.id} style={{ borderTop: '1px solid var(--border)' }}>
+                        <td style={{ padding: 4 }}>{v.hora || '—'}</td>
+                        <td style={{ padding: 4, color: 'var(--muted)', fontSize: 11 }}>
+                          {Array.isArray(v.items) ? `${v.items.length} item${v.items.length === 1 ? '' : 's'}` : '—'}
+                        </td>
+                        <td style={{ textAlign: 'right', padding: 4, fontWeight: 600 }}>{fmt$(v.total)}</td>
+                        <td style={{ textAlign: 'right', padding: 4, color: v.efectivo > 0 ? '#7dff7d' : 'var(--muted)' }}>{v.efectivo > 0 ? fmt$(v.efectivo) : '—'}</td>
+                        <td style={{ textAlign: 'right', padding: 4, color: v.debito > 0 ? '#7a9dff' : 'var(--muted)' }}>{v.debito > 0 ? fmt$(v.debito) : '—'}</td>
+                        <td style={{ textAlign: 'right', padding: 4, color: v.transferencia > 0 ? '#ffd17a' : 'var(--muted)' }}>{v.transferencia > 0 ? fmt$(v.transferencia) : '—'}</td>
+                        <td style={{ textAlign: 'right', padding: 4 }}>
+                          {isAdmin ? (
+                            <button onClick={() => anularVenta(v)}
+                              title="Anular venta y devolver stock"
+                              style={{ padding: '3px 10px', background: 'transparent', border: '1px solid #5a2a2a', color: '#ff8b8b', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                              🗑️ Anular
+                            </button>
+                          ) : (
+                            <span style={{ fontSize: 10, color: 'var(--muted)' }}>—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          ))}
+          <Paginador {...pag.controles} label="días" />
         </>
       )}
     </div>

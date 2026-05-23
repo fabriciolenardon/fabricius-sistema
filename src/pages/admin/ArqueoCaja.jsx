@@ -8,6 +8,7 @@
 // ============================================================
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
+import Paginador, { usePaginacion } from '../../components/Paginador'
 
 const fmt$ = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
 const hoyISO = () => new Date().toISOString().split('T')[0]
@@ -357,72 +358,84 @@ export default function ArqueoCaja() {
           <p style={{ color: 'var(--muted)', fontSize: 13 }}>Todavía no hay arqueos guardados.</p>
         )}
         {!loading && historial.length > 0 && (
-          <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', fontSize: 12, minWidth: 900 }}>
-            <thead>
-              <tr style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase' }}>
-                <th style={{ textAlign: 'left', padding: '6px 4px' }}>Fecha</th>
-                <th style={{ textAlign: 'left', padding: '6px 4px' }}>Hora</th>
-                <th style={{ textAlign: 'left', padding: '6px 4px' }}>Cajero</th>
-                <th style={{ textAlign: 'right', padding: '6px 4px' }}>💵 Efectivo (esp/cont/dif)</th>
-                <th style={{ textAlign: 'right', padding: '6px 4px' }}>💳 Débito/QR (esp/real/dif)</th>
-                <th style={{ textAlign: 'right', padding: '6px 4px' }}>🔄 Transfer. (esp/real/dif)</th>
-                <th style={{ textAlign: 'left', padding: '6px 4px' }}>Notas</th>
-              </tr>
-            </thead>
-            <tbody>
-              {historial.map(a => {
-                const dif = Number(a.diferencia) || 0
-                const cEf = dif === 0 ? '#7dff7d' : dif > 0 ? '#ffd17a' : '#ff8b8b'
-                const dDeb = Number(a.debito_diferencia) || 0
-                const cDeb = dDeb === 0 ? '#7dff7d' : dDeb > 0 ? '#ffd17a' : '#ff8b8b'
-                const dTra = Number(a.transferencia_diferencia) || 0
-                const cTra = dTra === 0 ? '#7dff7d' : dTra > 0 ? '#ffd17a' : '#ff8b8b'
-                const tieneDebito = a.debito_esperado != null || a.debito_real != null
-                const tieneTrans  = a.transferencia_esperada != null || a.transferencia_real != null
-                return (
-                  <tr key={a.id} style={{ borderTop: '1px solid var(--border)' }}>
-                    <td style={{ padding: '6px 4px' }}>{a.fecha}</td>
-                    <td style={{ padding: '6px 4px', color: 'var(--muted)' }}>{a.hora}</td>
-                    <td style={{ padding: '6px 4px' }}>{a.cajero || '—'}</td>
-                    <td style={{ textAlign: 'right', padding: '6px 4px', whiteSpace: 'nowrap' }}>
-                      <span style={{ color: 'var(--muted)' }}>{fmt$(a.efectivo_esperado)}</span>
-                      <span style={{ color: 'var(--muted)' }}> / </span>
-                      <span style={{ fontWeight: 600 }}>{fmt$(a.total_contado)}</span>
-                      <span style={{ color: 'var(--muted)' }}> / </span>
-                      <span style={{ color: cEf, fontWeight: 700 }}>{dif === 0 ? '$0' : (dif > 0 ? '+' : '') + fmt$(dif)}</span>
-                    </td>
-                    <td style={{ textAlign: 'right', padding: '6px 4px', whiteSpace: 'nowrap' }}>
-                      {tieneDebito ? (
-                        <>
-                          <span style={{ color: 'var(--muted)' }}>{fmt$(a.debito_esperado)}</span>
-                          <span style={{ color: 'var(--muted)' }}> / </span>
-                          <span style={{ fontWeight: 600 }}>{fmt$(a.debito_real)}</span>
-                          <span style={{ color: 'var(--muted)' }}> / </span>
-                          <span style={{ color: cDeb, fontWeight: 700 }}>{dDeb === 0 ? '$0' : (dDeb > 0 ? '+' : '') + fmt$(dDeb)}</span>
-                        </>
-                      ) : <span style={{ color: 'var(--muted)' }}>—</span>}
-                    </td>
-                    <td style={{ textAlign: 'right', padding: '6px 4px', whiteSpace: 'nowrap' }}>
-                      {tieneTrans ? (
-                        <>
-                          <span style={{ color: 'var(--muted)' }}>{fmt$(a.transferencia_esperada)}</span>
-                          <span style={{ color: 'var(--muted)' }}> / </span>
-                          <span style={{ fontWeight: 600 }}>{fmt$(a.transferencia_real)}</span>
-                          <span style={{ color: 'var(--muted)' }}> / </span>
-                          <span style={{ color: cTra, fontWeight: 700 }}>{dTra === 0 ? '$0' : (dTra > 0 ? '+' : '') + fmt$(dTra)}</span>
-                        </>
-                      ) : <span style={{ color: 'var(--muted)' }}>—</span>}
-                    </td>
-                    <td style={{ padding: '6px 4px', fontSize: 11, color: 'var(--muted)', maxWidth: 250 }}>{a.notas || '—'}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-          </div>
+          <HistorialArqueosPaginado historial={historial} />
         )}
       </div>
     </div>
+  )
+}
+
+// Sub-componente: pagina la lista de arqueos para evitar tabla interminable.
+function HistorialArqueosPaginado({ historial }) {
+  const pag = usePaginacion(historial, 20)
+  return (
+    <>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', fontSize: 12, minWidth: 900 }}>
+          <thead>
+            <tr style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase' }}>
+              <th style={{ textAlign: 'left', padding: '6px 4px' }}>Fecha</th>
+              <th style={{ textAlign: 'left', padding: '6px 4px' }}>Hora</th>
+              <th style={{ textAlign: 'left', padding: '6px 4px' }}>Cajero</th>
+              <th style={{ textAlign: 'right', padding: '6px 4px' }}>💵 Efectivo (esp/cont/dif)</th>
+              <th style={{ textAlign: 'right', padding: '6px 4px' }}>💳 Débito/QR (esp/real/dif)</th>
+              <th style={{ textAlign: 'right', padding: '6px 4px' }}>🔄 Transfer. (esp/real/dif)</th>
+              <th style={{ textAlign: 'left', padding: '6px 4px' }}>Notas</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pag.items.map(a => {
+              const dif = Number(a.diferencia) || 0
+              const cEf = dif === 0 ? '#7dff7d' : dif > 0 ? '#ffd17a' : '#ff8b8b'
+              const dDeb = Number(a.debito_diferencia) || 0
+              const cDeb = dDeb === 0 ? '#7dff7d' : dDeb > 0 ? '#ffd17a' : '#ff8b8b'
+              const dTra = Number(a.transferencia_diferencia) || 0
+              const cTra = dTra === 0 ? '#7dff7d' : dTra > 0 ? '#ffd17a' : '#ff8b8b'
+              const tieneDebito = a.debito_esperado != null || a.debito_real != null
+              const tieneTrans  = a.transferencia_esperada != null || a.transferencia_real != null
+              const fmt$ = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
+              return (
+                <tr key={a.id} style={{ borderTop: '1px solid var(--border)' }}>
+                  <td style={{ padding: '6px 4px' }}>{a.fecha}</td>
+                  <td style={{ padding: '6px 4px', color: 'var(--muted)' }}>{a.hora}</td>
+                  <td style={{ padding: '6px 4px' }}>{a.cajero || '—'}</td>
+                  <td style={{ textAlign: 'right', padding: '6px 4px', whiteSpace: 'nowrap' }}>
+                    <span style={{ color: 'var(--muted)' }}>{fmt$(a.efectivo_esperado)}</span>
+                    <span style={{ color: 'var(--muted)' }}> / </span>
+                    <span style={{ fontWeight: 600 }}>{fmt$(a.total_contado)}</span>
+                    <span style={{ color: 'var(--muted)' }}> / </span>
+                    <span style={{ color: cEf, fontWeight: 700 }}>{dif === 0 ? '$0' : (dif > 0 ? '+' : '') + fmt$(dif)}</span>
+                  </td>
+                  <td style={{ textAlign: 'right', padding: '6px 4px', whiteSpace: 'nowrap' }}>
+                    {tieneDebito ? (
+                      <>
+                        <span style={{ color: 'var(--muted)' }}>{fmt$(a.debito_esperado)}</span>
+                        <span style={{ color: 'var(--muted)' }}> / </span>
+                        <span style={{ fontWeight: 600 }}>{fmt$(a.debito_real)}</span>
+                        <span style={{ color: 'var(--muted)' }}> / </span>
+                        <span style={{ color: cDeb, fontWeight: 700 }}>{dDeb === 0 ? '$0' : (dDeb > 0 ? '+' : '') + fmt$(dDeb)}</span>
+                      </>
+                    ) : <span style={{ color: 'var(--muted)' }}>—</span>}
+                  </td>
+                  <td style={{ textAlign: 'right', padding: '6px 4px', whiteSpace: 'nowrap' }}>
+                    {tieneTrans ? (
+                      <>
+                        <span style={{ color: 'var(--muted)' }}>{fmt$(a.transferencia_esperada)}</span>
+                        <span style={{ color: 'var(--muted)' }}> / </span>
+                        <span style={{ fontWeight: 600 }}>{fmt$(a.transferencia_real)}</span>
+                        <span style={{ color: 'var(--muted)' }}> / </span>
+                        <span style={{ color: cTra, fontWeight: 700 }}>{dTra === 0 ? '$0' : (dTra > 0 ? '+' : '') + fmt$(dTra)}</span>
+                      </>
+                    ) : <span style={{ color: 'var(--muted)' }}>—</span>}
+                  </td>
+                  <td style={{ padding: '6px 4px', fontSize: 11, color: 'var(--muted)', maxWidth: 250 }}>{a.notas || '—'}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      <Paginador {...pag.controles} label="arqueos" />
+    </>
   )
 }

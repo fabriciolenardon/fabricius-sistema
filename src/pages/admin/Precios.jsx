@@ -1,6 +1,7 @@
 // Precios — gestión completa de listas, PLUs e importadores
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
+import Paginador, { usePaginacion } from '../../components/Paginador'
 import LimpiezaDuplicados from './LimpiezaDuplicados'
 import ImportarPLUQendra from './ImportarPLUQendra'
 const CATEGORIAS = {
@@ -772,24 +773,7 @@ export default function Precios() {
           {ofertasVencidas.length > 0 && (
             <div className="card">
               <div className="card-title">📁 Historial de ofertas</div>
-              <table>
-                <thead><tr><th>Producto</th><th>Descuento</th><th>Vigencia</th><th>Estado</th></tr></thead>
-                <tbody>
-                  {ofertasVencidas.map(o => {
-                    const esPct = o.descuento_pct != null && Number(o.descuento_pct) > 0
-                    return (
-                      <tr key={o.id} style={{ opacity: 0.6 }}>
-                        <td>{o.producto_nombre}</td>
-                        <td style={{ color: 'var(--muted)' }}>
-                          {esPct ? `📉 -${o.descuento_pct}%` : `💰 ${fmt(o.precio_oferta)}`}
-                        </td>
-                        <td style={{ fontSize: 11, color: 'var(--muted)' }}>{o.fecha_inicio} → {o.fecha_fin}</td>
-                        <td><span style={{ background: '#3a1a1a', color: '#ff6b6b', borderRadius: 4, padding: '2px 8px', fontSize: 11 }}>Vencida</span></td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+              <TablaOfertasVencidasPag ofertasVencidas={ofertasVencidas} />
             </div>
           )}
         </div>
@@ -969,5 +953,34 @@ function PLUTab({ precios, ofertas = [] }) {
         )}
       </div>
     </div>
+  )
+}
+
+// Sub-componente: paginación para historial de ofertas vencidas.
+function TablaOfertasVencidasPag({ ofertasVencidas }) {
+  const pag = usePaginacion(ofertasVencidas, 20)
+  const fmt = n => n != null ? '$' + Math.round(n).toLocaleString('es-AR') : '—'
+  return (
+    <>
+      <table>
+        <thead><tr><th>Producto</th><th>Descuento</th><th>Vigencia</th><th>Estado</th></tr></thead>
+        <tbody>
+          {pag.items.map(o => {
+            const esPct = o.descuento_pct != null && Number(o.descuento_pct) > 0
+            return (
+              <tr key={o.id} style={{ opacity: 0.6 }}>
+                <td>{o.producto_nombre}</td>
+                <td style={{ color: 'var(--muted)' }}>
+                  {esPct ? `📉 -${o.descuento_pct}%` : `💰 ${fmt(o.precio_oferta)}`}
+                </td>
+                <td style={{ fontSize: 11, color: 'var(--muted)' }}>{o.fecha_inicio} → {o.fecha_fin}</td>
+                <td><span style={{ background: '#3a1a1a', color: '#ff6b6b', borderRadius: 4, padding: '2px 8px', fontSize: 11 }}>Vencida</span></td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+      <Paginador {...pag.controles} label="ofertas vencidas" />
+    </>
   )
 }
