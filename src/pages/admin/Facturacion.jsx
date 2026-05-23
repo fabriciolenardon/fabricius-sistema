@@ -434,7 +434,7 @@ function FormCuenta({ cuenta, onCerrar, onGuardado }) {
               <Campo label="Número IIBB"><input value={form.iibb_numero || ''} onChange={e => set('iibb_numero', e.target.value)} style={inp} /></Campo>
               <Campo label="Régimen">
                 <select value={form.iibb_regimen || 'local'} onChange={e => set('iibb_regimen', e.target.value)} style={inp}>
-                  <option value="local">Local (Misiones)</option>
+                  <option value="local">Local (Córdoba)</option>
                   <option value="convenio_multilateral">Convenio Multilateral</option>
                   <option value="simplificado">Simplificado</option>
                 </select>
@@ -445,10 +445,10 @@ function FormCuenta({ cuenta, onCerrar, onGuardado }) {
         </div>
 
         <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8, letterSpacing: 1 }}>🏢 MUNICIPAL (Posadas)</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8, letterSpacing: 1 }}>🏢 MUNICIPAL (Río Primero, Córdoba)</div>
           <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, cursor: 'pointer', marginBottom: 8 }}>
             <input type="checkbox" checked={form.inscripto_municipal} onChange={e => set('inscripto_municipal', e.target.checked)} />
-            Paga Tasa Municipal / Seguridad e Higiene
+            Paga Contribución Comercio e Industria / Tasa Municipal
           </label>
           {form.inscripto_municipal && (
             <Campo label="Alícuota municipal %"><input type="number" step="0.01" value={form.alicuota_municipal_pct} onChange={e => set('alicuota_municipal_pct', e.target.value)} placeholder="Ej: 0.60" style={inp} /></Campo>
