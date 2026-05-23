@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useFlujoNotificaciones } from '../../lib/useFlujoNotificaciones'
 import BuscadorGlobal from '../../components/BuscadorGlobal'
+import LogoFabricius from '../../components/LogoFabricius'
 
 const navItems = [
   { to: '/admin/dashboard',   icon: '📊', label: 'Dashboard' },
@@ -360,16 +361,16 @@ export default function AdminLayout() {
               <div style={{ width: 18, height: 2, background: 'var(--gold)', borderRadius: 2 }} />
               <div style={{ width: 18, height: 2, background: 'var(--gold)', borderRadius: 2 }} />
             </button>
-            <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 20, color: 'var(--gold)', letterSpacing: 2, flex: 1 }}>
-              🥩 FABRICIUS
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
+              <LogoFabricius size="small" />
             </div>
             <CampanaNotificaciones notifs={notifs} />
           </>
         ) : (
           /* DESKTOP: Nav completo */
           <>
-            <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 20, color: 'var(--gold)', letterSpacing: 2, whiteSpace: 'nowrap' }}>
-              🥩 FABRICIUS
+            <div style={{ whiteSpace: 'nowrap', display: 'flex', alignItems: 'center' }}>
+              <LogoFabricius size="small" />
             </div>
             <div style={{ width: 1, height: 24, background: 'var(--border)' }} />
             <nav style={{ display: 'flex', gap: 2, flex: 1, overflowX: 'auto' }}>
@@ -392,7 +393,7 @@ export default function AdminLayout() {
                 <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--gold)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: '#000' }}>{initiales}</div>
                 <div>
                   <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text2)', lineHeight: 1.2 }}>{profile?.nombre}</div>
-                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>Administrador</div>
+                  <div style={{ fontSize: 10, color: user?.email === 'fabriciolenardon@gmail.com' ? 'var(--gold)' : 'var(--muted)', fontWeight: user?.email === 'fabriciolenardon@gmail.com' ? 700 : 400, letterSpacing: user?.email === 'fabriciolenardon@gmail.com' ? 1 : 0 }}>{user?.email === 'fabriciolenardon@gmail.com' ? '👑 CEO' : 'Administrador'}</div>
                 </div>
               </div>
               <button onClick={handleLogout}

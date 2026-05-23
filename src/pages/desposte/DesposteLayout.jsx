@@ -7,6 +7,7 @@
 // ============================================================
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import LogoFabricius from '../../components/LogoFabricius'
 
 export default function DesposteLayout() {
   const { signOut, profile } = useAuth()
@@ -27,8 +28,11 @@ export default function DesposteLayout() {
         display: 'flex', alignItems: 'center', gap: 16,
       }}>
         <div style={{ flex: 1 }}>
-          <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 26, color: 'var(--gold)', letterSpacing: 2 }}>
-            🔪 SECTOR DESPOSTE
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <LogoFabricius size="medium" />
+            <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 26, color: 'var(--gold)', letterSpacing: 2 }}>
+              🔪 SECTOR DESPOSTE
+            </div>
           </div>
           <div style={{ fontSize: 12, color: 'var(--muted)' }}>
             Carnicerías Fabricius — {profile?.nombre || 'Operario'}
