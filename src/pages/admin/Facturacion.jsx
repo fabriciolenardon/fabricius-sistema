@@ -18,6 +18,11 @@ import {
   categoriaSugerida, cuotaMensual, topeAnual, estadoSemaforo,
   proximaRecategorizacion,
 } from '../../lib/monotributo2026'
+import { esCuitValido, formatearCuit } from '../../lib/cuit'
+import { generarLibroVentas, generarLibroCompras, descargarCSV } from '../../lib/libroIva'
+import {
+  proyectarFacturacionAnual, distribuirEntreCuentas, calcularAvisos,
+} from '../../lib/facturacionHelpers'
 
 const fmt$ = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
 const fmtPct = n => (n || 0).toFixed(1) + '%'
@@ -61,20 +66,23 @@ export default function Facturacion() {
   const [cuentas, setCuentas] = useState([])
   const [facturas, setFacturas] = useState([])
   const [impuestos, setImpuestos] = useState([])
+  const [contrapartes, setContrapartes] = useState([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => { cargarTodo() }, [])
 
   async function cargarTodo() {
     setLoading(true)
-    const [{ data: cs }, { data: fs }, { data: ps }] = await Promise.all([
+    const [{ data: cs }, { data: fs }, { data: ps }, { data: kp }] = await Promise.all([
       supabase.from('cuentas_fiscales').select('*').order('nombre'),
       supabase.from('facturas').select('*').order('fecha', { ascending: false }),
       supabase.from('impuestos_pagados').select('*').order('fecha_pago', { ascending: false }),
+      supabase.from('contrapartes').select('*').eq('activa', true).order('nombre'),
     ])
     setCuentas(cs || [])
     setFacturas(fs || [])
     setImpuestos(ps || [])
+    setContrapartes(kp || [])
     setLoading(false)
   }
 
@@ -121,6 +129,7 @@ export default function Facturacion() {
         {tabBtn('cuentas', '🏛️ Cuentas')}
         {tabBtn('facturas', '🧾 Facturas')}
         {tabBtn('impuestos', '💸 Impuestos pagados')}
+        {tabBtn('contrapartes', '👥 Contrapartes')}
         {tabBtn('importar', '📥 Importar CSV')}
       </div>
 
@@ -129,18 +138,23 @@ export default function Facturacion() {
       {!loading && tab === 'cuentas' && (
         <TabCuentas
           cuentas={cuentas}
+          facturas={facturas}
+          impuestos={impuestos}
           facturacionPorCuenta={facturacionPorCuenta}
           onChange={cargarTodo}
         />
       )}
       {!loading && tab === 'facturas' && (
-        <TabFacturas cuentas={cuentas} facturas={facturas} onChange={cargarTodo} />
+        <TabFacturas cuentas={cuentas} facturas={facturas} contrapartes={contrapartes} onChange={cargarTodo} />
       )}
       {!loading && tab === 'impuestos' && (
         <TabImpuestos cuentas={cuentas} impuestos={impuestos} onChange={cargarTodo} />
       )}
       {!loading && tab === 'importar' && (
         <TabImportar cuentas={cuentas} onChange={cargarTodo} />
+      )}
+      {!loading && tab === 'contrapartes' && (
+        <TabContrapartes contrapartes={contrapartes} onChange={cargarTodo} />
       )}
     </div>
   )
@@ -149,9 +163,11 @@ export default function Facturacion() {
 // ============================================================
 // TAB CUENTAS — listado de cuentas con semáforo + alta/edición
 // ============================================================
-function TabCuentas({ cuentas, facturacionPorCuenta, onChange }) {
+function TabCuentas({ cuentas, facturas, impuestos, facturacionPorCuenta, onChange }) {
   const [editando, setEditando] = useState(null)
   const [mostrarForm, setMostrarForm] = useState(false)
+  const [mostrarSimulador, setMostrarSimulador] = useState(false)
+  const avisos = useMemo(() => calcularAvisos(cuentas, impuestos), [cuentas, impuestos])
 
   function nueva() {
     setEditando(null)
@@ -172,18 +188,29 @@ function TabCuentas({ cuentas, facturacionPorCuenta, onChange }) {
 
   return (
     <div>
-      {/* Alertas globales */}
+      {/* Recordatorios de vencimientos */}
+      <RecordatoriosVencimientos avisos={avisos} />
+
+      {/* Alertas de tope */}
       <AlertasGlobales cuentas={cuentas} facturacionPorCuenta={facturacionPorCuenta} />
 
       {/* Lista de cuentas con semáforo */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
         <div style={{ fontSize: 13, color: 'var(--muted)' }}>
           {cuentas.length} cuenta{cuentas.length === 1 ? '' : 's'} registrada{cuentas.length === 1 ? '' : 's'}
         </div>
-        <button onClick={nueva}
-          style={{ padding: '8px 16px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
-          + Nueva cuenta
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {cuentas.some(c => c.tipo === 'monotributo') && (
+            <button onClick={() => setMostrarSimulador(true)}
+              style={{ padding: '8px 16px', background: 'var(--surface2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+              🧮 Simular distribución
+            </button>
+          )}
+          <button onClick={nueva}
+            style={{ padding: '8px 16px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+            + Nueva cuenta
+          </button>
+        </div>
       </div>
 
       {cuentas.length === 0 ? (
@@ -197,6 +224,7 @@ function TabCuentas({ cuentas, facturacionPorCuenta, onChange }) {
               key={c.id}
               cuenta={c}
               datos={facturacionPorCuenta[c.id] || { emitido: 0, recibido: 0 }}
+              facturasCuenta={facturas.filter(f => f.cuenta_id === c.id && f.tipo === 'emitida')}
               onEditar={() => editar(c)}
               onEliminar={() => eliminar(c)}
             />
@@ -209,6 +237,14 @@ function TabCuentas({ cuentas, facturacionPorCuenta, onChange }) {
           cuenta={editando}
           onCerrar={() => { setMostrarForm(false); setEditando(null) }}
           onGuardado={() => { setMostrarForm(false); setEditando(null); onChange() }}
+        />
+      )}
+
+      {mostrarSimulador && (
+        <SimuladorDistribucion
+          cuentas={cuentas}
+          facturacionPorCuenta={facturacionPorCuenta}
+          onCerrar={() => setMostrarSimulador(false)}
         />
       )}
     </div>
@@ -249,7 +285,7 @@ function AlertasGlobales({ cuentas, facturacionPorCuenta }) {
   )
 }
 
-function CuentaCard({ cuenta, datos, onEditar, onEliminar }) {
+function CuentaCard({ cuenta, datos, facturasCuenta, onEditar, onEliminar }) {
   const esMono = cuenta.tipo === 'monotributo'
   const tope = esMono ? TOPE_MAX_ABSOLUTO : null
   const pct = esMono && tope ? (datos.emitido / tope) * 100 : 0
@@ -258,6 +294,9 @@ function CuentaCard({ cuenta, datos, onEditar, onEliminar }) {
   const cuotaActual = esMono && cuenta.categoria_monotributo
     ? cuotaMensual(cuenta.categoria_monotributo, cuenta.actividad || 'comercio')
     : 0
+  // Proyección de facturación a 12 meses con ritmo actual
+  const proyeccion = esMono ? proyectarFacturacionAnual(facturasCuenta || []) : 0
+  const pctProyeccion = esMono && tope ? (proyeccion / tope) * 100 : 0
 
   return (
     <div className="card" style={{ padding: 14, borderColor: sem?.color || 'var(--border)' }}>
@@ -326,6 +365,24 @@ function CuentaCard({ cuenta, datos, onEditar, onEliminar }) {
               🚨 EXCEDIDO — Pasaste el tope K. Hablalo YA con tu contador.
             </div>
           )}
+
+          {/* Proyección a 12 meses */}
+          {proyeccion > 0 && (
+            <div style={{ marginTop: 8, padding: 8, background: 'var(--surface2)', borderRadius: 6, fontSize: 12 }}>
+              <div style={{ fontSize: 10, color: 'var(--muted)', letterSpacing: 1, marginBottom: 2 }}>📈 PROYECCIÓN A 12 MESES</div>
+              <div>
+                Si seguís a este ritmo: <strong>{fmt$(proyeccion)}</strong>{' '}
+                <span style={{ color: pctProyeccion >= 100 ? '#ff8b8b' : pctProyeccion >= 85 ? '#ffd17a' : '#7dff7d', fontWeight: 700 }}>
+                  ({fmtPct(pctProyeccion)} del tope)
+                </span>
+              </div>
+              {pctProyeccion >= 100 && (
+                <div style={{ fontSize: 10, color: '#ff8b8b', marginTop: 2 }}>
+                  ⚠️ Si no bajás el ritmo, te vas a pasar antes de fin de año móvil.
+                </div>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>
@@ -348,6 +405,9 @@ function FormCuenta({ cuenta, onCerrar, onGuardado }) {
   async function guardar() {
     if (!form.nombre.trim()) return alert('Nombre obligatorio')
     if (!form.cuit.trim()) return alert('CUIT obligatorio')
+    if (!esCuitValido(form.cuit)) {
+      if (!confirm('⚠️ El CUIT no parece válido (el dígito verificador no coincide). ¿Guardar igual?')) return
+    }
     setGuardando(true)
     const datos = {
       ...form,
@@ -387,7 +447,13 @@ function FormCuenta({ cuenta, onCerrar, onGuardado }) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <Campo label="Nombre interno *"><input value={form.nombre} onChange={e => set('nombre', e.target.value)} placeholder='Ej: "Mono Fabri"' style={inp} /></Campo>
           <Campo label="Razón social"><input value={form.razon_social} onChange={e => set('razon_social', e.target.value)} placeholder="Razón social legal" style={inp} /></Campo>
-          <Campo label="CUIT *"><input value={form.cuit} onChange={e => set('cuit', e.target.value)} placeholder="20-12345678-9" style={inp} /></Campo>
+          <Campo label="CUIT *">
+            <input value={form.cuit} onChange={e => set('cuit', e.target.value)} placeholder="20-12345678-9"
+              style={{ ...inp, borderColor: form.cuit ? (esCuitValido(form.cuit) ? 'var(--green)' : '#ff8b8b') : 'var(--border)' }} />
+            {form.cuit && !esCuitValido(form.cuit) && (
+              <div style={{ fontSize: 10, color: '#ff8b8b', marginTop: 2 }}>⚠️ CUIT inválido (dígito verificador no coincide)</div>
+            )}
+          </Campo>
           <Campo label="Tipo de cuenta *">
             <select value={form.tipo} onChange={e => set('tipo', e.target.value)} style={inp}>
               {TIPOS_CUENTA.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}
@@ -491,10 +557,11 @@ function Campo({ label, children }) {
 // ============================================================
 // TAB FACTURAS — listado paginado + form de alta
 // ============================================================
-function TabFacturas({ cuentas, facturas, onChange }) {
+function TabFacturas({ cuentas, facturas, contrapartes, onChange }) {
   const [filtroCuenta, setFiltroCuenta] = useState('todas')
   const [filtroTipo, setFiltroTipo] = useState('todas')
   const [mostrarForm, setMostrarForm] = useState(false)
+  const [mostrarLibro, setMostrarLibro] = useState(false)
 
   const filtradas = useMemo(() => {
     return facturas.filter(f => {
@@ -549,8 +616,12 @@ function TabFacturas({ cuentas, facturas, onChange }) {
           <option value="emitida">Solo emitidas</option>
           <option value="recibida">Solo recibidas</option>
         </select>
+        <button onClick={() => setMostrarLibro(true)}
+          style={{ marginLeft: 'auto', padding: '8px 16px', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+          📊 Libro IVA
+        </button>
         <button onClick={() => setMostrarForm(true)}
-          style={{ marginLeft: 'auto', padding: '8px 16px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+          style={{ padding: '8px 16px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
           + Cargar factura
         </button>
       </div>
@@ -591,7 +662,12 @@ function TabFacturas({ cuentas, facturas, onChange }) {
                     </span>
                   </td>
                   <td style={{ textAlign: 'center', padding: '6px 6px', color: 'var(--muted)' }}>{f.tipo_comprobante || '—'}</td>
-                  <td style={{ padding: '6px 6px', fontFamily: 'monospace', fontSize: 11 }}>{f.punto_venta ? `${f.punto_venta}-` : ''}{f.numero || '—'}</td>
+                  <td style={{ padding: '6px 6px', fontFamily: 'monospace', fontSize: 11 }}>
+                    {f.punto_venta ? `${f.punto_venta}-` : ''}{f.numero || '—'}
+                    {f.archivo_url && (
+                      <span title="Tiene PDF adjunto" style={{ marginLeft: 4, color: 'var(--gold)' }}>📎</span>
+                    )}
+                  </td>
                   <td style={{ padding: '6px 6px' }}>{f.contraparte_nombre || '—'}</td>
                   <td style={{ textAlign: 'right', padding: '6px 6px' }}>{fmt$(f.monto_neto)}</td>
                   <td style={{ textAlign: 'right', padding: '6px 6px', color: 'var(--muted)' }}>{fmt$(f.monto_iva)}</td>
@@ -616,13 +692,16 @@ function TabFacturas({ cuentas, facturas, onChange }) {
       </div>
 
       {mostrarForm && (
-        <FormFactura cuentas={cuentas} onCerrar={() => setMostrarForm(false)} onGuardado={() => { setMostrarForm(false); onChange() }} />
+        <FormFactura cuentas={cuentas} contrapartes={contrapartes} onCerrar={() => setMostrarForm(false)} onGuardado={() => { setMostrarForm(false); onChange() }} />
+      )}
+      {mostrarLibro && (
+        <ModalLibroIva cuentas={cuentas} facturas={facturas} onCerrar={() => setMostrarLibro(false)} />
       )}
     </div>
   )
 }
 
-function FormFactura({ cuentas, onCerrar, onGuardado }) {
+function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
   const VACIO = {
     cuenta_id: cuentas[0]?.id || '',
     tipo: 'emitida',
@@ -643,7 +722,27 @@ function FormFactura({ cuentas, onCerrar, onGuardado }) {
   }
   const [form, setForm] = useState(VACIO)
   const [guardando, setGuardando] = useState(false)
+  const [archivoSubido, setArchivoSubido] = useState(null)
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  function elegirContraparte(c) {
+    if (!c) return
+    setForm(f => ({
+      ...f,
+      contraparte_id: c.id,
+      contraparte_nombre: c.nombre,
+      contraparte_cuit: c.cuit || '',
+      contraparte_iva: c.condicion_iva || 'consumidor_final',
+    }))
+  }
+
+  async function subirPdf(file) {
+    if (!file) return
+    const ruta = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+    const { data, error } = await supabase.storage.from('facturas').upload(ruta, file)
+    if (error) { alert('❌ Error subiendo PDF: ' + error.message); return }
+    setArchivoSubido({ ruta: data.path, nombre: file.name })
+  }
 
   // Auto-calcular total si dejaron el campo en blanco
   function calcularTotal() {
@@ -662,10 +761,12 @@ function FormFactura({ cuentas, onCerrar, onGuardado }) {
     const datos = {
       ...form,
       cuenta_id: Number(form.cuenta_id),
+      contraparte_id: form.contraparte_id || null,
       monto_neto: Number(form.monto_neto) || 0,
       monto_iva: Number(form.monto_iva) || 0,
       monto_otros: Number(form.monto_otros) || 0,
       monto_total: total,
+      archivo_url: archivoSubido?.ruta || null,
     }
     const { error } = await supabase.from('facturas').insert(datos)
     setGuardando(false)
@@ -713,9 +814,25 @@ function FormFactura({ cuentas, onCerrar, onGuardado }) {
 
         <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
           <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8, letterSpacing: 1 }}>👤 CONTRAPARTE</div>
+          {contrapartes && contrapartes.length > 0 && (
+            <Campo label="Elegir del padrón (opcional)">
+              <select value={form.contraparte_id || ''} onChange={e => {
+                const id = Number(e.target.value)
+                elegirContraparte(contrapartes.find(c => c.id === id))
+              }} style={inp}>
+                <option value="">— Tipear manualmente —</option>
+                {contrapartes.map(c => (
+                  <option key={c.id} value={c.id}>{c.nombre}{c.cuit ? ` · ${c.cuit}` : ''}</option>
+                ))}
+              </select>
+            </Campo>
+          )}
           <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 10 }}>
             <Campo label="Nombre / razón social"><input value={form.contraparte_nombre} onChange={e => set('contraparte_nombre', e.target.value)} style={inp} /></Campo>
-            <Campo label="CUIT"><input value={form.contraparte_cuit} onChange={e => set('contraparte_cuit', e.target.value)} style={inp} /></Campo>
+            <Campo label="CUIT">
+              <input value={form.contraparte_cuit} onChange={e => set('contraparte_cuit', e.target.value)}
+                style={{ ...inp, borderColor: form.contraparte_cuit ? (esCuitValido(form.contraparte_cuit) ? 'var(--green)' : 'var(--border)') : 'var(--border)' }} />
+            </Campo>
             <Campo label="Condición IVA">
               <select value={form.contraparte_iva} onChange={e => set('contraparte_iva', e.target.value)} style={inp}>
                 <option value="responsable_inscripto">RI</option>
@@ -726,6 +843,13 @@ function FormFactura({ cuentas, onCerrar, onGuardado }) {
               </select>
             </Campo>
           </div>
+          <Campo label="📎 Adjuntar PDF (opcional)">
+            <input type="file" accept="application/pdf,image/*" onChange={e => subirPdf(e.target.files?.[0])}
+              style={{ ...inp, padding: '6px 8px' }} />
+            {archivoSubido && (
+              <div style={{ fontSize: 10, color: 'var(--green)', marginTop: 4 }}>✅ {archivoSubido.nombre} subido</div>
+            )}
+          </Campo>
         </div>
 
         <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
@@ -900,7 +1024,27 @@ function FormImpuesto({ cuentas, onCerrar, onGuardado }) {
   }
   const [form, setForm] = useState(VACIO)
   const [guardando, setGuardando] = useState(false)
+  const [archivoSubido, setArchivoSubido] = useState(null)
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  function elegirContraparte(c) {
+    if (!c) return
+    setForm(f => ({
+      ...f,
+      contraparte_id: c.id,
+      contraparte_nombre: c.nombre,
+      contraparte_cuit: c.cuit || '',
+      contraparte_iva: c.condicion_iva || 'consumidor_final',
+    }))
+  }
+
+  async function subirPdf(file) {
+    if (!file) return
+    const ruta = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+    const { data, error } = await supabase.storage.from('facturas').upload(ruta, file)
+    if (error) { alert('❌ Error subiendo PDF: ' + error.message); return }
+    setArchivoSubido({ ruta: data.path, nombre: file.name })
+  }
 
   async function guardar() {
     if (!form.cuenta_id) return alert('Elegí cuenta')
@@ -1134,6 +1278,371 @@ function KPI({ label, value, sub, color }) {
       <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</div>
       <div style={{ fontSize: 24, fontWeight: 800, fontFamily: "'Bebas Neue',cursive", color: color || 'var(--gold)' }}>{value}</div>
       {sub && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{sub}</div>}
+    </div>
+  )
+}
+
+// ============================================================
+// COMPONENTES NUEVOS — agregados en migración 29
+// ============================================================
+
+// --- Recordatorios de vencimientos (cuotas mono, recategorización, etc) ---
+function RecordatoriosVencimientos({ avisos }) {
+  if (!avisos || avisos.length === 0) return null
+  const colores = {
+    danger:  { bg: '#3a1a1a', border: '#ff4f4f', text: '#ff8b8b' },
+    warning: { bg: '#3a2a14', border: '#ff9b3a', text: '#ffd17a' },
+    info:    { bg: '#1a2a3a', border: '#7a9dff', text: '#9bb6ff' },
+  }
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card-title">🔔 Recordatorios y vencimientos</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {avisos.map((a, i) => {
+          const c = colores[a.tipo] || colores.info
+          return (
+            <div key={i} style={{
+              padding: 10, background: c.bg, borderLeft: `4px solid ${c.border}`,
+              borderRadius: 6, fontSize: 13, display: 'flex', alignItems: 'center', gap: 10,
+            }}>
+              <span style={{ fontSize: 18 }}>{a.icono}</span>
+              <div>
+                <div style={{ fontWeight: 700, color: c.text }}>{a.titulo}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>{a.sub}</div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// --- Simulador de distribución entre cuentas para nivelar % del tope ---
+function SimuladorDistribucion({ cuentas, facturacionPorCuenta, onCerrar }) {
+  const [monto, setMonto] = useState('')
+  const monos = cuentas.filter(c => c.tipo === 'monotributo')
+  const dataMonos = monos.map(c => ({
+    id: c.id, nombre: c.nombre, tope: TOPE_MAX_ABSOLUTO,
+    facturado12m: facturacionPorCuenta[c.id]?.emitido || 0,
+  }))
+  const montoNum = Number(monto) || 0
+  const distribucion = montoNum > 0 ? distribuirEntreCuentas(montoNum, dataMonos) : []
+
+  return (
+    <div onClick={onCerrar}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div onClick={e => e.stopPropagation()}
+        style={{ background: 'var(--surface)', border: '1px solid var(--gold)', borderRadius: 12, padding: 20, maxWidth: 720, width: '100%', maxHeight: '90vh', overflow: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+          <div style={{ fontSize: 18, fontWeight: 700 }}>🧮 Simulador de distribución</div>
+          <button onClick={onCerrar} style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: 20, cursor: 'pointer' }}>✕</button>
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
+          Ingresá un monto que pensás facturar próximamente. El sistema te dice cómo distribuirlo entre los monotributistas
+          para que todos queden al mismo % del tope (criterio: nivelar el riesgo).
+        </div>
+        <Campo label="💰 Monto a distribuir">
+          <input type="number" step="1000" value={monto} onChange={e => setMonto(e.target.value)}
+            placeholder="Ej: 5000000" autoFocus
+            style={{ ...inp, fontSize: 18, fontWeight: 700, borderColor: 'var(--gold)' }} />
+        </Campo>
+
+        {montoNum > 0 && (
+          <div style={{ marginTop: 14 }}>
+            <table style={{ width: '100%', fontSize: 13 }}>
+              <thead>
+                <tr style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase' }}>
+                  <th style={{ textAlign: 'left', padding: '6px 4px' }}>Cuenta</th>
+                  <th style={{ textAlign: 'right', padding: '6px 4px' }}>Ya facturó</th>
+                  <th style={{ textAlign: 'right', padding: '6px 4px' }}>Sugerido</th>
+                  <th style={{ textAlign: 'right', padding: '6px 4px' }}>Quedaría en</th>
+                </tr>
+              </thead>
+              <tbody>
+                {distribucion.map(d => (
+                  <tr key={d.id} style={{ borderTop: '1px solid var(--border)' }}>
+                    <td style={{ padding: '8px 4px', fontWeight: 600 }}>{d.nombre}</td>
+                    <td style={{ textAlign: 'right', padding: '8px 4px', color: 'var(--muted)' }}>{fmt$(d.facturado12m)}</td>
+                    <td style={{ textAlign: 'right', padding: '8px 4px', color: 'var(--gold)', fontWeight: 700, fontSize: 15 }}>
+                      {d.asignar > 0 ? fmt$(d.asignar) : '—'}
+                    </td>
+                    <td style={{ textAlign: 'right', padding: '8px 4px', color: estadoSemaforo(d.pctFinal).color, fontWeight: 700 }}>
+                      {fmtPct(d.pctFinal)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {distribucion.some(d => d.alerta) && (
+              <div style={{ marginTop: 10, padding: 10, background: '#3a1a1a', color: '#ff8b8b', borderRadius: 6, fontSize: 12 }}>
+                ⚠️ {distribucion.find(d => d.alerta).alerta}
+              </div>
+            )}
+            <div style={{ marginTop: 10, padding: 10, background: 'var(--surface2)', borderRadius: 6, fontSize: 12, color: 'var(--muted)' }}>
+              💡 La sugerencia equilibra el % consumido del tope K entre todas las cuentas. Si una cuenta ya tiene más % consumido que la nivelación final, recibe 0 (no se le asigna nada).
+            </div>
+          </div>
+        )}
+
+        <div style={{ marginTop: 18 }}>
+          <button onClick={onCerrar}
+            style={{ width: '100%', padding: 12, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>
+            Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// --- Modal de generación de Libro IVA Ventas/Compras ---
+function ModalLibroIva({ cuentas, facturas, onCerrar }) {
+  const hoy = new Date()
+  const [tipo, setTipo] = useState('ventas') // 'ventas' | 'compras'
+  const [cuentaId, setCuentaId] = useState('todas')
+  const [anio, setAnio] = useState(hoy.getFullYear())
+  const [mes, setMes] = useState(hoy.getMonth() + 1)
+
+  function generar() {
+    const desde = `${anio}-${String(mes).padStart(2, '0')}-01`
+    const ult = new Date(anio, mes, 0).getDate()
+    const hasta = `${anio}-${String(mes).padStart(2, '0')}-${String(ult).padStart(2, '0')}`
+    let filtradas = facturas.filter(f => f.fecha >= desde && f.fecha <= hasta)
+    if (cuentaId !== 'todas') filtradas = filtradas.filter(f => f.cuenta_id === Number(cuentaId))
+
+    const contenido = tipo === 'ventas'
+      ? generarLibroVentas(filtradas, cuentas)
+      : generarLibroCompras(filtradas, cuentas)
+    const cuentaNom = cuentaId === 'todas' ? 'todas' : (cuentas.find(c => c.id === Number(cuentaId))?.nombre || cuentaId)
+    const nombre = `libro-iva-${tipo}-${anio}-${String(mes).padStart(2, '0')}-${cuentaNom}.csv`.replace(/[^a-zA-Z0-9._-]/g, '_')
+    descargarCSV(contenido, nombre)
+  }
+
+  return (
+    <div onClick={onCerrar}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div onClick={e => e.stopPropagation()}
+        style={{ background: 'var(--surface)', border: '1px solid var(--gold)', borderRadius: 12, padding: 20, maxWidth: 540, width: '100%' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+          <div style={{ fontSize: 18, fontWeight: 700 }}>📊 Libro IVA</div>
+          <button onClick={onCerrar} style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: 20, cursor: 'pointer' }}>✕</button>
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
+          Genera un CSV que tu contador puede abrir directo en Excel. Separador <code>;</code> con BOM UTF-8 para acentos correctos.
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <Campo label="Tipo">
+            <select value={tipo} onChange={e => setTipo(e.target.value)} style={inp}>
+              <option value="ventas">📤 Ventas (emitidas)</option>
+              <option value="compras">📥 Compras (recibidas)</option>
+            </select>
+          </Campo>
+          <Campo label="Cuenta">
+            <select value={cuentaId} onChange={e => setCuentaId(e.target.value)} style={inp}>
+              <option value="todas">Todas las cuentas</option>
+              {cuentas.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+            </select>
+          </Campo>
+          <Campo label="Año">
+            <input type="number" value={anio} onChange={e => setAnio(Number(e.target.value))} style={inp} />
+          </Campo>
+          <Campo label="Mes">
+            <select value={mes} onChange={e => setMes(Number(e.target.value))} style={inp}>
+              {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                <option key={m} value={m}>{String(m).padStart(2, '0')} — {['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][m-1]}</option>
+              ))}
+            </select>
+          </Campo>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
+          <button onClick={onCerrar} style={{ flex: 1, padding: 12, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>
+            Cancelar
+          </button>
+          <button onClick={generar}
+            style={{ flex: 2, padding: 12, background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 800, letterSpacing: 1 }}>
+            ⬇️ Descargar CSV
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// --- Tab Contrapartes: padrón de clientes y proveedores ---
+function TabContrapartes({ contrapartes, onChange }) {
+  const [editando, setEditando] = useState(null)
+  const [mostrarForm, setMostrarForm] = useState(false)
+  const [filtro, setFiltro] = useState('')
+
+  const filtradas = useMemo(() => {
+    const q = filtro.toLowerCase().trim()
+    if (!q) return contrapartes
+    return contrapartes.filter(c =>
+      c.nombre?.toLowerCase().includes(q) ||
+      c.cuit?.includes(q)
+    )
+  }, [contrapartes, filtro])
+
+  const pag = usePaginacion(filtradas, 20)
+
+  async function eliminar(c) {
+    if (!confirm(`¿Eliminar "${c.nombre}" del padrón?\nLas facturas asociadas pierden el link, pero conservan nombre y CUIT.`)) return
+    const { error } = await supabase.from('contrapartes').delete().eq('id', c.id)
+    if (error) alert('❌ ' + error.message)
+    else onChange()
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+        <input value={filtro} onChange={e => setFiltro(e.target.value)} placeholder="Buscar por nombre o CUIT..."
+          style={{ ...inp, maxWidth: 320 }} />
+        <button onClick={() => { setEditando(null); setMostrarForm(true) }}
+          style={{ marginLeft: 'auto', padding: '8px 16px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+          + Nueva contraparte
+        </button>
+      </div>
+
+      {contrapartes.length === 0 ? (
+        <div className="card" style={{ textAlign: 'center', padding: 30, color: 'var(--muted)' }}>
+          Todavía no hay contrapartes cargadas. Cargá tus clientes y proveedores frecuentes para tenerlos a un click al cargar facturas.
+        </div>
+      ) : (
+        <div className="card" style={{ padding: 0 }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', fontSize: 13, minWidth: 700 }}>
+              <thead>
+                <tr style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase' }}>
+                  <th style={{ textAlign: 'left', padding: '8px 6px' }}>Nombre</th>
+                  <th style={{ textAlign: 'left', padding: '8px 6px' }}>CUIT</th>
+                  <th style={{ textAlign: 'center', padding: '8px 6px' }}>IVA</th>
+                  <th style={{ textAlign: 'center', padding: '8px 6px' }}>Tipo</th>
+                  <th style={{ textAlign: 'left', padding: '8px 6px' }}>Contacto</th>
+                  <th style={{ width: 80 }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {pag.items.map(c => (
+                  <tr key={c.id} style={{ borderTop: '1px solid var(--border)' }}>
+                    <td style={{ padding: '6px 6px', fontWeight: 600 }}>{c.nombre}</td>
+                    <td style={{ padding: '6px 6px', fontFamily: 'monospace', fontSize: 12 }}>
+                      {c.cuit ? formatearCuit(c.cuit) : '—'}
+                      {c.cuit && !esCuitValido(c.cuit) && <span title="CUIT con dígito inválido" style={{ color: '#ff8b8b', marginLeft: 4 }}>⚠️</span>}
+                    </td>
+                    <td style={{ textAlign: 'center', padding: '6px 6px', color: 'var(--muted)', fontSize: 11 }}>{c.condicion_iva || '—'}</td>
+                    <td style={{ textAlign: 'center', padding: '6px 6px' }}>
+                      <span style={{ background: 'var(--surface2)', borderRadius: 4, padding: '2px 8px', fontSize: 10, fontWeight: 700 }}>
+                        {c.tipo === 'cliente' ? '🧑 CLI' : c.tipo === 'proveedor' ? '🏭 PROV' : '↔️ AMBOS'}
+                      </span>
+                    </td>
+                    <td style={{ padding: '6px 6px', fontSize: 11, color: 'var(--muted)' }}>{c.email || c.telefono || '—'}</td>
+                    <td style={{ textAlign: 'center', padding: '6px 6px' }}>
+                      <button onClick={() => { setEditando(c); setMostrarForm(true) }} style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 4, padding: '4px 8px', fontSize: 11, cursor: 'pointer', marginRight: 4 }}>✏️</button>
+                      <button onClick={() => eliminar(c)} style={{ background: 'transparent', border: '1px solid #5a2a2a', color: '#ff8b8b', borderRadius: 4, padding: '4px 8px', fontSize: 11, cursor: 'pointer' }}>🗑️</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ padding: 10 }}>
+            <Paginador {...pag.controles} label="contrapartes" />
+          </div>
+        </div>
+      )}
+
+      {mostrarForm && (
+        <FormContraparte
+          contraparte={editando}
+          onCerrar={() => { setMostrarForm(false); setEditando(null) }}
+          onGuardado={() => { setMostrarForm(false); setEditando(null); onChange() }}
+        />
+      )}
+    </div>
+  )
+}
+
+function FormContraparte({ contraparte, onCerrar, onGuardado }) {
+  const VACIO = { nombre: '', cuit: '', condicion_iva: 'responsable_inscripto', tipo: 'ambos', email: '', telefono: '', domicilio: '', notas: '' }
+  const [form, setForm] = useState(contraparte || VACIO)
+  const [guardando, setGuardando] = useState(false)
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  async function guardar() {
+    if (!form.nombre.trim()) return alert('Nombre obligatorio')
+    if (form.cuit && !esCuitValido(form.cuit)) {
+      if (!confirm('⚠️ El CUIT no parece válido. ¿Guardar igual?')) return
+    }
+    setGuardando(true)
+    const datos = { ...form, updated_at: new Date().toISOString() }
+    let error
+    if (contraparte?.id) {
+      const r = await supabase.from('contrapartes').update(datos).eq('id', contraparte.id)
+      error = r.error
+    } else {
+      const r = await supabase.from('contrapartes').insert(datos)
+      error = r.error
+    }
+    setGuardando(false)
+    if (error) return alert('❌ ' + error.message)
+    onGuardado()
+  }
+
+  return (
+    <div onClick={onCerrar}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div onClick={e => e.stopPropagation()}
+        style={{ background: 'var(--surface)', border: '1px solid var(--gold)', borderRadius: 12, padding: 20, maxWidth: 540, width: '100%' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+          <div style={{ fontSize: 18, fontWeight: 700 }}>{contraparte ? '✏️ Editar contraparte' : '+ Nueva contraparte'}</div>
+          <button onClick={onCerrar} style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: 20, cursor: 'pointer' }}>✕</button>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <Campo label="Nombre / razón social *">
+            <input value={form.nombre} onChange={e => set('nombre', e.target.value)} style={inp} />
+          </Campo>
+          <Campo label="CUIT">
+            <input value={form.cuit} onChange={e => set('cuit', e.target.value)} placeholder="20-12345678-9"
+              style={{ ...inp, borderColor: form.cuit ? (esCuitValido(form.cuit) ? 'var(--green)' : '#ff8b8b') : 'var(--border)' }} />
+            {form.cuit && !esCuitValido(form.cuit) && (
+              <div style={{ fontSize: 10, color: '#ff8b8b', marginTop: 2 }}>⚠️ CUIT inválido</div>
+            )}
+          </Campo>
+          <Campo label="Condición IVA">
+            <select value={form.condicion_iva} onChange={e => set('condicion_iva', e.target.value)} style={inp}>
+              <option value="responsable_inscripto">RI</option>
+              <option value="monotributo">Monotributo</option>
+              <option value="exento">Exento</option>
+              <option value="consumidor_final">Consumidor Final</option>
+              <option value="no_aplica">N/A</option>
+            </select>
+          </Campo>
+          <Campo label="Tipo">
+            <select value={form.tipo} onChange={e => set('tipo', e.target.value)} style={inp}>
+              <option value="cliente">🧑 Cliente</option>
+              <option value="proveedor">🏭 Proveedor</option>
+              <option value="ambos">↔️ Ambos</option>
+            </select>
+          </Campo>
+          <Campo label="Email"><input value={form.email || ''} onChange={e => set('email', e.target.value)} style={inp} /></Campo>
+          <Campo label="Teléfono"><input value={form.telefono || ''} onChange={e => set('telefono', e.target.value)} style={inp} /></Campo>
+        </div>
+        <Campo label="Domicilio"><input value={form.domicilio || ''} onChange={e => set('domicilio', e.target.value)} style={inp} /></Campo>
+        <Campo label="Notas"><input value={form.notas || ''} onChange={e => set('notas', e.target.value)} style={inp} /></Campo>
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
+          <button onClick={onCerrar} style={{ flex: 1, padding: 12, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>
+            Cancelar
+          </button>
+          <button onClick={guardar} disabled={guardando}
+            style={{ flex: 2, padding: 12, background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 800, letterSpacing: 1 }}>
+            {guardando ? '⏳ Guardando...' : '✅ Guardar'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

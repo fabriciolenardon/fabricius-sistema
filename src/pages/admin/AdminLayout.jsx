@@ -29,11 +29,14 @@ function useNotificaciones() {
       const hoyStr = hoy.toISOString().split('T')[0]
       const en15Str = en15.toISOString().split('T')[0]
 
-      const [{ data: cheques }, { data: clientes }, { data: cierres }, { data: stockData }] = await Promise.all([
+      const [{ data: cheques }, { data: clientes }, { data: cierres }, { data: stockData }, { data: cuentasFiscales }, { data: facturasRecientes }, { data: impuestosRecientes }] = await Promise.all([
         supabase.from('cheques').select('*').gte('fecha_pago', hoyStr).lte('fecha_pago', en15Str),
         supabase.from('clientes').select('*').gt('saldo', 0).order('saldo', { ascending: false }),
         supabase.from('cierres_semanales').select('*').order('semana_inicio', { ascending: false }).limit(1),
         supabase.from('stock_actual').select('*'),
+        supabase.from('cuentas_fiscales').select('*').eq('activa', true).then(r => r).catch(() => ({ data: null })),
+        supabase.from('facturas').select('cuenta_id, monto_total, fecha').eq('tipo', 'emitida').gte('fecha', new Date(hoy.getFullYear() - 1, hoy.getMonth(), hoy.getDate()).toISOString().split('T')[0]).then(r => r).catch(() => ({ data: null })),
+        supabase.from('impuestos_pagados').select('cuenta_id, concepto, periodo_anio, periodo_mes').then(r => r).catch(() => ({ data: null })),
       ])
 
       const nuevas = []
@@ -54,6 +57,34 @@ function useNotificaciones() {
       if (cierres?.length > 0) {
         const diasSinCierre = Math.floor((hoy - new Date(cierres[0].semana_fin + 'T12:00')) / (1000 * 60 * 60 * 24))
         if (diasSinCierre > 8) nuevas.push({ tipo: 'info', icono: '📋', titulo: `Hace ${diasSinCierre} días sin cierre`, sub: 'Registrá el cierre de la semana', link: '/admin/cierre' })
+      }
+
+      // ── Avisos de Facturación ──
+      if (cuentasFiscales && facturasRecientes) {
+        const mesActual = hoy.getMonth() + 1
+        const anioActual = hoy.getFullYear()
+        const diaActual = hoy.getDate()
+        cuentasFiscales.forEach(cf => {
+          if (cf.tipo !== 'monotributo') return
+          // Tope absoluto cat K = $108.357.084 (vigente 2026)
+          const TOPE_K = 108357084.05
+          const facturado = (facturasRecientes || []).filter(f => f.cuenta_id === cf.id).reduce((s, f) => s + (Number(f.monto_total) || 0), 0)
+          const pct = (facturado / TOPE_K) * 100
+          if (pct >= 95) {
+            nuevas.push({ tipo: 'danger', icono: '🚨', titulo: `${cf.nombre} al ${pct.toFixed(0)}% del tope mono`, sub: 'Riesgo crítico de exclusión', link: '/admin/facturacion' })
+          } else if (pct >= 85) {
+            nuevas.push({ tipo: 'warning', icono: '📑', titulo: `${cf.nombre} al ${pct.toFixed(0)}% del tope mono`, sub: 'Atención al cierre del año móvil', link: '/admin/facturacion' })
+          }
+          // Cuota del mes
+          const yaPago = (impuestosRecientes || []).some(p => p.cuenta_id === cf.id && p.concepto === 'monotributo' && p.periodo_anio === anioActual && p.periodo_mes === mesActual)
+          if (!yaPago) {
+            if (diaActual > 20) {
+              nuevas.push({ tipo: 'danger', icono: '📘', titulo: `Cuota Mono ${cf.nombre} VENCIDA`, sub: `Período ${String(mesActual).padStart(2, '0')}/${anioActual}`, link: '/admin/facturacion' })
+            } else if (diaActual >= 15) {
+              nuevas.push({ tipo: 'warning', icono: '📘', titulo: `Cuota Mono ${cf.nombre} vence pronto`, sub: `Día 20 — quedan ${20 - diaActual} días`, link: '/admin/facturacion' })
+            }
+          }
+        })
       }
 
       if (stockData) {
