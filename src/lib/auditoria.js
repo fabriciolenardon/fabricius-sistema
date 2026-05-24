@@ -136,4 +136,13 @@ export const auditoria = {
     descripcion: `Borró factura ${factura.tipo} #${factura.numero || factura.id}`,
     valoresAntes: factura,
   }),
+  ajustarStock: (tipo, antes, despues, motivo) => logAuditoria({
+    accion: 'update',
+    modulo: 'deposito',
+    entidad: 'stock_actual',
+    entidad_id: tipo,
+    descripcion: `Ajustó stock "${tipo}": ${antes} → ${despues}. Motivo: ${motivo || '—'}`,
+    valoresAntes: { tipo, kg_disponible: antes },
+    valoresDespues: { tipo, kg_disponible: despues, motivo },
+  }),
 }
