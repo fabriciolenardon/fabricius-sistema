@@ -9,6 +9,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
+import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
 
 const fmt$ = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
 
@@ -83,10 +84,10 @@ export default function DashboardCajaWidget() {
 
   async function cargar() {
     setLoading(true)
-    const ahora = new Date()
-    const fHoy = ahora.toISOString().split('T')[0]
-    const ayerD = new Date(ahora); ayerD.setDate(ayerD.getDate() - 1)
-    const fAyer = ayerD.toISOString().split('T')[0]
+    // Hora local Argentina, NO UTC. Antes el dashboard mostraba "hoy"
+    // como la fecha UTC, que después de las 21hs ARG ya es el día siguiente.
+    const fHoy = fechaHoyARG()
+    const fAyer = fechaRelativaARG(-1)
 
     const [{ data: vHoy }, { data: vAyer }] = await Promise.all([
       supabase.from('ventas_minoristas').select('*').eq('origen', 'caja').eq('fecha', fHoy),

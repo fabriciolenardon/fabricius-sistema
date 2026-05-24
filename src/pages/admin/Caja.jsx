@@ -11,6 +11,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { decodificarEANBalanza, esCodigoBalanza } from '../../lib/balanzaEAN'
+import { fechaHoyARG, horaHoyARG, horaNumARG } from '../../lib/fechas'
 import HistorialCaja from './HistorialCaja'
 import ArqueoCaja from './ArqueoCaja'
 
@@ -58,6 +59,8 @@ export default function Caja() {
   const [msg, setMsg] = useState(null)
   const [pago, setPago] = useState({ efectivo: '', debito: '', transferencia: '' })
   const [mostrarCierre, setMostrarCierre] = useState(false)
+  const [guardandoVenta, setGuardandoVenta] = useState(false) // Anti-duplicado: bloquea doble click / Enter repetido en cerrarVenta()
+  const ventaClientIdRef = useRef(null)                       // UUID generado al abrir cobro — clave de idempotencia en DB
   const [ultimaVenta, setUltimaVenta] = useState(null)
   const [ventasHoy, setVentasHoy] = useState([])
   const [vistaCaja, setVistaCaja] = useState('vender') // 'vender' | 'historial' | 'arqueo'
@@ -70,7 +73,7 @@ export default function Caja() {
   useEffect(() => { cargarTodo() }, [])
 
   async function cargarTodo() {
-    const hoy = new Date().toISOString().split('T')[0]
+    const hoy = fechaHoyARG()  // Hora local ARG, NO UTC. Ver lib/fechas.js
     const [{ data: pre }, { data: cfg }, { data: ventas }, { data: ofs }] = await Promise.all([
       supabase.from('precios').select('*').order('nombre'),
       supabase.from('config_sistema').select('*').eq('clave', 'ean13_formato').maybeSingle(),
@@ -263,8 +266,22 @@ export default function Caja() {
                   (parseFloat(pago.transferencia) || 0)
   const vuelto = cobrado - total
 
+  // Al cerrar el modal (cancelación o éxito) liberamos el client_id
+  // para que la próxima venta nazca con un UUID nuevo. Cubre las
+  // tres salidas: ESC, click fuera y botón Cancelar.
+  useEffect(() => {
+    if (!mostrarCierre) {
+      ventaClientIdRef.current = null
+    }
+  }, [mostrarCierre])
+
   // ---- Cerrar venta ----
   async function cerrarVenta() {
+    // ── Guardia anti-duplicado ──────────────────────────────
+    // Si ya estamos guardando, ignoramos el segundo trigger.
+    // Esto cubre: doble click en CONFIRMAR, Enter repetido en
+    // el campo efectivo, lag de red + reintentos del cajero.
+    if (guardandoVenta) return
     if (carrito.length === 0) {
       showMsg('❌ El carrito está vacío', 'error')
       return
@@ -274,12 +291,26 @@ export default function Caja() {
       return
     }
 
+    setGuardandoVenta(true)
+    try {
+    // Generar client_id sólo si no existe ya uno para este modal.
+    // Si el insert falla por red y el cajero reintenta, va el mismo
+    // UUID y la UNIQUE constraint del servidor garantiza idempotencia.
+    if (!ventaClientIdRef.current) {
+      ventaClientIdRef.current = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    }
+
     const ahora = new Date()
     const venta = {
-      fecha: ahora.toISOString().split('T')[0],
-      hora: ahora.toTimeString().slice(0, 8),
-      turno: ahora.getHours() < 14 ? 'mañana' : 'tarde',
+      // Siempre hora local Argentina, NO UTC. Antes había bug: ventas
+      // hechas después de las 21hs ARG quedaban con fecha del día siguiente.
+      fecha: fechaHoyARG(ahora),
+      hora: horaHoyARG(ahora),
+      turno: horaNumARG(ahora) < 14 ? 'mañana' : 'tarde',
       origen: 'caja',
+      client_id: ventaClientIdRef.current,
       items: carrito.map(i => ({
         descripcion: i.descripcion,
         categoria: i.categoria,
@@ -301,7 +332,18 @@ export default function Caja() {
       .single()
 
     if (error) {
-      showMsg(`❌ Error: ${error.message}`, 'error', 4000)
+      // Si pegó la UNIQUE constraint (23505), la venta ya quedó registrada
+      // en un intento previo — no es un error real, es la protección actuando.
+      if (error.code === '23505' && error.message?.includes('client_id')) {
+        showMsg('⚠️ Esta venta ya estaba registrada (anti-duplicado)', 'error', 4000)
+        setCarrito([])
+        setPago({ efectivo: '', debito: '', transferencia: '' })
+        setMostrarCierre(false)
+        ventaClientIdRef.current = null
+        cargarTodo()
+      } else {
+        showMsg(`❌ Error: ${error.message}`, 'error', 4000)
+      }
       return
     }
 
@@ -338,8 +380,13 @@ export default function Caja() {
     setCarrito([])
     setPago({ efectivo: '', debito: '', transferencia: '' })
     setMostrarCierre(false)
+    ventaClientIdRef.current = null  // Liberar el UUID — la próxima venta usa uno nuevo
     cargarTodo()
     showMsg(`✅ Venta #${data.id} registrada`, 'success', 4000)
+    } finally {
+      // Garantizar que el flag se libere incluso si hubo un error inesperado
+      setGuardandoVenta(false)
+    }
   }
 
   // ---- Atajos de teclado ----
@@ -787,7 +834,7 @@ export default function Caja() {
                 <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>💵 EFECTIVO</label>
                 <input ref={efectivoRef} type="number" value={pago.efectivo}
                   onChange={e => setPago(p => ({ ...p, efectivo: e.target.value }))}
-                  onKeyDown={e => e.key === 'Enter' && cobrado >= total && cerrarVenta()}
+                  onKeyDown={e => e.key === 'Enter' && cobrado >= total && !guardandoVenta && cerrarVenta()}
                   style={{ ...inp, fontSize: 18, textAlign: 'right' }} placeholder="0" />
               </div>
               <div>
@@ -833,9 +880,9 @@ export default function Caja() {
                 style={{ flex: 1, padding: 14, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 10, color: 'var(--muted)', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>
                 Cancelar
               </button>
-              <button onClick={cerrarVenta} disabled={cobrado < total}
-                style={{ flex: 2, padding: 14, background: cobrado >= total ? 'var(--green)' : 'var(--surface2)', color: cobrado >= total ? '#000' : 'var(--muted)', border: 'none', borderRadius: 10, fontSize: 16, fontWeight: 800, cursor: cobrado >= total ? 'pointer' : 'not-allowed', fontFamily: "'Bebas Neue',cursive", letterSpacing: 2 }}>
-                ✅ CONFIRMAR VENTA
+              <button onClick={cerrarVenta} disabled={cobrado < total || guardandoVenta}
+                style={{ flex: 2, padding: 14, background: guardandoVenta ? 'var(--surface2)' : (cobrado >= total ? 'var(--green)' : 'var(--surface2)'), color: guardandoVenta ? 'var(--muted)' : (cobrado >= total ? '#000' : 'var(--muted)'), border: 'none', borderRadius: 10, fontSize: 16, fontWeight: 800, cursor: (cobrado >= total && !guardandoVenta) ? 'pointer' : 'not-allowed', fontFamily: "'Bebas Neue',cursive", letterSpacing: 2 }}>
+                {guardandoVenta ? '⏳ GUARDANDO…' : '✅ CONFIRMAR VENTA'}
               </button>
             </div>
           </div>

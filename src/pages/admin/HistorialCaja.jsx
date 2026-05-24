@@ -12,6 +12,7 @@
 // ============================================================
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
+import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
 import { useAuth } from '../../context/AuthContext'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
@@ -60,23 +61,22 @@ const GRUPOS = {
 }
 
 function rangoFechas(modo) {
-  const hoy = new Date()
-  hoy.setHours(0, 0, 0, 0)
-  const iso = d => d.toISOString().split('T')[0]
-  if (modo === 'hoy')   { return { desde: iso(hoy), hasta: iso(hoy) } }
+  // Hora local Argentina, NO UTC. Antes "hoy" después de las 21hs ARG
+  // se calculaba como el día siguiente y los filtros mostraban mal.
+  const hoy = fechaHoyARG()
+  if (modo === 'hoy')   { return { desde: hoy, hasta: hoy } }
   if (modo === 'ayer')  {
-    const a = new Date(hoy); a.setDate(a.getDate() - 1)
-    return { desde: iso(a), hasta: iso(a) }
+    const ayer = fechaRelativaARG(-1)
+    return { desde: ayer, hasta: ayer }
   }
   if (modo === '7dias') {
-    const d = new Date(hoy); d.setDate(d.getDate() - 6)
-    return { desde: iso(d), hasta: iso(hoy) }
+    return { desde: fechaRelativaARG(-6), hasta: hoy }
   }
   if (modo === 'mes')   {
-    const m = new Date(hoy.getFullYear(), hoy.getMonth(), 1)
-    return { desde: iso(m), hasta: iso(hoy) }
+    // Primer día del mes en ARG = simplemente cambiar día a 01
+    return { desde: hoy.slice(0, 8) + '01', hasta: hoy }
   }
-  return { desde: iso(hoy), hasta: iso(hoy) }
+  return { desde: hoy, hasta: hoy }
 }
 
 export default function HistorialCaja() {
