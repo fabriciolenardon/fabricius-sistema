@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
+import { fechaHoyARG } from '../../lib/fechas'
 
 const CATEGORIAS = {
   bovino_corte: '🥩 Bovinos — Cortes',
@@ -18,10 +19,10 @@ const fmt = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
 const ahora = () => new Date().toISOString()
 
 function fechaMinimaEntrega() {
-  // 12 horas de anticipación mínima
+  // 12 horas de anticipación mínima — en zona ARG, no UTC.
   const d = new Date()
   d.setHours(d.getHours() + 12)
-  return d.toISOString().split('T')[0]
+  return fechaHoyARG(d)
 }
 
 export default function ClienteNuevoPedido() {

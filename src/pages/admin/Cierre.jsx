@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import { fechaHoyARG } from '../../lib/fechas'
 
 function fmt(n) { return '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR') }
 function fmtKg(n) { return parseFloat(n || 0).toFixed(1) + ' kg' }
@@ -150,7 +151,9 @@ export default function Cierre() {
     lunes.setDate(hoy.getDate() - (dia === 0 ? 6 : dia - 1))
     const sabado = new Date(lunes)
     sabado.setDate(lunes.getDate() + 5)
-    setForm(f => ({ ...f, inicio: lunes.toISOString().split('T')[0], fin: sabado.toISOString().split('T')[0] }))
+    // fechaHoyARG en lugar de toISOString — corrige el corrimiento de
+     // un día que aparecía cuando se entraba después de las 21hs ARG.
+    setForm(f => ({ ...f, inicio: fechaHoyARG(lunes), fin: fechaHoyARG(sabado) }))
   }, [])
 
   async function fetchCierres() {

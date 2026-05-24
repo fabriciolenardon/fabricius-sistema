@@ -3,6 +3,7 @@
 // =============================================
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import { fechaHoyARG } from '../../lib/fechas'
 
 // URL publica de produccion del portal — NO usar window.location.origin para evitar URLs de preview de Vercel
 const PORTAL_URL = 'https://fabricius-sistema.vercel.app/login'
@@ -15,7 +16,7 @@ export function Clientes() {
   const [showForm, setShowForm] = useState(false)
   const [showPago, setShowPago] = useState(false)
   const [editandoId, setEditandoId] = useState(null)
-  const [pago, setPago] = useState({ importe: '', forma: 'efectivo', fecha: new Date().toISOString().split('T')[0], notas: '' })
+  const [pago, setPago] = useState({ importe: '', forma: 'efectivo', fecha: fechaHoyARG(), notas: '' })
   const [form, setForm] = useState({ nombre: '', nombre_fantasia: '', tipo: 'carniceria', telefono: '', localidad: '', domicilio: '', cuit: '', lista_precios: 'carn', notas: '' })
   // Modal de gestion del portal: { tipo: 'habilitar'|'credenciales'|'revocar', cliente, email, credenciales, loading }
   const [modalPortal, setModalPortal] = useState(null)
@@ -199,7 +200,7 @@ async function eliminarMovimiento(mov) {
       saldo: nuevoSaldo
     })
     await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', seleccionado.id)
-    setPago({ importe: '', forma: 'efectivo', fecha: new Date().toISOString().split('T')[0], notas: '' })
+    setPago({ importe: '', forma: 'efectivo', fecha: fechaHoyARG(), notas: '' })
     setShowPago(false)
     await fetchClientes()
     await seleccionar({ ...seleccionado, saldo: nuevoSaldo })

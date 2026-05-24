@@ -11,6 +11,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { generarEAN13Balanza } from '../../lib/balanzaEAN'
+import { fechaHoyARG } from '../../lib/fechas'
 import JsBarcode from 'jsbarcode'
 
 const CATEGORIAS = {
@@ -22,11 +23,14 @@ const CATEGORIAS = {
   embutido: '🌭 Embutidos',
 }
 
-function hoy() { return new Date().toISOString().split('T')[0] }
+// Hora local ARG. Antes con UTC, después de las 21hs ARG el "hoy" de la
+// etiqueta quedaba con la fecha del día siguiente. sumarDias usa T12:00:00
+// como ancla para evitar saltos de día por TZ al hacer setDate.
+function hoy() { return fechaHoyARG() }
 function sumarDias(fecha, dias) {
   const d = new Date(fecha + 'T12:00:00')
   d.setDate(d.getDate() + dias)
-  return d.toISOString().split('T')[0]
+  return fechaHoyARG(d)
 }
 function fmtFecha(f) {
   if (!f) return ''

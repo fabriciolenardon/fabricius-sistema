@@ -5,6 +5,7 @@
 // módulo de facturación multi-cuenta.
 // ============================================================
 import { TOPE_MAX_ABSOLUTO, topeAnual, proximaRecategorizacion } from './monotributo2026'
+import { fechaHoyARG } from './fechas'
 
 // ─────────────────────────────────────────────────────────────
 // PROYECCIÓN: estima cuánto va a facturar la cuenta en los
@@ -12,14 +13,15 @@ import { TOPE_MAX_ABSOLUTO, topeAnual, proximaRecategorizacion } from './monotri
 // ─────────────────────────────────────────────────────────────
 export function proyectarFacturacionAnual(facturasEmitidas) {
   if (!facturasEmitidas || facturasEmitidas.length === 0) return 0
-  // Tomar últimos 90 días (3 meses) como referencia
+  // Tomar últimos 90 días (3 meses) como referencia. fechaHoyARG (no UTC)
+  // evita corrimientos cerca de la medianoche.
   const hace90 = new Date(); hace90.setDate(hace90.getDate() - 90)
-  const hace90ISO = hace90.toISOString().split('T')[0]
+  const hace90ISO = fechaHoyARG(hace90)
   const recientes = facturasEmitidas.filter(f => f.fecha >= hace90ISO)
   if (recientes.length === 0) {
     // Si no hubo nada en 3 meses, proyectar con últimos 12 meses
     const hace365 = new Date(); hace365.setDate(hace365.getDate() - 365)
-    const hace365ISO = hace365.toISOString().split('T')[0]
+    const hace365ISO = fechaHoyARG(hace365)
     const ultimoAno = facturasEmitidas.filter(f => f.fecha >= hace365ISO)
     return ultimoAno.reduce((s, f) => s + (Number(f.monto_total) || 0), 0)
   }

@@ -23,14 +23,17 @@ import { generarLibroVentas, generarLibroCompras, descargarCSV } from '../../lib
 import {
   proyectarFacturacionAnual, distribuirEntreCuentas, calcularAvisos,
 } from '../../lib/facturacionHelpers'
+import { fechaHoyARG } from '../../lib/fechas'
 
 const fmt$ = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
 const fmtPct = n => (n || 0).toFixed(1) + '%'
 const fmtFecha = d => d ? new Date(d).toLocaleDateString('es-AR') : '—'
-const hoyISO = () => new Date().toISOString().split('T')[0]
+// Hora local ARG (no UTC) — antes después de las 21hs el filtro "hoy"
+// quedaba con la fecha del día siguiente.
+const hoyISO = () => fechaHoyARG()
 const haceUnAno = () => {
   const d = new Date(); d.setMonth(d.getMonth() - 12)
-  return d.toISOString().split('T')[0]
+  return fechaHoyARG(d)
 }
 
 const TIPOS_CUENTA = [

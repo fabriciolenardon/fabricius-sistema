@@ -1,6 +1,7 @@
 // Gastos.jsx
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import { fechaHoyARG } from '../../lib/fechas'
 
 function fmt(n) { return '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR') }
 
@@ -26,7 +27,7 @@ const TIPOS = [
 ]
 
 const FORM_VACIO = {
-  fecha: new Date().toISOString().split('T')[0],
+  fecha: fechaHoyARG(),
   categoria: '', descripcion: '', monto: '',
   forma: 'efectivo', socio: 'fabricio', origenIngreso: '', notas: ''
 }
@@ -37,7 +38,7 @@ export default function Gastos() {
   const [form, setForm] = useState(FORM_VACIO)
   const [alert, setAlert] = useState(null)
   const [editandoId, setEditandoId] = useState(null)
-  const [filtroMes, setFiltroMes] = useState(new Date().toISOString().split('T')[0].substring(0, 7))
+  const [filtroMes, setFiltroMes] = useState(fechaHoyARG().substring(0, 7))
   const [filtroPeriodo, setFiltroPeriodo] = useState('mes')
 
   useEffect(() => { fetchGastos() }, [])

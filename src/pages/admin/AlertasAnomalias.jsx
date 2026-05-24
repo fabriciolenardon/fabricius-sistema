@@ -19,14 +19,14 @@
 // ============================================================
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
+import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
 
 const fmt$ = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
-const hoyISO = () => new Date().toISOString().split('T')[0]
-function fechaHaceDias(n) {
-  const d = new Date()
-  d.setDate(d.getDate() - n)
-  return d.toISOString().split('T')[0]
-}
+// Wrappers cortos sobre fechaHoyARG/fechaRelativaARG para mantener legibilidad
+// del código existente. Antes eran toISOString().split('T')[0] (UTC) → bug
+// después de las 21hs ARG (devolvía la fecha del día siguiente).
+const hoyISO = () => fechaHoyARG()
+const fechaHaceDias = n => fechaRelativaARG(-n)
 
 export default function AlertasAnomalias() {
   const [arqueosSemana, setArqueosSemana] = useState([])

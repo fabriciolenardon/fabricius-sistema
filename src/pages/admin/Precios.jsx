@@ -1,6 +1,7 @@
 // Precios — gestión completa de listas, PLUs e importadores
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
+import { fechaHoyARG } from '../../lib/fechas'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 import LimpiezaDuplicados from './LimpiezaDuplicados'
 import ImportarPLUQendra from './ImportarPLUQendra'
@@ -48,7 +49,7 @@ export default function Precios() {
 
   // Ofertas
   const [ofertas, setOfertas] = useState([])
-  const [ofertaForm, setOfertaForm] = useState({ precio_id: '', tipo: 'fijo', precio_oferta: '', descuento_pct: '', fecha_inicio: new Date().toISOString().split('T')[0], fecha_fin: '', notas: '', aplica_carniceria: true, aplica_mayorista: true, aplica_minorista: true })
+  const [ofertaForm, setOfertaForm] = useState({ precio_id: '', tipo: 'fijo', precio_oferta: '', descuento_pct: '', fecha_inicio: fechaHoyARG(), fecha_fin: '', notas: '', aplica_carniceria: true, aplica_mayorista: true, aplica_minorista: true })
   const [ofertaLoading, setOfertaLoading] = useState(false)
   const [busquedaOferta, setBusquedaOferta] = useState('')
   const [mostrarDropdown, setMostrarDropdown] = useState(false)
@@ -230,7 +231,7 @@ export default function Precios() {
       return
     }
     mostrarMsg('✅ Oferta registrada correctamente')
-    setOfertaForm({ precio_id: '', tipo: 'fijo', precio_oferta: '', descuento_pct: '', fecha_inicio: new Date().toISOString().split('T')[0], fecha_fin: '', notas: '', aplica_carniceria: true, aplica_mayorista: true, aplica_minorista: true })
+    setOfertaForm({ precio_id: '', tipo: 'fijo', precio_oferta: '', descuento_pct: '', fecha_inicio: fechaHoyARG(), fecha_fin: '', notas: '', aplica_carniceria: true, aplica_mayorista: true, aplica_minorista: true })
     setBusquedaOferta(''); setProductoSeleccionado(null)
     await cargarOfertas()
   }
@@ -241,7 +242,7 @@ export default function Precios() {
     await cargarOfertas()
   }
 
-  const hoy = new Date().toISOString().split('T')[0]
+  const hoy = fechaHoyARG()
   function catalogoPDF() {
     const precsActivos = preciosConOfertas.filter(p => (p.precio_minorista || p.precio_carniceria || 0) > 0)
     const porCat = {}
@@ -923,7 +924,7 @@ function PLUTab({ precios, ofertas = [] }) {
   }
 
   function exportarCSV() {
-    const hoy = new Date().toISOString().split('T')[0]
+    const hoy = fechaHoyARG()
 
     // Formato simple (compatible con muchos importadores)
     const header = 'Codigo,Nombre,Precio\n'
@@ -943,7 +944,7 @@ function PLUTab({ precios, ofertas = [] }) {
 
   // Formato Qendra extendido (con sector, tipo, vencimiento, etc.)
   function exportarQendra() {
-    const hoy = new Date().toISOString().split('T')[0]
+    const hoy = fechaHoyARG()
     // Header con formato Qendra: separador punto y coma, más campos
     const header = 'codigo;descripcion;precio_lista1;tipo;tara;sector;dias_vencimiento;origen\n'
     const rows = plus.map(p => {

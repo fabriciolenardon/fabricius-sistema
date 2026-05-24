@@ -1,6 +1,7 @@
 // Sueldos.jsx
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import { fechaHoyARG } from '../../lib/fechas'
 
 const EMPLEADOS_DEFAULT = [
   { id: 1, apellido: 'FRONTERA', nombre: 'GERMAN GABRIEL', valor_hora: 6000, modalidad: 'hora', cbu: '' },
@@ -81,8 +82,10 @@ export default function Sueldos() {
     const dia = hoy.getDay()
     const lunes = new Date(hoy); lunes.setDate(hoy.getDate() - (dia === 0 ? 6 : dia - 1))
     const sabado = new Date(lunes); sabado.setDate(lunes.getDate() + 5)
-    setInicio(lunes.toISOString().split('T')[0])
-    setFin(sabado.toISOString().split('T')[0])
+    // fechaHoyARG en lugar de toISOString — sin esto, los lunes después de
+    // las 21hs ARG la semana arrancaba un día más adelante.
+    setInicio(fechaHoyARG(lunes))
+    setFin(fechaHoyARG(sabado))
   }, [])
 
   async function fetchLiquidaciones() {

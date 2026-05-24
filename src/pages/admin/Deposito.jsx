@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
+import { fechaHoyARG } from '../../lib/fechas'
 import FlujoDeposito from './FlujoDeposito'
 
 async function actualizarStock(tipo, kg) {
@@ -104,7 +105,7 @@ function DesposteTab({ onSaved }) {
   const [modelo, setModelo] = useState('A')
   const [tipoAnimal, setTipoAnimal] = useState('novillo')
   const [piezas, setPiezas] = useState([])
-  const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0])
+  const [fecha, setFecha] = useState(fechaHoyARG())
   const [notas, setNotas] = useState('')
   const [alert, setAlert] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -361,14 +362,14 @@ async function confirmarElaboracionSalame() {
         kg_queso: parseFloat(kgQuesoEmbutido) || 0,
         kg_elaborado: kgTotal, pct_aumento: 0,
         kg_final: 0, maduracion_completa: false,
-        fecha_fin_maduracion: fechaFin.toISOString().split('T')[0],
+        fecha_fin_maduracion: fechaHoyARG(fechaFin),
         notas
       })
       for (const [tipo, v] of Object.entries(piezasEmbutido)) {
         if (parseFloat(v) > 0) await actualizarStock(tipo, -parseFloat(v))
       }
       if (parseFloat(kgCarneBovinaEmbutido) > 0) await actualizarStock('bovino_corte', -parseFloat(kgCarneBovinaEmbutido))
-      showAlert(`✅ Salame registrado — Maduración hasta ${fechaFin.toISOString().split('T')[0]}`)
+      showAlert(`✅ Salame registrado — Maduración hasta ${fechaHoyARG(fechaFin)}`)
       setPiezasEmbutido({ cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '', cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: '' })
       setKgCarneBovinaEmbutido(''); setKgQuesoEmbutido(''); setNotas('')
       await cargarDatos(); onSaved()
@@ -1061,7 +1062,7 @@ async function confirmarDesposteCerdo() {
   )
 }
 function EntradaForm({ onSaved, showAlert, proveedores }) {
-  const [form, setForm] = useState({ tipo: '', proveedor: '', descripcion: '', fecha: new Date().toISOString().split('T')[0], kg: '', precioKg: '9800', merma: '', destino: 'DEPOSITO', importe: '', cantidad: '1' })
+  const [form, setForm] = useState({ tipo: '', proveedor: '', descripcion: '', fecha: fechaHoyARG(), kg: '', precioKg: '9800', merma: '', destino: 'DEPOSITO', importe: '', cantidad: '1' })
   const [historial, setHistorial] = useState([])
   const [editando, setEditando] = useState(null)
   const [formEdit, setFormEdit] = useState({})
@@ -1364,7 +1365,7 @@ async function eliminar(entrada) {
 }
 
 export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
-  const [form, setForm] = useState({ destino: 'MITRE', clienteId: '', clienteNombre: '', domicilio: '', fecha: new Date().toISOString().split('T')[0], categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
+  const [form, setForm] = useState({ destino: 'MITRE', clienteId: '', clienteNombre: '', domicilio: '', fecha: fechaHoyARG(), categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
   const [items, setItems] = useState([])
   const [todosPrecios, setTodosPrecios] = useState([])
   const [clientes, setClientes] = useState([])
@@ -1580,7 +1581,7 @@ for (const item of items) {
     onRemito(remitoData)
     setItems([])
     setBusqueda('')
-    setForm({ destino: 'MITRE', clienteId: '', clienteNombre: '', domicilio: '', fecha: new Date().toISOString().split('T')[0], categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
+    setForm({ destino: 'MITRE', clienteId: '', clienteNombre: '', domicilio: '', fecha: fechaHoyARG(), categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
     onSaved()
     setTimeout(() => { showAlert(null); setTab('remitos') }, 1500)
   }
@@ -2052,8 +2053,8 @@ function ProveedoresTab() {
   const [editandoNombreId, setEditandoNombreId] = useState(null)
   const [nombreEditando, setNombreEditando] = useState('')
   const [formLegajo, setFormLegajo] = useState({ contacto: '', telefono: '', cuit: '', direccion: '', producto_principal: '', notas: '' })
-  const [formCompra, setFormCompra] = useState({ fecha: new Date().toISOString().split('T')[0], semana_inicio: '', semana_fin: '', proveedor_nombre: '', producto: '', kg: '', importe: '' })
-  const [formPago, setFormPago] = useState({ fecha: new Date().toISOString().split('T')[0], semana_inicio: '', semana_fin: '', proveedor_nombre: '', importe_compra: '', percepcion: '', saldo_anterior: '', entrega: '', notas: '' })
+  const [formCompra, setFormCompra] = useState({ fecha: fechaHoyARG(), semana_inicio: '', semana_fin: '', proveedor_nombre: '', producto: '', kg: '', importe: '' })
+  const [formPago, setFormPago] = useState({ fecha: fechaHoyARG(), semana_inicio: '', semana_fin: '', proveedor_nombre: '', importe_compra: '', percepcion: '', saldo_anterior: '', entrega: '', notas: '' })
 
   const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, width: '100%', boxSizing: 'border-box' }
 

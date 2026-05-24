@@ -1,6 +1,7 @@
 // Cheques.jsx
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import { fechaHoyARG } from '../../lib/fechas'
 
 function fmt(n) { return '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR') }
 
@@ -8,7 +9,7 @@ export default function Cheques() {
   const [cheques, setCheques] = useState([])
   const [clientes, setClientes] = useState([])
   const [tipo, setTipo] = useState('fisico')
-  const [form, setForm] = useState({ numero: '', fechaRec: new Date().toISOString().split('T')[0], fechaPago: '', banco: '', clienteId: '', monto: '', destino: 'ctacte', proveedor: '', notas: '' })
+  const [form, setForm] = useState({ numero: '', fechaRec: fechaHoyARG(), fechaPago: '', banco: '', clienteId: '', monto: '', destino: 'ctacte', proveedor: '', notas: '' })
   const [alert, setAlert] = useState(null)
 
   useEffect(() => {

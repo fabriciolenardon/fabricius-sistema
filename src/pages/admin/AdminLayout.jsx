@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext'
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useFlujoNotificaciones } from '../../lib/useFlujoNotificaciones'
+import { fechaHoyARG } from '../../lib/fechas'
 import BuscadorGlobal from '../../components/BuscadorGlobal'
 import LogoFabricius from '../../components/LogoFabricius'
 
@@ -31,8 +32,11 @@ function useNotificaciones() {
     async function cargar() {
       const hoy = new Date()
       const en15 = new Date(); en15.setDate(hoy.getDate() + 15)
-      const hoyStr = hoy.toISOString().split('T')[0]
-      const en15Str = en15.toISOString().split('T')[0]
+      // fechaHoyARG (no toISOString): después de las 21hs ARG las alertas
+      // de cheques quedaban con la ventana corrida un día.
+      const hoyStr = fechaHoyARG(hoy)
+      const en15Str = fechaHoyARG(en15)
+      const haceUnAno = new Date(hoy.getFullYear() - 1, hoy.getMonth(), hoy.getDate())
 
       const [{ data: cheques }, { data: clientes }, { data: cierres }, { data: stockData }, { data: cuentasFiscales }, { data: facturasRecientes }, { data: impuestosRecientes }] = await Promise.all([
         supabase.from('cheques').select('*').gte('fecha_pago', hoyStr).lte('fecha_pago', en15Str),
@@ -40,7 +44,7 @@ function useNotificaciones() {
         supabase.from('cierres_semanales').select('*').order('semana_inicio', { ascending: false }).limit(1),
         supabase.from('stock_actual').select('*'),
         supabase.from('cuentas_fiscales').select('*').eq('activa', true).then(r => r).catch(() => ({ data: null })),
-        supabase.from('facturas').select('cuenta_id, monto_total, fecha').eq('tipo', 'emitida').gte('fecha', new Date(hoy.getFullYear() - 1, hoy.getMonth(), hoy.getDate()).toISOString().split('T')[0]).then(r => r).catch(() => ({ data: null })),
+        supabase.from('facturas').select('cuenta_id, monto_total, fecha').eq('tipo', 'emitida').gte('fecha', fechaHoyARG(haceUnAno)).then(r => r).catch(() => ({ data: null })),
         supabase.from('impuestos_pagados').select('cuenta_id, concepto, periodo_anio, periodo_mes').then(r => r).catch(() => ({ data: null })),
       ])
 
