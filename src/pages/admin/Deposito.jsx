@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
+import Paginador, { usePaginacion } from '../../components/Paginador'
 import FlujoDeposito from './FlujoDeposito'
 import AjusteStock from './AjusteStock'
 
@@ -1073,9 +1074,18 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
   useEffect(() => { cargarHistorial() }, [])
 
   async function cargarHistorial() {
-    const { data } = await supabase.from('entradas_deposito').select('*').order('fecha', { ascending: false }).limit(100)
+    // Antes estaba limitado a 100, lo que cortaba el historial de meses
+    // anteriores. Ahora traemos todo y paginamos en cliente con usePaginacion.
+    const { data } = await supabase
+      .from('entradas_deposito')
+      .select('*')
+      .order('fecha', { ascending: false })
+      .order('id', { ascending: false })
     setHistorial(data || [])
   }
+
+  // Paginación del historial — 20 por página por defecto, opciones 10/20/50/100
+  const pag = usePaginacion(historial, 20)
 
   // Tipos que vienen en unidades discretas (cajones, cajas).
   // Para estos, el campo "Kg" representa los KG POR UNIDAD y se multiplica
@@ -1326,7 +1336,7 @@ async function eliminar(entrada) {
             </tr>
           </thead>
           <tbody>
-            {historial.map(e => (
+            {pag.items.map(e => (
               editando === e.id ? (
                 <tr key={e.id} style={{ background: 'rgba(201,168,76,0.08)' }}>
                   <td><input type="date" value={formEdit.fecha} onChange={x => setFormEdit(f => ({ ...f, fecha: x.target.value }))} style={{ ...inp, width: 130 }} /></td>
@@ -1362,6 +1372,7 @@ async function eliminar(entrada) {
             {historial.length === 0 && <tr><td colSpan={7} className="empty">Sin entradas registradas</td></tr>}
           </tbody>
         </table>
+        <Paginador {...pag.controles} label="entradas" />
       </div>
     </div>
   )
