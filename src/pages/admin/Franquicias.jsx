@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
+import { fechaHoyARG } from '../../lib/fechas'
 function fmt(n) { return '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR') }
 
 const FRANQUICIAS = [
@@ -13,7 +14,7 @@ export default function Franquicias() {
   const [movimientos, setMovimientos] = useState([])
   const [remitos, setRemitos] = useState([])
   const [showPago, setShowPago] = useState(false)
-  const [pago, setPago] = useState({ importe: '', forma: 'efectivo', fecha: new Date().toISOString().split('T')[0], notas: '' })
+  const [pago, setPago] = useState({ importe: '', forma: 'efectivo', fecha: fechaHoyARG(), notas: '' })
   const [clientes, setClientes] = useState([])
   const [msg, setMsg] = useState(null)
 
@@ -49,7 +50,7 @@ export default function Franquicias() {
     })
     await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', cliente.id)
     setMsg({ type: 'success', msg: '✅ Pago registrado' })
-    setPago({ importe: '', forma: 'efectivo', fecha: new Date().toISOString().split('T')[0], notas: '' })
+    setPago({ importe: '', forma: 'efectivo', fecha: fechaHoyARG(), notas: '' })
     setShowPago(false)
     await seleccionar(seleccionada)
     setTimeout(() => setMsg(null), 3000)

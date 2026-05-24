@@ -1,6 +1,8 @@
 // Gastos.jsx
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import { fechaHoyARG } from '../../lib/fechas'
+import Paginador, { usePaginacion } from '../../components/Paginador'
 
 function fmt(n) { return '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR') }
 
@@ -26,7 +28,7 @@ const TIPOS = [
 ]
 
 const FORM_VACIO = {
-  fecha: new Date().toISOString().split('T')[0],
+  fecha: fechaHoyARG(),
   categoria: '', descripcion: '', monto: '',
   forma: 'efectivo', socio: 'fabricio', origenIngreso: '', notas: ''
 }
@@ -37,13 +39,14 @@ export default function Gastos() {
   const [form, setForm] = useState(FORM_VACIO)
   const [alert, setAlert] = useState(null)
   const [editandoId, setEditandoId] = useState(null)
-  const [filtroMes, setFiltroMes] = useState(new Date().toISOString().split('T')[0].substring(0, 7))
+  const [filtroMes, setFiltroMes] = useState(fechaHoyARG().substring(0, 7))
   const [filtroPeriodo, setFiltroPeriodo] = useState('mes')
 
   useEffect(() => { fetchGastos() }, [])
 
   async function fetchGastos() {
-    const { data } = await supabase.from('gastos').select('*').order('fecha', { ascending: false }).limit(200)
+    // Sin .limit — paginamos en cliente para mostrar TODOS los gastos
+    const { data } = await supabase.from('gastos').select('*').order('fecha', { ascending: false })
     setGastos(data || [])
   }
 
@@ -123,6 +126,9 @@ export default function Gastos() {
 
   // Meses disponibles
   const mesesDisp = [...new Set(gastos.map(g => g.fecha?.substring(0, 7)))].filter(Boolean).sort().reverse()
+
+  // Paginación del listado filtrado (todos los tipos juntos, ordenados por fecha)
+  const pag = usePaginacion(gastosFiltrados, 25)
 
   const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }
 
@@ -282,21 +288,19 @@ export default function Gastos() {
             {filtroPeriodo === 'semana' ? 'Gastos de la semana' : filtroPeriodo === 'mes' ? `Gastos de ${new Date(filtroMes + '-15').toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })}` : 'Todos los gastos'}
           </div>
 
-          {/* Agrupar por tipo */}
-          {TIPOS.map(t => {
-            const items = gastosFiltrados.filter(g => g.tipo === t.id)
-            if (items.length === 0) return null
-            const subtotal = items.reduce((s, g) => s + (g.monto || 0), 0)
-            return (
-              <div key={t.id} style={{ marginBottom: 16 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 8px', background: 'var(--surface2)', borderRadius: 6, marginBottom: 6 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: t.color }}>{t.label}</span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: t.color }}>{fmt(subtotal)}</span>
-                </div>
-                {items.map(g => (
-                  <div key={g.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 4px', borderBottom: '1px solid var(--border)' }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 600, fontSize: 13 }}>{g.descripcion}</div>
+          {/* Listado plano paginado — el desglose por tipo ya se ve en las
+              4 tarjetas de stats arriba. Cada fila lleva su badge de tipo. */}
+          {gastosFiltrados.length === 0
+            ? <div className="empty">Sin registros para este período</div>
+            : pag.items.map(g => {
+                const t = TIPOS.find(x => x.id === g.tipo) || TIPOS[0]
+                return (
+                  <div key={g.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 6px', borderBottom: '1px solid var(--border)' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                        <span style={{ background: t.color + '22', color: t.color, borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>{t.label}</span>
+                        <div style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.descripcion}</div>
+                      </div>
                       <div style={{ fontSize: 11, color: 'var(--muted)' }}>
                         {g.fecha} · {g.forma}
                         {g.socio ? ` · ${g.socio}` : ''}
@@ -314,11 +318,9 @@ export default function Gastos() {
                         style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '3px 7px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: 'var(--red-light)' }}>🗑️</button>
                     </div>
                   </div>
-                ))}
-              </div>
-            )
-          })}
-          {gastosFiltrados.length === 0 && <div className="empty">Sin registros para este período</div>}
+                )
+              })}
+          <Paginador {...pag.controles} label="registros" />
         </div>
       </div>
     </div>

@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
+import { fechaHoyARG } from '../../lib/fechas'
+import Paginador, { usePaginacion } from '../../components/Paginador'
 import FlujoDeposito from './FlujoDeposito'
+import AjusteStock from './AjusteStock'
 
 async function actualizarStock(tipo, kg) {
   const { data } = await supabase.from('stock_actual').select('*').eq('tipo', tipo).maybeSingle()
@@ -73,6 +76,7 @@ export function Deposito() {
           { id: 'flujo', label: '📥 Flujo Depósito' },
           { id: 'remitos', label: '🧾 Remitos' },
           { id: 'proveedores', label: '🏭 Proveedores' },
+          { id: 'ajuste', label: '🔧 Ajuste Stock' },
         ].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
             style={{ padding: '8px 16px', borderRadius: 8, border: `1px solid ${tab === t.id ? 'var(--amber)' : 'var(--border)'}`, background: tab === t.id ? 'var(--amber)' : 'transparent', color: tab === t.id ? '#fff' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
@@ -86,6 +90,7 @@ export function Deposito() {
 {tab === 'remitos' && <RemitosTab remitoActual={remitoActual} />}
       {tab === 'flujo' && <FlujoDeposito />}
       {tab === 'proveedores' && <ProveedoresTab />}
+      {tab === 'ajuste' && <AjusteStock />}
     </div>
   )
 }
@@ -104,7 +109,7 @@ function DesposteTab({ onSaved }) {
   const [modelo, setModelo] = useState('A')
   const [tipoAnimal, setTipoAnimal] = useState('novillo')
   const [piezas, setPiezas] = useState([])
-  const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0])
+  const [fecha, setFecha] = useState(fechaHoyARG())
   const [notas, setNotas] = useState('')
   const [alert, setAlert] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -143,11 +148,11 @@ const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(n
   async function cargarDatos() {
     const [{ data: entradas }, { data: despostesData }, { data: preciosData }, { data: stockData }, { data: caponesData }, { data: elaboracionesData }, { data: piezasIndivData }] = await Promise.all([
   supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).eq('reservada', false).order('fecha', { ascending: false }),
-  supabase.from('despostes').select('*').order('fecha', { ascending: false }).limit(20),
+  supabase.from('despostes').select('*').order('fecha', { ascending: false }),
   supabase.from('precios').select('*').eq('categoria', 'bovino_pieza'),
   supabase.from('stock_actual').select('*'),
   supabase.from('entradas_deposito').select('*').eq('tipo', 'cerdo').eq('despostada', false).order('fecha', { ascending: false }),
-  supabase.from('elaboraciones_embutidos').select('*').order('fecha', { ascending: false }).limit(20),
+  supabase.from('elaboraciones_embutidos').select('*').order('fecha', { ascending: false }),
   supabase.from('piezas_stock').select('*').order('fecha_ingreso', { ascending: false }).order('id', { ascending: false })
 ])
 setMediasRes(entradas || [])
@@ -361,14 +366,14 @@ async function confirmarElaboracionSalame() {
         kg_queso: parseFloat(kgQuesoEmbutido) || 0,
         kg_elaborado: kgTotal, pct_aumento: 0,
         kg_final: 0, maduracion_completa: false,
-        fecha_fin_maduracion: fechaFin.toISOString().split('T')[0],
+        fecha_fin_maduracion: fechaHoyARG(fechaFin),
         notas
       })
       for (const [tipo, v] of Object.entries(piezasEmbutido)) {
         if (parseFloat(v) > 0) await actualizarStock(tipo, -parseFloat(v))
       }
       if (parseFloat(kgCarneBovinaEmbutido) > 0) await actualizarStock('bovino_corte', -parseFloat(kgCarneBovinaEmbutido))
-      showAlert(`✅ Salame registrado — Maduración hasta ${fechaFin.toISOString().split('T')[0]}`)
+      showAlert(`✅ Salame registrado — Maduración hasta ${fechaHoyARG(fechaFin)}`)
       setPiezasEmbutido({ cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '', cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: '' })
       setKgCarneBovinaEmbutido(''); setKgQuesoEmbutido(''); setNotas('')
       await cargarDatos(); onSaved()
@@ -994,6 +999,16 @@ async function confirmarDesposteCerdo() {
 
 {subtab === 'historial' && (
   <div>
+    <HistorialDespostes despostes={despostes} />
+    <HistorialElaboraciones elaboraciones={elaboraciones} />
+  </div>
+)}
+{false && (
+  <div>
+    {/* Bloque legacy mantenido como referencia visual del estilo original.
+        Está deshabilitado con `false &&` — el render real lo hacen los
+        componentes <HistorialDespostes /> y <HistorialElaboraciones /> de
+        arriba que ya manejan paginación. */}
     <div className="card" style={{ marginBottom: 16 }}>
       <div className="card-title">📋 Historial de despostes</div>
       {despostes.length === 0 ? <div className="empty">Sin despostes registrados</div> : despostes.map(d => (
@@ -1060,8 +1075,90 @@ async function confirmarDesposteCerdo() {
     </div>
   )
 }
+// ───────────────────────────────────────────────────────────
+// Componentes auxiliares para paginar los historiales del tab
+// "Desposte → Historial" (despostes + elaboraciones de embutidos/salames)
+// ───────────────────────────────────────────────────────────
+function HistorialDespostes({ despostes }) {
+  const pag = usePaginacion(despostes || [], 15)
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card-title">📋 Historial de despostes ({(despostes || []).length})</div>
+      {(despostes || []).length === 0
+        ? <div className="empty">Sin despostes registrados</div>
+        : pag.items.map(d => (
+          <div key={d.id} style={{ padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>
+                  {d.tipo_desposte === 'piezas' ? '🍖 Piezas' : d.tipo_desposte === 'kilo' ? '⚖️ Por Kilo' : d.tipo_desposte === 'cerdo' ? '🐷 Cerdo' : '🔄 Pieza a Kilo'}
+                  {d.modelo && d.modelo !== 'KILO' && d.modelo !== 'PIEZA_KILO' && d.modelo !== 'CERDO' ? ` · Modelo ${d.modelo}` : ''}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>{d.fecha} · {d.kg_media_res?.toFixed(1)} kg — {d.kg_neto?.toFixed(1)} kg neto</div>
+                {d.notas && <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>{d.notas}</div>}
+              </div>
+              <span style={{ background: d.tipo_desposte === 'piezas' ? '#2a2010' : d.tipo_desposte === 'cerdo' ? '#2a1a0a' : '#1a1a2a', color: d.tipo_desposte === 'piezas' ? 'var(--gold)' : d.tipo_desposte === 'cerdo' ? 'var(--amber)' : '#7db5ff', borderRadius: 6, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>
+                {d.tipo_desposte === 'piezas' ? 'PIEZAS' : d.tipo_desposte === 'kilo' ? 'X KILO' : d.tipo_desposte === 'cerdo' ? 'CERDO' : 'PIEZA→KILO'}
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {(d.piezas || []).map((p, i) => (
+                <span key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, padding: '2px 8px', fontSize: 11, color: 'var(--text2)' }}>
+                  {p.nombre}: {p.kg?.toFixed(1)} kg{p.precio_venta > 0 ? ` · $${Math.round(p.precio_venta).toLocaleString('es-AR')}/kg` : ''}
+                </span>
+              ))}
+            </div>
+          </div>
+        ))}
+      <Paginador {...pag.controles} label="despostes" />
+    </div>
+  )
+}
+
+function HistorialElaboraciones({ elaboraciones }) {
+  const pag = usePaginacion(elaboraciones || [], 15)
+  return (
+    <div className="card">
+      <div className="card-title">🌭 Historial de elaboraciones ({(elaboraciones || []).length})</div>
+      {(elaboraciones || []).length === 0
+        ? <div className="empty">Sin elaboraciones registradas</div>
+        : pag.items.map(e => (
+          <div key={e.id} style={{ padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>
+                  {e.tipo === 'salame' ? '🥩 Salame' : '🌭'} {e.tipo === 'embutido' ? e.tipo_embutido?.replace(/_/g, ' ').toUpperCase() : ''}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                  {e.fecha} · {(e.kg_carne_cerdo || 0).toFixed(1)} kg cerdo + {(e.kg_carne_bovina || 0).toFixed(1)} kg bovino
+                  {e.kg_queso > 0 ? ` + ${e.kg_queso.toFixed(1)} kg queso` : ''}
+                </div>
+                {e.tipo === 'salame' && !e.maduracion_completa && (
+                  <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 2 }}>⏳ En maduración hasta: {e.fecha_fin_maduracion}</div>
+                )}
+                {e.tipo === 'salame' && e.maduracion_completa && (
+                  <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 2 }}>✅ Maduración completa</div>
+                )}
+                {e.notas && <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>{e.notas}</div>}
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <span style={{ background: e.tipo === 'salame' ? '#2a1a0a' : '#1a2a1a', color: e.tipo === 'salame' ? 'var(--amber)' : 'var(--green)', borderRadius: 6, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>
+                  {e.tipo === 'salame' ? 'SALAME' : 'EMBUTIDO'}
+                </span>
+                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: 'var(--gold)', marginTop: 4 }}>
+                  {e.tipo === 'salame' ? `${(e.kg_elaborado || 0).toFixed(1)} kg salame` : `${(e.kg_final || 0).toFixed(1)} kg`}
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      <Paginador {...pag.controles} label="elaboraciones" />
+    </div>
+  )
+}
+
 function EntradaForm({ onSaved, showAlert, proveedores }) {
-  const [form, setForm] = useState({ tipo: '', proveedor: '', descripcion: '', fecha: new Date().toISOString().split('T')[0], kg: '', precioKg: '9800', merma: '', destino: 'DEPOSITO', importe: '', cantidad: '1' })
+  const [form, setForm] = useState({ tipo: '', proveedor: '', descripcion: '', fecha: fechaHoyARG(), kg: '', precioKg: '9800', merma: '', destino: 'DEPOSITO', importe: '', cantidad: '1' })
   const [historial, setHistorial] = useState([])
   const [editando, setEditando] = useState(null)
   const [formEdit, setFormEdit] = useState({})
@@ -1069,9 +1166,18 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
   useEffect(() => { cargarHistorial() }, [])
 
   async function cargarHistorial() {
-    const { data } = await supabase.from('entradas_deposito').select('*').order('fecha', { ascending: false }).limit(100)
+    // Antes estaba limitado a 100, lo que cortaba el historial de meses
+    // anteriores. Ahora traemos todo y paginamos en cliente con usePaginacion.
+    const { data } = await supabase
+      .from('entradas_deposito')
+      .select('*')
+      .order('fecha', { ascending: false })
+      .order('id', { ascending: false })
     setHistorial(data || [])
   }
+
+  // Paginación del historial — 20 por página por defecto, opciones 10/20/50/100
+  const pag = usePaginacion(historial, 20)
 
   // Tipos que vienen en unidades discretas (cajones, cajas).
   // Para estos, el campo "Kg" representa los KG POR UNIDAD y se multiplica
@@ -1322,7 +1428,7 @@ async function eliminar(entrada) {
             </tr>
           </thead>
           <tbody>
-            {historial.map(e => (
+            {pag.items.map(e => (
               editando === e.id ? (
                 <tr key={e.id} style={{ background: 'rgba(201,168,76,0.08)' }}>
                   <td><input type="date" value={formEdit.fecha} onChange={x => setFormEdit(f => ({ ...f, fecha: x.target.value }))} style={{ ...inp, width: 130 }} /></td>
@@ -1358,13 +1464,14 @@ async function eliminar(entrada) {
             {historial.length === 0 && <tr><td colSpan={7} className="empty">Sin entradas registradas</td></tr>}
           </tbody>
         </table>
+        <Paginador {...pag.controles} label="entradas" />
       </div>
     </div>
   )
 }
 
 export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
-  const [form, setForm] = useState({ destino: 'MITRE', clienteId: '', clienteNombre: '', domicilio: '', fecha: new Date().toISOString().split('T')[0], categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
+  const [form, setForm] = useState({ destino: 'MITRE', clienteId: '', clienteNombre: '', domicilio: '', fecha: fechaHoyARG(), categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
   const [items, setItems] = useState([])
   const [todosPrecios, setTodosPrecios] = useState([])
   const [clientes, setClientes] = useState([])
@@ -1580,7 +1687,7 @@ for (const item of items) {
     onRemito(remitoData)
     setItems([])
     setBusqueda('')
-    setForm({ destino: 'MITRE', clienteId: '', clienteNombre: '', domicilio: '', fecha: new Date().toISOString().split('T')[0], categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
+    setForm({ destino: 'MITRE', clienteId: '', clienteNombre: '', domicilio: '', fecha: fechaHoyARG(), categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
     onSaved()
     setTimeout(() => { showAlert(null); setTab('remitos') }, 1500)
   }
@@ -1793,6 +1900,8 @@ export function RemitosTab({ remitoActual }) {
   const [nuevoProductoId, setNuevoProductoId] = useState('')
   const [nuevoKg, setNuevoKg] = useState('')
   const [nuevoPrecio, setNuevoPrecio] = useState('')
+  // Paginación del historial de remitos — antes estaba cortado a 30
+  const pagRemitos = usePaginacion(remitos, 20)
  const CATEGORIAS = {
     bovino_mr: '🐄 Media Reses', bovino_corte: '🥩 Bovinos — Cortes',
     bovino_brosa: '🫀 Brosas', bovino_pieza: '🍖 Piezas',
@@ -1810,7 +1919,8 @@ export function RemitosTab({ remitoActual }) {
   useEffect(() => { if (remitoActual) setSeleccionado(remitoActual) }, [remitoActual])
 
   async function cargarRemitos() {
-    const { data } = await supabase.from('remitos').select('*').order('created_at', { ascending: false }).limit(30)
+    // Sin .limit — paginamos en cliente para mostrar todos los remitos históricos
+    const { data } = await supabase.from('remitos').select('*').order('created_at', { ascending: false })
     setRemitos(data || [])
   }
   async function eliminarRemito(remito) {
@@ -2009,11 +2119,11 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
         </div>
       )}
       <div className="card">
-        <div className="card-title">Historial de remitos</div>
+        <div className="card-title">Historial de remitos ({remitos.length})</div>
         <table>
           <thead><tr><th>N° Remito</th><th>Fecha</th><th>Cliente</th><th>Total</th><th>Acciones</th></tr></thead>
           <tbody>
-            {remitos.map(r => (
+            {pagRemitos.items.map(r => (
               <tr key={r.id} style={{ background: r.eliminado ? 'rgba(255,50,50,0.08)' : 'transparent', opacity: r.eliminado ? 0.7 : 1 }}>
                 <td>
   <strong>N° {String(r.numero).padStart(5, '0')}</strong>
@@ -2035,6 +2145,7 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
 {remitos.length === 0 && <tr><td colSpan={5} className="empty">Sin remitos</td></tr>}
           </tbody>
         </table>
+        <Paginador {...pagRemitos.controles} label="remitos" />
       </div>
     </div>
   )
@@ -2052,23 +2163,28 @@ function ProveedoresTab() {
   const [editandoNombreId, setEditandoNombreId] = useState(null)
   const [nombreEditando, setNombreEditando] = useState('')
   const [formLegajo, setFormLegajo] = useState({ contacto: '', telefono: '', cuit: '', direccion: '', producto_principal: '', notas: '' })
-  const [formCompra, setFormCompra] = useState({ fecha: new Date().toISOString().split('T')[0], semana_inicio: '', semana_fin: '', proveedor_nombre: '', producto: '', kg: '', importe: '' })
-  const [formPago, setFormPago] = useState({ fecha: new Date().toISOString().split('T')[0], semana_inicio: '', semana_fin: '', proveedor_nombre: '', importe_compra: '', percepcion: '', saldo_anterior: '', entrega: '', notas: '' })
+  const [formCompra, setFormCompra] = useState({ fecha: fechaHoyARG(), semana_inicio: '', semana_fin: '', proveedor_nombre: '', producto: '', kg: '', importe: '' })
+  const [formPago, setFormPago] = useState({ fecha: fechaHoyARG(), semana_inicio: '', semana_fin: '', proveedor_nombre: '', importe_compra: '', percepcion: '', saldo_anterior: '', entrega: '', notas: '' })
 
   const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, width: '100%', boxSizing: 'border-box' }
 
   useEffect(() => { fetchAll() }, [])
 
   async function fetchAll() {
+    // Sin .limit — paginamos en cliente para mostrar todo el historial
     const [{ data: c }, { data: p }, { data: prov }] = await Promise.all([
-      supabase.from('compras_proveedores').select('*').order('fecha', { ascending: false }).limit(100),
-      supabase.from('pagos_proveedores_semanal').select('*').order('fecha', { ascending: false }).limit(100),
+      supabase.from('compras_proveedores').select('*').order('fecha', { ascending: false }),
+      supabase.from('pagos_proveedores_semanal').select('*').order('fecha', { ascending: false }),
       supabase.from('proveedores').select('*').eq('activo', true).order('nombre')
     ])
     setCompras(c || [])
     setPagos(p || [])
     setProveedoresDB(prov || [])
   }
+
+  // Paginadores del tab Proveedores
+  const pagCompras = usePaginacion(compras, 20)
+  const pagPagos = usePaginacion(pagos, 20)
 
   function showMsg(msg, type = 'success') { setAlert({ msg, type }); setTimeout(() => setAlert(null), 3000) }
 
@@ -2310,9 +2426,10 @@ function ProveedoresTab() {
             <button className="btn btn-gold" onClick={guardarCompra}>✅ Registrar compra</button>
           </div>
           <div className="card">
-            <div className="card-title">Historial de compras</div>
+            <div className="card-title">Historial de compras ({compras.length})</div>
             <table><thead><tr><th>Fecha</th><th>Proveedor</th><th>Producto</th><th>Kg</th><th>Importe</th></tr></thead>
-            <tbody>{compras.slice(0, 20).map(c => (<tr key={c.id}><td>{c.fecha}</td><td><strong>{c.proveedor_nombre}</strong></td><td>{c.producto || '—'}</td><td>{c.kg > 0 ? c.kg + ' kg' : '—'}</td><td style={{ color: 'var(--amber)', fontWeight: 600 }}>{fmt(c.importe)}</td></tr>))}{compras.length === 0 && <tr><td colSpan={5} className="empty">Sin compras registradas</td></tr>}</tbody></table>
+            <tbody>{pagCompras.items.map(c => (<tr key={c.id}><td>{c.fecha}</td><td><strong>{c.proveedor_nombre}</strong></td><td>{c.producto || '—'}</td><td>{c.kg > 0 ? c.kg + ' kg' : '—'}</td><td style={{ color: 'var(--amber)', fontWeight: 600 }}>{fmt(c.importe)}</td></tr>))}{compras.length === 0 && <tr><td colSpan={5} className="empty">Sin compras registradas</td></tr>}</tbody></table>
+            <Paginador {...pagCompras.controles} label="compras" />
           </div>
         </div>
       )}
@@ -2342,9 +2459,10 @@ function ProveedoresTab() {
             <button className="btn btn-gold" onClick={guardarPago}>✅ Registrar pago semanal</button>
           </div>
           <div className="card">
-            <div className="card-title">Historial de pagos semanales</div>
+            <div className="card-title">Historial de pagos semanales ({pagos.length})</div>
             <table><thead><tr><th>Fecha</th><th>Proveedor</th><th>Compra</th><th>Percep.</th><th>Saldo ant.</th><th>Entrega</th><th>Saldo adeudado</th></tr></thead>
-            <tbody>{pagos.slice(0, 20).map(p => (<tr key={p.id}><td>{p.fecha}</td><td><strong>{p.proveedor_nombre}</strong></td><td style={{ color: 'var(--amber)' }}>{fmt(p.importe_compra)}</td><td>{p.percepcion > 0 ? fmt(p.percepcion) : '—'}</td><td>{p.saldo_anterior > 0 ? fmt(p.saldo_anterior) : '—'}</td><td style={{ color: 'var(--green)' }}>{fmt(p.entrega)}</td><td style={{ color: p.saldo_adeudado > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 700 }}>{fmt(p.saldo_adeudado)}</td></tr>))}{pagos.length === 0 && <tr><td colSpan={7} className="empty">Sin pagos registrados</td></tr>}</tbody></table>
+            <tbody>{pagPagos.items.map(p => (<tr key={p.id}><td>{p.fecha}</td><td><strong>{p.proveedor_nombre}</strong></td><td style={{ color: 'var(--amber)' }}>{fmt(p.importe_compra)}</td><td>{p.percepcion > 0 ? fmt(p.percepcion) : '—'}</td><td>{p.saldo_anterior > 0 ? fmt(p.saldo_anterior) : '—'}</td><td style={{ color: 'var(--green)' }}>{fmt(p.entrega)}</td><td style={{ color: p.saldo_adeudado > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 700 }}>{fmt(p.saldo_adeudado)}</td></tr>))}{pagos.length === 0 && <tr><td colSpan={7} className="empty">Sin pagos registrados</td></tr>}</tbody></table>
+            <Paginador {...pagPagos.controles} label="pagos" />
           </div>
         </div>
       )}

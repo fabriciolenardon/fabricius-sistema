@@ -14,25 +14,34 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { enviarWhatsapp, fmtArs } from '../../lib/whatsapp'
+import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
 
 const TOPE_K = 108357084.05 // tope monotributo cat K 2026
 
-const hoyISO = () => new Date().toISOString().split('T')[0]
-const fechaHaceDias = (n) => {
-  const d = new Date(); d.setDate(d.getDate() - n)
-  return d.toISOString().split('T')[0]
-}
+// Antes estas helpers usaban toISOString() (UTC). A partir de las 21hs ARG
+// devolvían la fecha del día siguiente → KPIs y comparativas mostraban mal.
+// Ahora todo pasa por fechaHoyARG / fechaRelativaARG (zona Córdoba).
+const hoyISO = () => fechaHoyARG()
+const fechaHaceDias = (n) => fechaRelativaARG(-n)
 const inicioMes = () => {
-  const d = new Date()
-  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0]
+  // Primer día del mes actual en ARG: tomamos hoy_ARG y reemplazamos día por '01'
+  return fechaHoyARG().slice(0, 8) + '01'
 }
 const inicioMesAnterior = () => {
-  const d = new Date()
-  return new Date(d.getFullYear(), d.getMonth() - 1, 1).toISOString().split('T')[0]
+  // Mes anterior: si hoy es YYYY-MM, mes anterior es YYYY-(MM-1) con manejo de enero
+  const hoy = fechaHoyARG()
+  const y = Number(hoy.slice(0, 4))
+  const m = Number(hoy.slice(5, 7))
+  const yPrev = m === 1 ? y - 1 : y
+  const mPrev = m === 1 ? 12 : m - 1
+  return `${yPrev}-${String(mPrev).padStart(2, '0')}-01`
 }
 const finMesAnterior = () => {
-  const d = new Date()
-  return new Date(d.getFullYear(), d.getMonth(), 0).toISOString().split('T')[0]
+  // Último día del mes anterior = día 0 del mes actual. Calculamos en ARG
+  // tomando inicio del mes actual y restando 1 día con fechaRelativaARG.
+  const inicio = new Date(inicioMes() + 'T12:00:00') // 12:00 evita salto de día por TZ
+  inicio.setDate(inicio.getDate() - 1)
+  return fechaHoyARG(inicio)
 }
 
 export default function DashboardEjecutivo() {

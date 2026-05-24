@@ -1,6 +1,8 @@
 // Cheques.jsx
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import { fechaHoyARG } from '../../lib/fechas'
+import Paginador, { usePaginacion } from '../../components/Paginador'
 
 function fmt(n) { return '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR') }
 
@@ -8,8 +10,10 @@ export default function Cheques() {
   const [cheques, setCheques] = useState([])
   const [clientes, setClientes] = useState([])
   const [tipo, setTipo] = useState('fisico')
-  const [form, setForm] = useState({ numero: '', fechaRec: new Date().toISOString().split('T')[0], fechaPago: '', banco: '', clienteId: '', monto: '', destino: 'ctacte', proveedor: '', notas: '' })
+  const [form, setForm] = useState({ numero: '', fechaRec: fechaHoyARG(), fechaPago: '', banco: '', clienteId: '', monto: '', destino: 'ctacte', proveedor: '', notas: '' })
   const [alert, setAlert] = useState(null)
+  // Paginación del listado — el historial puede tener cientos de cheques
+  const pag = usePaginacion(cheques, 20)
 
   useEffect(() => {
     supabase.from('cheques').select('*').order('fecha_recepcion', { ascending: false }).then(({ data }) => setCheques(data || []))
@@ -112,8 +116,8 @@ export default function Cheques() {
         </div>
 
         <div className="card">
-          <div className="card-title">Cheques registrados</div>
-          {cheques.map(ch => (
+          <div className="card-title">Cheques registrados ({cheques.length})</div>
+          {pag.items.map(ch => (
             <div key={ch.id} style={{ background: 'var(--surface2)', borderRadius: 10, padding: 14, marginBottom: 10 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
@@ -131,6 +135,7 @@ export default function Cheques() {
             </div>
           ))}
           {cheques.length === 0 && <div className="empty">Sin cheques registrados</div>}
+          <Paginador {...pag.controles} label="cheques" />
         </div>
       </div>
     </div>

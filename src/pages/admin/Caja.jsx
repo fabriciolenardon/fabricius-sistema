@@ -424,21 +424,30 @@ export default function Caja() {
       .sort((a, b) => b.kg - a.kg)
   }, [ventasHoy])
 
-  // Kg vendidos por tipo de stock (mapeo igual al que descuenta del stock)
+  // Kg vendidos por tipo de stock (mapeo igual al que descuenta del stock).
+  // Antes había un fallback `return 'bovino_corte'` que metía ventas de
+  // almacén/bebidas dentro del cubo "Bovino Cortes" en el panel lateral.
+  // Ahora cada categoría va a su propio cubo y las desconocidas se ignoran
+  // (retornar null = no aparece en el panel).
   const kgPorStock = useMemo(() => {
     const acc = {}
     function mapearCat(cat) {
-      if (!cat) return 'bovino_corte'
+      if (!cat) return null
       if (cat === 'bovino_mr') return 'bovino_mr'
+      if (cat === 'bovino_corte') return 'bovino_corte'
       if (cat === 'bovino_pieza' || cat === 'bovino_caja_cb' || cat === 'bovino_caja_pt') return 'bovino_pieza'
       if (cat === 'bovino_brosa') return 'bovino_brosa'
       if (cat === 'cerdo' || cat === 'cerdo_corte' || cat === 'cerdo_pieza') return 'cerdo'
-      if (cat === 'pollo') return 'pollo'
+      if (cat === 'pollo' || cat === 'pollo_cajon') return 'pollo'
       if (cat === 'embutido') return 'embutido'
-      return 'bovino_corte'
+      if (cat === 'almacen') return 'almacen'
+      if (cat === 'bebidas') return 'bebidas'
+      if (cat === 'rebozado' || cat === 'rebozado_cajon') return 'rebozado'
+      return null
     }
     ventasHoy.forEach(v => (v.items || []).forEach(it => {
       const k = mapearCat(it.categoria)
+      if (!k) return
       acc[k] = (acc[k] || 0) + (it.kg || 0)
     }))
     return acc
@@ -689,12 +698,31 @@ export default function Caja() {
           {Object.keys(kgPorStock).length > 0 && (
             <div className="card" style={{ padding: 14 }}>
               <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 1, marginBottom: 8 }}>📉 STOCK DESCONTADO HOY</div>
-              {Object.entries(kgPorStock).sort((a, b) => b[1] - a[1]).map(([tipo, kg]) => (
-                <div key={tipo} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: 'var(--surface2)', borderRadius: 6, marginBottom: 4, fontSize: 12 }}>
-                  <span style={{ color: 'var(--muted)' }}>{tipo === 'bovino_corte' ? '🥩 Bovino Cortes' : tipo === 'bovino_pieza' ? '🍖 Piezas' : tipo === 'bovino_brosa' ? '🫀 Brosa' : tipo === 'cerdo' ? '🐷 Cerdo' : tipo === 'pollo' ? '🍗 Pollo' : tipo === 'embutido' ? '🌭 Embutidos' : tipo === 'bovino_mr' ? '🐄 Media Reses' : tipo}</span>
-                  <strong style={{ color: 'var(--green)' }}>-{kg.toFixed(2)} kg</strong>
-                </div>
-              ))}
+              {Object.entries(kgPorStock).sort((a, b) => b[1] - a[1]).map(([tipo, kg]) => {
+                // Etiqueta legible del cubo. Incluye almacen/bebidas/rebozado
+                // (antes el panel los mostraba mal como "Bovino Cortes").
+                const LABELS = {
+                  bovino_mr: '🐄 Media Reses',
+                  bovino_corte: '🥩 Bovino Cortes',
+                  bovino_pieza: '🍖 Piezas',
+                  bovino_brosa: '🫀 Brosa',
+                  cerdo: '🐷 Cerdo',
+                  pollo: '🍗 Pollo',
+                  embutido: '🌭 Embutidos',
+                  almacen: '🛒 Almacén',
+                  bebidas: '🥤 Bebidas',
+                  rebozado: '🧊 Rebozados',
+                }
+                // Para almacen/bebidas/rebozado lo correcto es "unidades" no kg
+                const esPorUnidad = tipo === 'almacen' || tipo === 'bebidas' || tipo === 'rebozado'
+                const unidad = esPorUnidad ? 'u' : 'kg'
+                return (
+                  <div key={tipo} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: 'var(--surface2)', borderRadius: 6, marginBottom: 4, fontSize: 12 }}>
+                    <span style={{ color: 'var(--muted)' }}>{LABELS[tipo] || tipo}</span>
+                    <strong style={{ color: 'var(--green)' }}>-{kg.toFixed(2)} {unidad}</strong>
+                  </div>
+                )
+              })}
             </div>
           )}
 

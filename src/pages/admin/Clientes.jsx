@@ -3,6 +3,8 @@
 // =============================================
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import { fechaHoyARG } from '../../lib/fechas'
+import Paginador, { usePaginacion } from '../../components/Paginador'
 
 // URL publica de produccion del portal — NO usar window.location.origin para evitar URLs de preview de Vercel
 const PORTAL_URL = 'https://fabricius-sistema.vercel.app/login'
@@ -15,7 +17,7 @@ export function Clientes() {
   const [showForm, setShowForm] = useState(false)
   const [showPago, setShowPago] = useState(false)
   const [editandoId, setEditandoId] = useState(null)
-  const [pago, setPago] = useState({ importe: '', forma: 'efectivo', fecha: new Date().toISOString().split('T')[0], notas: '' })
+  const [pago, setPago] = useState({ importe: '', forma: 'efectivo', fecha: fechaHoyARG(), notas: '' })
   const [form, setForm] = useState({ nombre: '', nombre_fantasia: '', tipo: 'carniceria', telefono: '', localidad: '', domicilio: '', cuit: '', lista_precios: 'carn', notas: '' })
   // Modal de gestion del portal: { tipo: 'habilitar'|'credenciales'|'revocar', cliente, email, credenciales, loading }
   const [modalPortal, setModalPortal] = useState(null)
@@ -32,7 +34,8 @@ async function seleccionar(cliente) {
     setShowForm(false)
     const { data: movs } = await supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id).order('fecha', { ascending: false })
     setMovimientos(movs || [])
-    const { data: rems } = await supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false }).limit(20)
+    // Sin .limit — paginamos en cliente para mostrar todo el historial del cliente
+    const { data: rems } = await supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false })
     setRemitos(rems || [])
   }
  async function anularRemitoCliente(remito) {
@@ -50,7 +53,7 @@ async function seleccionar(cliente) {
   await supabase.from('movimientos_ctacte').delete().eq('remito_id', remito.id)
   setSeleccionado(prev => ({ ...prev, saldo: nuevoSaldo }))
   setClientes(prev => prev.map(c => c.id === seleccionado.id ? { ...c, saldo: nuevoSaldo } : c))
-  const { data: rems } = await supabase.from('remitos').select('*').eq('cliente_id', seleccionado.id).order('created_at', { ascending: false }).limit(20)
+  const { data: rems } = await supabase.from('remitos').select('*').eq('cliente_id', seleccionado.id).order('created_at', { ascending: false })
   setRemitos(rems || [])
 }
 async function eliminarMovimiento(mov) {
@@ -199,7 +202,7 @@ async function eliminarMovimiento(mov) {
       saldo: nuevoSaldo
     })
     await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', seleccionado.id)
-    setPago({ importe: '', forma: 'efectivo', fecha: new Date().toISOString().split('T')[0], notas: '' })
+    setPago({ importe: '', forma: 'efectivo', fecha: fechaHoyARG(), notas: '' })
     setShowPago(false)
     await fetchClientes()
     await seleccionar({ ...seleccionado, saldo: nuevoSaldo })
@@ -449,6 +452,8 @@ async function eliminarMovimiento(mov) {
               )}
             </div>
 
+            <RemitosCliente remitos={remitos} imprimirRemito={imprimirRemito} />
+{false && (
             <div className="card" style={{ marginBottom: 16 }}>
   <div className="card-title">🧾 Remitos</div>
   <table>
@@ -469,6 +474,7 @@ async function eliminarMovimiento(mov) {
     </tbody>
   </table>
 </div>
+)}
           </div>
         )}
       </div>
@@ -598,6 +604,35 @@ async function eliminarMovimiento(mov) {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// Sub-componente: lista paginada de remitos del cliente seleccionado.
+// Antes mostraba 20 remitos máx; ahora pagina todos.
+function RemitosCliente({ remitos, imprimirRemito }) {
+  const pag = usePaginacion(remitos || [], 20)
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card-title">🧾 Remitos ({(remitos || []).length})</div>
+      <table>
+        <thead><tr><th>N° Remito</th><th>Fecha</th><th>Total</th><th>Imprimir</th></tr></thead>
+        <tbody>
+          {pag.items.map(r => (
+            <tr key={r.id} style={{ background: r.eliminado ? 'rgba(255,50,50,0.08)' : 'transparent', opacity: r.eliminado ? 0.8 : 1 }}>
+              <td>
+                <strong>N° {String(r.numero).padStart(5, '0')}</strong>
+                {r.eliminado && <span style={{ marginLeft: 8, background: '#3a1a1a', color: '#ff6b6b', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700 }}>❌ ANULADO por {r.eliminado_por}</span>}
+              </td>
+              <td>{r.fecha}</td>
+              <td style={{ color: r.eliminado ? 'var(--muted)' : 'var(--gold)', textDecoration: r.eliminado ? 'line-through' : 'none' }}>${Math.round(r.total).toLocaleString('es-AR')}</td>
+              <td>{!r.eliminado && <button onClick={() => imprimirRemito(r)} style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>🖨️</button>}</td>
+            </tr>
+          ))}
+          {(remitos || []).length === 0 && <tr><td colSpan={4} className="empty">Sin remitos</td></tr>}
+        </tbody>
+      </table>
+      <Paginador {...pag.controles} label="remitos" />
     </div>
   )
 }

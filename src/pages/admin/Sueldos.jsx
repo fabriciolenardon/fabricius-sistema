@@ -1,6 +1,8 @@
 // Sueldos.jsx
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import { fechaHoyARG } from '../../lib/fechas'
+import Paginador, { usePaginacion } from '../../components/Paginador'
 
 const EMPLEADOS_DEFAULT = [
   { id: 1, apellido: 'FRONTERA', nombre: 'GERMAN GABRIEL', valor_hora: 6000, modalidad: 'hora', cbu: '' },
@@ -81,12 +83,15 @@ export default function Sueldos() {
     const dia = hoy.getDay()
     const lunes = new Date(hoy); lunes.setDate(hoy.getDate() - (dia === 0 ? 6 : dia - 1))
     const sabado = new Date(lunes); sabado.setDate(lunes.getDate() + 5)
-    setInicio(lunes.toISOString().split('T')[0])
-    setFin(sabado.toISOString().split('T')[0])
+    // fechaHoyARG en lugar de toISOString — sin esto, los lunes después de
+    // las 21hs ARG la semana arrancaba un día más adelante.
+    setInicio(fechaHoyARG(lunes))
+    setFin(fechaHoyARG(sabado))
   }, [])
 
   async function fetchLiquidaciones() {
-    const { data } = await supabase.from('liquidaciones_sueldos').select('*').order('semana_inicio', { ascending: false }).limit(50)
+    // Sin .limit() — paginamos en cliente con usePaginacion para mostrar TODAS las semanas
+    const { data } = await supabase.from('liquidaciones_sueldos').select('*').order('semana_inicio', { ascending: false })
     setLiquidaciones(data || [])
   }
 
@@ -191,7 +196,9 @@ export default function Sueldos() {
     setTimeout(() => setAlert(null), 4000)
   }
 
-  const semanas = [...new Set(liquidaciones.map(l => l.semana_inicio))].slice(0, 10)
+  // Lista única de semanas (ordenadas) y paginada — antes era slice(0,10)
+  const semanasAll = [...new Set(liquidaciones.map(l => l.semana_inicio))]
+  const pagSemanas = usePaginacion(semanasAll, 10)
 
   return (
     <div>
@@ -351,7 +358,7 @@ export default function Sueldos() {
 
       {tab === 'historial' && (
         <div>
-          {semanas.map(semana => {
+          {pagSemanas.items.map(semana => {
             const liqSemana = liquidaciones.filter(l => l.semana_inicio === semana)
             const totalSemana = liqSemana.reduce((s, l) => s + (l.neto || 0), 0)
             return (
@@ -380,6 +387,7 @@ export default function Sueldos() {
             )
           })}
           {liquidaciones.length === 0 && <div className="card"><p style={{ color: 'var(--muted)', textAlign: 'center' }}>Sin liquidaciones registradas</p></div>}
+          <Paginador {...pagSemanas.controles} label="semanas" />
         </div>
       )}
     </div>

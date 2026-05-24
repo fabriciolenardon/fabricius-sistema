@@ -8,10 +8,10 @@
 // ============================================================
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
+import { fechaHoyARG, horaHoyARG } from '../../lib/fechas'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
 const fmt$ = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
-const hoyISO = () => new Date().toISOString().split('T')[0]
 
 // Denominaciones argentinas en orden descendente
 const DENOMINACIONES = [
@@ -50,7 +50,7 @@ export default function ArqueoCaja() {
 
   async function cargar() {
     setLoading(true)
-    const fecha = hoyISO()
+    const fecha = fechaHoyARG()
     const [{ data: ventas }, { data: arqueos }] = await Promise.all([
       supabase.from('ventas_minoristas').select('efectivo, debito, transferencia').eq('origen', 'caja').eq('fecha', fecha),
       supabase.from('arqueos_caja').select('*').order('fecha', { ascending: false }).order('hora', { ascending: false }).limit(20),
@@ -107,8 +107,8 @@ export default function ArqueoCaja() {
 
     setGuardando(true)
     const { error } = await supabase.from('arqueos_caja').insert({
-      fecha: hoyISO(),
-      hora: new Date().toTimeString().slice(0, 8),
+      fecha: fechaHoyARG(),
+      hora: horaHoyARG(),
       billetes: conteo,
       total_contado: totalContado,
       efectivo_esperado: efectivoEsperado,

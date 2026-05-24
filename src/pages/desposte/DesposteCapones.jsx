@@ -13,6 +13,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { PIEZAS_CERDO } from '../../lib/modelosDesposte'
+import { fechaHoyARG } from '../../lib/fechas'
 
 async function sumarStock(tipo, kg) {
   const { data } = await supabase.from('stock_actual').select('*').eq('tipo', tipo).maybeSingle()
@@ -83,7 +84,7 @@ export default function DesposteCapones() {
     }
 
     setGuardando(true)
-    const hoy = new Date().toISOString().split('T')[0]
+    const hoy = fechaHoyARG()
     const piezasDetalle = PIEZAS_CERDO
       .map(p => ({ nombre: p.nombre, kg: Number(piezas[p.key]) || 0, stock: p.stock }))
       .filter(p => p.kg > 0)
