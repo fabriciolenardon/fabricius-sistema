@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
+import Paginador, { usePaginacion } from '../../components/Paginador'
 
 function fmt(n) { return '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR') }
 function fmtKg(n) { return parseFloat(n || 0).toFixed(1) + ' kg' }
@@ -142,6 +143,8 @@ export default function Cierre() {
   const [alert, setAlert] = useState(null)
   const [mesSelector, setMesSelector] = useState('')
   const [editandoId, setEditandoId] = useState(null)
+  // Paginación del historial de cierres semanales
+  const pagCierres = usePaginacion(cierres, 20)
 
   useEffect(() => {
     fetchCierres()
@@ -610,7 +613,7 @@ for (const s of stockUpdates) {
       {tab === 'historial' && (
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <div className="card-title" style={{ margin: 0 }}>Historial de cierres</div>
+            <div className="card-title" style={{ margin: 0 }}>Historial de cierres ({cierres.length})</div>
           </div>
           <div style={{ overflowX: 'auto' }}>
             <table>
@@ -619,7 +622,7 @@ for (const s of stockUpdates) {
                 <th>Rem.Carne</th><th>Rem.Pollo</th><th>Rem.Cerdo</th><th>Acciones</th>
               </tr></thead>
               <tbody>
-                {cierres.map(c => (
+                {pagCierres.items.map(c => (
                   <tr key={c.id} style={{ background: c.ganancia < 0 ? 'rgba(192,57,43,0.05)' : undefined }}>
                     <td style={{ fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap' }}>
                       {new Date(c.semana_inicio + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })} →{' '}
@@ -645,6 +648,7 @@ for (const s of stockUpdates) {
               </tbody>
             </table>
           </div>
+          <Paginador {...pagCierres.controles} label="cierres" />
         </div>
       )}
     </div>

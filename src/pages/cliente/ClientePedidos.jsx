@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
+import Paginador, { usePaginacion } from '../../components/Paginador'
 
 const fmt = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
 
@@ -45,6 +46,9 @@ export default function ClientePedidos() {
     cargar()
   }
 
+  // Paginación del historial de pedidos del cliente
+  const pag = usePaginacion(pedidos, 10)
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 8 }}>
@@ -64,7 +68,7 @@ export default function ClientePedidos() {
         </div>
       ) : (
         <div style={{ display: 'grid', gap: 12 }}>
-          {pedidos.map(p => {
+          {pag.items.map(p => {
             const info = ESTADO_INFO[p.estado] || ESTADO_INFO.pendiente
             const abierto = pedidoAbierto === p.id
             return (
@@ -184,6 +188,7 @@ export default function ClientePedidos() {
               </div>
             )
           })}
+          <Paginador {...pag.controles} label="pedidos" />
         </div>
       )}
     </div>

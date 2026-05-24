@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
+import Paginador, { usePaginacion } from '../../components/Paginador'
 
 const fmt = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
 const ahora = () => new Date().toISOString()
@@ -212,6 +213,9 @@ export function Pedidos() {
   }
 
   const pedidosFiltrados = pedidos.filter(p => filtro === 'todos' || p.estado === filtro)
+  // Paginación del listado filtrado — vuelve a página 1 cuando cambia el filtro
+  // gracias al useEffect interno de usePaginacion que ajusta si pagina > totalPaginas.
+  const pag = usePaginacion(pedidosFiltrados, 20)
   const cantPorEstado = {
     pendiente: pedidos.filter(p => p.estado === 'pendiente').length,
     confirmado: pedidos.filter(p => p.estado === 'confirmado').length,
@@ -245,7 +249,7 @@ export function Pedidos() {
         <div className="card" style={{ textAlign: 'center', padding: 30, color: 'var(--muted)' }}>Sin pedidos en este estado</div>
       ) : (
         <div style={{ display: 'grid', gap: 12 }}>
-          {pedidosFiltrados.map(p => {
+          {pag.items.map(p => {
             const info = ESTADO_INFO[p.estado] || ESTADO_INFO.pendiente
             const abierto = pedidoAbierto === p.id
             return (
@@ -274,6 +278,8 @@ export function Pedidos() {
           })}
         </div>
       )}
+
+      {pedidosFiltrados.length > 0 && <Paginador {...pag.controles} label="pedidos" />}
 
       {modalDespacho && <ModalDespacho m={modalDespacho} setModalDespacho={setModalDespacho} remitosCliente={remitosCliente} actualizarKgDespacho={actualizarKgDespacho} confirmarDespacho={confirmarDespacho} />}
     </div>

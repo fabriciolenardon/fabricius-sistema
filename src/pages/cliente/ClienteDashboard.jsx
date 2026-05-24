@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
+import Paginador, { usePaginacion } from '../../components/Paginador'
 
 function fmt(n) { return '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR') }
 
@@ -166,6 +167,8 @@ export function ClienteCtaCte() {
   }, [cliente])
 
   const saldo = cliente?.saldo || 0
+  // Paginación del historial de movimientos
+  const pag = usePaginacion(movimientos, 20)
 
   return (
     <div>
@@ -185,7 +188,7 @@ export function ClienteCtaCte() {
         <table>
           <thead><tr><th>Fecha</th><th>Tipo</th><th>Descripción</th><th>Debe</th><th>Haber</th><th>Saldo</th></tr></thead>
           <tbody>
-            {movimientos.map(m => (
+            {pag.items.map(m => (
               <tr key={m.id}>
                 <td>{m.fecha}</td>
                 <td><span className={`badge ${m.tipo === 'compra' ? 'badge-red' : 'badge-green'}`}>{m.tipo}</span></td>
@@ -198,6 +201,7 @@ export function ClienteCtaCte() {
             {movimientos.length === 0 && <tr><td colSpan={6} className="empty">Sin movimientos registrados</td></tr>}
           </tbody>
         </table>
+        <Paginador {...pag.controles} label="movimientos" />
       </div>
     </div>
   )
@@ -281,6 +285,9 @@ export function ClienteRemitos() {
     win.document.close()
   }
 
+  // Paginación del listado completo de remitos del cliente
+  const pagRemitos = usePaginacion(remitos, 20)
+
   return (
     <div>
       <div className="page-title">MIS REMITOS</div>
@@ -290,7 +297,7 @@ export function ClienteRemitos() {
         <table>
           <thead><tr><th>N° Remito</th><th>Fecha</th><th>Total</th><th>Detalle</th><th>Imprimir</th></tr></thead>
           <tbody>
-            {remitos.map(r => (
+            {pagRemitos.items.map(r => (
               <>
                 <tr key={r.id}>
                   <td><strong>N° {String(r.numero).padStart(5, '0')}</strong></td>
@@ -345,6 +352,7 @@ export function ClienteRemitos() {
             {remitos.length === 0 && <tr><td colSpan={5} className="empty">Sin remitos registrados aún</td></tr>}
           </tbody>
         </table>
+        <Paginador {...pagRemitos.controles} label="remitos" />
       </div>
     </div>
   )
