@@ -9,9 +9,10 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG, horaHoyARG } from '../../lib/fechas'
+import { parseNumero, fmtPrecio } from '../../lib/formatos'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
-const fmt$ = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
+const fmt$ = n => fmtPrecio(Math.abs(Number(n) || 0))
 
 // Denominaciones argentinas en orden descendente
 const DENOMINACIONES = [
@@ -46,14 +47,21 @@ export default function ArqueoCaja() {
   const [guardando, setGuardando] = useState(false)
   const [msg, setMsg] = useState(null)
 
-  useEffect(() => { cargar() }, [])
+  // NUEVO: fecha del arqueo (para cargar arqueos de dias pasados) +
+  // modo rapido (input simple en lugar de conteo billete-por-billete,
+  // util para backfills donde solo se sabe el total contado).
+  const [fechaArqueo, setFechaArqueo] = useState(fechaHoyARG())
+  const [modoRapido, setModoRapido] = useState(false)
+  const [efectivoContadoRapido, setEfectivoContadoRapido] = useState('')
+
+  // Recargar ventas cuando cambia la fecha seleccionada
+  useEffect(() => { cargar() }, [fechaArqueo])
 
   async function cargar() {
     setLoading(true)
-    const fecha = fechaHoyARG()
     const [{ data: ventas }, { data: arqueos }] = await Promise.all([
-      supabase.from('ventas_minoristas').select('efectivo, debito, transferencia').eq('origen', 'caja').eq('fecha', fecha),
-      supabase.from('arqueos_caja').select('*').order('fecha', { ascending: false }).order('hora', { ascending: false }).limit(20),
+      supabase.from('ventas_minoristas').select('efectivo, debito, transferencia').eq('origen', 'caja').eq('fecha', fechaArqueo),
+      supabase.from('arqueos_caja').select('*').order('fecha', { ascending: false }).order('hora', { ascending: false }).limit(100),
     ])
     const arr = ventas || []
     const totalEf = arr.reduce((s, v) => s + (Number(v.efectivo) || 0), 0)
@@ -70,6 +78,18 @@ export default function ArqueoCaja() {
     setLoading(false)
   }
 
+  // Eliminar arqueo viejo (para corregir errores de carga manual)
+  async function eliminarArqueo(arqueo) {
+    if (!confirm(`¿Eliminar arqueo del ${arqueo.fecha} (${arqueo.hora || 'sin hora'})?\n\nEsta acción no se puede deshacer.`)) return
+    const { error } = await supabase.from('arqueos_caja').delete().eq('id', arqueo.id)
+    if (error) {
+      showMsg('❌ Error al eliminar: ' + error.message, 'error')
+      return
+    }
+    showMsg('✅ Arqueo eliminado', 'success')
+    await cargar()
+  }
+
   function showMsg(texto, tipo = 'success') {
     setMsg({ texto, tipo })
     setTimeout(() => setMsg(null), 4000)
@@ -80,13 +100,16 @@ export default function ArqueoCaja() {
   }
 
   // === Cálculos en vivo ===
+  // En modo normal: suma billete por billete del conteo
+  // En modo rapido: usa el input unico de efectivo contado (para backfill)
   const totalContado = useMemo(() => {
+    if (modoRapido) return parseNumero(efectivoContadoRapido)
     return DENOMINACIONES.reduce((s, d) => s + (parseInt(conteo[d.valor]) || 0) * d.valor, 0)
-  }, [conteo])
+  }, [conteo, modoRapido, efectivoContadoRapido])
 
   const diferencia = totalContado - efectivoEsperado
-  const debitoRealNum = Number(debitoReal) || 0
-  const transferenciaRealNum = Number(transferenciaReal) || 0
+  const debitoRealNum = parseNumero(debitoReal)
+  const transferenciaRealNum = parseNumero(transferenciaReal)
   const debitoDif = debitoRealNum - debitoEsperado
   const transferenciaDif = transferenciaRealNum - transferenciaEsperada
 
@@ -106,10 +129,15 @@ export default function ArqueoCaja() {
     )) return
 
     setGuardando(true)
+    // En modo rapido no tenemos desglose por denominacion; guardamos
+    // billetes como {} y agregamos nota indicando que fue backfill manual
+    const notaFinal = modoRapido
+      ? `[BACKFILL MANUAL — sin desglose billete-por-billete] ${notas || ''}`.trim()
+      : (notas || null)
     const { error } = await supabase.from('arqueos_caja').insert({
-      fecha: fechaHoyARG(),
+      fecha: fechaArqueo,
       hora: horaHoyARG(),
-      billetes: conteo,
+      billetes: modoRapido ? {} : conteo,
       total_contado: totalContado,
       efectivo_esperado: efectivoEsperado,
       diferencia,
@@ -119,7 +147,7 @@ export default function ArqueoCaja() {
       transferencia_esperada: transferenciaEsperada,
       transferencia_real: transferenciaRealNum,
       transferencia_diferencia: transferenciaDif,
-      notas: notas || null,
+      notas: notaFinal,
       cajero: cajero || null,
     })
     setGuardando(false)
@@ -127,10 +155,11 @@ export default function ArqueoCaja() {
       showMsg('❌ Error: ' + error.message, 'error')
       return
     }
-    showMsg('✅ Arqueo guardado', 'success')
+    showMsg(`✅ Arqueo del ${fechaArqueo} guardado`, 'success')
     setConteo({})
     setDebitoReal('')
     setTransferenciaReal('')
+    setEfectivoContadoRapido('')
     setNotas('')
     await cargar()
   }
@@ -140,6 +169,7 @@ export default function ArqueoCaja() {
     setConteo({})
     setDebitoReal('')
     setTransferenciaReal('')
+    setEfectivoContadoRapido('')
     setNotas('')
   }
 
@@ -158,14 +188,76 @@ export default function ArqueoCaja() {
         }}>{msg.texto}</div>
       )}
 
+      {/* SELECTOR DE FECHA + MODO RAPIDO (backfill) */}
+      <div className="card" style={{ marginBottom: 16, padding: 14, background: fechaArqueo !== fechaHoyARG() ? 'rgba(255,209,122,0.04)' : 'var(--surface)' }}>
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div>
+            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>📅 FECHA DEL ARQUEO</label>
+            <input type="date" value={fechaArqueo} max={fechaHoyARG()}
+              onChange={e => setFechaArqueo(e.target.value)}
+              style={{ background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '8px 12px', fontSize: 13, fontWeight: 600 }} />
+            {fechaArqueo !== fechaHoyARG() && (
+              <div style={{ fontSize: 10, color: '#ffd17a', marginTop: 4 }}>⚠️ Cargando arqueo de día pasado</div>
+            )}
+          </div>
+
+          <div>
+            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>MODO DE CARGA</label>
+            <div style={{ display: 'flex', gap: 4 }}>
+              <button onClick={() => setModoRapido(false)}
+                style={{
+                  padding: '8px 14px', borderRadius: 6,
+                  border: `1px solid ${!modoRapido ? 'var(--gold)' : 'var(--border)'}`,
+                  background: !modoRapido ? 'var(--gold)' : 'transparent',
+                  color: !modoRapido ? '#000' : 'var(--muted)',
+                  cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                }}>🧾 Conteo detallado</button>
+              <button onClick={() => setModoRapido(true)}
+                style={{
+                  padding: '8px 14px', borderRadius: 6,
+                  border: `1px solid ${modoRapido ? 'var(--gold)' : 'var(--border)'}`,
+                  background: modoRapido ? 'var(--gold)' : 'transparent',
+                  color: modoRapido ? '#000' : 'var(--muted)',
+                  cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                }}>⚡ Modo rápido</button>
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
+              {modoRapido
+                ? 'Solo total (sin desglose por billete). Para backfills aproximados.'
+                : 'Billete por billete y moneda por moneda. Para arqueo real diario.'}
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 16 }}>
 
-        {/* CONTEO DE BILLETES */}
+        {/* CONTEO DE BILLETES o MODO RAPIDO */}
         <div className="card">
-          <div className="card-title">💵 Conteo físico de la caja</div>
+          <div className="card-title">{modoRapido ? '⚡ Total contado (modo rápido)' : '💵 Conteo físico de la caja'}</div>
           <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
-            Cargá cuántos billetes/monedas tenés de cada denominación.
+            {modoRapido
+              ? 'Ingresá solo el total que contaste en efectivo. Útil para cargar arqueos de días pasados aproximados.'
+              : 'Cargá cuántos billetes/monedas tenés de cada denominación.'}
           </p>
+
+          {modoRapido && (
+            <div>
+              <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>💵 EFECTIVO CONTADO TOTAL</label>
+              <input type="text" inputMode="decimal"
+                value={efectivoContadoRapido}
+                onChange={e => setEfectivoContadoRapido(e.target.value)}
+                placeholder="Ej: 50000 o 50.000,50"
+                autoFocus
+                style={{ width: '100%', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '14px 16px', fontSize: 20, fontWeight: 700, fontFamily: "'Bebas Neue',cursive" }} />
+              {efectivoContadoRapido && (
+                <div style={{ marginTop: 10, padding: 10, background: 'var(--surface2)', borderRadius: 6, fontSize: 13 }}>
+                  Vas a registrar: <strong style={{ color: 'var(--gold)' }}>{fmt$(totalContado)}</strong> en efectivo
+                </div>
+              )}
+            </div>
+          )}
+          {!modoRapido && (
           <table style={{ width: '100%', fontSize: 13 }}>
             <thead>
               <tr style={{ color: 'var(--muted)', fontSize: 11, textTransform: 'uppercase' }}>
@@ -206,6 +298,7 @@ export default function ArqueoCaja() {
               </tr>
             </tfoot>
           </table>
+          )}
           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
             <button onClick={limpiarConteo} style={{ padding: '6px 12px', background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>
               ✕ Limpiar
@@ -221,7 +314,7 @@ export default function ArqueoCaja() {
             {/* RESUMEN DEL DIA POR MEDIO DE PAGO */}
             <div style={{ padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: 8, marginBottom: 12, border: '1px solid var(--border)' }}>
               <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>
-                💼 Ventas registradas hoy ({ventasHoy})
+                💼 Ventas registradas {fechaArqueo === fechaHoyARG() ? 'hoy' : `el ${fechaArqueo}`} ({ventasHoy})
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 10 }}>
@@ -303,7 +396,7 @@ export default function ArqueoCaja() {
                 <div style={{ fontSize: 12, color: '#7a9dff' }}>Sistema: <b>{fmt$(debitoEsperado)}</b></div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, alignItems: 'center' }}>
-                <input type="number" min="0" step="0.01"
+                <input type="text" inputMode="decimal"
                   value={debitoReal} onChange={e => setDebitoReal(e.target.value)}
                   placeholder="Real desde banco/MP"
                   style={{ width: '100%', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '8px 10px', fontSize: 14, fontWeight: 600 }} />
@@ -325,7 +418,7 @@ export default function ArqueoCaja() {
                 <div style={{ fontSize: 12, color: '#ffd17a' }}>Sistema: <b>{fmt$(transferenciaEsperada)}</b></div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, alignItems: 'center' }}>
-                <input type="number" min="0" step="0.01"
+                <input type="text" inputMode="decimal"
                   value={transferenciaReal} onChange={e => setTransferenciaReal(e.target.value)}
                   placeholder="Real desde banco"
                   style={{ width: '100%', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '8px 10px', fontSize: 14, fontWeight: 600 }} />
@@ -353,7 +446,7 @@ export default function ArqueoCaja() {
 
             <button onClick={guardarArqueo} disabled={guardando}
               style={{ marginTop: 12, width: '100%', padding: '12px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: guardando ? 'not-allowed' : 'pointer', fontWeight: 800, fontSize: 14, opacity: guardando ? 0.6 : 1 }}>
-              {guardando ? 'Guardando...' : '💾 Guardar arqueo'}
+              {guardando ? 'Guardando...' : `💾 Guardar arqueo del ${fechaArqueo}`}
             </button>
           </div>
         </div>
@@ -367,7 +460,7 @@ export default function ArqueoCaja() {
           <p style={{ color: 'var(--muted)', fontSize: 13 }}>Todavía no hay arqueos guardados.</p>
         )}
         {!loading && historial.length > 0 && (
-          <HistorialArqueosPaginado historial={historial} />
+          <HistorialArqueosPaginado historial={historial} onEliminar={eliminarArqueo} />
         )}
       </div>
     </div>
@@ -375,12 +468,12 @@ export default function ArqueoCaja() {
 }
 
 // Sub-componente: pagina la lista de arqueos para evitar tabla interminable.
-function HistorialArqueosPaginado({ historial }) {
+function HistorialArqueosPaginado({ historial, onEliminar }) {
   const pag = usePaginacion(historial, 20)
   return (
     <>
       <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', fontSize: 12, minWidth: 900 }}>
+        <table style={{ width: '100%', fontSize: 12, minWidth: 980 }}>
           <thead>
             <tr style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase' }}>
               <th style={{ textAlign: 'left', padding: '6px 4px' }}>Fecha</th>
@@ -390,6 +483,7 @@ function HistorialArqueosPaginado({ historial }) {
               <th style={{ textAlign: 'right', padding: '6px 4px' }}>💳 Débito/QR (esp/real/dif)</th>
               <th style={{ textAlign: 'right', padding: '6px 4px' }}>🔄 Transfer. (esp/real/dif)</th>
               <th style={{ textAlign: 'left', padding: '6px 4px' }}>Notas</th>
+              <th style={{ textAlign: 'center', padding: '6px 4px' }}>Acción</th>
             </tr>
           </thead>
           <tbody>
@@ -402,10 +496,13 @@ function HistorialArqueosPaginado({ historial }) {
               const cTra = dTra === 0 ? '#7dff7d' : dTra > 0 ? '#ffd17a' : '#ff8b8b'
               const tieneDebito = a.debito_esperado != null || a.debito_real != null
               const tieneTrans  = a.transferencia_esperada != null || a.transferencia_real != null
-              const fmt$ = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
+              const esBackfill = (a.notas || '').startsWith('[BACKFILL')
               return (
-                <tr key={a.id} style={{ borderTop: '1px solid var(--border)' }}>
-                  <td style={{ padding: '6px 4px' }}>{a.fecha}</td>
+                <tr key={a.id} style={{ borderTop: '1px solid var(--border)', background: esBackfill ? 'rgba(255,209,122,0.04)' : 'transparent' }}>
+                  <td style={{ padding: '6px 4px' }}>
+                    {a.fecha}
+                    {esBackfill && <span title="Cargado manualmente (backfill)" style={{ marginLeft: 6, fontSize: 10, color: '#ffd17a' }}>⚡</span>}
+                  </td>
                   <td style={{ padding: '6px 4px', color: 'var(--muted)' }}>{a.hora}</td>
                   <td style={{ padding: '6px 4px' }}>{a.cajero || '—'}</td>
                   <td style={{ textAlign: 'right', padding: '6px 4px', whiteSpace: 'nowrap' }}>
@@ -438,6 +535,13 @@ function HistorialArqueosPaginado({ historial }) {
                     ) : <span style={{ color: 'var(--muted)' }}>—</span>}
                   </td>
                   <td style={{ padding: '6px 4px', fontSize: 11, color: 'var(--muted)', maxWidth: 250 }}>{a.notas || '—'}</td>
+                  <td style={{ padding: '6px 4px', textAlign: 'center' }}>
+                    <button onClick={() => onEliminar(a)}
+                      title="Eliminar este arqueo"
+                      style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: 'var(--red-light)' }}>
+                      🗑️
+                    </button>
+                  </td>
                 </tr>
               )
             })}
