@@ -116,6 +116,321 @@ export function SelectorPeriodo({ periodo, setPeriodo, data }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// 📦 CAJAS — dashboard de tracking individual de cajas CB/PT
+// ═══════════════════════════════════════════════════════════════
+// Snapshot del estado actual de cajas_stock + ventas en el período.
+// Carga su propia data (no usa useReportesData) porque el stock
+// disponible es estado actual, no histórico.
+//
+// Recibe `periodo` para mostrar ventas de cajas dentro de ese rango.
+export function ReporteCajas({ periodo }) {
+  const [loading, setLoading] = useState(true)
+  const [cajas, setCajas] = useState([])
+  const [productos, setProductos] = useState([])
+
+  useEffect(() => {
+    let cancelado = false
+    async function cargar() {
+      setLoading(true)
+      const [{ data: cjs }, { data: prods }] = await Promise.all([
+        supabase.from('cajas_stock').select('*'),
+        supabase.from('precios').select('id, nombre, categoria')
+          .in('categoria', ['bovino_caja_cb', 'bovino_caja_pt']),
+      ])
+      if (cancelado) return
+      setCajas(cjs || [])
+      setProductos(prods || [])
+      setLoading(false)
+    }
+    cargar()
+    return () => { cancelado = true }
+  }, [])
+
+  const productoNombre = (id) => productos.find(p => p.id === id)?.nombre || null
+
+  const disp = useMemo(() => cajas.filter(c => c.estado === 'disponible'), [cajas])
+
+  const stats = useMemo(() => {
+    const cb = disp.filter(c => c.tipo_caja === 'CB')
+    const pt = disp.filter(c => c.tipo_caja === 'PT')
+    const kgCB = cb.reduce((s, c) => s + Number(c.kg || 0), 0)
+    const kgPT = pt.reduce((s, c) => s + Number(c.kg || 0), 0)
+    const sinAsignar = disp.filter(c => !c.producto_id).length
+    return {
+      cantTotal: disp.length,
+      cantCB: cb.length, cantPT: pt.length,
+      kgCB, kgPT, kgTotal: kgCB + kgPT,
+      promCB: cb.length > 0 ? kgCB / cb.length : 0,
+      promPT: pt.length > 0 ? kgPT / pt.length : 0,
+      sinAsignar,
+    }
+  }, [disp])
+
+  // Desglose por producto: cant, kg total, peso prom, min, max, antigüedad prom
+  const porProducto = useMemo(() => {
+    const acc = {}  // producto_id → { ... }
+    const hoy = new Date()
+    disp.forEach(c => {
+      const key = c.producto_id || `__sin__${c.tipo_caja}`
+      if (!acc[key]) acc[key] = {
+        productoId: c.producto_id,
+        nombre: c.producto_id ? (productoNombre(c.producto_id) || `Producto borrado (${c.tipo_caja})`) : `⚠️ Sin asignar (${c.tipo_caja})`,
+        tipo: c.tipo_caja,
+        cant: 0, kgTotal: 0, kgMin: Infinity, kgMax: 0, edades: [],
+      }
+      const kg = Number(c.kg || 0)
+      acc[key].cant += 1
+      acc[key].kgTotal += kg
+      if (kg < acc[key].kgMin) acc[key].kgMin = kg
+      if (kg > acc[key].kgMax) acc[key].kgMax = kg
+      if (c.fecha_ingreso) {
+        const dias = Math.floor((hoy - new Date(c.fecha_ingreso + 'T12:00')) / (1000 * 60 * 60 * 24))
+        acc[key].edades.push(dias)
+      }
+    })
+    return Object.values(acc).map(p => ({
+      ...p,
+      promKg: p.cant > 0 ? p.kgTotal / p.cant : 0,
+      promEdad: p.edades.length > 0 ? p.edades.reduce((a, b) => a + b, 0) / p.edades.length : 0,
+      kgMin: p.kgMin === Infinity ? 0 : p.kgMin,
+    })).sort((a, b) => b.cant - a.cant)
+  }, [disp, productos])
+
+  // Alertas: viejas, sin asignar, productos configurados con stock CERO
+  const alertas = useMemo(() => {
+    const hoy = new Date()
+    const viejas = disp.filter(c => {
+      if (!c.fecha_ingreso) return false
+      const dias = Math.floor((hoy - new Date(c.fecha_ingreso + 'T12:00')) / (1000 * 60 * 60 * 24))
+      return dias > 15
+    })
+    const productosConStock = new Set(disp.map(c => c.producto_id).filter(Boolean))
+    const sinStock = productos.filter(p => !productosConStock.has(p.id))
+    return { viejas, sinStock }
+  }, [disp, productos])
+
+  // Outliers: top 5 más pesadas y top 5 más livianas (para detectar errores de carga)
+  const outliers = useMemo(() => {
+    const ordenadas = [...disp].sort((a, b) => Number(b.kg || 0) - Number(a.kg || 0))
+    return {
+      pesadas: ordenadas.slice(0, 5),
+      livianas: ordenadas.slice(-5).reverse(),
+    }
+  }, [disp])
+
+  // Cajas vendidas en el período (para la sección de ventas)
+  const ventasPeriodo = useMemo(() => {
+    const hoy = fechaHoyARG()
+    let desde
+    if (periodo === 'anio') desde = hoy.slice(0, 4) + '-01-01'
+    else desde = fechaRelativaARG(-PERIODOS[periodo].dias + 1)
+    return cajas.filter(c => c.estado === 'vendida' && c.fecha_salida && c.fecha_salida >= desde && c.fecha_salida <= hoy)
+  }, [cajas, periodo])
+
+  const ventasStats = useMemo(() => {
+    const total = ventasPeriodo.reduce((s, c) => s + (Number(c.total_venta) || 0), 0)
+    const kg    = ventasPeriodo.reduce((s, c) => s + (Number(c.kg) || 0), 0)
+    const costo = ventasPeriodo.reduce((s, c) =>
+      s + (Number(c.precio_costo_kg) || 0) * (Number(c.kg) || 0), 0)
+    const ganancia = total - costo
+    const margen   = total > 0 ? (ganancia / total) * 100 : 0
+    return { cant: ventasPeriodo.length, total, kg, costo, ganancia, margen }
+  }, [ventasPeriodo])
+
+  // Ventas por producto en el período
+  const ventasPorProducto = useMemo(() => {
+    const acc = {}
+    ventasPeriodo.forEach(c => {
+      const nombre = c.producto_id ? (productoNombre(c.producto_id) || 'Sin asignar') : `Sin asignar (${c.tipo_caja})`
+      if (!acc[nombre]) acc[nombre] = { nombre, cant: 0, kg: 0, total: 0 }
+      acc[nombre].cant  += 1
+      acc[nombre].kg    += Number(c.kg) || 0
+      acc[nombre].total += Number(c.total_venta) || 0
+    })
+    return Object.values(acc).sort((a, b) => b.total - a.total)
+  }, [ventasPeriodo, productos])
+
+  if (loading) return <p style={{ color: 'var(--muted)' }}>Cargando cajas...</p>
+
+  return (
+    <>
+      {/* KPIs principales */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>
+        <KPI label="📦 TOTAL DISPONIBLES" valor={stats.cantTotal} sub={`${fmtK(stats.kgTotal)} en stock`} color="var(--gold)" />
+        <KPI label="🐄 CAJAS CB" valor={stats.cantCB} sub={`${fmtK(stats.kgCB)} · prom ${fmtK(stats.promCB)}`} color="#7db5ff" />
+        <KPI label="🥩 CAJAS PT" valor={stats.cantPT} sub={`${fmtK(stats.kgPT)} · prom ${fmtK(stats.promPT)}`} color="#ffd17a" />
+        <KPI label={stats.sinAsignar > 0 ? '⚠️ SIN PRODUCTO' : '✅ TODAS ASIGNADAS'}
+             valor={stats.sinAsignar}
+             sub={stats.sinAsignar > 0 ? 'Asignalas en Depósito > Cajas' : 'Todo en orden'}
+             color={stats.sinAsignar > 0 ? '#ff8b8b' : '#7dff7d'} />
+      </div>
+
+      {/* Alertas */}
+      {(alertas.viejas.length > 0 || alertas.sinStock.length > 0) && (
+        <div className="card" style={{ marginBottom: 16, borderLeft: '3px solid #ffd17a' }}>
+          <div className="card-title" style={{ color: '#ffd17a' }}>🚨 Alertas</div>
+          {alertas.viejas.length > 0 && (
+            <div style={{ marginBottom: 8, fontSize: 13 }}>
+              <strong style={{ color: '#ff8b8b' }}>⏳ {alertas.viejas.length} caja{alertas.viejas.length === 1 ? '' : 's'} con más de 15 días en stock</strong>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                {alertas.viejas.slice(0, 5).map(c => (
+                  <span key={c.id} style={{ marginRight: 12 }}>
+                    #{c.id} ({c.tipo_caja}, {fmtK(c.kg)}) — ingreso {c.fecha_ingreso}
+                  </span>
+                ))}
+                {alertas.viejas.length > 5 && ` ... y ${alertas.viejas.length - 5} más`}
+              </div>
+            </div>
+          )}
+          {alertas.sinStock.length > 0 && (
+            <div style={{ fontSize: 13 }}>
+              <strong style={{ color: '#ffd17a' }}>📭 {alertas.sinStock.length} producto{alertas.sinStock.length === 1 ? '' : 's'} sin stock</strong>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                {alertas.sinStock.slice(0, 10).map(p => p.nombre).join(' · ')}
+                {alertas.sinStock.length > 10 && ` ... y ${alertas.sinStock.length - 10} más`}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Desglose por producto */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-title">📊 Stock disponible por producto</div>
+        {porProducto.length === 0 ? (
+          <p style={{ color: 'var(--muted)', fontSize: 13 }}>No hay cajas disponibles en stock.</p>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', fontSize: 12, minWidth: 700 }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left' }}>Producto</th>
+                  <th style={{ textAlign: 'center' }}>Tipo</th>
+                  <th style={{ textAlign: 'right' }}>Cajas</th>
+                  <th style={{ textAlign: 'right' }}>Kg total</th>
+                  <th style={{ textAlign: 'right' }}>Peso prom</th>
+                  <th style={{ textAlign: 'right' }}>Min — Max</th>
+                  <th style={{ textAlign: 'right' }}>Antigüedad prom</th>
+                </tr>
+              </thead>
+              <tbody>
+                {porProducto.map(p => (
+                  <tr key={p.nombre} style={{ borderTop: '1px solid var(--border)' }}>
+                    <td style={{ padding: '6px 4px', fontWeight: 600 }}>{p.nombre}</td>
+                    <td style={{ padding: '6px 4px', textAlign: 'center' }}>
+                      <span style={{ background: p.tipo === 'CB' ? '#1a2a3a' : '#2a2010', color: p.tipo === 'CB' ? '#7db5ff' : '#ffd17a', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700 }}>{p.tipo}</span>
+                    </td>
+                    <td style={{ padding: '6px 4px', textAlign: 'right', fontWeight: 700, color: 'var(--gold)' }}>{p.cant}</td>
+                    <td style={{ padding: '6px 4px', textAlign: 'right' }}>{fmtK(p.kgTotal)}</td>
+                    <td style={{ padding: '6px 4px', textAlign: 'right' }}>{fmtK(p.promKg)}</td>
+                    <td style={{ padding: '6px 4px', textAlign: 'right', color: 'var(--muted)', fontSize: 11 }}>{fmtK(p.kgMin)} — {fmtK(p.kgMax)}</td>
+                    <td style={{ padding: '6px 4px', textAlign: 'right', color: p.promEdad > 15 ? '#ff8b8b' : p.promEdad > 7 ? '#ffd17a' : 'var(--muted)' }}>
+                      {p.promEdad.toFixed(0)} d
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Ventas de cajas en el período */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-title">💰 Ventas de cajas — {PERIODOS[periodo].label}</div>
+        {ventasPeriodo.length === 0 ? (
+          <p style={{ color: 'var(--muted)', fontSize: 13 }}>Sin cajas vendidas en este período.</p>
+        ) : (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: 14 }}>
+              <Mini label="Cajas vendidas" valor={ventasStats.cant} />
+              <Mini label="Kg" valor={fmtK(ventasStats.kg)} />
+              <Mini label="Facturado" valor={fmt(ventasStats.total)} />
+              <Mini label="Costo (estim.)" valor={fmt(ventasStats.costo)} />
+              <Mini label="Ganancia" valor={fmt(ventasStats.ganancia)} />
+              <Mini label="Margen" valor={fmtPct(ventasStats.margen)} />
+            </div>
+            <table style={{ width: '100%', fontSize: 12 }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left' }}>Producto</th>
+                  <th style={{ textAlign: 'right' }}>Cajas vend.</th>
+                  <th style={{ textAlign: 'right' }}>Kg</th>
+                  <th style={{ textAlign: 'right', color: 'var(--gold)' }}>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ventasPorProducto.map(p => (
+                  <tr key={p.nombre} style={{ borderTop: '1px solid var(--border)' }}>
+                    <td style={{ padding: '6px 4px', fontWeight: 600 }}>{p.nombre}</td>
+                    <td style={{ padding: '6px 4px', textAlign: 'right', color: 'var(--muted)' }}>{p.cant}</td>
+                    <td style={{ padding: '6px 4px', textAlign: 'right' }}>{fmtK(p.kg)}</td>
+                    <td style={{ padding: '6px 4px', textAlign: 'right', color: 'var(--gold)', fontWeight: 700 }}>{fmt(p.total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+      </div>
+
+      {/* Outliers: top pesadas y livianas */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 12 }}>
+        <div className="card">
+          <div className="card-title">⚖️ Top 5 más pesadas</div>
+          <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: -8, marginBottom: 10 }}>
+            Útil para detectar errores de carga (peso típico CB/PT: 5-30 kg).
+          </p>
+          {outliers.pesadas.length === 0 ? (
+            <p style={{ color: 'var(--muted)', fontSize: 13 }}>Sin cajas disponibles.</p>
+          ) : (
+            <table style={{ width: '100%', fontSize: 12 }}>
+              <tbody>
+                {outliers.pesadas.map(c => (
+                  <tr key={c.id} style={{ borderTop: '1px solid var(--border)' }}>
+                    <td style={{ padding: '6px 4px', fontFamily: 'monospace', color: 'var(--muted)' }}>#{c.id}</td>
+                    <td style={{ padding: '6px 4px' }}>{c.tipo_caja}</td>
+                    <td style={{ padding: '6px 4px', fontSize: 11, color: 'var(--muted)' }}>{productoNombre(c.producto_id) || '⚠️ sin asignar'}</td>
+                    <td style={{ padding: '6px 4px', textAlign: 'right', color: Number(c.kg) > 30 ? '#ff8b8b' : 'var(--gold)', fontWeight: 700 }}>
+                      {fmtK(c.kg)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div className="card">
+          <div className="card-title">🪶 Top 5 más livianas</div>
+          <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: -8, marginBottom: 10 }}>
+            Sospechosas si están por debajo de 5 kg (típico mínimo CB/PT).
+          </p>
+          {outliers.livianas.length === 0 ? (
+            <p style={{ color: 'var(--muted)', fontSize: 13 }}>Sin cajas disponibles.</p>
+          ) : (
+            <table style={{ width: '100%', fontSize: 12 }}>
+              <tbody>
+                {outliers.livianas.map(c => (
+                  <tr key={c.id} style={{ borderTop: '1px solid var(--border)' }}>
+                    <td style={{ padding: '6px 4px', fontFamily: 'monospace', color: 'var(--muted)' }}>#{c.id}</td>
+                    <td style={{ padding: '6px 4px' }}>{c.tipo_caja}</td>
+                    <td style={{ padding: '6px 4px', fontSize: 11, color: 'var(--muted)' }}>{productoNombre(c.producto_id) || '⚠️ sin asignar'}</td>
+                    <td style={{ padding: '6px 4px', textAlign: 'right', color: Number(c.kg) < 5 ? '#ff8b8b' : 'var(--gold)', fontWeight: 700 }}>
+                      {fmtK(c.kg)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
 // 💰 MARGEN — % ganancia por semana
 // ═══════════════════════════════════════════════════════════════
 export function ReporteMargen({ data }) {
