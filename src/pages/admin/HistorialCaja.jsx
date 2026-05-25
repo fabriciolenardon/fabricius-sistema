@@ -13,7 +13,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
-import { kgPorUnidadDeNombre } from '../../lib/stockHelpers'
+import { kgPorUnidadDeProducto } from '../../lib/stockHelpers'
 import { useAuth } from '../../context/AuthContext'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
@@ -168,7 +168,7 @@ export default function HistorialCaja() {
       try {
         const esCajonAConvertir = item.categoria === 'pollo_cajon' || item.categoria === 'rebozado_cajon'
         const cantidad = esCajonAConvertir
-          ? (Number(item.kg) || 0) * (kgPorUnidadDeNombre(item.descripcion) || 1)
+          ? (Number(item.kg) || 0) * (kgPorUnidadDeProducto(item) || 1)
           : (Number(item.kg) || 0)
         const { data: stock } = await supabase.from('stock_actual').select('*').eq('tipo', tipoStock).maybeSingle()
         if (stock) {

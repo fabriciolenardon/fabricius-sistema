@@ -12,7 +12,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { decodificarEANBalanza, esCodigoBalanza } from '../../lib/balanzaEAN'
 import { fechaHoyARG, horaHoyARG, horaNumARG } from '../../lib/fechas'
-import { kgPorUnidadDeNombre } from '../../lib/stockHelpers'
+import { kgPorUnidadDeProducto } from '../../lib/stockHelpers'
 import HistorialCaja from './HistorialCaja'
 import ArqueoCaja from './ArqueoCaja'
 
@@ -197,6 +197,10 @@ export default function Caja() {
       // genérica. Permite que productos como "Bondiola de cerdo" toquen
       // stock_actual.cerdo_bondiola en vez del bucket cerdo_pieza general.
       stock_origen: producto.stock_origen || null,
+      // kg por unidad para cajones (pollo_cajon, rebozado_cajon). Si está
+      // null, el helper hace fallback al parseo del nombre. Cargado desde
+      // /admin/precios al crear el producto.
+      kg_por_unidad: producto.kg_por_unidad || null,
       kg: cant,            // se sigue llamando "kg" para no romper el resto; representa la cantidad
       unidad: pesable ? 'kg' : 'u',
       precio: parseFloat(precio),
@@ -328,6 +332,9 @@ export default function Caja() {
         // específico (cerdo_bondiola, cerdo_pierna, etc.) en lugar de
         // contra el bucket genérico cerdo_pieza.
         stock_origen: i.stock_origen || null,
+        // Persistido para anular ventas viejas de cajones: necesitamos
+        // saber cuántos kg pesa cada cajón aunque el producto haya cambiado.
+        kg_por_unidad: i.kg_por_unidad || null,
       })),
       total,
       efectivo: parseFloat(pago.efectivo) || 0,
@@ -394,10 +401,12 @@ export default function Caja() {
     for (const item of carrito) {
       const tipoStock = mapearStock(item.categoria, item.stock_origen)
       if (!tipoStock) continue  // categoría sin tracking de stock → saltar
-      // Para cajones de pollo/rebozado: multiplicar unidades × kg_por_cajón
+      // Para cajones de pollo/rebozado: multiplicar unidades × kg_por_cajón.
+      // kgPorUnidadDeProducto usa primero item.kg_por_unidad (cargado en
+      // precios), fallback al parseo del nombre.
       const esCajonAConvertir = item.categoria === 'pollo_cajon' || item.categoria === 'rebozado_cajon'
       const cantidad = esCajonAConvertir
-        ? (item.kg || 0) * (kgPorUnidadDeNombre(item.descripcion) || 1)
+        ? (item.kg || 0) * (kgPorUnidadDeProducto(item) || 1)
         : (item.kg || 0)
       const { data: stock } = await supabase.from('stock_actual').select('*').eq('tipo', tipoStock).maybeSingle()
       if (stock) {

@@ -1629,6 +1629,9 @@ const item = {
   // 'kg' para items pesables. El renderizado del carrito usa este flag.
   unidad: esUnidadLocal ? 'u' : 'kg',
   stock_origen: form.categoria === 'pieza_entera' ? 'bovino_pieza' : (prodItem?.stock_origen || null),
+  // kg por unidad — usado para cajones pollo/rebozado al descontar stock.
+  // Si el producto no lo tiene cargado, el helper hace fallback al parseo del nombre.
+  kg_por_unidad: prodItem?.kg_por_unidad || null,
   media_res_id: mediaSeleccionada?.id || null,
   pieza_id: form.categoria === 'pieza_entera' ? piezaEnteraSeleccionada?.id : null,
   pieza_tipo: form.categoria === 'pieza_entera' ? piezaEnteraSeleccionada?.tipo_pieza : null,
