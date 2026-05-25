@@ -2,9 +2,11 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
+import { parseNumero, fmtPrecio } from '../../lib/formatos'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
-function fmt(n) { return '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR') }
+// Reemplaza el fmt local por el helper centralizado que respeta decimales
+const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
 
 export default function Cheques() {
   const [cheques, setCheques] = useState([])
@@ -26,16 +28,16 @@ export default function Cheques() {
     const { error } = await supabase.from('cheques').insert({
       tipo, numero: form.numero, fecha_recepcion: form.fechaRec, fecha_pago: form.fechaPago || null,
       banco: form.banco, cliente_id: form.clienteId, cliente_nombre: cliente?.nombre,
-      monto: parseFloat(form.monto), destino: form.destino, proveedor_nombre: form.proveedor, notas: form.notas
+      monto: parseNumero(form.monto), destino: form.destino, proveedor_nombre: form.proveedor, notas: form.notas
     })
     if (error) { setAlert({ type: 'error', msg: error.message }); return }
     if (form.destino === 'ctacte') {
       const { data: clienteActual } = await supabase.from('clientes').select('saldo').eq('id', form.clienteId).single()
-      const nuevoSaldo = (clienteActual?.saldo || 0) - parseFloat(form.monto)
+      const nuevoSaldo = (clienteActual?.saldo || 0) - parseNumero(form.monto)
       await supabase.from('movimientos_ctacte').insert({
         fecha: form.fechaRec, cliente_id: form.clienteId,
         tipo: 'cheque', descripcion: `${tipo === 'echeq' ? 'E-cheq' : 'Cheque'} Nro. ${form.numero}${form.banco ? ' — ' + form.banco : ''}`,
-        debe: 0, haber: parseFloat(form.monto), saldo: nuevoSaldo
+        debe: 0, haber: parseNumero(form.monto), saldo: nuevoSaldo
       })
       await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', form.clienteId)
     }

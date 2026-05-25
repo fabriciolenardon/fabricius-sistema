@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
+import { parseNumero, fmtPrecio, fmtKg as fmtKgAR } from '../../lib/formatos'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
-function fmt(n) { return '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR') }
-function fmtKg(n) { return parseFloat(n || 0).toFixed(1) + ' kg' }
+const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
+const fmtKg = n => fmtKgAR(Number(n) || 0)
 
 const camposIngresos = [
   { id: 'efectivo', label: 'Efectivo' },
@@ -199,19 +200,19 @@ export default function Cierre() {
     const datos = {
       semana_inicio: form.inicio, semana_fin: form.fin, mes,
       ventas: totalIngresos,
-      compras: parseFloat(form.compras) || 0,
-      gastos: (parseFloat(form.gastos) || 0) + (parseFloat(form.socios) || 0),
-      sueldos: parseFloat(form.sueldos) || 0,
+      compras: parseNumero(form.compras),
+      gastos: (parseNumero(form.gastos)) + (parseNumero(form.socios)),
+      sueldos: parseNumero(form.sueldos),
       ganancia,
       ingresos: ingresosCampos,
-      kg_carne: parseFloat(form.kgCarne) || 0,
-      kg_pollo: parseFloat(form.kgPollo) || 0,
-      kg_cerdo: parseFloat(form.kgCerdo) || 0,
-      kg_merma: parseFloat(form.kgMerma) || 0,
-      kg_remanente_carne: parseFloat(form.kgRemanenteCarne) || 0,
-      kg_remanente_pollo: parseFloat(form.kgRemanentePollo) || 0,
-      kg_remanente_cerdo: parseFloat(form.kgRemanenteCerdo) || 0,
-      ventas_ctacte: parseFloat(form.ventasCtacte) || 0,
+      kg_carne: parseNumero(form.kgCarne),
+      kg_pollo: parseNumero(form.kgPollo),
+      kg_cerdo: parseNumero(form.kgCerdo),
+      kg_merma: parseNumero(form.kgMerma),
+      kg_remanente_carne: parseNumero(form.kgRemanenteCarne),
+      kg_remanente_pollo: parseNumero(form.kgRemanentePollo),
+      kg_remanente_cerdo: parseNumero(form.kgRemanenteCerdo),
+      ventas_ctacte: parseNumero(form.ventasCtacte),
     }
 
     if (editandoId) {
@@ -224,12 +225,12 @@ export default function Cierre() {
       if (error) { showAlert({ type: 'error', msg: 'Error al guardar: ' + error.message }); setLoading(false); return }
 // Resetear stock con los remanentes ingresados
 const stockUpdates = [
-  { tipo: 'bovino_corte', kg: parseFloat(form.kgRemanenteCarne) || 0 },
+  { tipo: 'bovino_corte', kg: parseNumero(form.kgRemanenteCarne) },
   { tipo: 'bovino_pieza', kg: 0 },
   { tipo: 'bovino_mr', kg: 0 },
   { tipo: 'bovino_brosa', kg: 0 },
-  { tipo: 'pollo', kg: parseFloat(form.kgRemanentePollo) || 0 },
-  { tipo: 'cerdo', kg: parseFloat(form.kgRemanenteCerdo) || 0 },
+  { tipo: 'pollo', kg: parseNumero(form.kgRemanentePollo) },
+  { tipo: 'cerdo', kg: parseNumero(form.kgRemanenteCerdo) },
   { tipo: 'embutido', kg: 0 },
 ]
 for (const s of stockUpdates) {
@@ -438,9 +439,9 @@ for (const s of stockUpdates) {
             <div className="grid4" style={{ marginBottom: 20 }}>
               {[
                 { label: 'Ventas', val: totalIngresos, color: 'var(--green)' },
-                { label: 'Compras', val: parseFloat(form.compras) || 0, color: 'var(--red-light)' },
-                { label: 'Gastos + Socios', val: (parseFloat(form.gastos) || 0) + (parseFloat(form.socios) || 0), color: 'var(--amber)' },
-                { label: 'Sueldos', val: parseFloat(form.sueldos) || 0, color: 'var(--blue)' },
+                { label: 'Compras', val: parseNumero(form.compras), color: 'var(--red-light)' },
+                { label: 'Gastos + Socios', val: (parseNumero(form.gastos)) + (parseNumero(form.socios)), color: 'var(--amber)' },
+                { label: 'Sueldos', val: parseNumero(form.sueldos), color: 'var(--blue)' },
               ].map(s => (
                 <div key={s.label} className="stat">
                   <div className="stat-label">{s.label}</div>
@@ -450,19 +451,19 @@ for (const s of stockUpdates) {
             </div>
 
             {/* REMANENTE RESUMEN */}
-            {(parseFloat(form.kgRemanenteCarne) > 0 || parseFloat(form.kgRemanentePollo) > 0 || parseFloat(form.kgRemanenteCerdo) > 0) && (
+            {(parseNumero(form.kgRemanenteCarne) > 0 || parseNumero(form.kgRemanentePollo) > 0 || parseNumero(form.kgRemanenteCerdo) > 0) && (
               <div style={{ background: '#1a1a2a', border: '1px solid #2a2a5a', borderRadius: 8, padding: '10px 16px', marginBottom: 16, display: 'flex', gap: 20, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 12, color: '#7db5ff', fontWeight: 700 }}>📦 Remanente próxima semana:</span>
-                <span style={{ fontSize: 12, color: 'var(--gold)' }}>🥩 {fmtKg(parseFloat(form.kgRemanenteCarne) || 0)}</span>
-                <span style={{ fontSize: 12, color: 'var(--blue)' }}>🍗 {fmtKg(parseFloat(form.kgRemanentePollo) || 0)}</span>
-                <span style={{ fontSize: 12, color: 'var(--amber)' }}>🐷 {fmtKg(parseFloat(form.kgRemanenteCerdo) || 0)}</span>
+                <span style={{ fontSize: 12, color: 'var(--gold)' }}>🥩 {fmtKg(parseNumero(form.kgRemanenteCarne))}</span>
+                <span style={{ fontSize: 12, color: 'var(--blue)' }}>🍗 {fmtKg(parseNumero(form.kgRemanentePollo))}</span>
+                <span style={{ fontSize: 12, color: 'var(--amber)' }}>🐷 {fmtKg(parseNumero(form.kgRemanenteCerdo))}</span>
               </div>
             )}
 
-            {parseFloat(form.ventasCtacte) > 0 && (
+            {parseNumero(form.ventasCtacte) > 0 && (
               <div style={{ background: '#1a2a1a', border: '1px solid #2d5a2d', borderRadius: 8, padding: '10px 16px', marginBottom: 16 }}>
                 <span style={{ fontSize: 12, color: '#7dff7d', fontWeight: 700 }}>📒 Ventas cta. cte. esta semana: </span>
-                <span style={{ fontSize: 14, color: '#7dff7d', fontWeight: 700 }}>{fmt(parseFloat(form.ventasCtacte) || 0)}</span>
+                <span style={{ fontSize: 14, color: '#7dff7d', fontWeight: 700 }}>{fmt(parseNumero(form.ventasCtacte))}</span>
                 <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 8 }}>(incluido en total ventas, no acumula saldo)</span>
               </div>
             )}

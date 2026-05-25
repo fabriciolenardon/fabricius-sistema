@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
-function fmt(n) { return '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR') }
+import { parseNumero, fmtPrecio } from '../../lib/formatos'
+const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
 
 const FRANQUICIAS = [
   { nombre: 'ALVEAR', titular: 'Roxana', direccion: 'Carnicería Alvear' },
@@ -41,7 +42,7 @@ export default function Franquicias() {
 
   async function registrarPago() {
     if (!pago.importe || !cliente) return
-    const importe = parseFloat(pago.importe)
+    const importe = parseNumero(pago.importe)
     const nuevoSaldo = (cliente.saldo || 0) - importe
     await supabase.from('movimientos_ctacte').insert({
       cliente_id: cliente.id, fecha: pago.fecha, tipo: 'pago',

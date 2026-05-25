@@ -14,6 +14,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { PIEZAS_CERDO } from '../../lib/modelosDesposte'
 import { fechaHoyARG } from '../../lib/fechas'
+import { parseNumero } from '../../lib/formatos'
 
 async function sumarStock(tipo, kg) {
   const { data } = await supabase.from('stock_actual').select('*').eq('tipo', tipo).maybeSingle()
@@ -64,7 +65,7 @@ export default function DesposteCapones() {
   }
 
   const kgCapon = seleccionado ? (Number(seleccionado.kg_real) || Number(seleccionado.kg) || 0) : 0
-  const kgPiezas = PIEZAS_CERDO.reduce((s, p) => s + (Number(piezas[p.key]) || 0), 0)
+  const kgPiezas = PIEZAS_CERDO.reduce((s, p) => s + (parseNumero(piezas[p.key])), 0)
   const merma = kgCapon - kgPiezas
   const mermaPct = kgCapon > 0 ? (merma / kgCapon) * 100 : 0
 
@@ -81,7 +82,7 @@ export default function DesposteCapones() {
     // Rango real Fabricius para capones: 70-150 kg.
     if (kgCapon > 0) {
       // Pieza individual no puede pesar más que el capón
-      const piezaInflada = PIEZAS_CERDO.find(p => (Number(piezas[p.key]) || 0) > kgCapon)
+      const piezaInflada = PIEZAS_CERDO.find(p => (parseNumero(piezas[p.key])) > kgCapon)
       if (piezaInflada) {
         return aviso(`⚠️ "${piezaInflada.nombre}" tiene ${piezas[piezaInflada.key]} kg pero el capón es de ${fmt(kgCapon)} kg. Imposible.`, 'error')
       }
@@ -100,7 +101,7 @@ export default function DesposteCapones() {
     setGuardando(true)
     const hoy = fechaHoyARG()
     const piezasDetalle = PIEZAS_CERDO
-      .map(p => ({ nombre: p.nombre, kg: Number(piezas[p.key]) || 0, stock: p.stock }))
+      .map(p => ({ nombre: p.nombre, kg: parseNumero(piezas[p.key]), stock: p.stock }))
       .filter(p => p.kg > 0)
 
     // 1) Crear el desposte

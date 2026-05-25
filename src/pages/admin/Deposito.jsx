@@ -330,7 +330,7 @@ async function confirmarElaboracionEmbutido() {
   if (kgCerdo === 0) { showAlert('Ingresá al menos una pieza de cerdo', 'error'); return }
   setLoading(true)
   try {
-    const kgTotal = kgCerdo + (parseFloat(kgCarneBovinaEmbutido) || 0)
+    const kgTotal = kgCerdo + (parseNumero(kgCarneBovinaEmbutido))
     const kgFinal = parseFloat((kgTotal * (1 + pctAumentoEmbutido / 100)).toFixed(2))
     const piezasUsadas = Object.entries(piezasEmbutido)
       .filter(([, v]) => parseFloat(v) > 0)
@@ -339,14 +339,14 @@ async function confirmarElaboracionEmbutido() {
       fecha, tipo: 'embutido', tipo_embutido: tipoEmbutido,
       piezas_usadas: piezasUsadas,
       kg_carne_cerdo: kgCerdo,
-      kg_carne_bovina: parseFloat(kgCarneBovinaEmbutido) || 0,
+      kg_carne_bovina: parseNumero(kgCarneBovinaEmbutido),
       kg_elaborado: kgTotal, pct_aumento: pctAumentoEmbutido,
       kg_final: kgFinal, maduracion_completa: true, notas
     })
     for (const [tipo, v] of Object.entries(piezasEmbutido)) {
       if (parseFloat(v) > 0) await actualizarStock(tipo, -parseFloat(v))
     }
-    if (parseFloat(kgCarneBovinaEmbutido) > 0) await actualizarStock('bovino_corte', -parseFloat(kgCarneBovinaEmbutido))
+    if (parseNumero(kgCarneBovinaEmbutido) > 0) await actualizarStock('bovino_corte', -parseNumero(kgCarneBovinaEmbutido))
     await actualizarStock('embutido', kgFinal)
     showAlert(`✅ ${kgFinal.toFixed(1)} kg de embutidos elaborados al stock`)
     setPiezasEmbutido({ cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '', cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: '' })
@@ -361,7 +361,7 @@ async function confirmarElaboracionSalame() {
     if (kgCerdo === 0) { showAlert('Ingresá al menos una pieza de cerdo', 'error'); return }
     setLoading(true)
     try {
-      const kgTotal = kgCerdo + (parseFloat(kgCarneBovinaEmbutido) || 0) + (parseFloat(kgQuesoEmbutido) || 0)
+      const kgTotal = kgCerdo + (parseNumero(kgCarneBovinaEmbutido)) + (parseNumero(kgQuesoEmbutido))
       const fechaFin = new Date(fecha)
       fechaFin.setDate(fechaFin.getDate() + 21)
       const piezasUsadas = Object.entries(piezasEmbutido)
@@ -371,8 +371,8 @@ async function confirmarElaboracionSalame() {
         fecha, tipo: 'salame', tipo_embutido: tipoEmbutido,
         piezas_usadas: piezasUsadas,
         kg_carne_cerdo: kgCerdo,
-        kg_carne_bovina: parseFloat(kgCarneBovinaEmbutido) || 0,
-        kg_queso: parseFloat(kgQuesoEmbutido) || 0,
+        kg_carne_bovina: parseNumero(kgCarneBovinaEmbutido),
+        kg_queso: parseNumero(kgQuesoEmbutido),
         kg_elaborado: kgTotal, pct_aumento: 0,
         kg_final: 0, maduracion_completa: false,
         fecha_fin_maduracion: fechaHoyARG(fechaFin),
@@ -381,7 +381,7 @@ async function confirmarElaboracionSalame() {
       for (const [tipo, v] of Object.entries(piezasEmbutido)) {
         if (parseFloat(v) > 0) await actualizarStock(tipo, -parseFloat(v))
       }
-      if (parseFloat(kgCarneBovinaEmbutido) > 0) await actualizarStock('bovino_corte', -parseFloat(kgCarneBovinaEmbutido))
+      if (parseNumero(kgCarneBovinaEmbutido) > 0) await actualizarStock('bovino_corte', -parseNumero(kgCarneBovinaEmbutido))
       showAlert(`✅ Salame registrado — Maduración hasta ${fechaHoyARG(fechaFin)}`)
       setPiezasEmbutido({ cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '', cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: '' })
       setKgCarneBovinaEmbutido(''); setKgQuesoEmbutido(''); setNotas('')
@@ -393,17 +393,17 @@ async function confirmarDesposteCerdo() {
   if (!caponSeleccionado) { showAlert('Seleccioná un capón', 'error'); return }
   const kgCapon = caponSeleccionado.kg_real || caponSeleccionado.kg || 0
   const piezasRegistradas = [
-    { nombre: 'Piernas (x2)', kg: parseFloat(piezasCerdo.pierna) || 0, stock: 'cerdo_pierna' },
-    { nombre: 'Carrés (x2)', kg: parseFloat(piezasCerdo.carre) || 0, stock: 'cerdo_carre' },
-    { nombre: 'Pechitos (x2)', kg: parseFloat(piezasCerdo.pechito) || 0, stock: 'cerdo_pechito' },
-    { nombre: 'Matambres (x2)', kg: parseFloat(piezasCerdo.matambre) || 0, stock: 'cerdo_matambre' },
-    { nombre: 'Paletas (x2)', kg: parseFloat(piezasCerdo.paleta) || 0, stock: 'cerdo_paleta' },
-    { nombre: 'Carnaza', kg: parseFloat(piezasCerdo.parrillero) || 0, stock: 'cerdo_parrillero' },
-    { nombre: 'Huesos', kg: parseFloat(piezasCerdo.huesos) || 0, stock: 'cerdo_huesos' },
-    { nombre: 'Bondiola s/hueso', kg: parseFloat(piezasCerdo.bondiola) || 0, stock: 'cerdo_bondiola' },
-    { nombre: 'Tocino', kg: parseFloat(piezasCerdo.tocino) || 0, stock: 'cerdo_tocino' },
-    { nombre: 'Cuero', kg: parseFloat(piezasCerdo.cuero) || 0, stock: 'cerdo_cuero' },
-    { nombre: 'Cabeza', kg: parseFloat(piezasCerdo.cabeza) || 0, stock: 'cerdo_cabeza' },
+    { nombre: 'Piernas (x2)', kg: parseNumero(piezasCerdo.pierna), stock: 'cerdo_pierna' },
+    { nombre: 'Carrés (x2)', kg: parseNumero(piezasCerdo.carre), stock: 'cerdo_carre' },
+    { nombre: 'Pechitos (x2)', kg: parseNumero(piezasCerdo.pechito), stock: 'cerdo_pechito' },
+    { nombre: 'Matambres (x2)', kg: parseNumero(piezasCerdo.matambre), stock: 'cerdo_matambre' },
+    { nombre: 'Paletas (x2)', kg: parseNumero(piezasCerdo.paleta), stock: 'cerdo_paleta' },
+    { nombre: 'Carnaza', kg: parseNumero(piezasCerdo.parrillero), stock: 'cerdo_parrillero' },
+    { nombre: 'Huesos', kg: parseNumero(piezasCerdo.huesos), stock: 'cerdo_huesos' },
+    { nombre: 'Bondiola s/hueso', kg: parseNumero(piezasCerdo.bondiola), stock: 'cerdo_bondiola' },
+    { nombre: 'Tocino', kg: parseNumero(piezasCerdo.tocino), stock: 'cerdo_tocino' },
+    { nombre: 'Cuero', kg: parseNumero(piezasCerdo.cuero), stock: 'cerdo_cuero' },
+    { nombre: 'Cabeza', kg: parseNumero(piezasCerdo.cabeza), stock: 'cerdo_cabeza' },
   ].filter(p => p.kg > 0)
 
   // Validaciones anti-error humano (mismo patrón que media res bovina):
@@ -1005,8 +1005,8 @@ async function confirmarDesposteCerdo() {
       <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, marginBottom: 14 }}>
         {(() => {
           const kgCerdo = Object.values(piezasEmbutido).reduce((s, v) => s + (parseFloat(v) || 0), 0)
-          const kgBovino = parseFloat(kgCarneBovinaEmbutido) || 0
-          const kgQueso = parseFloat(kgQuesoEmbutido) || 0
+          const kgBovino = parseNumero(kgCarneBovinaEmbutido)
+          const kgQueso = parseNumero(kgQuesoEmbutido)
           const kgTotal = kgCerdo + kgBovino + kgQueso
           const kgFinal = tipoElaboracion === 'embutido' ? kgTotal * (1 + pctAumentoEmbutido / 100) : kgTotal * 0.5
           return (
@@ -1472,7 +1472,7 @@ async function eliminar(entrada) {
 
   async function guardarEdicion(entrada) {
     const kgAnterior = entrada.kg_real || entrada.kg || 0
-    const kgNuevo = parseFloat(formEdit.kg) || 0
+    const kgNuevo = parseNumero(formEdit.kg)
     const kgReal = kgNuevo * (1 - (entrada.merma_pct || 0) / 100)
     const diferencia = kgReal - kgAnterior
     await supabase.from('entradas_deposito').update({
@@ -1480,10 +1480,10 @@ async function eliminar(entrada) {
       descripcion: formEdit.descripcion,
       kg: kgNuevo,
       kg_real: kgReal,
-      precio_kg: parseFloat(formEdit.precioKg) || 0,
+      precio_kg: parseNumero(formEdit.precioKg),
       proveedor_nombre: formEdit.proveedor,
       destino: formEdit.destino,
-      importe: kgNuevo * (parseFloat(formEdit.precioKg) || 0)
+      importe: kgNuevo * (parseNumero(formEdit.precioKg))
     }).eq('id', entrada.id)
     if (diferencia !== 0) await actualizarStock(entrada.tipo, diferencia)
     setEditando(null)
@@ -2722,15 +2722,15 @@ function ProveedoresTab() {
 
   async function guardarCompra() {
     if (!formCompra.proveedor_nombre || !formCompra.importe) { showMsg('Completá proveedor e importe', 'error'); return }
-    await supabase.from('compras_proveedores').insert({ fecha: formCompra.fecha, semana_inicio: formCompra.semana_inicio || null, semana_fin: formCompra.semana_fin || null, proveedor_nombre: formCompra.proveedor_nombre, producto: formCompra.producto, kg: parseFloat(formCompra.kg) || 0, importe: parseFloat(formCompra.importe) || 0 })
+    await supabase.from('compras_proveedores').insert({ fecha: formCompra.fecha, semana_inicio: formCompra.semana_inicio || null, semana_fin: formCompra.semana_fin || null, proveedor_nombre: formCompra.proveedor_nombre, producto: formCompra.producto, kg: parseNumero(formCompra.kg), importe: parseNumero(formCompra.importe) })
     showMsg('✅ Compra registrada')
     setFormCompra(f => ({ ...f, producto: '', kg: '', importe: '', proveedor_nombre: '' })); fetchAll()
   }
 
   async function guardarPago() {
     if (!formPago.proveedor_nombre) { showMsg('Seleccioná un proveedor', 'error'); return }
-    const saldoAdeudado = (parseFloat(formPago.importe_compra) || 0) + (parseFloat(formPago.percepcion) || 0) + (parseFloat(formPago.saldo_anterior) || 0) - (parseFloat(formPago.entrega) || 0)
-    await supabase.from('pagos_proveedores_semanal').insert({ fecha: formPago.fecha, semana_inicio: formPago.semana_inicio || null, semana_fin: formPago.semana_fin || null, proveedor_nombre: formPago.proveedor_nombre, importe_compra: parseFloat(formPago.importe_compra) || 0, percepcion: parseFloat(formPago.percepcion) || 0, saldo_anterior: parseFloat(formPago.saldo_anterior) || 0, entrega: parseFloat(formPago.entrega) || 0, saldo_adeudado: saldoAdeudado, notas: formPago.notas })
+    const saldoAdeudado = (parseNumero(formPago.importe_compra)) + (parseNumero(formPago.percepcion)) + (parseNumero(formPago.saldo_anterior)) - (parseNumero(formPago.entrega))
+    await supabase.from('pagos_proveedores_semanal').insert({ fecha: formPago.fecha, semana_inicio: formPago.semana_inicio || null, semana_fin: formPago.semana_fin || null, proveedor_nombre: formPago.proveedor_nombre, importe_compra: parseNumero(formPago.importe_compra), percepcion: parseNumero(formPago.percepcion), saldo_anterior: parseNumero(formPago.saldo_anterior), entrega: parseNumero(formPago.entrega), saldo_adeudado: saldoAdeudado, notas: formPago.notas })
     showMsg('✅ Pago registrado')
     setFormPago(f => ({ ...f, importe_compra: '', percepcion: '', saldo_anterior: '', entrega: '', notas: '', proveedor_nombre: '' })); fetchAll()
   }
@@ -2913,11 +2913,11 @@ function ProveedoresTab() {
             </div>
             {(formPago.importe_compra || formPago.entrega) && (
               <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, display: 'flex', gap: 20, flexWrap: 'wrap' }}>
-                <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>Compra: </span><strong style={{ color: 'var(--amber)' }}>{fmt(parseFloat(formPago.importe_compra) || 0)}</strong></div>
-                <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>+ Percepción: </span><strong>{fmt(parseFloat(formPago.percepcion) || 0)}</strong></div>
-                <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>+ Saldo ant.: </span><strong>{fmt(parseFloat(formPago.saldo_anterior) || 0)}</strong></div>
-                <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>− Entrega: </span><strong style={{ color: 'var(--green)' }}>{fmt(parseFloat(formPago.entrega) || 0)}</strong></div>
-                <div style={{ fontSize: 14, fontWeight: 700 }}><span style={{ color: 'var(--muted)' }}>= Saldo adeudado: </span><strong style={{ color: ((parseFloat(formPago.importe_compra) || 0) + (parseFloat(formPago.percepcion) || 0) + (parseFloat(formPago.saldo_anterior) || 0) - (parseFloat(formPago.entrega) || 0)) > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt((parseFloat(formPago.importe_compra) || 0) + (parseFloat(formPago.percepcion) || 0) + (parseFloat(formPago.saldo_anterior) || 0) - (parseFloat(formPago.entrega) || 0))}</strong></div>
+                <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>Compra: </span><strong style={{ color: 'var(--amber)' }}>{fmt(parseNumero(formPago.importe_compra))}</strong></div>
+                <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>+ Percepción: </span><strong>{fmt(parseNumero(formPago.percepcion))}</strong></div>
+                <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>+ Saldo ant.: </span><strong>{fmt(parseNumero(formPago.saldo_anterior))}</strong></div>
+                <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>− Entrega: </span><strong style={{ color: 'var(--green)' }}>{fmt(parseNumero(formPago.entrega))}</strong></div>
+                <div style={{ fontSize: 14, fontWeight: 700 }}><span style={{ color: 'var(--muted)' }}>= Saldo adeudado: </span><strong style={{ color: ((parseNumero(formPago.importe_compra)) + (parseNumero(formPago.percepcion)) + (parseNumero(formPago.saldo_anterior)) - (parseNumero(formPago.entrega))) > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt((parseNumero(formPago.importe_compra)) + (parseNumero(formPago.percepcion)) + (parseNumero(formPago.saldo_anterior)) - (parseNumero(formPago.entrega)))}</strong></div>
               </div>
             )}
             <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Notas</label><input value={formPago.notas} onChange={e => setFormPago(f => ({ ...f, notas: e.target.value }))} placeholder="Cheque nro., banco, etc." style={{ ...inp, marginBottom: 12 }} /></div>

@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
+import { parseNumero } from '../../lib/formatos'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
 // URL publica de produccion del portal — NO usar window.location.origin para evitar URLs de preview de Vercel
@@ -190,7 +191,7 @@ async function eliminarMovimiento(mov) {
 
   async function registrarPago() {
     if (!pago.importe || !seleccionado) return
-    const importe = parseFloat(pago.importe)
+    const importe = parseNumero(pago.importe)
     const nuevoSaldo = (seleccionado.saldo || 0) - importe
     await supabase.from('movimientos_ctacte').insert({
       cliente_id: seleccionado.id,

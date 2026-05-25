@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
+import { parseNumero } from '../../lib/formatos'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
 function fmt(n) { return '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR') }
@@ -60,7 +61,7 @@ export default function Gastos() {
     const datos = {
       fecha: form.fecha, tipo,
       categoria: tipo === 'socio' || tipo === 'ingreso' ? '' : form.categoria,
-      descripcion: form.descripcion, monto: parseFloat(form.monto),
+      descripcion: form.descripcion, monto: parseNumero(form.monto),
       forma: form.forma,
       socio: tipo === 'socio' ? form.socio : null,
       origen_ingreso: tipo === 'ingreso' ? form.origenIngreso : null,
