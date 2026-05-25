@@ -31,6 +31,12 @@ export const PERIODOS = {
 
 // Hook: carga compras + ventas + pedidos + clientes en el rango pedido.
 // El consumer recarga cuando cambia el periodo (clave del PERIODOS).
+//
+// Además carga datos de COSTO en una ventana fija de 180 días (despostes,
+// cajas_stock y entradas) — sirven para calcular el costo promedio
+// ponderado de cada producto en ReporteProducto. Se usa una ventana
+// fija (no del período) porque el "costo promedio" tiene sentido
+// estable en el tiempo, no se calcula sólo con lo del período actual.
 export function useReportesData(periodo) {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState(null)
@@ -46,13 +52,21 @@ export function useReportesData(periodo) {
       } else {
         desde = fechaRelativaARG(-PERIODOS[periodo].dias + 1)
       }
+      // Ventana para calcular costos: últimos 180 días (o el período si es mayor)
+      const desdeCosto = desde < fechaRelativaARG(-180) ? desde : fechaRelativaARG(-180)
 
-      const [entradas, salidas, ventasCaja, pedidos, clientes] = await Promise.all([
+      const [entradas, salidas, ventasCaja, pedidos, clientes,
+             despostesCosto, cajasCosto, preciosLookup, entradasCosto] = await Promise.all([
         supabase.from('entradas_deposito').select('*').gte('fecha', desde).lte('fecha', hoy),
         supabase.from('salidas_deposito').select('*').gte('fecha', desde).lte('fecha', hoy),
         supabase.from('ventas_minoristas').select('*').eq('origen', 'caja').gte('fecha', desde).lte('fecha', hoy),
         supabase.from('pedidos').select('*').gte('dia_entrega', desde).lte('dia_entrega', hoy).eq('estado', 'confirmado'),
         supabase.from('clientes').select('id, nombre, tipo, lista_precios, saldo'),
+        // Cost data (ventana 180d)
+        supabase.from('despostes').select('piezas, fecha').gte('fecha', desdeCosto).lte('fecha', hoy),
+        supabase.from('cajas_stock').select('producto_id, precio_costo_kg, kg, fecha_ingreso').gte('fecha_ingreso', desdeCosto),
+        supabase.from('precios').select('id, nombre, categoria, kg_por_unidad, precio_minorista, precio_mayorista, precio_carniceria'),
+        supabase.from('entradas_deposito').select('descripcion, tipo, kg, precio_kg, fecha').gte('fecha', desdeCosto).lte('fecha', hoy),
       ])
 
       if (cancelado) return
@@ -80,6 +94,13 @@ export function useReportesData(periodo) {
         ventasCaja: ventasCaja.data || [],
         pedidos: pedidos.data || [],
         clientes: clientes.data || [],
+        // Cost data (180d window) — usado por ReporteProducto para margen real
+        costoFuentes: {
+          despostes: despostesCosto.data || [],
+          cajas: cajasCosto.data || [],
+          precios: preciosLookup.data || [],
+          entradas: entradasCosto.data || [],
+        },
         desde, hasta: hoy,
       })
       setLoading(false)
@@ -89,6 +110,57 @@ export function useReportesData(periodo) {
   }, [periodo])
 
   return { loading, data }
+}
+
+// ───────────────────────────────────────────────────────────────
+// Construye un mapa { NOMBRE_PRODUCTO_UPPER → costoKg ponderado }
+// a partir de las 3 fuentes de costo (180d):
+//   - despostes.piezas[]   → cada pieza tiene nombre + kg + precio_costo_kg
+//   - cajas_stock          → producto_id se resuelve via precios.nombre
+//   - entradas_deposito    → matching por descripcion exacta
+//
+// Cada fuente aporta (kg, costoTotal). El promedio final es ponderado por kg.
+// Si un producto vendido no aparece en ninguna fuente → costoKg = null
+// (la UI muestra "—" y no calcula margen para ese item).
+// ───────────────────────────────────────────────────────────────
+export function construirCostoPorProducto(costoFuentes) {
+  if (!costoFuentes) return {}
+  const acc = {}  // key → { kgTotal, costoTotal }
+  const agregar = (nombre, kg, precioCostoKg) => {
+    const n = (nombre || '').toString().toUpperCase().trim()
+    const k = Number(kg) || 0
+    const c = Number(precioCostoKg) || 0
+    if (!n || k <= 0 || c <= 0) return
+    if (!acc[n]) acc[n] = { kgTotal: 0, costoTotal: 0 }
+    acc[n].kgTotal   += k
+    acc[n].costoTotal += k * c
+  }
+
+  // 1) despostes → piezas individuales
+  ;(costoFuentes.despostes || []).forEach(d => {
+    ;(d.piezas || []).forEach(p => agregar(p.nombre, p.kg, p.precio_costo_kg))
+  })
+
+  // 2) cajas_stock → resolver producto_id a nombre via precios
+  const precioById = {}
+  ;(costoFuentes.precios || []).forEach(p => { precioById[p.id] = p })
+  ;(costoFuentes.cajas || []).forEach(c => {
+    if (!c.producto_id) return
+    const prod = precioById[c.producto_id]
+    if (prod) agregar(prod.nombre, c.kg, c.precio_costo_kg)
+  })
+
+  // 3) entradas_deposito → matching por descripcion exacta
+  ;(costoFuentes.entradas || []).forEach(e => {
+    agregar(e.descripcion, e.kg, e.precio_kg)
+  })
+
+  // Calcular promedio ponderado
+  const result = {}
+  Object.entries(acc).forEach(([k, v]) => {
+    result[k] = v.kgTotal > 0 ? v.costoTotal / v.kgTotal : null
+  })
+  return result
 }
 
 // Selector de período (toggle 30d / 90d / Año)
@@ -699,6 +771,10 @@ export function ReporteCliente({ data }) {
 // 🥩 POR PRODUCTO — ranking
 // ═══════════════════════════════════════════════════════════════
 export function ReporteProducto({ data }) {
+  // Mapa { 'NOMBRE_PRODUCTO_UPPER' → costoKg ponderado } construido a partir
+  // de despostes + cajas_stock + entradas_deposito de los últimos 180 días.
+  const costoPorProducto = useMemo(() => construirCostoPorProducto(data.costoFuentes), [data.costoFuentes])
+
   const ranking = useMemo(() => {
     const acc = {}
     const agregar = (items) => {
@@ -712,58 +788,126 @@ export function ReporteProducto({ data }) {
     }
     data.ventasCaja.forEach(v => agregar(v.items))
     data.pedidos.forEach(p => agregar(p.items))
-    return Object.values(acc).sort((a, b) => b.importe - a.importe)
-  }, [data])
+
+    // Enriquecer con costo, ganancia, margen
+    return Object.values(acc).map(p => {
+      const costoKg = costoPorProducto[p.nombre.toUpperCase().trim()] ?? null
+      const precioPromVenta = p.kg > 0 ? p.importe / p.kg : 0
+      const costoTotal = costoKg != null ? costoKg * p.kg : null
+      const ganancia   = costoTotal != null ? p.importe - costoTotal : null
+      const margenPct  = (ganancia != null && p.importe > 0) ? (ganancia / p.importe) * 100 : null
+      return { ...p, costoKg, precioPromVenta, costoTotal, ganancia, margenPct }
+    }).sort((a, b) => b.importe - a.importe)
+  }, [data, costoPorProducto])
 
   const porCategoria = useMemo(() => {
     const acc = {}
     ranking.forEach(r => {
       const c = r.categoria
-      if (!acc[c]) acc[c] = { categoria: c, importe: 0, kg: 0, productos: 0 }
+      if (!acc[c]) acc[c] = { categoria: c, importe: 0, kg: 0, productos: 0, costoTotal: 0, conCosto: 0, sinCosto: 0 }
       acc[c].importe   += r.importe
       acc[c].kg        += r.kg
       acc[c].productos += 1
+      if (r.costoTotal != null) {
+        acc[c].costoTotal += r.costoTotal
+        acc[c].conCosto   += 1
+      } else {
+        acc[c].sinCosto += 1
+      }
     })
-    return Object.values(acc).sort((a, b) => b.importe - a.importe)
+    return Object.values(acc).map(c => {
+      const ganancia  = c.costoTotal > 0 ? c.importe - c.costoTotal : null
+      const margenPct = (ganancia != null && c.importe > 0) ? (ganancia / c.importe) * 100 : null
+      return { ...c, ganancia, margenPct }
+    }).sort((a, b) => b.importe - a.importe)
   }, [ranking])
+
+  // Stats globales: cuántos productos tienen / no tienen costo
+  const cobertura = useMemo(() => {
+    const conCosto    = ranking.filter(r => r.costoKg != null).length
+    const sinCosto    = ranking.length - conCosto
+    const importeCon  = ranking.filter(r => r.costoKg != null).reduce((s, r) => s + r.importe, 0)
+    const importeTot  = ranking.reduce((s, r) => s + r.importe, 0)
+    const pctImporte  = importeTot > 0 ? (importeCon / importeTot) * 100 : 0
+    return { conCosto, sinCosto, pctImporte, totalProductos: ranking.length }
+  }, [ranking])
+
+  const colorMargen = (pct) => {
+    if (pct == null) return 'var(--muted)'
+    if (pct < 0)   return '#ff8b8b'
+    if (pct < 15)  return '#ffd17a'
+    if (pct < 30)  return '#7dff7d'
+    return 'var(--gold)'
+  }
 
   return (
     <>
+      {/* Banner de cobertura de costos */}
+      <div className="card" style={{ marginBottom: 16, padding: 12, borderLeft: `3px solid ${cobertura.pctImporte >= 70 ? '#7dff7d' : cobertura.pctImporte >= 40 ? '#ffd17a' : '#ff8b8b'}` }}>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>
+          📊 <strong style={{ color: 'var(--text)' }}>Cobertura de costos:</strong> {cobertura.conCosto} de {cobertura.totalProductos} productos tienen costo conocido
+          {cobertura.sinCosto > 0 && <span style={{ color: '#ff8b8b' }}> · {cobertura.sinCosto} sin datos</span>}
+          <span> · cubre <strong>{fmtPct(cobertura.pctImporte)}</strong> del facturado</span>
+        </div>
+        <div style={{ fontSize: 10, color: 'var(--muted)' }}>
+          ℹ️ Costo = promedio ponderado de las últimas compras/despostes (ventana 180 días).
+          Los productos sin datos (Costo: —) son los que no aparecen en entradas, despostes ni cajas en esa ventana —
+          cargá una compra/desposte y aparecen.
+        </div>
+      </div>
+
+      {/* Resumen por categoría con margen */}
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="card-title">📂 Resumen por categoría</div>
         {porCategoria.length === 0 ? (
           <p style={{ color: 'var(--muted)', fontSize: 13 }}>Sin ventas en el período.</p>
         ) : (
-          <table style={{ width: '100%', fontSize: 12 }}>
-            <thead>
-              <tr>
-                <th style={{ textAlign: 'left' }}>Categoría</th>
-                <th style={{ textAlign: 'right' }}>Productos distintos</th>
-                <th style={{ textAlign: 'right' }}>Kg vendidos</th>
-                <th style={{ textAlign: 'right', color: 'var(--gold)' }}>Facturado</th>
-              </tr>
-            </thead>
-            <tbody>
-              {porCategoria.map(c => (
-                <tr key={c.categoria} style={{ borderTop: '1px solid var(--border)' }}>
-                  <td style={{ padding: '6px 4px', fontWeight: 600 }}>{c.categoria}</td>
-                  <td style={{ padding: '6px 4px', textAlign: 'right', color: 'var(--muted)' }}>{c.productos}</td>
-                  <td style={{ padding: '6px 4px', textAlign: 'right' }}>{fmtK(c.kg)}</td>
-                  <td style={{ padding: '6px 4px', textAlign: 'right', color: 'var(--gold)', fontWeight: 700 }}>{fmt(c.importe)}</td>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', fontSize: 12, minWidth: 600 }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left' }}>Categoría</th>
+                  <th style={{ textAlign: 'right' }}>Productos</th>
+                  <th style={{ textAlign: 'right' }}>Kg</th>
+                  <th style={{ textAlign: 'right', color: 'var(--gold)' }}>Facturado</th>
+                  <th style={{ textAlign: 'right', color: '#ff8b8b' }}>Costo est.</th>
+                  <th style={{ textAlign: 'right' }}>Ganancia</th>
+                  <th style={{ textAlign: 'right' }}>Margen %</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {porCategoria.map(c => (
+                  <tr key={c.categoria} style={{ borderTop: '1px solid var(--border)' }}>
+                    <td style={{ padding: '6px 4px', fontWeight: 600 }}>{c.categoria}</td>
+                    <td style={{ padding: '6px 4px', textAlign: 'right', color: 'var(--muted)' }}>
+                      {c.productos}
+                      {c.sinCosto > 0 && <span style={{ color: '#ff8b8b', fontSize: 10 }}> ({c.sinCosto} s/costo)</span>}
+                    </td>
+                    <td style={{ padding: '6px 4px', textAlign: 'right' }}>{fmtK(c.kg)}</td>
+                    <td style={{ padding: '6px 4px', textAlign: 'right', color: 'var(--gold)', fontWeight: 700 }}>{fmt(c.importe)}</td>
+                    <td style={{ padding: '6px 4px', textAlign: 'right', color: '#ff8b8b' }}>{c.costoTotal > 0 ? fmt(c.costoTotal) : '—'}</td>
+                    <td style={{ padding: '6px 4px', textAlign: 'right', color: colorMargen(c.margenPct), fontWeight: 700 }}>
+                      {c.ganancia != null ? fmt(c.ganancia) : '—'}
+                    </td>
+                    <td style={{ padding: '6px 4px', textAlign: 'right', color: colorMargen(c.margenPct), fontWeight: 700 }}>
+                      {c.margenPct != null ? fmtPct(c.margenPct) : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
+      {/* Top productos con margen */}
       <div className="card">
         <div className="card-title">🏆 Top productos del período</div>
         {ranking.length === 0 ? (
           <p style={{ color: 'var(--muted)', fontSize: 13 }}>Sin ventas en el período.</p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', fontSize: 12, minWidth: 600 }}>
+            <table style={{ width: '100%', fontSize: 12, minWidth: 880 }}>
               <thead>
                 <tr>
                   <th style={{ textAlign: 'left', width: 30 }}>#</th>
@@ -771,7 +915,11 @@ export function ReporteProducto({ data }) {
                   <th style={{ textAlign: 'left' }}>Categoría</th>
                   <th style={{ textAlign: 'right' }}>Ops</th>
                   <th style={{ textAlign: 'right' }}>Kg</th>
+                  <th style={{ textAlign: 'right' }}>Venta $/kg</th>
+                  <th style={{ textAlign: 'right', color: '#ff8b8b' }}>Costo $/kg</th>
                   <th style={{ textAlign: 'right', color: 'var(--gold)' }}>Facturado</th>
+                  <th style={{ textAlign: 'right' }}>Ganancia</th>
+                  <th style={{ textAlign: 'right' }}>Margen %</th>
                 </tr>
               </thead>
               <tbody>
@@ -782,7 +930,17 @@ export function ReporteProducto({ data }) {
                     <td style={{ padding: '6px 4px', color: 'var(--muted)', fontSize: 11 }}>{p.categoria}</td>
                     <td style={{ padding: '6px 4px', textAlign: 'right', color: 'var(--muted)' }}>{p.ops}</td>
                     <td style={{ padding: '6px 4px', textAlign: 'right' }}>{fmtK(p.kg)}</td>
+                    <td style={{ padding: '6px 4px', textAlign: 'right' }}>{fmt(p.precioPromVenta)}</td>
+                    <td style={{ padding: '6px 4px', textAlign: 'right', color: '#ff8b8b' }}>
+                      {p.costoKg != null ? fmt(p.costoKg) : '—'}
+                    </td>
                     <td style={{ padding: '6px 4px', textAlign: 'right', color: 'var(--gold)', fontWeight: 700 }}>{fmt(p.importe)}</td>
+                    <td style={{ padding: '6px 4px', textAlign: 'right', color: colorMargen(p.margenPct), fontWeight: 700 }}>
+                      {p.ganancia != null ? fmt(p.ganancia) : '—'}
+                    </td>
+                    <td style={{ padding: '6px 4px', textAlign: 'right', color: colorMargen(p.margenPct), fontWeight: 700 }}>
+                      {p.margenPct != null ? fmtPct(p.margenPct) : '—'}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -795,6 +953,60 @@ export function ReporteProducto({ data }) {
           </div>
         )}
       </div>
+
+      {/* Top productos por MARGEN (más rentables) y los problemáticos */}
+      {ranking.filter(r => r.margenPct != null).length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 12, marginTop: 16 }}>
+          <div className="card">
+            <div className="card-title">🏅 Top 10 más rentables (por % margen)</div>
+            <table style={{ width: '100%', fontSize: 12 }}>
+              <tbody>
+                {ranking.filter(r => r.margenPct != null)
+                  .sort((a, b) => b.margenPct - a.margenPct)
+                  .slice(0, 10)
+                  .map((p, i) => (
+                    <tr key={p.nombre} style={{ borderTop: '1px solid var(--border)' }}>
+                      <td style={{ padding: '6px 4px', color: 'var(--muted)', width: 24 }}>{i + 1}.</td>
+                      <td style={{ padding: '6px 4px', fontWeight: 600 }}>{p.nombre}</td>
+                      <td style={{ padding: '6px 4px', textAlign: 'right', color: 'var(--muted)', fontSize: 11 }}>{fmt(p.importe)}</td>
+                      <td style={{ padding: '6px 4px', textAlign: 'right', color: colorMargen(p.margenPct), fontWeight: 700 }}>{fmtPct(p.margenPct)}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="card">
+            <div className="card-title" style={{ color: '#ff8b8b' }}>⚠️ Productos con margen bajo o negativo</div>
+            <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: -8, marginBottom: 10 }}>
+              Margen menor al 15% — revisar precio o costo de compra.
+            </p>
+            {(() => {
+              const problemas = ranking.filter(r => r.margenPct != null && r.margenPct < 15)
+                .sort((a, b) => a.margenPct - b.margenPct)
+                .slice(0, 10)
+              return problemas.length === 0 ? (
+                <p style={{ color: '#7dff7d', fontSize: 13 }}>✅ Ningún producto con margen bajo.</p>
+              ) : (
+                <table style={{ width: '100%', fontSize: 12 }}>
+                  <tbody>
+                    {problemas.map((p, i) => (
+                      <tr key={p.nombre} style={{ borderTop: '1px solid var(--border)' }}>
+                        <td style={{ padding: '6px 4px', color: 'var(--muted)', width: 24 }}>{i + 1}.</td>
+                        <td style={{ padding: '6px 4px', fontWeight: 600 }}>{p.nombre}</td>
+                        <td style={{ padding: '6px 4px', textAlign: 'right', color: 'var(--muted)', fontSize: 11 }}>
+                          Costo {fmt(p.costoKg)}/kg
+                        </td>
+                        <td style={{ padding: '6px 4px', textAlign: 'right', color: colorMargen(p.margenPct), fontWeight: 700 }}>{fmtPct(p.margenPct)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )
+            })()}
+          </div>
+        </div>
+      )}
     </>
   )
 }
