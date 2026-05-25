@@ -24,6 +24,8 @@
 // Extrae el peso en kg de un cajón leyéndolo del nombre del producto.
 // Reconoce patrones tipo "X20KG", "X 14 KG", "cajón 20kg", etc.
 // Si no encuentra nada, devuelve 0 (no se aplica conversión).
+// Es el FALLBACK histórico — preferir kgPorUnidadDeProducto() que usa
+// el campo explícito precios.kg_por_unidad si está cargado.
 export function kgPorUnidadDeNombre(nombre) {
   if (!nombre) return 0
   const txt = String(nombre).toUpperCase()
@@ -36,13 +38,33 @@ export function kgPorUnidadDeNombre(nombre) {
   return 0
 }
 
+// Devuelve cuántos kg pesa cada unidad de un producto vendido por cajón.
+// Usa el campo explícito `kg_por_unidad` del producto si está cargado;
+// si no, cae al parseo del nombre por compatibilidad. Devuelve 0 si no
+// se puede determinar (el caller debe fallback a 1 para no romper).
+//
+// `producto` puede ser:
+//   - Un objeto producto de la tabla `precios` con .kg_por_unidad y .nombre
+//   - Un objeto item del carrito que ya tenga kg_por_unidad copiado
+//   - Solo el nombre como string (legacy — para items viejos)
+export function kgPorUnidadDeProducto(producto) {
+  if (!producto) return 0
+  // String: legacy — solo tenemos el nombre
+  if (typeof producto === 'string') return kgPorUnidadDeNombre(producto)
+  // Objeto: preferir kg_por_unidad (campo explícito), fallback al nombre
+  const kpu = Number(producto.kg_por_unidad)
+  if (kpu > 0) return kpu
+  return kgPorUnidadDeNombre(producto.nombre || producto.descripcion || '')
+}
+
 // Devuelve [tipoStock, kgADescontar] para un item del carrito.
-// item: { tipo, kg, descripcion, stock_origen? }
+// item: { tipo, kg, descripcion, stock_origen?, kg_por_unidad? }
 // CATEGORIA_A_STOCK: mapeo categoria_producto → tipo en stock_actual
 //
 // Si la categoría es de "cajón" (pollo_cajon, rebozado_cajon), descuenta
 // del stock kg del producto base multiplicando unidades × kg_por_cajón.
-// Si no se puede detectar el kg/cajón del nombre, asume 1 (no rompe).
+// Prefiere item.kg_por_unidad (cargado desde precios.kg_por_unidad);
+// si no, parsea del nombre como fallback. Si no encuentra, asume 1.
 //
 // Retorna { tipoStock, cantidad } donde cantidad es la magnitud a descontar
 // (kg o unidades, depende del tipo de stock).
@@ -52,11 +74,11 @@ export function resolverDescuentoStock(item, CATEGORIA_A_STOCK = {}) {
 
   // Caso especial: cajones cuyo stock está en kg del producto base
   if (cat === 'pollo_cajon') {
-    const kgPorCajon = kgPorUnidadDeNombre(item.descripcion) || 1
+    const kgPorCajon = kgPorUnidadDeProducto(item) || 1
     return { tipoStock: 'pollo', cantidad: kg * kgPorCajon }
   }
   if (cat === 'rebozado_cajon') {
-    const kgPorCajon = kgPorUnidadDeNombre(item.descripcion) || 1
+    const kgPorCajon = kgPorUnidadDeProducto(item) || 1
     return { tipoStock: 'rebozado', cantidad: kg * kgPorCajon }
   }
 

@@ -24,7 +24,11 @@ const CATEGORIAS = {
   almacen: '🛒 Almacén',
   bebidas: '🥤 Bebidas',
 }
-const VACIO = { categoria: 'bovino_corte', nombre: '', precio_carniceria: '', precio_mayorista: '', precio_minorista: '', codigo_balanza: '', dias_vencimiento: '3', descripcion_etiqueta: '', pesable: true }
+const VACIO = { categoria: 'bovino_corte', nombre: '', precio_carniceria: '', precio_mayorista: '', precio_minorista: '', codigo_balanza: '', dias_vencimiento: '3', descripcion_etiqueta: '', pesable: true, kg_por_unidad: '' }
+
+// Categorías que se venden por cajón (unidad con peso fijo) y por lo tanto
+// necesitan el campo kg_por_unidad cargado para descontar stock correctamente.
+const CATEGORIAS_CON_KG_POR_UNIDAD = new Set(['pollo_cajon', 'rebozado_cajon'])
 const fmt = n => n != null ? '$' + Math.round(n).toLocaleString('es-AR') : '—'
 const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }
 
@@ -84,6 +88,12 @@ export default function Precios() {
       dias_vencimiento: form.dias_vencimiento === '' ? 3 : Number(form.dias_vencimiento),
       descripcion_etiqueta: form.descripcion_etiqueta || null,
       pesable: form.pesable !== false,
+      // kg por unidad — solo relevante para categorías por cajón (pollo_cajon,
+      // rebozado_cajon). Determina cuántos kg se descuentan del stock base al
+      // vender una unidad. NULL si no aplica (el sistema cae al parseo del nombre).
+      kg_por_unidad: form.kg_por_unidad === '' || form.kg_por_unidad == null
+        ? null
+        : Number(form.kg_por_unidad),
     }
 
     // Si está asignando un PLU, verificar si ya está ocupado por OTRO producto
@@ -142,6 +152,7 @@ export default function Precios() {
       dias_vencimiento: p.dias_vencimiento ?? 3,
       descripcion_etiqueta: p.descripcion_etiqueta ?? '',
       pesable: p.pesable !== false,
+      kg_por_unidad: p.kg_por_unidad ?? '',
     })
     setFiltro(p.categoria)
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -485,6 +496,23 @@ export default function Precios() {
                 <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>📅 Días vencimiento</label>
                 <input type="number" min="0" value={form.dias_vencimiento} onChange={e => setForm({ ...form, dias_vencimiento: e.target.value })} placeholder="3" style={inp} />
               </div>
+              {CATEGORIAS_CON_KG_POR_UNIDAD.has(form.categoria) && (
+                <div style={{ gridColumn: '1/-1', background: '#1a2a3a', border: '1px solid #2d3a5a', borderRadius: 8, padding: 12 }}>
+                  <label style={{ fontSize: 12, color: '#7db5ff', display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                    📦 Kg por cajón / unidad
+                  </label>
+                  <input
+                    type="number" step="0.1" min="0"
+                    value={form.kg_por_unidad}
+                    onChange={e => setForm({ ...form, kg_por_unidad: e.target.value })}
+                    placeholder="Ej: 20"
+                    style={{ ...inp, borderColor: '#7db5ff' }}
+                  />
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                    Cuántos kg pesa cada cajón/unidad. Al vender 1 cajón se descuentan estos kg del stock base ({form.categoria === 'pollo_cajon' ? 'pollo' : 'rebozado'}). Si lo dejás vacío, el sistema intenta parsearlo del nombre (ej. "X20KG").
+                  </div>
+                </div>
+              )}
               <div style={{ gridColumn: '1/-1' }}>
                 <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>🏷️ Descripción para etiqueta (opcional)</label>
                 <input value={form.descripcion_etiqueta} onChange={e => setForm({ ...form, descripcion_etiqueta: e.target.value })} placeholder="Ej: Asado de tira premium" style={inp} />

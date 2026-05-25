@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
 import { resolverDescuentoStock } from '../../lib/stockHelpers'
+import { cargarCajasDisponibles, crearCajasIngreso, venderCaja, revertirVentaCaja, CATEGORIA_A_TIPO_CAJA } from '../../lib/cajasStock'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 import FlujoDeposito from './FlujoDeposito'
 import AjusteStock from './AjusteStock'
@@ -1163,6 +1164,25 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
   const [historial, setHistorial] = useState([])
   const [editando, setEditando] = useState(null)
   const [formEdit, setFormEdit] = useState({})
+  // Para cajas CB/PT: array con el peso de cada caja individual.
+  // Se sincroniza con form.cantidad cuando tipo es caja_cb / caja_pt.
+  const [cajasPesos, setCajasPesos] = useState([])
+
+  // Tipos que tienen tracking individual (cada unidad es una fila en cajas_stock)
+  const esCajaIndividual = form.tipo === 'caja_cb' || form.tipo === 'caja_pt'
+
+  // Sincronizar el array de pesos con la cantidad cada vez que cambia
+  // form.cantidad o form.tipo (entrando/saliendo del modo cajas).
+  useEffect(() => {
+    if (!esCajaIndividual) { setCajasPesos([]); return }
+    const n = Math.max(1, parseInt(form.cantidad) || 1)
+    setCajasPesos(prev => {
+      const arr = [...prev]
+      while (arr.length < n) arr.push('')
+      if (arr.length > n) arr.length = n
+      return arr
+    })
+  }, [form.cantidad, form.tipo, esCajaIndividual])
 
   useEffect(() => { cargarHistorial() }, [])
 
@@ -1194,6 +1214,54 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
   async function guardar() {
     const esSoloUnid = TIPOS_SOLO_UNIDADES.includes(form.tipo)
     if (!form.tipo || !form.proveedor) { showAlert({ type: 'error', msg: 'Completá los campos requeridos' }); return }
+
+    // ── CAJAS CB / PT: tracking individual ────────────────────────────
+    // Cada caja se carga con su propio peso. Insertamos N filas en cajas_stock
+    // (una por caja) y UNA fila en entradas_deposito como registro contable.
+    if (esCajaIndividual) {
+      const pesosValidos = cajasPesos.map(p => parseFloat(p)).filter(p => p > 0)
+      const cantPesperada = Math.max(1, parseInt(form.cantidad) || 1)
+      if (pesosValidos.length !== cantPesperada) {
+        showAlert({ type: 'error', msg: `Cargá el peso de las ${cantPesperada} cajas (faltan ${cantPesperada - pesosValidos.length})` })
+        return
+      }
+      const kgTotalCajas = pesosValidos.reduce((s, kg) => s + kg, 0)
+      const importeCajas = parseFloat(form.importe) || 0
+      const precioPromedioKg = kgTotalCajas > 0 ? importeCajas / kgTotalCajas : 0
+      const descripcionCajas = `${form.descripcion || (form.tipo === 'caja_cb' ? 'Caja CB' : 'Caja PT')} ×${cantPesperada}`
+      // 1) Registrar la entrada contable (suma de las cajas)
+      const { data: entradaIns, error: errEnt } = await supabase.from('entradas_deposito').insert({
+        fecha: form.fecha, tipo: form.tipo, proveedor_nombre: form.proveedor,
+        descripcion: descripcionCajas, kg: kgTotalCajas, kg_real: kgTotalCajas,
+        merma_pct: 0, precio_kg: precioPromedioKg,
+        importe: importeCajas, destino: form.destino, cantidad: cantPesperada,
+      }).select().single()
+      if (errEnt) { showAlert({ type: 'error', msg: errEnt.message }); return }
+      // 2) Insertar una fila por caja en cajas_stock (con su peso individual)
+      const { error: errCajas } = await crearCajasIngreso(pesosValidos, {
+        tipoCaja: form.tipo === 'caja_cb' ? 'CB' : 'PT',
+        fecha: form.fecha,
+        proveedor: form.proveedor,
+        descripcion: form.descripcion || null,
+        precioCostoKg: precioPromedioKg,
+        entradaId: entradaIns?.id || null,
+      })
+      if (errCajas) { showAlert({ type: 'error', msg: 'Cajas no se cargaron: ' + errCajas }); return }
+      // 3) Registrar en compras_proveedores
+      await supabase.from('compras_proveedores').insert({
+        fecha: form.fecha, proveedor_nombre: form.proveedor,
+        producto: descripcionCajas, kg: kgTotalCajas, importe: importeCajas,
+      })
+      showAlert({ type: 'success', msg: `✅ ${cantPesperada} cajas registradas — ${kgTotalCajas.toFixed(1)} kg en total` })
+      setForm(f => ({ ...f, descripcion: '', kg: '', importe: '', precioKg: '9800', cantidad: '1' }))
+      setCajasPesos([])
+      onSaved()
+      cargarHistorial()
+      setTimeout(() => showAlert(null), 3000)
+      return
+    }
+
+    // ── FLUJO HISTÓRICO PARA EL RESTO DE TIPOS ────────────────────────
     if (esSoloUnid && !form.cantidad) { showAlert({ type: 'error', msg: 'Ingresá la cantidad de unidades' }); return }
     if (!esSoloUnid && !form.kg) { showAlert({ type: 'error', msg: 'Completá los campos requeridos' }); return }
     const esEnUnidades = TIPOS_EN_UNIDADES.includes(form.tipo)
@@ -1346,14 +1414,20 @@ async function eliminar(entrada) {
         </div>
         {TIPOS_EN_UNIDADES.includes(form.tipo) && (
           <div className="form-row">
-            <div className="form-group"><label>{esSoloUnidades ? '📦 Cantidad de unidades' : 'Cantidad de unidades'}</label>
-              <input type="number" min="1" step="1" placeholder={esSoloUnidades ? 'Ej: 24' : 'Ej: 14'} value={form.cantidad} onChange={e => setForm(f => ({ ...f, cantidad: e.target.value }))} style={{ borderColor: 'var(--gold)' }} />
+            <div className="form-group"><label>{esSoloUnidades ? '📦 Cantidad de unidades' : esCajaIndividual ? '📦 Cantidad de cajas' : 'Cantidad de unidades'}</label>
+              <input type="number" min="1" step="1" placeholder={esSoloUnidades ? 'Ej: 24' : esCajaIndividual ? 'Ej: 5' : 'Ej: 14'} value={form.cantidad} onChange={e => setForm(f => ({ ...f, cantidad: e.target.value }))} style={{ borderColor: 'var(--gold)' }} />
             </div>
             <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end' }}>
               <div style={{ fontSize: 12, color: 'var(--muted)', paddingBottom: 8 }}>
                 {(() => {
                   const cant = Math.max(1, parseInt(form.cantidad) || 1)
                   if (esSoloUnidades) return `📦 Se sumarán ${cant} unidades al stock`
+                  if (esCajaIndividual) {
+                    const total = cajasPesos.reduce((s, p) => s + (parseFloat(p) || 0), 0)
+                    return total > 0
+                      ? `📦 Total: ${cant} cajas = ${total.toFixed(1)} kg`
+                      : '📦 Cargá el peso de cada caja abajo'
+                  }
                   const kgU = parseFloat(form.kg) || 0
                   return kgU > 0 ? `📦 Total: ${cant} × ${kgU} kg = ${(cant * kgU).toFixed(1)} kg al stock` : '📦 Ingresá kg por unidad para ver el total'
                 })()}
@@ -1361,7 +1435,36 @@ async function eliminar(entrada) {
             </div>
           </div>
         )}
-        {!esSoloUnidades && (
+
+        {/* ──────────────────────────────────────────────────────────
+            CAJAS CB/PT: grid con un input de peso por cada caja.
+            Permite cargar pesos variables sin asumir uniformidad.
+            ────────────────────────────────────────────────────────── */}
+        {esCajaIndividual && cajasPesos.length > 0 && (
+          <div style={{ background: '#1a2a3a', border: '1px solid #2d3a5a', borderRadius: 10, padding: '12px 14px', marginBottom: 12 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#7db5ff', marginBottom: 10 }}>
+              ⚖️ Peso individual de cada caja {form.tipo === 'caja_cb' ? 'CB' : 'PT'}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 8 }}>
+              {cajasPesos.map((p, idx) => (
+                <div key={idx}>
+                  <label style={{ fontSize: 10, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Caja #{idx + 1} (kg)</label>
+                  <input
+                    type="number" step="0.01" min="0" placeholder="0.0"
+                    value={p}
+                    onChange={e => setCajasPesos(prev => prev.map((v, i) => i === idx ? e.target.value : v))}
+                    style={{ width: '100%', background: 'var(--surface)', border: `1px solid ${p ? 'var(--gold)' : 'var(--border)'}`, color: 'var(--text)', borderRadius: 6, padding: '6px 8px', fontSize: 14, fontWeight: 600, boxSizing: 'border-box' }}
+                  />
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: 10, fontSize: 11, color: 'var(--muted)' }}>
+              💡 Cada caja se carga individualmente. Al vender vas a elegir cuál caja específica del stock.
+            </div>
+          </div>
+        )}
+
+        {!esSoloUnidades && !esCajaIndividual && (
           <div className="form-row">
             <div className="form-group"><label>{TIPOS_EN_UNIDADES.includes(form.tipo) ? 'Kg por unidad' : 'Kg'}</label>
               <input type="number" step="0.1" placeholder="0" value={form.kg} onChange={e => setForm(f => ({ ...f, kg: e.target.value }))} />
@@ -1483,12 +1586,19 @@ export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   const [formManual, setFormManual] = useState({ descripcion: '', importe: '' })
   const [piezasDispVenta, setPiezasDispVenta] = useState([])
   const [piezaEnteraSeleccionada, setPiezaEnteraSeleccionada] = useState(null)
+  // Cajas individuales disponibles (cajas_stock) — para Caja CB/PT
+  const [cajasDispVenta, setCajasDispVenta] = useState([])
+  const [cajaSeleccionada, setCajaSeleccionada] = useState(null)
   // Mapa { tipo: kg_disponible } cargado de stock_actual — se usa para mostrar
   // disponibilidad de cajas CB/PT al cajero y validar que no sobre-venda.
   const [stockMap, setStockMap] = useState({})
   async function recargarPiezasDispVenta() {
     const { data } = await supabase.from('piezas_stock').select('*').eq('estado', 'disponible').order('fecha_ingreso', { ascending: true }).order('id', { ascending: true })
     setPiezasDispVenta(data || [])
+  }
+  async function recargarCajasDispVenta() {
+    const { data } = await supabase.from('cajas_stock').select('*').eq('estado', 'disponible').order('fecha_ingreso', { ascending: true }).order('id', { ascending: true })
+    setCajasDispVenta(data || [])
   }
   async function recargarStockMap() {
     const { data } = await supabase.from('stock_actual').select('tipo, kg_disponible')
@@ -1501,6 +1611,7 @@ export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
     supabase.from('clientes').select('*').order('nombre').then(({ data }) => setClientes(data || []))
   supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false }).then(({ data }) => setMediasDisponibles(data || []))
   recargarPiezasDispVenta()
+  recargarCajasDispVenta()
   recargarStockMap()
   }, [])
 
@@ -1548,7 +1659,13 @@ const CATEGORIA_A_STOCK = {
     pieza_parrillero: 'pieza_parrillero',
     caja_cb: 'caja_cb',
     caja_pt: 'caja_pt',
-    cerdo_corte: 'cerdo',
+    // ── CERDO ──────────────────────────────────────────────
+    // cerdo (capón entero) → stock_actual.tipo='cerdo' (capones)
+    // cerdo_corte / cerdo_pieza → usar stock_origen del producto si está
+    //   configurado (ej. 'cerdo_bondiola', 'cerdo_pierna'), sino caer en
+    //   el bucket genérico 'cerdo_pieza' que se SUMA al display de
+    //   "Cerdo Piezas" del dashboard. NUNCA descontar de 'cerdo' (capones).
+    cerdo_corte: 'cerdo_pieza',
     cerdo_pieza: 'cerdo_pieza',
     cerdo: 'cerdo',
     embutido: 'embutido',
@@ -1581,26 +1698,18 @@ const CATEGORIA_A_STOCK = {
 async function agregarItem() {
     const esUnidadLocal = CATEGORIAS_POR_UNIDAD.has(form.categoria)
     const unidadLabel = esUnidadLocal ? 'cantidad' : 'kg'
-    if (!form.kg || !form.precio) { showAlert({ type: 'error', msg: `Completá ${unidadLabel} y precio` }); return }
-    if (form.categoria === 'pieza_entera' && !piezaEnteraSeleccionada) { showAlert({ type: 'error', msg: 'Seleccioná una pieza del stock' }); return }
-    if (form.categoria !== 'bovino_mr' && form.categoria !== 'pieza_entera' && !form.productoId) { showAlert({ type: 'error', msg: 'Seleccioná un producto' }); return }
-
-    // Validación de stock para cajas CB/PT: no permitir despachar más cajas
-    // que las disponibles en stock_actual (considerando lo que ya está en el
-    // carrito aún sin guardar).
     const esCajaLocal = form.categoria === 'bovino_caja_cb' || form.categoria === 'bovino_caja_pt'
-    if (esCajaLocal) {
-      const tipoStock = CATEGORIA_A_STOCK[form.categoria]
-      const disponible = stockMap[tipoStock] || 0
-      const yaEnCarrito = items
-        .filter(it => it.tipo === form.categoria)
-        .reduce((s, it) => s + (Number(it.kg) || 0), 0)
-      const pedido = parseFloat(form.kg) || 0
-      if (yaEnCarrito + pedido > disponible) {
-        const restante = Math.max(0, disponible - yaEnCarrito)
-        showAlert({ type: 'error', msg: `Stock insuficiente: solo hay ${restante} caja(s) disponible(s)` })
-        return
-      }
+    // Para cajas CB/PT: si hay una caja seleccionada del stock individual,
+    // el kg viene de la caja (no del input del form). El precio sí del form.
+    if (esCajaLocal && cajaSeleccionada) {
+      if (!form.precio) { showAlert({ type: 'error', msg: 'Cargá el precio/kg' }); return }
+    } else {
+      if (!form.kg || !form.precio) { showAlert({ type: 'error', msg: `Completá ${unidadLabel} y precio` }); return }
+    }
+    if (form.categoria === 'pieza_entera' && !piezaEnteraSeleccionada) { showAlert({ type: 'error', msg: 'Seleccioná una pieza del stock' }); return }
+    if (esCajaLocal && !cajaSeleccionada) { showAlert({ type: 'error', msg: 'Seleccioná una caja del stock' }); return }
+    if (form.categoria !== 'bovino_mr' && form.categoria !== 'pieza_entera' && !esCajaLocal && !form.productoId) {
+      showAlert({ type: 'error', msg: 'Seleccioná un producto' }); return
     }
 
     const prod = todosPrecios.find(p => p.id === form.productoId)
@@ -1609,30 +1718,42 @@ async function agregarItem() {
       descripcion = mediaSeleccionada ? `Media Res — ${mediaSeleccionada.descripcion || mediaSeleccionada.proveedor_nombre}` : 'Media Res'
     } else if (form.categoria === 'pieza_entera') {
       descripcion = `${piezaEnteraSeleccionada.tipo_pieza} #${piezaEnteraSeleccionada.id} (${piezaEnteraSeleccionada.proveedor_origen || 's/proveedor'})`
+    } else if (esCajaLocal && cajaSeleccionada) {
+      descripcion = `Caja ${cajaSeleccionada.tipo_caja} #${cajaSeleccionada.id} — ${Number(cajaSeleccionada.kg).toFixed(1)} kg`
     } else {
       descripcion = prod?.nombre || ''
     }
     const prodItem = (form.categoria !== 'bovino_mr' && form.categoria !== 'pieza_entera') ? todosPrecios.find(p => p.id === form.productoId) : null
+    // Para cajas: kg viene de la caja seleccionada, no del form
+    const kgItem = esCajaLocal && cajaSeleccionada ? Number(cajaSeleccionada.kg) : parseFloat(form.kg)
+    const precioItem = parseFloat(form.precio)
 const item = {
   descripcion,
-  kg: parseFloat(form.kg),
-  precio: parseFloat(form.precio),
-  importe: parseFloat(form.kg) * parseFloat(form.precio),
+  kg: kgItem,
+  precio: precioItem,
+  importe: kgItem * precioItem,
   tipo: form.categoria,
-  // 'u' para items vendidos por unidad (cajones, cajas, almacén, bebidas) y
-  // 'kg' para items pesables. El renderizado del carrito usa este flag.
-  unidad: esUnidadLocal ? 'u' : 'kg',
+  // 'u' para items vendidos por unidad (cajones, almacén, bebidas) y 'kg'
+  // para items pesables. Las cajas individuales usan 'kg' porque la
+  // unidad real de venta es el kg (cada caja tiene su peso propio).
+  unidad: (esUnidadLocal && !esCajaLocal) ? 'u' : 'kg',
   stock_origen: form.categoria === 'pieza_entera' ? 'bovino_pieza' : (prodItem?.stock_origen || null),
+  kg_por_unidad: prodItem?.kg_por_unidad || null,
   media_res_id: mediaSeleccionada?.id || null,
   pieza_id: form.categoria === 'pieza_entera' ? piezaEnteraSeleccionada?.id : null,
   pieza_tipo: form.categoria === 'pieza_entera' ? piezaEnteraSeleccionada?.tipo_pieza : null,
+  // caja_id: para cajas individuales — al guardar el remito se llama
+  // venderCaja(caja_id) que la marca como 'vendida' en cajas_stock.
+  caja_id: esCajaLocal ? cajaSeleccionada?.id : null,
+  caja_tipo: esCajaLocal ? cajaSeleccionada?.tipo_caja : null,
 }
     setItems(prev => [...prev, item])
     setForm(f => ({ ...f, kg: '', productoId: '', precio: '', categoria: '' }))
-    // IMPORTANTE: la media res NO se descuenta del stock al agregarla al carrito.
-    // Recien se marca como despostada en guardar() cuando se confirma el despacho y se genera el remito.
+    // IMPORTANTE: ni media res ni cajas se descuentan del stock al agregarse
+    // al carrito. Se marca como vendida recién en guardar() cuando se confirma.
     if (mediaSeleccionada) setMediaSeleccionada(null)
     if (piezaEnteraSeleccionada) setPiezaEnteraSeleccionada(null)
+    if (cajaSeleccionada) setCajaSeleccionada(null)
   }
  
   function quitarItem(idx) { setItems(prev => prev.filter((_, i) => i !== idx)) }
@@ -1685,6 +1806,10 @@ const item = {
     const kgPorTipo = {}
 for (const item of items) {
   if (item.manual) continue  // los items manuales (descartables/insumos) no descuentan stock
+  // Cajas individuales: las marcamos vendidas con venderCaja() abajo, que
+  // ya decrementa stock_actual.caja_cb/caja_pt por su peso individual.
+  // Skipear acá para no descontar dos veces.
+  if (item.caja_id) continue
   // resolverDescuentoStock maneja el caso especial de cajones (pollo_cajon /
   // rebozado_cajon) que descuentan kg del producto base, multiplicando
   // unidades × kg_por_cajón (parseado del nombre, ej. "X20KG").
@@ -1706,6 +1831,23 @@ for (const item of items) {
       cliente_id: clienteId || null, domicilio,
       items, total, cobro: form.cobro, notas: form.notas
     }).select().single()
+
+    // Marcar cajas individuales como vendidas (cajas_stock) — venderCaja
+    // también decrementa stock_actual.caja_cb / caja_pt automáticamente.
+    const itemsCajas = items.filter(it => it.caja_id)
+    for (const it of itemsCajas) {
+      const { error: errCaja } = await venderCaja(it.caja_id, {
+        destino: form.destino,
+        clienteId: clienteId || null,
+        clienteNombre,
+        precioVentaKg: it.precio,
+        totalVenta: it.importe,
+        fechaSalida: form.fecha,
+        notas: 'Vendida en remito N° ' + String(remitoData?.numero || remitoData?.id || '').padStart(5, '0'),
+      })
+      if (errCaja) console.warn('No se pudo marcar caja vendida:', errCaja)
+    }
+    if (itemsCajas.length > 0) await recargarCajasDispVenta()
 
     // Marcar piezas individuales vendidas (de cualquier item con tipo='pieza_entera')
     const itemsPiezaEntera = items.filter(it => it.tipo === 'pieza_entera' && it.pieza_id)
@@ -1868,54 +2010,80 @@ for (const item of items) {
             </select>
           </div>
           <div className="form-group"><label>Producto</label>
-            <select value={form.productoId} onChange={e => onProductoChange(e.target.value)} disabled={!form.categoria}>
-              <option value="">— Seleccioná producto —</option>
-              {productosFiltrados.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-            </select>
+            {esCaja ? (
+              <div style={{ padding: '8px 12px', background: 'var(--surface2)', border: '1px dashed var(--border)', borderRadius: 8, fontSize: 12, color: 'var(--muted)' }}>
+                ↓ Elegí una caja del stock individual abajo
+              </div>
+            ) : (
+              <select value={form.productoId} onChange={e => onProductoChange(e.target.value)} disabled={!form.categoria}>
+                <option value="">— Seleccioná producto —</option>
+                {productosFiltrados.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+              </select>
+            )}
           </div>
         </div>
 
-        {/* Para cajas CB/PT mostramos el stock disponible bien visible para
-            que el cajero sepa cuánto puede vender sin pasar al negativo. */}
+        {/* Selector de cajas individuales (CB / PT) — reemplaza el banner viejo.
+            Cada caja tiene su peso propio cargado en el ingreso. Al seleccionar
+            una, el form usa su kg automáticamente. Las cajas ya en el carrito
+            (sin guardar todavía) se ocultan para no venderlas dos veces. */}
         {esCaja && (() => {
-          const tipoStock = CATEGORIA_A_STOCK[form.categoria]
-          const disponible = stockMap[tipoStock] || 0
-          const yaEnCarrito = items.filter(it => it.tipo === form.categoria).reduce((s, it) => s + (Number(it.kg) || 0), 0)
-          const restante = Math.max(0, disponible - yaEnCarrito)
-          const sinStock = restante === 0
+          const tipoCaja = CATEGORIA_A_TIPO_CAJA[form.categoria]
+          const idsEnCarrito = items.filter(it => it.caja_id).map(it => it.caja_id)
+          const cajasVisibles = cajasDispVenta.filter(c => c.tipo_caja === tipoCaja && !idsEnCarrito.includes(c.id))
           return (
-            <div style={{
-              background: sinStock ? '#3a1a1a' : '#1a2a3a',
-              border: `1px solid ${sinStock ? '#5a2a2a' : '#2d3a5a'}`,
-              borderRadius: 8, padding: '10px 14px', marginBottom: 12,
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap',
-            }}>
-              <div style={{ fontSize: 12, color: sinStock ? '#ff8b8b' : '#7db5ff', fontWeight: 600 }}>
-                📦 Stock disponible de {form.categoria === 'bovino_caja_cb' ? 'Cajas CB' : 'Cajas PT'}
+            <div style={{ background: '#1a2a3a', border: '1px solid #2d3a5a', borderRadius: 10, padding: '14px 16px', marginBottom: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#7db5ff' }}>
+                  📦 Seleccioná la caja {tipoCaja} a despachar
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                  {cajasVisibles.length} disponible{cajasVisibles.length === 1 ? '' : 's'} en stock
+                </div>
               </div>
-              <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-                <span style={{ fontSize: 11, color: 'var(--muted)' }}>En depósito: <strong style={{ color: 'var(--text)' }}>{disponible}</strong></span>
-                {yaEnCarrito > 0 && <span style={{ fontSize: 11, color: 'var(--muted)' }}>En carrito: <strong style={{ color: 'var(--amber)' }}>{yaEnCarrito}</strong></span>}
-                <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: sinStock ? '#ff6b6b' : '#7dff7d' }}>
-                  {restante} {restante === 1 ? 'caja' : 'cajas'}
-                </span>
-              </div>
+              {cajasVisibles.length === 0 ? (
+                <div style={{ fontSize: 12, color: 'var(--muted)', padding: '6px 0' }}>
+                  Sin cajas {tipoCaja} disponibles en el depósito. Cargá nuevas desde Entradas.
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
+                  {cajasVisibles.map(c => (
+                    <div key={c.id}
+                      onClick={() => { setCajaSeleccionada(c); setForm(f => ({ ...f, kg: String(c.kg) })) }}
+                      style={{
+                        padding: '8px 12px', borderRadius: 8, cursor: 'pointer',
+                        border: `2px solid ${cajaSeleccionada?.id === c.id ? 'var(--gold)' : 'var(--border)'}`,
+                        background: cajaSeleccionada?.id === c.id ? 'rgba(201,168,76,0.12)' : 'var(--surface2)',
+                      }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 13 }}>📦 Caja {c.tipo_caja} #{c.id}</div>
+                          <div style={{ fontSize: 10, color: 'var(--muted)' }}>{c.proveedor_origen || 's/proveedor'} · {c.fecha_ingreso}</div>
+                        </div>
+                        <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{Number(c.kg).toFixed(1)} kg</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )
         })()}
 
         <div className="form-row">
-          <div className="form-group"><label>{esUnidad ? 'Cantidad de unidades' : 'Kg'}</label>
+          <div className="form-group"><label>{esCaja ? 'Kg (auto desde la caja seleccionada)' : esUnidad ? 'Cantidad de unidades' : 'Kg'}</label>
             <input
               type="number"
-              step={esUnidad ? '1' : '0.1'}
-              min={esUnidad ? '1' : '0'}
-              placeholder={esUnidad ? '1' : '0'}
+              step={esUnidad && !esCaja ? '1' : '0.01'}
+              min={esUnidad && !esCaja ? '1' : '0'}
+              placeholder={esUnidad && !esCaja ? '1' : '0'}
               value={form.kg}
               onChange={e => setForm(f => ({ ...f, kg: e.target.value }))}
+              disabled={esCaja && !!cajaSeleccionada}
+              style={esCaja && !!cajaSeleccionada ? { opacity: 0.6, cursor: 'not-allowed' } : {}}
             />
           </div>
-          <div className="form-group"><label>{esUnidad ? 'Precio por unidad' : 'Precio/kg'}</label>
+          <div className="form-group"><label>{esCaja ? 'Precio por kg ($)' : esUnidad ? 'Precio por unidad' : 'Precio/kg'}</label>
             <input type="number" value={form.precio} onChange={e => setForm(f => ({ ...f, precio: e.target.value }))} style={{ borderColor: 'var(--gold)' }} />
           </div>
         </div>
@@ -2050,6 +2218,12 @@ export function RemitosTab({ remitoActual }) {
     const nuevoSaldo = (clienteActual?.saldo || 0) - remito.total
     await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', remito.cliente_id)
     await supabase.from('movimientos_ctacte').delete().eq('remito_id', remito.id)
+  }
+  // Revertir cajas individuales vendidas en este remito (vuelven a 'disponible')
+  const itemsCajas = (remito.items || []).filter(it => it.caja_id)
+  for (const it of itemsCajas) {
+    const { error } = await revertirVentaCaja(it.caja_id)
+    if (error) console.warn('No se pudo revertir caja vendida:', error)
   }
   showAlert('🗑️ Remito anulado', 'success')
   setAnulando(false)

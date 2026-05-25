@@ -12,7 +12,8 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { decodificarEANBalanza, esCodigoBalanza } from '../../lib/balanzaEAN'
 import { fechaHoyARG, horaHoyARG, horaNumARG } from '../../lib/fechas'
-import { kgPorUnidadDeNombre } from '../../lib/stockHelpers'
+import { kgPorUnidadDeProducto } from '../../lib/stockHelpers'
+import { cargarCajasDisponibles, venderCaja, CATEGORIA_A_TIPO_CAJA } from '../../lib/cajasStock'
 import HistorialCaja from './HistorialCaja'
 import ArqueoCaja from './ArqueoCaja'
 
@@ -62,6 +63,10 @@ export default function Caja() {
   const [mostrarCierre, setMostrarCierre] = useState(false)
   const [guardandoVenta, setGuardandoVenta] = useState(false) // Anti-duplicado: bloquea doble click / Enter repetido en cerrarVenta()
   const ventaClientIdRef = useRef(null)                       // UUID generado al abrir cobro — clave de idempotencia en DB
+  // Selector de cajas individuales (CB/PT) — modal que abre al escanear/seleccionar
+  // un producto de categoría bovino_caja_cb o bovino_caja_pt
+  const [selectorCaja, setSelectorCaja] = useState(null)      // { producto } | null
+  const [cajasDisp, setCajasDisp] = useState([])              // cajas con estado='disponible'
   const [ultimaVenta, setUltimaVenta] = useState(null)
   const [ventasHoy, setVentasHoy] = useState([])
   const [vistaCaja, setVistaCaja] = useState('vender') // 'vender' | 'historial' | 'arqueo'
@@ -75,7 +80,7 @@ export default function Caja() {
 
   async function cargarTodo() {
     const hoy = fechaHoyARG()  // Hora local ARG, NO UTC. Ver lib/fechas.js
-    const [{ data: pre }, { data: cfg }, { data: ventas }, { data: ofs }] = await Promise.all([
+    const [{ data: pre }, { data: cfg }, { data: ventas }, { data: ofs }, { data: cajas }] = await Promise.all([
       supabase.from('precios').select('*').order('nombre'),
       supabase.from('config_sistema').select('*').eq('clave', 'ean13_formato').maybeSingle(),
       supabase.from('ventas_minoristas').select('*')
@@ -85,11 +90,15 @@ export default function Caja() {
         .eq('activa', true)
         .lte('fecha_inicio', hoy)
         .gte('fecha_fin', hoy),
+      // Cajas individuales disponibles para venta (CB + PT)
+      supabase.from('cajas_stock').select('*').eq('estado', 'disponible')
+        .order('fecha_ingreso', { ascending: true }).order('id', { ascending: true }),
     ])
     setPrecios(pre || [])
     if (cfg?.valor) setConfigEAN(cfg.valor)
     setVentasHoy(ventas || [])
     setOfertas(ofs || [])
+    setCajasDisp(cajas || [])
   }
 
   // ---- Resuelve el precio final de un producto según lista activa + ofertas ----
@@ -182,6 +191,13 @@ export default function Caja() {
   }
 
   function agregarItem(producto, cantidad, precioOverride = null) {
+    // Interceptar productos de categoría caja CB/PT: en vez de agregar al
+    // carrito directo, abrir el selector de caja individual del stock.
+    if (producto?.categoria === 'bovino_caja_cb' || producto?.categoria === 'bovino_caja_pt') {
+      setSelectorCaja({ producto, precioOverride })
+      return
+    }
+
     const resuelto = resolverPrecio(producto)
     const precio = precioOverride != null ? Number(precioOverride) : resuelto.precio
     const tieneOferta = !!resuelto.oferta && precio < resuelto.precioBase
@@ -192,6 +208,15 @@ export default function Caja() {
       producto_id: producto.id,
       descripcion: producto.nombre,
       categoria: producto.categoria,
+      // stock_origen del producto — usado en cerrarVenta para descontar
+      // del cut específico (ej. 'cerdo_bondiola') en lugar de la categoría
+      // genérica. Permite que productos como "Bondiola de cerdo" toquen
+      // stock_actual.cerdo_bondiola en vez del bucket cerdo_pieza general.
+      stock_origen: producto.stock_origen || null,
+      // kg por unidad para cajones (pollo_cajon, rebozado_cajon). Si está
+      // null, el helper hace fallback al parseo del nombre. Cargado desde
+      // /admin/precios al crear el producto.
+      kg_por_unidad: producto.kg_por_unidad || null,
       kg: cant,            // se sigue llamando "kg" para no romper el resto; representa la cantidad
       unidad: pesable ? 'kg' : 'u',
       precio: parseFloat(precio),
@@ -205,6 +230,37 @@ export default function Caja() {
     const badge = tieneOferta ? ' 🏷️ OFERTA' : ''
     const listaTxt = listaPrecio === 'mayorista' ? ' [MAY]' : ''
     showMsg(`✅ ${producto.nombre} — ${unidadTxt}${badge}${listaTxt}`)
+  }
+
+  // Agrega una caja específica seleccionada del modal al carrito.
+  // El kg es el de la caja física; el precio sale de la lista (kg×precio_kg).
+  function agregarCajaAlCarrito(caja, producto) {
+    const resuelto = resolverPrecio(producto)
+    const precio = resuelto.precio  // precio por kg
+    const tieneOferta = !!resuelto.oferta && precio < resuelto.precioBase
+    const kg = Number(caja.kg) || 0
+    setCarrito(c => [...c, {
+      id: Date.now() + Math.random(),
+      producto_id: producto.id,
+      descripcion: `${producto.nombre} — Caja #${caja.id} (${kg.toFixed(1)} kg)`,
+      categoria: producto.categoria,
+      stock_origen: null,
+      kg_por_unidad: null,
+      kg,
+      unidad: 'kg',
+      precio: parseFloat(precio),
+      precio_base: parseFloat(resuelto.precioBase),
+      tiene_oferta: tieneOferta,
+      oferta_pct: tieneOferta && resuelto.oferta?.descuento_pct ? Number(resuelto.oferta.descuento_pct) : null,
+      lista: listaPrecio,
+      importe: kg * parseFloat(precio),
+      // Marcadores específicos de caja individual — usados en cerrarVenta
+      // para llamar venderCaja(caja_id) y persistido en items[] de la venta.
+      caja_id: caja.id,
+      caja_tipo: caja.tipo_caja,
+    }])
+    setSelectorCaja(null)
+    showMsg(`✅ Caja ${caja.tipo_caja} #${caja.id} — ${kg.toFixed(1)} kg`)
   }
 
   // Cuando la balanza embebe el importe (no el peso), usamos esta función
@@ -319,6 +375,17 @@ export default function Caja() {
         precio: i.precio,
         importe: i.importe,
         producto_id: i.producto_id,
+        // Persistido para que anular-venta pueda revertir contra el cut
+        // específico (cerdo_bondiola, cerdo_pierna, etc.) en lugar de
+        // contra el bucket genérico cerdo_pieza.
+        stock_origen: i.stock_origen || null,
+        // Persistido para anular ventas viejas de cajones: necesitamos
+        // saber cuántos kg pesa cada cajón aunque el producto haya cambiado.
+        kg_por_unidad: i.kg_por_unidad || null,
+        // Caja individual (CB/PT) — al anular venta llamamos revertirVentaCaja
+        // para volver la caja a estado 'disponible'.
+        caja_id: i.caja_id || null,
+        caja_tipo: i.caja_tipo || null,
       })),
       total,
       efectivo: parseFloat(pago.efectivo) || 0,
@@ -356,17 +423,25 @@ export default function Caja() {
     //   3) Cajones de pollo/rebozado → descuenta KG DEL PRODUCTO BASE
     //      multiplicando unidades × kg_por_cajón (parseado del nombre,
     //      ej. "X20KG" → 20 kg por cada cajón vendido).
-    function mapearStock(cat) {
+    // Función que decide a qué tipo de stock_actual va una venta.
+    // Para cerdo_corte/cerdo_pieza usa el stock_origen del producto si está
+    // configurado (ej. cerdo_bondiola); sino cae en cerdo_pieza (bucket
+    // genérico que ya se suma al display "Cerdo Piezas" del dashboard).
+    // NUNCA descuenta de 'cerdo' (capones) — esos sólo bajan al despostar.
+    function mapearStock(cat, stockOrigen) {
       if (!cat) return null
+      if (stockOrigen) return stockOrigen
       if (cat === 'bovino_mr')        return 'bovino_mr'
       if (cat === 'bovino_corte')     return 'bovino_corte'
       if (cat === 'bovino_pieza')     return 'bovino_pieza'
       if (cat === 'bovino_brosa')     return 'bovino_brosa'
-      if (cat === 'cerdo_corte' || cat === 'cerdo_pieza' || cat === 'cerdo') return 'cerdo'
+      if (cat === 'cerdo')            return 'cerdo'         // capón entero
+      if (cat === 'cerdo_corte')      return 'cerdo_pieza'   // bucket genérico de piezas
+      if (cat === 'cerdo_pieza')      return 'cerdo_pieza'
       if (cat === 'pollo')            return 'pollo'
-      if (cat === 'pollo_cajon')      return 'pollo'      // unidad × kg_por_cajón
+      if (cat === 'pollo_cajon')      return 'pollo'         // unidad × kg_por_cajón
       if (cat === 'rebozado')         return 'rebozado'
-      if (cat === 'rebozado_cajon')   return 'rebozado'   // unidad × kg_por_cajón
+      if (cat === 'rebozado_cajon')   return 'rebozado'      // unidad × kg_por_cajón
       if (cat === 'embutido')         return 'embutido'
       if (cat === 'almacen')          return 'almacen'
       if (cat === 'bebidas')          return 'bebidas'
@@ -375,19 +450,43 @@ export default function Caja() {
       return null
     }
     for (const item of carrito) {
-      const tipoStock = mapearStock(item.categoria)
+      // Caja individual: la maneja venderCaja() abajo, que ya decrementa
+      // stock_actual.caja_cb / caja_pt por su peso individual.
+      if (item.caja_id) continue
+      const tipoStock = mapearStock(item.categoria, item.stock_origen)
       if (!tipoStock) continue  // categoría sin tracking de stock → saltar
-      // Para cajones de pollo/rebozado: multiplicar unidades × kg_por_cajón
+      // Para cajones de pollo/rebozado: multiplicar unidades × kg_por_cajón.
+      // kgPorUnidadDeProducto usa primero item.kg_por_unidad (cargado en
+      // precios), fallback al parseo del nombre.
       const esCajonAConvertir = item.categoria === 'pollo_cajon' || item.categoria === 'rebozado_cajon'
       const cantidad = esCajonAConvertir
-        ? (item.kg || 0) * (kgPorUnidadDeNombre(item.descripcion) || 1)
+        ? (item.kg || 0) * (kgPorUnidadDeProducto(item) || 1)
         : (item.kg || 0)
       const { data: stock } = await supabase.from('stock_actual').select('*').eq('tipo', tipoStock).maybeSingle()
       if (stock) {
         await supabase.from('stock_actual')
           .update({ kg_disponible: (stock.kg_disponible || 0) - cantidad })
           .eq('tipo', tipoStock)
+      } else {
+        // Si el tipo no existe todavía (ej. primera venta de cerdo_pieza),
+        // crear la fila con valor negativo — actualizarStock-style behavior.
+        await supabase.from('stock_actual').insert({ tipo: tipoStock, kg_disponible: -cantidad })
       }
+    }
+
+    // Marcar cajas individuales vendidas (cajas_stock)
+    for (const item of carrito) {
+      if (!item.caja_id) continue
+      const { error: errCaja } = await venderCaja(item.caja_id, {
+        destino: 'caja_minorista',
+        clienteId: null,
+        clienteNombre: 'Caja Rápida',
+        precioVentaKg: item.precio,
+        totalVenta: item.importe,
+        fechaSalida: fechaHoyARG(ahora),
+        notas: `Vendida en Caja Rápida #${data.id}`,
+      })
+      if (errCaja) console.warn('No se pudo marcar caja vendida:', errCaja)
     }
 
     setUltimaVenta({ ...venta, vuelto: cobrado - total, id: data.id })
@@ -795,6 +894,55 @@ export default function Caja() {
           </div>
         </div>
       </div>
+
+      {/* ============ MODAL SELECTOR DE CAJA CB/PT ============ */}
+      {selectorCaja && (() => {
+        const tipoCaja = CATEGORIA_A_TIPO_CAJA[selectorCaja.producto.categoria]
+        const idsEnCarrito = carrito.filter(i => i.caja_id).map(i => i.caja_id)
+        const cajasVisibles = cajasDisp.filter(c => c.tipo_caja === tipoCaja && !idsEnCarrito.includes(c.id))
+        return (
+          <div onClick={() => setSelectorCaja(null)}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+            <div onClick={e => e.stopPropagation()}
+              style={{ background: 'var(--surface)', border: '1px solid var(--gold)', borderRadius: 12, padding: 20, maxWidth: 640, width: '100%', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <div style={{ fontSize: 16, fontWeight: 700 }}>📦 Elegí la caja {tipoCaja} a vender</div>
+                <button onClick={() => setSelectorCaja(null)} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 18 }}>✕</button>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
+                {selectorCaja.producto.nombre} · ${Math.round(resolverPrecio(selectorCaja.producto).precio).toLocaleString('es-AR')}/kg
+                {' · '}{cajasVisibles.length} caja{cajasVisibles.length === 1 ? '' : 's'} disponible{cajasVisibles.length === 1 ? '' : 's'}
+              </div>
+              <div style={{ overflowY: 'auto', flex: 1 }}>
+                {cajasVisibles.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: 30, color: 'var(--muted)' }}>
+                    Sin cajas {tipoCaja} disponibles. Cargá nuevas desde Depósito → Entradas.
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
+                    {cajasVisibles.map(c => {
+                      const importe = Number(c.kg) * resolverPrecio(selectorCaja.producto).precio
+                      return (
+                        <div key={c.id} onClick={() => agregarCajaAlCarrito(c, selectorCaja.producto)}
+                          style={{ padding: '10px 12px', borderRadius: 8, cursor: 'pointer', border: '2px solid var(--border)', background: 'var(--surface2)' }}
+                          onMouseOver={e => { e.currentTarget.style.borderColor = 'var(--gold)'; e.currentTarget.style.background = 'rgba(201,168,76,0.08)' }}
+                          onMouseOut={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = 'var(--surface2)' }}>
+                          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>📦 Caja {c.tipo_caja} #{c.id}</div>
+                          <div style={{ fontSize: 10, color: 'var(--muted)' }}>{c.proveedor_origen || 's/proveedor'} · {c.fecha_ingreso}</div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
+                            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{Number(c.kg).toFixed(1)} kg</span>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--green)' }}>${Math.round(importe).toLocaleString('es-AR')}</span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* ============ MODAL BUSCADOR ============ */}
       {mostrarBuscador && (

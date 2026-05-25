@@ -151,7 +151,11 @@ export default function Dashboard() {
     (stock.cerdo_bondiola || 0) +
     (stock.cerdo_tocino || 0) +
     (stock.cerdo_cuero || 0) +
-    (stock.cerdo_cabeza || 0)
+    (stock.cerdo_cabeza || 0) +
+    // Bucket genérico — se usa cuando un producto cerdo_corte/cerdo_pieza
+    // no tiene stock_origen configurado a un cut específico. Antes estas
+    // ventas iban a 'cerdo' (capones) y dejaban capones en negativo.
+    (stock.cerdo_pieza || 0)
   )
   const stockPollo = Math.max(0, stock.pollo || 0)
   const stockBrosas = Math.max(0, stock.bovino_brosa || 0)

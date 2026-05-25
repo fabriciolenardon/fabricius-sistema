@@ -13,7 +13,8 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
-import { kgPorUnidadDeNombre } from '../../lib/stockHelpers'
+import { kgPorUnidadDeProducto } from '../../lib/stockHelpers'
+import { revertirVentaCaja } from '../../lib/cajasStock'
 import { useAuth } from '../../context/AuthContext'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
@@ -34,14 +35,19 @@ function grupoDeCategoria(cat) {
   return 'otros'
 }
 
-// Mapeo categoría → tipo en stock_actual (igual al de Caja.jsx para mantener coherencia)
-function mapearStockTipo(cat) {
+// Mapeo categoría → tipo en stock_actual (igual al de Caja.jsx para mantener coherencia).
+// Recibe stock_origen opcional para revertir contra el cut específico si la
+// venta original lo guardó (ej. cerdo_bondiola). Sino usa fallback por categoría.
+function mapearStockTipo(cat, stockOrigen) {
   if (!cat) return null
+  if (stockOrigen) return stockOrigen
   if (cat === 'bovino_mr')        return 'bovino_mr'
   if (cat === 'bovino_corte')     return 'bovino_corte'
   if (cat === 'bovino_pieza')     return 'bovino_pieza'
   if (cat === 'bovino_brosa')     return 'bovino_brosa'
-  if (cat === 'cerdo_corte' || cat === 'cerdo_pieza' || cat === 'cerdo') return 'cerdo'
+  if (cat === 'cerdo')            return 'cerdo'        // capón
+  if (cat === 'cerdo_corte')      return 'cerdo_pieza'  // bucket genérico de piezas
+  if (cat === 'cerdo_pieza')      return 'cerdo_pieza'
   if (cat === 'pollo')            return 'pollo'
   if (cat === 'pollo_cajon')      return 'pollo'      // se revierte kg×cajón
   if (cat === 'rebozado')         return 'rebozado'
@@ -154,16 +160,24 @@ export default function HistorialCaja() {
     // Para cajones (pollo_cajon, rebozado_cajon) hay que multiplicar
     // las unidades vendidas por los kg que pesa cada cajón para
     // devolver al stock kg del producto base — mismo cálculo invertido
-    // que hace Caja.jsx al vender.
+    // que hace Caja.jsx al vender. Para cajas individuales (CB/PT) se
+    // llama revertirVentaCaja que vuelve la caja a 'disponible' y suma
+    // sus kg a stock_actual.
     const items = Array.isArray(venta.items) ? venta.items : []
     const errores = []
     for (const item of items) {
-      const tipoStock = mapearStockTipo(item.categoria)
+      // Caja individual — revertir y saltar el flujo normal
+      if (item.caja_id) {
+        const { error } = await revertirVentaCaja(item.caja_id)
+        if (error) errores.push(`Caja #${item.caja_id}: ${error}`)
+        continue
+      }
+      const tipoStock = mapearStockTipo(item.categoria, item.stock_origen)
       if (!tipoStock) continue
       try {
         const esCajonAConvertir = item.categoria === 'pollo_cajon' || item.categoria === 'rebozado_cajon'
         const cantidad = esCajonAConvertir
-          ? (Number(item.kg) || 0) * (kgPorUnidadDeNombre(item.descripcion) || 1)
+          ? (Number(item.kg) || 0) * (kgPorUnidadDeProducto(item) || 1)
           : (Number(item.kg) || 0)
         const { data: stock } = await supabase.from('stock_actual').select('*').eq('tipo', tipoStock).maybeSingle()
         if (stock) {
