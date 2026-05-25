@@ -109,9 +109,24 @@ export default function FlujoDeposito() {
     const mermaCalc = f.kg_media_res > 0 && kgPiezasTotal > 0
       ? ((f.kg_media_res - kgPiezasTotal) / f.kg_media_res) * 100 : 0
 
-    // Guardia anti kg-inflados: si la suma de piezas supera al peso de la
-    // media res por más del 10%, casi seguro es un typo del operario
-    // (ej. tipear 39400 en vez de 39.4). Pedir confirmación explícita.
+    // Guardia 1: ninguna pieza individual puede pesar más que la media res.
+    // Detecta typos en un solo valor (ej. operario tipeó 394 en vez de 39.4).
+    if (f.kg_media_res > 0) {
+      const piezaInflada = piezasFlujo.find(p => (Number(p.kg) || 0) > f.kg_media_res)
+      if (piezaInflada) {
+        aviso(`⚠️ Pieza "${piezaInflada.nombre}" tiene ${piezaInflada.kg} kg pero la media res es de ${f.kg_media_res} kg. Rechazá el flujo y pedile al operario que revise.`, 'error')
+        return
+      }
+    }
+    // Guardia 2: sanity check de la media res en sí (no debería pasar 200kg)
+    if (f.kg_media_res > 200) {
+      const ok = window.confirm(
+        `⚠️ La media res declara ${f.kg_media_res} kg.\nUna media res típica pesa 100-150 kg. ¿Estás seguro?`
+      )
+      if (!ok) { aviso('Aprobación cancelada.', 'error'); return }
+    }
+    // Guardia 3: si la suma de piezas supera al peso de la media res por más
+    // del 10%, casi seguro hay un typo. Pedir confirmación explícita.
     if (f.kg_media_res > 0 && kgPiezasTotal > f.kg_media_res * 1.1) {
       const ok = window.confirm(
         `⚠️ ATENCIÓN — Valores sospechosos\n\n` +

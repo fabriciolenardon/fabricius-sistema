@@ -6,6 +6,7 @@ import { cargarCajasDisponibles, crearCajasIngreso, venderCaja, revertirVentaCaj
 import Paginador, { usePaginacion } from '../../components/Paginador'
 import FlujoDeposito from './FlujoDeposito'
 import AjusteStock from './AjusteStock'
+import CajasTab from './CajasTab'
 
 async function actualizarStock(tipo, kg) {
   const { data } = await supabase.from('stock_actual').select('*').eq('tipo', tipo).maybeSingle()
@@ -75,6 +76,7 @@ export function Deposito() {
           { id: 'entradas', label: '📥 Entradas' },
           { id: 'desposte', label: '🔪 Desposte' },
           { id: 'piezas', label: '🥩 Piezas' },
+          { id: 'cajas', label: '📦 Cajas' },
           { id: 'flujo', label: '📥 Flujo Depósito' },
           { id: 'remitos', label: '🧾 Remitos' },
           { id: 'proveedores', label: '🏭 Proveedores' },
@@ -89,6 +91,7 @@ export function Deposito() {
       {tab === 'entradas' && <EntradaForm onSaved={() => {}} showAlert={showAlert} proveedores={proveedores} />}
         {tab === 'desposte' && <DesposteTab key={tab} onSaved={() => {}} />}
 {tab === 'piezas' && <PiezasTab key={tab} />}
+{tab === 'cajas' && <CajasTab key={tab} />}
 {tab === 'remitos' && <RemitosTab remitoActual={remitoActual} />}
       {tab === 'flujo' && <FlujoDeposito />}
       {tab === 'proveedores' && <ProveedoresTab />}
@@ -384,22 +387,41 @@ async function confirmarElaboracionSalame() {
   }
 async function confirmarDesposteCerdo() {
   if (!caponSeleccionado) { showAlert('Seleccioná un capón', 'error'); return }
+  const kgCapon = caponSeleccionado.kg_real || caponSeleccionado.kg || 0
+  const piezasRegistradas = [
+    { nombre: 'Piernas (x2)', kg: parseFloat(piezasCerdo.pierna) || 0, stock: 'cerdo_pierna' },
+    { nombre: 'Carrés (x2)', kg: parseFloat(piezasCerdo.carre) || 0, stock: 'cerdo_carre' },
+    { nombre: 'Pechitos (x2)', kg: parseFloat(piezasCerdo.pechito) || 0, stock: 'cerdo_pechito' },
+    { nombre: 'Matambres (x2)', kg: parseFloat(piezasCerdo.matambre) || 0, stock: 'cerdo_matambre' },
+    { nombre: 'Paletas (x2)', kg: parseFloat(piezasCerdo.paleta) || 0, stock: 'cerdo_paleta' },
+    { nombre: 'Carnaza', kg: parseFloat(piezasCerdo.parrillero) || 0, stock: 'cerdo_parrillero' },
+    { nombre: 'Huesos', kg: parseFloat(piezasCerdo.huesos) || 0, stock: 'cerdo_huesos' },
+    { nombre: 'Bondiola s/hueso', kg: parseFloat(piezasCerdo.bondiola) || 0, stock: 'cerdo_bondiola' },
+    { nombre: 'Tocino', kg: parseFloat(piezasCerdo.tocino) || 0, stock: 'cerdo_tocino' },
+    { nombre: 'Cuero', kg: parseFloat(piezasCerdo.cuero) || 0, stock: 'cerdo_cuero' },
+    { nombre: 'Cabeza', kg: parseFloat(piezasCerdo.cabeza) || 0, stock: 'cerdo_cabeza' },
+  ].filter(p => p.kg > 0)
+
+  // Validaciones anti-error humano (mismo patrón que media res bovina):
+  //   (a) Ninguna pieza individual puede pesar más que el capón
+  //   (b) Suma de piezas no debe superar el capón por más del 10%
+  //   (c) Capón > 150 kg = sospechoso
+  const piezaInflada = piezasRegistradas.find(p => p.kg > kgCapon)
+  if (piezaInflada) {
+    showAlert(`⚠️ "${piezaInflada.nombre}" tiene ${piezaInflada.kg} kg pero el capón es de ${kgCapon} kg. Una pieza no puede pesar más que el capón.`, 'error')
+    return
+  }
+  const sumaPiezas = piezasRegistradas.reduce((s, p) => s + p.kg, 0)
+  if (kgCapon > 0 && sumaPiezas > kgCapon * 1.1) {
+    showAlert(`⚠️ La suma de piezas (${sumaPiezas.toFixed(1)} kg) supera al capón (${kgCapon} kg). Revisá los valores — probablemente sobra un dígito.`, 'error')
+    return
+  }
+  if (kgCapon > 150) {
+    if (!confirm(`⚠️ ${kgCapon} kg es bastante para un capón (típico: 80-130 kg). ¿Continuar?`)) return
+  }
+
   setLoading(true)
   try {
-    const kgCapon = caponSeleccionado.kg_real || caponSeleccionado.kg || 0
-    const piezasRegistradas = [
-      { nombre: 'Piernas (x2)', kg: parseFloat(piezasCerdo.pierna) || 0, stock: 'cerdo_pierna' },
-      { nombre: 'Carrés (x2)', kg: parseFloat(piezasCerdo.carre) || 0, stock: 'cerdo_carre' },
-      { nombre: 'Pechitos (x2)', kg: parseFloat(piezasCerdo.pechito) || 0, stock: 'cerdo_pechito' },
-      { nombre: 'Matambres (x2)', kg: parseFloat(piezasCerdo.matambre) || 0, stock: 'cerdo_matambre' },
-      { nombre: 'Paletas (x2)', kg: parseFloat(piezasCerdo.paleta) || 0, stock: 'cerdo_paleta' },
-      { nombre: 'Carnaza', kg: parseFloat(piezasCerdo.parrillero) || 0, stock: 'cerdo_parrillero' },
-{ nombre: 'Huesos', kg: parseFloat(piezasCerdo.huesos) || 0, stock: 'cerdo_huesos' },
-      { nombre: 'Bondiola s/hueso', kg: parseFloat(piezasCerdo.bondiola) || 0, stock: 'cerdo_bondiola' },
-      { nombre: 'Tocino', kg: parseFloat(piezasCerdo.tocino) || 0, stock: 'cerdo_tocino' },
-      { nombre: 'Cuero', kg: parseFloat(piezasCerdo.cuero) || 0, stock: 'cerdo_cuero' },
-      { nombre: 'Cabeza', kg: parseFloat(piezasCerdo.cabeza) || 0, stock: 'cerdo_cabeza' },
-    ].filter(p => p.kg > 0)
     await supabase.from('despostes').insert({
       fecha, entrada_id: caponSeleccionado.id, modelo: 'CERDO',
       tipo_desposte: 'cerdo', tipo_animal: 'cerdo',
@@ -1224,6 +1246,26 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
   async function guardar() {
     const esSoloUnid = TIPOS_SOLO_UNIDADES.includes(form.tipo)
     if (!form.tipo || !form.proveedor) { showAlert({ type: 'error', msg: 'Completá los campos requeridos' }); return }
+
+    // Sanity check de kg: cualquier valor numérico inválido o sospechosamente
+    // alto debe ser bloqueado o confirmado.
+    const kgInput = parseFloat(form.kg) || 0
+    if (!esCajaIndividual && !esSoloUnid && kgInput < 0) {
+      showAlert({ type: 'error', msg: 'Los kilos no pueden ser negativos' }); return
+    }
+    // Si la entrada es por unidad (cajón pollo/rebozado), el kg de cada unidad
+    // típicamente está entre 1 y 50. Si excede 200 sospechar typo.
+    if (TIPOS_EN_UNIDADES.includes(form.tipo) && !esSoloUnid && !esCajaIndividual && kgInput > 200) {
+      if (!confirm(`⚠️ ${kgInput} kg por unidad es bastante alto (típico: 10-25 kg). ¿Es correcto?`)) return
+    }
+    // Para media res, validar < 200 kg (típico 100-150 kg)
+    if (form.tipo === 'bovino_mr' && kgInput > 200) {
+      if (!confirm(`⚠️ ${kgInput} kg para una media res es demasiado (típico: 100-150 kg). ¿Es correcto?`)) return
+    }
+    // Para capón, validar < 150 kg
+    if (form.tipo === 'cerdo' && kgInput > 150) {
+      if (!confirm(`⚠️ ${kgInput} kg para un capón es bastante (típico: 80-130 kg). ¿Es correcto?`)) return
+    }
 
     // ── CAJAS CB / PT: tracking individual ────────────────────────────
     // Cada caja se carga con su propio peso. Insertamos N filas en cajas_stock
