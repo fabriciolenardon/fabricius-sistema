@@ -24,11 +24,16 @@ const CATEGORIAS = {
   almacen: '🛒 Almacén',
   bebidas: '🥤 Bebidas',
 }
-const VACIO = { categoria: 'bovino_corte', nombre: '', precio_carniceria: '', precio_mayorista: '', precio_minorista: '', codigo_balanza: '', dias_vencimiento: '3', descripcion_etiqueta: '', pesable: true, kg_por_unidad: '' }
+const VACIO = { categoria: 'bovino_corte', nombre: '', precio_carniceria: '', precio_mayorista: '', precio_minorista: '', codigo_balanza: '', dias_vencimiento: '3', descripcion_etiqueta: '', pesable: true, kg_por_unidad: '', vende_por_pieza: false }
 
 // Categorías que se venden por cajón (unidad con peso fijo) y por lo tanto
 // necesitan el campo kg_por_unidad cargado para descontar stock correctamente.
 const CATEGORIAS_CON_KG_POR_UNIDAD = new Set(['pollo_cajon', 'rebozado_cajon'])
+
+// Categorías donde tiene sentido el flag "se vende por pieza entera".
+// Las piezas bovinas son las únicas donde se vende un objeto físico único
+// (cada pierna, cuarto pistola, costillar, etc. con su peso propio).
+const CATEGORIAS_CON_PIEZA_ENTERA = new Set(['bovino_pieza'])
 const fmt = n => n != null ? '$' + Math.round(n).toLocaleString('es-AR') : '—'
 const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }
 
@@ -94,6 +99,10 @@ export default function Precios() {
       kg_por_unidad: form.kg_por_unidad === '' || form.kg_por_unidad == null
         ? null
         : Number(form.kg_por_unidad),
+      // Marca productos que se venden como pieza entera individual (no por kg).
+      // Cuando el cajero los elige en Caja Rápida (o Mayorista), aparece el
+      // selector de piezas_stock para elegir cuál pieza específica vender.
+      vende_por_pieza: !!form.vende_por_pieza,
     }
 
     // Si está asignando un PLU, verificar si ya está ocupado por OTRO producto
@@ -153,6 +162,7 @@ export default function Precios() {
       descripcion_etiqueta: p.descripcion_etiqueta ?? '',
       pesable: p.pesable !== false,
       kg_por_unidad: p.kg_por_unidad ?? '',
+      vende_por_pieza: !!p.vende_por_pieza,
     })
     setFiltro(p.categoria)
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -510,6 +520,21 @@ export default function Precios() {
                   />
                   <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
                     Cuántos kg pesa cada cajón/unidad. Al vender 1 cajón se descuentan estos kg del stock base ({form.categoria === 'pollo_cajon' ? 'pollo' : 'rebozado'}). Si lo dejás vacío, el sistema intenta parsearlo del nombre (ej. "X20KG").
+                  </div>
+                </div>
+              )}
+              {CATEGORIAS_CON_PIEZA_ENTERA.has(form.categoria) && (
+                <div style={{ gridColumn: '1/-1', background: '#2a1f1a', border: '1px solid #5a3d2d', borderRadius: 8, padding: 12 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--gold)' }}>
+                    <input type="checkbox"
+                      checked={!!form.vende_por_pieza}
+                      onChange={e => setForm({ ...form, vende_por_pieza: e.target.checked })}
+                      style={{ width: 18, height: 18, cursor: 'pointer' }} />
+                    🥩 Se vende por pieza entera (selección del stock)
+                  </label>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
+                    Al activarlo: cuando se elija este producto en Caja Rápida o Mayorista, aparece un selector con las piezas disponibles del stock (cada una con su kg propio). El cajero elige una pieza específica para vender — no se ingresa kg manualmente.
+                    <br />Dejalo desactivado si el producto se vende por kg (Ej: "Pierna por kg" — el cajero pesa lo que el cliente lleva).
                   </div>
                 </div>
               )}

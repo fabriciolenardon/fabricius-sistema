@@ -67,6 +67,11 @@ export default function Caja() {
   // un producto de categoría bovino_caja_cb o bovino_caja_pt
   const [selectorCaja, setSelectorCaja] = useState(null)      // { producto } | null
   const [cajasDisp, setCajasDisp] = useState([])              // cajas con estado='disponible'
+  // Selector de pieza entera bovina — modal que abre al elegir un producto
+  // con flag vende_por_pieza=true (típicamente piernas, cuartos, costillares
+  // que tienen tracking individual en piezas_stock).
+  const [selectorPieza, setSelectorPieza] = useState(null)    // { producto } | null
+  const [piezasDisp, setPiezasDisp] = useState([])            // piezas disponibles
   const [ultimaVenta, setUltimaVenta] = useState(null)
   const [ventasHoy, setVentasHoy] = useState([])
   const [vistaCaja, setVistaCaja] = useState('vender') // 'vender' | 'historial' | 'arqueo'
@@ -80,7 +85,7 @@ export default function Caja() {
 
   async function cargarTodo() {
     const hoy = fechaHoyARG()  // Hora local ARG, NO UTC. Ver lib/fechas.js
-    const [{ data: pre }, { data: cfg }, { data: ventas }, { data: ofs }, { data: cajas }] = await Promise.all([
+    const [{ data: pre }, { data: cfg }, { data: ventas }, { data: ofs }, { data: cajas }, { data: piezas }] = await Promise.all([
       supabase.from('precios').select('*').order('nombre'),
       supabase.from('config_sistema').select('*').eq('clave', 'ean13_formato').maybeSingle(),
       supabase.from('ventas_minoristas').select('*')
@@ -93,12 +98,16 @@ export default function Caja() {
       // Cajas individuales disponibles para venta (CB + PT)
       supabase.from('cajas_stock').select('*').eq('estado', 'disponible')
         .order('fecha_ingreso', { ascending: true }).order('id', { ascending: true }),
+      // Piezas bovinas individuales disponibles (para productos con vende_por_pieza=true)
+      supabase.from('piezas_stock').select('*').eq('estado', 'disponible')
+        .order('fecha_ingreso', { ascending: true }).order('id', { ascending: true }),
     ])
     setPrecios(pre || [])
     if (cfg?.valor) setConfigEAN(cfg.valor)
     setVentasHoy(ventas || [])
     setOfertas(ofs || [])
     setCajasDisp(cajas || [])
+    setPiezasDisp(piezas || [])
   }
 
   // ---- Resuelve el precio final de un producto según lista activa + ofertas ----
@@ -197,6 +206,12 @@ export default function Caja() {
       setSelectorCaja({ producto, precioOverride })
       return
     }
+    // Interceptar productos marcados como "vende por pieza entera": abrir
+    // el selector de piezas individuales del stock (piezas_stock).
+    if (producto?.vende_por_pieza) {
+      setSelectorPieza({ producto, precioOverride })
+      return
+    }
 
     const resuelto = resolverPrecio(producto)
     const precio = precioOverride != null ? Number(precioOverride) : resuelto.precio
@@ -261,6 +276,38 @@ export default function Caja() {
     }])
     setSelectorCaja(null)
     showMsg(`✅ Caja ${caja.tipo_caja} #${caja.id} — ${kg.toFixed(1)} kg`)
+  }
+
+  // Agrega una pieza entera específica seleccionada del modal al carrito.
+  // Mismo patrón que agregarCajaAlCarrito — el kg sale de la pieza física
+  // y el precio del producto. La pieza se marca como 'vendida' en cerrarVenta.
+  function agregarPiezaAlCarrito(pieza, producto) {
+    const resuelto = resolverPrecio(producto)
+    const precio = resuelto.precio
+    const tieneOferta = !!resuelto.oferta && precio < resuelto.precioBase
+    const kg = Number(pieza.kg) || 0
+    setCarrito(c => [...c, {
+      id: Date.now() + Math.random(),
+      producto_id: producto.id,
+      descripcion: `${producto.nombre} — Pieza #${pieza.id} ${pieza.tipo_pieza ? `(${pieza.tipo_pieza})` : ''} (${kg.toFixed(1)} kg)`,
+      categoria: producto.categoria,
+      stock_origen: null,
+      kg_por_unidad: null,
+      kg,
+      unidad: 'kg',
+      precio: parseFloat(precio),
+      precio_base: parseFloat(resuelto.precioBase),
+      tiene_oferta: tieneOferta,
+      oferta_pct: tieneOferta && resuelto.oferta?.descuento_pct ? Number(resuelto.oferta.descuento_pct) : null,
+      lista: listaPrecio,
+      importe: kg * parseFloat(precio),
+      // Marcador de pieza individual — al cerrar venta marcamos 'vendida'
+      // en piezas_stock (igual que SalidaForm hace para mayorista).
+      pieza_id: pieza.id,
+      pieza_tipo: pieza.tipo_pieza,
+    }])
+    setSelectorPieza(null)
+    showMsg(`✅ Pieza #${pieza.id} (${pieza.tipo_pieza || 'pieza'}) — ${kg.toFixed(1)} kg`)
   }
 
   // Cuando la balanza embebe el importe (no el peso), usamos esta función
@@ -386,6 +433,10 @@ export default function Caja() {
         // para volver la caja a estado 'disponible'.
         caja_id: i.caja_id || null,
         caja_tipo: i.caja_tipo || null,
+        // Pieza entera individual (piezas_stock) — al anular venta marcamos
+        // la pieza de vuelta como 'disponible' en piezas_stock.
+        pieza_id: i.pieza_id || null,
+        pieza_tipo: i.pieza_tipo || null,
       })),
       total,
       efectivo: parseFloat(pago.efectivo) || 0,
@@ -453,6 +504,10 @@ export default function Caja() {
       // Caja individual: la maneja venderCaja() abajo, que ya decrementa
       // stock_actual.caja_cb / caja_pt por su peso individual.
       if (item.caja_id) continue
+      // Pieza entera: la marcamos abajo en piezas_stock. NO decrementamos
+      // bovino_pieza para no duplicar (la pieza ya estaba contabilizada en
+      // ese stock al despostarse). El stock_actual lo mantenemos via piezas_stock.
+      if (item.pieza_id) continue
       const tipoStock = mapearStock(item.categoria, item.stock_origen)
       if (!tipoStock) continue  // categoría sin tracking de stock → saltar
       // Para cajones de pollo/rebozado: multiplicar unidades × kg_por_cajón.
@@ -487,6 +542,22 @@ export default function Caja() {
         notas: `Vendida en Caja Rápida #${data.id}`,
       })
       if (errCaja) console.warn('No se pudo marcar caja vendida:', errCaja)
+    }
+
+    // Marcar piezas enteras vendidas (piezas_stock) — mismo patrón que cajas
+    for (const item of carrito) {
+      if (!item.pieza_id) continue
+      const { error: errPieza } = await supabase.from('piezas_stock').update({
+        estado: 'vendida',
+        destino: 'caja_minorista',
+        cliente_id: null,
+        cliente_nombre: 'Caja Rápida',
+        precio_venta_kg: item.precio,
+        total_venta: item.importe,
+        fecha_salida: fechaHoyARG(ahora),
+        notas_salida: `Vendida en Caja Rápida #${data.id}`,
+      }).eq('id', item.pieza_id)
+      if (errPieza) console.warn('No se pudo marcar pieza vendida:', errPieza.message)
     }
 
     setUltimaVenta({ ...venta, vuelto: cobrado - total, id: data.id })
@@ -898,8 +969,16 @@ export default function Caja() {
       {/* ============ MODAL SELECTOR DE CAJA CB/PT ============ */}
       {selectorCaja && (() => {
         const tipoCaja = CATEGORIA_A_TIPO_CAJA[selectorCaja.producto.categoria]
+        const productoId = selectorCaja.producto.id
         const idsEnCarrito = carrito.filter(i => i.caja_id).map(i => i.caja_id)
-        const cajasVisibles = cajasDisp.filter(c => c.tipo_caja === tipoCaja && !idsEnCarrito.includes(c.id))
+        // Filtrar: tipo correcto + no esté en carrito + producto match
+        // (cajas con producto_id null = legacy = se muestran como fallback).
+        const cajasVisibles = cajasDisp.filter(c => {
+          if (c.tipo_caja !== tipoCaja) return false
+          if (idsEnCarrito.includes(c.id)) return false
+          if (c.producto_id && c.producto_id !== productoId) return false
+          return true
+        })
         return (
           <div onClick={() => setSelectorCaja(null)}
             style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
@@ -937,6 +1016,67 @@ export default function Caja() {
                       )
                     })}
                   </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ============ MODAL SELECTOR DE PIEZA ENTERA ============ */}
+      {selectorPieza && (() => {
+        const idsEnCarrito = carrito.filter(i => i.pieza_id).map(i => i.pieza_id)
+        // Mostrar todas las piezas disponibles (no filtramos por tipo —
+        // así el cajero ve TODO el stock y elige por kg/proveedor/fecha).
+        const piezasVisibles = piezasDisp.filter(p => !idsEnCarrito.includes(p.id))
+        // Agrupar por tipo_pieza para que sea más fácil escanear
+        const porTipo = {}
+        piezasVisibles.forEach(p => { (porTipo[p.tipo_pieza || 'Otra'] = porTipo[p.tipo_pieza || 'Otra'] || []).push(p) })
+        const precioKg = resolverPrecio(selectorPieza.producto).precio
+        return (
+          <div onClick={() => setSelectorPieza(null)}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+            <div onClick={e => e.stopPropagation()}
+              style={{ background: 'var(--surface)', border: '1px solid var(--gold)', borderRadius: 12, padding: 20, maxWidth: 720, width: '100%', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <div style={{ fontSize: 16, fontWeight: 700 }}>🥩 Elegí la pieza a vender</div>
+                <button onClick={() => setSelectorPieza(null)} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 18 }}>✕</button>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
+                {selectorPieza.producto.nombre} · ${Math.round(precioKg).toLocaleString('es-AR')}/kg
+                {' · '}{piezasVisibles.length} pieza{piezasVisibles.length === 1 ? '' : 's'} disponible{piezasVisibles.length === 1 ? '' : 's'}
+              </div>
+              <div style={{ overflowY: 'auto', flex: 1 }}>
+                {piezasVisibles.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: 30, color: 'var(--muted)' }}>
+                    Sin piezas disponibles. Despostá una media res primero desde Depósito.
+                  </div>
+                ) : (
+                  Object.entries(porTipo).map(([tipo, lista]) => (
+                    <div key={tipo} style={{ marginBottom: 14 }}>
+                      <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
+                        {tipo} ({lista.length})
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
+                        {lista.map(p => {
+                          const importe = Number(p.kg) * precioKg
+                          return (
+                            <div key={p.id} onClick={() => agregarPiezaAlCarrito(p, selectorPieza.producto)}
+                              style={{ padding: '10px 12px', borderRadius: 8, cursor: 'pointer', border: '2px solid var(--border)', background: 'var(--surface2)' }}
+                              onMouseOver={e => { e.currentTarget.style.borderColor = 'var(--gold)'; e.currentTarget.style.background = 'rgba(201,168,76,0.08)' }}
+                              onMouseOut={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = 'var(--surface2)' }}>
+                              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>🥩 Pieza #{p.id}</div>
+                              <div style={{ fontSize: 10, color: 'var(--muted)' }}>{p.proveedor_origen || 's/proveedor'} · {p.fecha_ingreso}{p.modelo_desposte ? ` · Mod. ${p.modelo_desposte}` : ''}</div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
+                                <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{Number(p.kg).toFixed(1)} kg</span>
+                                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--green)' }}>${Math.round(importe).toLocaleString('es-AR')}</span>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))
                 )}
               </div>
             </div>

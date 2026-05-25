@@ -83,11 +83,27 @@ export default function DesposteMediaRes() {
   async function enviar() {
     const kg = Number(kgManual) || 0
     if (kg <= 0) return aviso('Cargá los kilos de la media res', 'error')
+    // Sanity check: las medias res de Fabricius van de 70 a 140 kg.
+    // > 150 kg es prácticamente seguro un typo (típico bug ×1000 o dígito extra).
+    if (kg > 150) {
+      return aviso(`⚠️ ${kg} kg es demasiado para una media res (rango real: 70-140 kg). Revisá el valor — ¿no sobra un dígito?`, 'error')
+    }
+    if (kg < 50) {
+      return aviso(`⚠️ ${kg} kg es muy bajo para una media res (rango real: 70-140 kg). Verificá el valor.`, 'error')
+    }
 
-    // Validación anti-error humano: la suma de piezas no debería ser más
-    // del 110% del peso de la media res. Si lo es, casi seguro es un typo
-    // (ej. 39400 en vez de 39.4 → bug histórico que dejó stock inflado).
+    // Validaciones anti-error humano para modo piezas:
+    //   (a) Ninguna pieza individual puede pesar más que la media res entera
+    //   (b) Suma de piezas ≤ 110% del peso de la media res
     if (submodo === 'piezas') {
+      // (a) Validación individual: detecta typos en una sola pieza
+      for (const pieza of MODELOS_DESPOSTE[modelo].piezas) {
+        const pesoP = Number(piezasKg[pieza.nombre]) || 0
+        if (pesoP > kg) {
+          return aviso(`⚠️ "${pieza.nombre}" tiene ${pesoP} kg pero la media res es de ${kg} kg. Una pieza no puede pesar más que la media res entera.`, 'error')
+        }
+      }
+      // (b) Suma de piezas
       const sumaPiezas = MODELOS_DESPOSTE[modelo].piezas.reduce((s, p) => s + (Number(piezasKg[p.nombre]) || 0), 0)
       if (sumaPiezas > kg * 1.1) {
         return aviso(`⚠️ La suma de piezas (${sumaPiezas.toFixed(1)} kg) supera el peso de la media res (${kg} kg). Revisá los valores — probablemente sobra un dígito.`, 'error')

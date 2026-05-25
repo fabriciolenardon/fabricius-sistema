@@ -22,14 +22,21 @@ const TIPO_A_STOCK_ACTUAL = {
 }
 
 // Devuelve cajas con estado='disponible' del tipo pedido ('CB' | 'PT'),
-// ordenadas por fecha_ingreso (más viejas primero = FIFO).
-export async function cargarCajasDisponibles(tipoCaja) {
+// ordenadas por fecha_ingreso (más viejas primero = FIFO). Si se pasa
+// productoId, filtra solo las cajas vinculadas a ese producto + las legacy
+// sin producto asignado (para no esconder stock viejo).
+export async function cargarCajasDisponibles(tipoCaja, productoId = null) {
   if (!tipoCaja) return []
-  const { data } = await supabase
+  let query = supabase
     .from('cajas_stock')
     .select('*')
     .eq('tipo_caja', tipoCaja)
     .eq('estado', 'disponible')
+  if (productoId) {
+    // OR: producto_id matches OR producto_id is null (legacy sin asignar)
+    query = query.or(`producto_id.eq.${productoId},producto_id.is.null`)
+  }
+  const { data } = await query
     .order('fecha_ingreso', { ascending: true })
     .order('id', { ascending: true })
   return data || []
@@ -52,9 +59,11 @@ async function sumarStockActualCaja(tipoCaja, deltaKg) {
 
 // Crea N cajas individuales con sus pesos. Devuelve las cajas creadas.
 // pesos: array de números (uno por caja).
-// meta: { tipoCaja, fecha, proveedor, descripcion, precioCostoKg, entradaId }
+// meta: { tipoCaja, fecha, proveedor, descripcion, precioCostoKg, entradaId, productoId }
+// productoId es el id del producto en `precios` (ej. el "Bola de Lomo Caja PT")
+// — todas las cajas creadas con esta llamada quedan vinculadas a él.
 export async function crearCajasIngreso(pesos, meta) {
-  const { tipoCaja, fecha, proveedor, descripcion, precioCostoKg, entradaId } = meta
+  const { tipoCaja, fecha, proveedor, descripcion, precioCostoKg, entradaId, productoId } = meta
   if (!tipoCaja || !pesos?.length) return { data: [], error: 'Faltan datos' }
   const filas = pesos
     .map(kg => Number(kg))
@@ -67,6 +76,7 @@ export async function crearCajasIngreso(pesos, meta) {
       descripcion_origen: descripcion || null,
       precio_costo_kg: precioCostoKg || null,
       entrada_id: entradaId || null,
+      producto_id: productoId || null,
       estado: 'disponible',
     }))
   if (filas.length === 0) return { data: [], error: 'Ninguna caja con peso válido' }
