@@ -24,7 +24,11 @@ CREATE TABLE IF NOT EXISTS cajas_stock (
   proveedor_origen    TEXT,
   descripcion_origen  TEXT,             -- lote, marca, nº de bulto, etc.
   precio_costo_kg     NUMERIC,
-  entrada_id          INT REFERENCES entradas_deposito(id) ON DELETE SET NULL,
+  -- entradas_deposito.id es UUID en producción (aunque el schema canónico
+  -- dice serial). Usamos UUID sin FK explícita, mismo patrón que la
+  -- migración 30_rol_desposte.sql, para evitar el error
+  -- "integer and uuid are of incompatible types".
+  entrada_id          UUID,
   -- Estado y trazabilidad de salida
   estado              TEXT NOT NULL DEFAULT 'disponible'
                       CHECK (estado IN ('disponible', 'vendida', 'anulada')),
