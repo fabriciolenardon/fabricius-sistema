@@ -18,17 +18,20 @@ import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
 import {
   useReportesData, SelectorPeriodo,
   ReporteMargen, ReporteCliente, ReporteProducto, ReporteCanal, ReporteTemporal,
-  ReporteCajas,
+  ReporteCajas, ReporteFlujo, ReporteGastos, ReporteInteranual,
 } from './Reportes'
 
 const SUB_TABS = [
-  { id: 'resumen',  icon: '📊', label: 'Resumen' },
-  { id: 'margen',   icon: '💰', label: 'Margen' },
-  { id: 'cliente',  icon: '👥', label: 'Por Cliente' },
-  { id: 'producto', icon: '🥩', label: 'Por Producto' },
-  { id: 'canal',    icon: '⚖️', label: 'Min vs May' },
-  { id: 'cajas',    icon: '📦', label: 'Cajas' },
-  { id: 'temporal', icon: '🕐', label: 'Temporal' },
+  { id: 'resumen',    icon: '📊', label: 'Resumen' },
+  { id: 'flujo',      icon: '💵', label: 'Flujo Caja' },
+  { id: 'margen',     icon: '💰', label: 'Margen' },
+  { id: 'cliente',    icon: '👥', label: 'Por Cliente' },
+  { id: 'producto',   icon: '🥩', label: 'Por Producto' },
+  { id: 'canal',      icon: '⚖️', label: 'Min vs May' },
+  { id: 'cajas',      icon: '📦', label: 'Cajas' },
+  { id: 'gastos',     icon: '💸', label: 'Gastos' },
+  { id: 'interanual', icon: '📅', label: 'vs Año pasado' },
+  { id: 'temporal',   icon: '🕐', label: 'Temporal' },
 ]
 
 const TOPE_K = 108357084.05 // tope monotributo cat K 2026
@@ -93,9 +96,9 @@ export default function DashboardEjecutivo() {
 
 function ReportePanel({ tab }) {
   const [periodo, setPeriodo] = useState('30d')
-  // Cajas no usa los datos compartidos (carga su propio snapshot de
-  // cajas_stock). Skipea el hook pesado para esta tab y muestra el
-  // componente directo — el periodo solo afecta la sección de ventas.
+
+  // Cajas: carga su propio snapshot de cajas_stock (no usa hook común).
+  // El periodo solo afecta la sección de ventas de cajas dentro.
   if (tab === 'cajas') {
     return (
       <>
@@ -104,6 +107,12 @@ function ReportePanel({ tab }) {
       </>
     )
   }
+
+  // Interanual: carga su propia data (24 meses). No usa periodo ni hook común.
+  if (tab === 'interanual') {
+    return <ReporteInteranual />
+  }
+
   return <ReportePanelData tab={tab} periodo={periodo} setPeriodo={setPeriodo} />
 }
 
@@ -120,6 +129,8 @@ function ReportePanelData({ tab, periodo, setPeriodo }) {
           {tab === 'cliente'  && <ReporteCliente data={data} />}
           {tab === 'producto' && <ReporteProducto data={data} />}
           {tab === 'canal'    && <ReporteCanal data={data} />}
+          {tab === 'flujo'    && <ReporteFlujo data={data} />}
+          {tab === 'gastos'   && <ReporteGastos data={data} />}
           {tab === 'temporal' && <ReporteTemporal data={data} />}
         </>
       ) : null}
