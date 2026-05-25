@@ -898,8 +898,16 @@ export default function Caja() {
       {/* ============ MODAL SELECTOR DE CAJA CB/PT ============ */}
       {selectorCaja && (() => {
         const tipoCaja = CATEGORIA_A_TIPO_CAJA[selectorCaja.producto.categoria]
+        const productoId = selectorCaja.producto.id
         const idsEnCarrito = carrito.filter(i => i.caja_id).map(i => i.caja_id)
-        const cajasVisibles = cajasDisp.filter(c => c.tipo_caja === tipoCaja && !idsEnCarrito.includes(c.id))
+        // Filtrar: tipo correcto + no esté en carrito + producto match
+        // (cajas con producto_id null = legacy = se muestran como fallback).
+        const cajasVisibles = cajasDisp.filter(c => {
+          if (c.tipo_caja !== tipoCaja) return false
+          if (idsEnCarrito.includes(c.id)) return false
+          if (c.producto_id && c.producto_id !== productoId) return false
+          return true
+        })
         return (
           <div onClick={() => setSelectorCaja(null)}
             style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>

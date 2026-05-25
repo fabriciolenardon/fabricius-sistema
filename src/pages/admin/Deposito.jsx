@@ -1160,13 +1160,23 @@ function HistorialElaboraciones({ elaboraciones }) {
 }
 
 function EntradaForm({ onSaved, showAlert, proveedores }) {
-  const [form, setForm] = useState({ tipo: '', proveedor: '', descripcion: '', fecha: fechaHoyARG(), kg: '', precioKg: '9800', merma: '', destino: 'DEPOSITO', importe: '', cantidad: '1' })
+  const [form, setForm] = useState({ tipo: '', proveedor: '', descripcion: '', fecha: fechaHoyARG(), kg: '', precioKg: '9800', merma: '', destino: 'DEPOSITO', importe: '', cantidad: '1', cajaProductoId: '' })
   const [historial, setHistorial] = useState([])
   const [editando, setEditando] = useState(null)
   const [formEdit, setFormEdit] = useState({})
   // Para cajas CB/PT: array con el peso de cada caja individual.
   // Se sincroniza con form.cantidad cuando tipo es caja_cb / caja_pt.
   const [cajasPesos, setCajasPesos] = useState([])
+  // Productos de precios filtrados a categorías de cajas — selector cuando
+  // el usuario carga cajas para vincular cada caja al producto que contiene
+  // (ej. "Bola de Lomo Caja PT").
+  const [productosCajas, setProductosCajas] = useState([])
+  useEffect(() => {
+    supabase.from('precios').select('id, nombre, categoria')
+      .in('categoria', ['bovino_caja_cb', 'bovino_caja_pt'])
+      .order('nombre')
+      .then(({ data }) => setProductosCajas(data || []))
+  }, [])
 
   // Tipos que tienen tracking individual (cada unidad es una fila en cajas_stock)
   const esCajaIndividual = form.tipo === 'caja_cb' || form.tipo === 'caja_pt'
@@ -1219,16 +1229,23 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     // Cada caja se carga con su propio peso. Insertamos N filas en cajas_stock
     // (una por caja) y UNA fila en entradas_deposito como registro contable.
     if (esCajaIndividual) {
+      // Validar que se haya seleccionado un producto (ej. Bola de Lomo Caja PT)
+      // para vincular las cajas — sin esto el selector de venta no las encuentra.
+      if (!form.cajaProductoId) {
+        showAlert({ type: 'error', msg: 'Seleccioná el producto que va dentro de las cajas (ej. Bola de Lomo Caja PT)' })
+        return
+      }
       const pesosValidos = cajasPesos.map(p => parseFloat(p)).filter(p => p > 0)
       const cantPesperada = Math.max(1, parseInt(form.cantidad) || 1)
       if (pesosValidos.length !== cantPesperada) {
         showAlert({ type: 'error', msg: `Cargá el peso de las ${cantPesperada} cajas (faltan ${cantPesperada - pesosValidos.length})` })
         return
       }
+      const productoCaja = productosCajas.find(p => p.id === form.cajaProductoId)
       const kgTotalCajas = pesosValidos.reduce((s, kg) => s + kg, 0)
       const importeCajas = parseFloat(form.importe) || 0
       const precioPromedioKg = kgTotalCajas > 0 ? importeCajas / kgTotalCajas : 0
-      const descripcionCajas = `${form.descripcion || (form.tipo === 'caja_cb' ? 'Caja CB' : 'Caja PT')} ×${cantPesperada}`
+      const descripcionCajas = `${productoCaja?.nombre || form.descripcion || (form.tipo === 'caja_cb' ? 'Caja CB' : 'Caja PT')} ×${cantPesperada}`
       // 1) Registrar la entrada contable (suma de las cajas)
       const { data: entradaIns, error: errEnt } = await supabase.from('entradas_deposito').insert({
         fecha: form.fecha, tipo: form.tipo, proveedor_nombre: form.proveedor,
@@ -1242,9 +1259,10 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
         tipoCaja: form.tipo === 'caja_cb' ? 'CB' : 'PT',
         fecha: form.fecha,
         proveedor: form.proveedor,
-        descripcion: form.descripcion || null,
+        descripcion: productoCaja?.nombre || form.descripcion || null,
         precioCostoKg: precioPromedioKg,
         entradaId: entradaIns?.id || null,
+        productoId: form.cajaProductoId,
       })
       if (errCajas) { showAlert({ type: 'error', msg: 'Cajas no se cargaron: ' + errCajas }); return }
       // 3) Registrar en compras_proveedores
@@ -1252,8 +1270,8 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
         fecha: form.fecha, proveedor_nombre: form.proveedor,
         producto: descripcionCajas, kg: kgTotalCajas, importe: importeCajas,
       })
-      showAlert({ type: 'success', msg: `✅ ${cantPesperada} cajas registradas — ${kgTotalCajas.toFixed(1)} kg en total` })
-      setForm(f => ({ ...f, descripcion: '', kg: '', importe: '', precioKg: '9800', cantidad: '1' }))
+      showAlert({ type: 'success', msg: `✅ ${cantPesperada} cajas de ${productoCaja?.nombre || 'sin nombre'} registradas — ${kgTotalCajas.toFixed(1)} kg en total` })
+      setForm(f => ({ ...f, descripcion: '', kg: '', importe: '', precioKg: '9800', cantidad: '1', cajaProductoId: '' }))
       setCajasPesos([])
       onSaved()
       cargarHistorial()
@@ -1437,9 +1455,31 @@ async function eliminar(entrada) {
         )}
 
         {/* ──────────────────────────────────────────────────────────
-            CAJAS CB/PT: grid con un input de peso por cada caja.
-            Permite cargar pesos variables sin asumir uniformidad.
+            CAJAS CB/PT: producto que va dentro + grid de pesos por caja.
+            El producto se usa para que la venta filtre correctamente
+            (solo aparecen cajas del producto que se está vendiendo).
             ────────────────────────────────────────────────────────── */}
+        {esCajaIndividual && (
+          <div className="form-row">
+            <div className="form-group" style={{ gridColumn: '1/-1' }}>
+              <label>🥩 Producto que contienen estas cajas</label>
+              <select
+                value={form.cajaProductoId || ''}
+                onChange={e => setForm(f => ({ ...f, cajaProductoId: e.target.value }))}
+                style={{ borderColor: 'var(--gold)' }}
+              >
+                <option value="">— Seleccioná un producto —</option>
+                {productosCajas
+                  .filter(p => p.categoria === (form.tipo === 'caja_cb' ? 'bovino_caja_cb' : 'bovino_caja_pt'))
+                  .map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+              </select>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                Cada caja queda vinculada a este producto. Cuando vendas "{productosCajas.find(p => p.id === form.cajaProductoId)?.nombre || 'el producto'}" desde Caja o Mayorista, el selector va a mostrar solo estas cajas.
+                {productosCajas.length === 0 && <span style={{ color: '#ff8b8b' }}> · Aún no tenés productos de categoría caja en Precios — agregalos primero.</span>}
+              </div>
+            </div>
+          </div>
+        )}
         {esCajaIndividual && cajasPesos.length > 0 && (
           <div style={{ background: '#1a2a3a', border: '1px solid #2d3a5a', borderRadius: 10, padding: '12px 14px', marginBottom: 12 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: '#7db5ff', marginBottom: 10 }}>
@@ -2026,11 +2066,20 @@ for (const item of items) {
         {/* Selector de cajas individuales (CB / PT) — reemplaza el banner viejo.
             Cada caja tiene su peso propio cargado en el ingreso. Al seleccionar
             una, el form usa su kg automáticamente. Las cajas ya en el carrito
-            (sin guardar todavía) se ocultan para no venderlas dos veces. */}
+            (sin guardar todavía) se ocultan para no venderlas dos veces.
+            Filtra por producto_id si el usuario eligió un producto específico:
+            así "Bola de Lomo Caja PT" sólo muestra cajas de Bola de Lomo. */}
         {esCaja && (() => {
           const tipoCaja = CATEGORIA_A_TIPO_CAJA[form.categoria]
           const idsEnCarrito = items.filter(it => it.caja_id).map(it => it.caja_id)
-          const cajasVisibles = cajasDispVenta.filter(c => c.tipo_caja === tipoCaja && !idsEnCarrito.includes(c.id))
+          const cajasVisibles = cajasDispVenta.filter(c => {
+            if (c.tipo_caja !== tipoCaja) return false
+            if (idsEnCarrito.includes(c.id)) return false
+            // Si el usuario eligió un producto, filtrar por ese producto
+            // (mostrar también las "genericas" sin producto_id como fallback)
+            if (form.productoId && c.producto_id && c.producto_id !== form.productoId) return false
+            return true
+          })
           return (
             <div style={{ background: '#1a2a3a', border: '1px solid #2d3a5a', borderRadius: 10, padding: '14px 16px', marginBottom: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
