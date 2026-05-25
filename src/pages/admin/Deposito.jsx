@@ -1482,16 +1482,40 @@ export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   const [formManual, setFormManual] = useState({ descripcion: '', importe: '' })
   const [piezasDispVenta, setPiezasDispVenta] = useState([])
   const [piezaEnteraSeleccionada, setPiezaEnteraSeleccionada] = useState(null)
+  // Mapa { tipo: kg_disponible } cargado de stock_actual — se usa para mostrar
+  // disponibilidad de cajas CB/PT al cajero y validar que no sobre-venda.
+  const [stockMap, setStockMap] = useState({})
   async function recargarPiezasDispVenta() {
     const { data } = await supabase.from('piezas_stock').select('*').eq('estado', 'disponible').order('fecha_ingreso', { ascending: true }).order('id', { ascending: true })
     setPiezasDispVenta(data || [])
+  }
+  async function recargarStockMap() {
+    const { data } = await supabase.from('stock_actual').select('tipo, kg_disponible')
+    const m = {}
+    ;(data || []).forEach(r => { m[r.tipo] = Number(r.kg_disponible) || 0 })
+    setStockMap(m)
   }
   useEffect(() => {
     supabase.from('precios').select('*').order('nombre').then(({ data }) => setTodosPrecios(data || []))
     supabase.from('clientes').select('*').order('nombre').then(({ data }) => setClientes(data || []))
   supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false }).then(({ data }) => setMediasDisponibles(data || []))
   recargarPiezasDispVenta()
+  recargarStockMap()
   }, [])
+
+  // Categorías que se venden por UNIDAD (no por kg). Para estas el form
+  // muestra "Cantidad" en vez de "Kg", el step es entero, y el carrito
+  // muestra "X u" en vez de "X kg". Las cajas CB/PT además validan stock.
+  const CATEGORIAS_POR_UNIDAD = new Set([
+    'pollo_cajon',     // 🍗 Pollo Cajón
+    'rebozado_cajon',  // 🧊 Rebozado Cajón
+    'almacen',         // 🛒 Almacén
+    'bebidas',         // 🥤 Bebidas
+    'bovino_caja_cb',  // 📦 Caja CB
+    'bovino_caja_pt',  // 📦 Caja PT
+  ])
+  const esUnidad = CATEGORIAS_POR_UNIDAD.has(form.categoria)
+  const esCaja = form.categoria === 'bovino_caja_cb' || form.categoria === 'bovino_caja_pt'
 
 const CATEGORIAS = {
     bovino_mr: '🐄 Media Reses',
@@ -1554,9 +1578,30 @@ const CATEGORIA_A_STOCK = {
     setForm(f => ({ ...f, productoId: id, precio }))
   }
 async function agregarItem() {
-    if (!form.kg || !form.precio) { showAlert({ type: 'error', msg: 'Completá kg y precio' }); return }
+    const esUnidadLocal = CATEGORIAS_POR_UNIDAD.has(form.categoria)
+    const unidadLabel = esUnidadLocal ? 'cantidad' : 'kg'
+    if (!form.kg || !form.precio) { showAlert({ type: 'error', msg: `Completá ${unidadLabel} y precio` }); return }
     if (form.categoria === 'pieza_entera' && !piezaEnteraSeleccionada) { showAlert({ type: 'error', msg: 'Seleccioná una pieza del stock' }); return }
     if (form.categoria !== 'bovino_mr' && form.categoria !== 'pieza_entera' && !form.productoId) { showAlert({ type: 'error', msg: 'Seleccioná un producto' }); return }
+
+    // Validación de stock para cajas CB/PT: no permitir despachar más cajas
+    // que las disponibles en stock_actual (considerando lo que ya está en el
+    // carrito aún sin guardar).
+    const esCajaLocal = form.categoria === 'bovino_caja_cb' || form.categoria === 'bovino_caja_pt'
+    if (esCajaLocal) {
+      const tipoStock = CATEGORIA_A_STOCK[form.categoria]
+      const disponible = stockMap[tipoStock] || 0
+      const yaEnCarrito = items
+        .filter(it => it.tipo === form.categoria)
+        .reduce((s, it) => s + (Number(it.kg) || 0), 0)
+      const pedido = parseFloat(form.kg) || 0
+      if (yaEnCarrito + pedido > disponible) {
+        const restante = Math.max(0, disponible - yaEnCarrito)
+        showAlert({ type: 'error', msg: `Stock insuficiente: solo hay ${restante} caja(s) disponible(s)` })
+        return
+      }
+    }
+
     const prod = todosPrecios.find(p => p.id === form.productoId)
     let descripcion
     if (form.categoria === 'bovino_mr') {
@@ -1573,6 +1618,9 @@ const item = {
   precio: parseFloat(form.precio),
   importe: parseFloat(form.kg) * parseFloat(form.precio),
   tipo: form.categoria,
+  // 'u' para items vendidos por unidad (cajones, cajas, almacén, bebidas) y
+  // 'kg' para items pesables. El renderizado del carrito usa este flag.
+  unidad: esUnidadLocal ? 'u' : 'kg',
   stock_origen: form.categoria === 'pieza_entera' ? 'bovino_pieza' : (prodItem?.stock_origen || null),
   media_res_id: mediaSeleccionada?.id || null,
   pieza_id: form.categoria === 'pieza_entera' ? piezaEnteraSeleccionada?.id : null,
@@ -1688,6 +1736,10 @@ for (const item of items) {
     setItems([])
     setBusqueda('')
     setForm({ destino: 'MITRE', clienteId: '', clienteNombre: '', domicilio: '', fecha: fechaHoyARG(), categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
+    // Refrescar el stockMap para que las cajas/almacén/bebidas reflejen la
+    // resta inmediatamente — sin esto, el cajero ve disponibilidad vieja
+    // hasta que recarga la página.
+    recargarStockMap()
     onSaved()
     setTimeout(() => { showAlert(null); setTab('remitos') }, 1500)
   }
@@ -1819,11 +1871,47 @@ for (const item of items) {
           </div>
         </div>
 
+        {/* Para cajas CB/PT mostramos el stock disponible bien visible para
+            que el cajero sepa cuánto puede vender sin pasar al negativo. */}
+        {esCaja && (() => {
+          const tipoStock = CATEGORIA_A_STOCK[form.categoria]
+          const disponible = stockMap[tipoStock] || 0
+          const yaEnCarrito = items.filter(it => it.tipo === form.categoria).reduce((s, it) => s + (Number(it.kg) || 0), 0)
+          const restante = Math.max(0, disponible - yaEnCarrito)
+          const sinStock = restante === 0
+          return (
+            <div style={{
+              background: sinStock ? '#3a1a1a' : '#1a2a3a',
+              border: `1px solid ${sinStock ? '#5a2a2a' : '#2d3a5a'}`,
+              borderRadius: 8, padding: '10px 14px', marginBottom: 12,
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+            }}>
+              <div style={{ fontSize: 12, color: sinStock ? '#ff8b8b' : '#7db5ff', fontWeight: 600 }}>
+                📦 Stock disponible de {form.categoria === 'bovino_caja_cb' ? 'Cajas CB' : 'Cajas PT'}
+              </div>
+              <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                <span style={{ fontSize: 11, color: 'var(--muted)' }}>En depósito: <strong style={{ color: 'var(--text)' }}>{disponible}</strong></span>
+                {yaEnCarrito > 0 && <span style={{ fontSize: 11, color: 'var(--muted)' }}>En carrito: <strong style={{ color: 'var(--amber)' }}>{yaEnCarrito}</strong></span>}
+                <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: sinStock ? '#ff6b6b' : '#7dff7d' }}>
+                  {restante} {restante === 1 ? 'caja' : 'cajas'}
+                </span>
+              </div>
+            </div>
+          )
+        })()}
+
         <div className="form-row">
-          <div className="form-group"><label>Kg</label>
-            <input type="number" step="0.1" placeholder="0" value={form.kg} onChange={e => setForm(f => ({ ...f, kg: e.target.value }))} />
+          <div className="form-group"><label>{esUnidad ? 'Cantidad de unidades' : 'Kg'}</label>
+            <input
+              type="number"
+              step={esUnidad ? '1' : '0.1'}
+              min={esUnidad ? '1' : '0'}
+              placeholder={esUnidad ? '1' : '0'}
+              value={form.kg}
+              onChange={e => setForm(f => ({ ...f, kg: e.target.value }))}
+            />
           </div>
-          <div className="form-group"><label>Precio/kg</label>
+          <div className="form-group"><label>{esUnidad ? 'Precio por unidad' : 'Precio/kg'}</label>
             <input type="number" value={form.precio} onChange={e => setForm(f => ({ ...f, precio: e.target.value }))} style={{ borderColor: 'var(--gold)' }} />
           </div>
         </div>
@@ -1849,17 +1937,28 @@ for (const item of items) {
         {items.length > 0 && (
           <div style={{ marginBottom: 16 }}>
             <table>
-              <thead><tr><th>Descripción</th><th>Kg</th><th>Precio/kg</th><th>Importe</th><th></th></tr></thead>
+              <thead><tr><th>Descripción</th><th>Cantidad</th><th>Precio</th><th>Importe</th><th></th></tr></thead>
               <tbody>
-                {items.map((item, i) => (
-                  <tr key={i}>
-                    <td>{item.manual && <span style={{ fontSize: 10, color: 'var(--muted)', marginRight: 4 }}>📦</span>}{item.descripcion}</td>
-                    <td>{item.manual ? '—' : `${item.kg} kg`}</td>
-                    <td>{item.manual ? '—' : `$${Math.round(item.precio).toLocaleString('es-AR')}`}</td>
-                    <td style={{ color: 'var(--gold)' }}>${Math.round(item.importe).toLocaleString('es-AR')}</td>
-                    <td><button onClick={() => quitarItem(i)} style={{ background: 'none', border: 'none', color: 'var(--red-light)', cursor: 'pointer' }}>🗑️</button></td>
-                  </tr>
-                ))}
+                {items.map((item, i) => {
+                  // unidad: 'u' (cajón/caja/almacén/bebida) o 'kg' (peso).
+                  // Para items viejos sin unidad explícita asumimos 'kg' (legacy).
+                  const u = item.unidad || 'kg'
+                  const cantidadTxt = u === 'u'
+                    ? `${item.kg} ${item.kg === 1 ? 'unidad' : 'unidades'}`
+                    : `${item.kg} kg`
+                  const precioTxt = u === 'u'
+                    ? `$${Math.round(item.precio).toLocaleString('es-AR')}/u`
+                    : `$${Math.round(item.precio).toLocaleString('es-AR')}/kg`
+                  return (
+                    <tr key={i}>
+                      <td>{item.manual && <span style={{ fontSize: 10, color: 'var(--muted)', marginRight: 4 }}>📦</span>}{item.descripcion}</td>
+                      <td>{item.manual ? '—' : cantidadTxt}</td>
+                      <td>{item.manual ? '—' : precioTxt}</td>
+                      <td style={{ color: 'var(--gold)' }}>${Math.round(item.importe).toLocaleString('es-AR')}</td>
+                      <td><button onClick={() => quitarItem(i)} style={{ background: 'none', border: 'none', color: 'var(--red-light)', cursor: 'pointer' }}>🗑️</button></td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
             <div style={{ textAlign: 'right', fontFamily: "'Bebas Neue', cursive", fontSize: 28, color: 'var(--gold)', marginTop: 8 }}>
