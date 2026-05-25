@@ -17,7 +17,6 @@ import Precios from './pages/admin/Precios'
 import Facturacion from './pages/admin/Facturacion'
 import Auditoria from './pages/admin/Auditoria'
 import DashboardEjecutivo from './pages/admin/DashboardEjecutivo'
-import Reportes from './pages/admin/Reportes'
 import FranquiciaLayout from './pages/franquicia/FranquiciaLayout'
 import FranquiciaDashboard from './pages/franquicia/FranquiciaDashboard'
 import FranquiciaCtaCte from './pages/franquicia/FranquiciaCtaCte'
@@ -112,7 +111,6 @@ export default function App() {
           <Route path="facturacion" element={<Facturacion />} />
           <Route path="auditoria" element={<Auditoria />} />
           <Route path="ejecutivo" element={<SoloCEO><DashboardEjecutivo /></SoloCEO>} />
-          <Route path="reportes" element={<SoloCEO><Reportes /></SoloCEO>} />
         </Route>
         <Route path="/franquicia" element={<ProtectedRoute requiredRole="franquicia"><FranquiciaLayout /></ProtectedRoute>}>
           <Route path="dashboard" element={<FranquiciaDashboard />} />

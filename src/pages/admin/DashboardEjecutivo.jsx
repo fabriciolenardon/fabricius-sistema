@@ -15,6 +15,19 @@ import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { enviarWhatsapp, fmtArs } from '../../lib/whatsapp'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
+import {
+  useReportesData, SelectorPeriodo,
+  ReporteMargen, ReporteCliente, ReporteProducto, ReporteCanal, ReporteTemporal,
+} from './Reportes'
+
+const SUB_TABS = [
+  { id: 'resumen',  icon: '📊', label: 'Resumen' },
+  { id: 'margen',   icon: '💰', label: 'Margen' },
+  { id: 'cliente',  icon: '👥', label: 'Por Cliente' },
+  { id: 'producto', icon: '🥩', label: 'Por Producto' },
+  { id: 'canal',    icon: '⚖️', label: 'Min vs May' },
+  { id: 'temporal', icon: '🕐', label: 'Temporal' },
+]
 
 const TOPE_K = 108357084.05 // tope monotributo cat K 2026
 
@@ -45,6 +58,59 @@ const finMesAnterior = () => {
 }
 
 export default function DashboardEjecutivo() {
+  const [subTab, setSubTab] = useState('resumen')
+  return (
+    <div>
+      <div className="page-title">⚡ DASHBOARD EJECUTIVO</div>
+      <div className="page-sub">
+        {subTab === 'resumen'
+          ? 'Resumen panorámico del negocio · Una pantalla, toda la info'
+          : 'Reportes avanzados · Solo visible para vos'}
+      </div>
+
+      {/* Sub-tabs CEO: Resumen + 5 reportes */}
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 14, marginBottom: 16, borderBottom: '1px solid var(--border)' }}>
+        {SUB_TABS.map(t => (
+          <button key={t.id} onClick={() => setSubTab(t.id)}
+            style={{
+              padding: '10px 16px', border: 'none', background: 'transparent',
+              color: subTab === t.id ? 'var(--gold)' : 'var(--muted)',
+              borderBottom: subTab === t.id ? '2px solid var(--gold)' : '2px solid transparent',
+              cursor: 'pointer', fontWeight: 700, fontSize: 13,
+              fontFamily: "'DM Sans',sans-serif", marginBottom: -1,
+            }}>
+            <span style={{ marginRight: 6 }}>{t.icon}</span>{t.label}
+          </button>
+        ))}
+      </div>
+
+      {subTab === 'resumen' ? <ResumenEjecutivo /> : <ReportePanel tab={subTab} />}
+    </div>
+  )
+}
+
+function ReportePanel({ tab }) {
+  const [periodo, setPeriodo] = useState('30d')
+  const { loading, data } = useReportesData(periodo)
+  return (
+    <>
+      <SelectorPeriodo periodo={periodo} setPeriodo={setPeriodo} data={data} />
+      {loading ? (
+        <p style={{ color: 'var(--muted)' }}>Cargando reporte...</p>
+      ) : data ? (
+        <>
+          {tab === 'margen'   && <ReporteMargen data={data} />}
+          {tab === 'cliente'  && <ReporteCliente data={data} />}
+          {tab === 'producto' && <ReporteProducto data={data} />}
+          {tab === 'canal'    && <ReporteCanal data={data} />}
+          {tab === 'temporal' && <ReporteTemporal data={data} />}
+        </>
+      ) : null}
+    </>
+  )
+}
+
+function ResumenEjecutivo() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [whatsappDestino, setWhatsappDestino] = useState(() => localStorage.getItem('reporte_whatsapp') || '')
@@ -177,14 +243,11 @@ export default function DashboardEjecutivo() {
     enviarWhatsapp(whatsappDestino, msg)
   }
 
-  if (loading) return <p style={{ color: 'var(--muted)' }}>Cargando dashboard ejecutivo...</p>
+  if (loading) return <p style={{ color: 'var(--muted)' }}>Cargando resumen...</p>
   if (!data) return null
 
   return (
-    <div>
-      <div className="page-title">⚡ DASHBOARD EJECUTIVO</div>
-      <div className="page-sub">Resumen panorámico del negocio · Una pantalla, toda la info</div>
-
+    <>
       {/* Acción rápida: enviar reporte */}
       <div className="card" style={{ marginTop: 14, padding: 14, display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
         <div style={{ flex: 1, minWidth: 200 }}>
@@ -316,7 +379,7 @@ export default function DashboardEjecutivo() {
           )}
         </div>
       </div>
-    </div>
+    </>
   )
 }
 

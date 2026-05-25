@@ -1,18 +1,18 @@
 // ============================================================
-// REPORTES CEO — Análisis avanzado del negocio
+// REPORTES CEO — Sub-componentes para Dashboard Ejecutivo
 // ============================================================
-// Acceso restringido al CEO (fabriciolenardon@gmail.com).
-// Wrap con <SoloCEO> en App.jsx.
+// Originalmente era una página propia /admin/reportes pero se
+// movió como sub-tabs del Dashboard Ejecutivo para reducir
+// clutter en el nav principal.
 //
-// 5 reportes en tabs:
-//   1. 💰 Margen / % Ganancia — compras vs ventas semanal
-//   2. 👥 Por Cliente — ranking
-//   3. 🥩 Por Producto — ranking
-//   4. ⚖️ Minorista vs Mayorista — comparativa
-//   5. 🕐 Temporal — día/hora pico
+// Este archivo exporta:
+//   - useReportesData(periodo)  → hook que carga los datos
+//   - PERIODOS                  → diccionario de opciones
+//   - SelectorPeriodo           → componente de toggle
+//   - ReporteMargen / ReporteCliente / ReporteProducto /
+//     ReporteCanal / ReporteTemporal → las 5 vistas
 //
-// Período configurable: 30d / 90d / Año en curso
-// Toda la plata se muestra con fmtPrecio (formato AR uniforme)
+// Todos los reportes usan fmtPrecio (formato AR uniforme).
 // ============================================================
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
@@ -23,109 +23,76 @@ const fmt = n => fmtPrecio(Number(n) || 0)
 const fmtK = n => fmtKg(Number(n) || 0)
 const fmtPct = n => `${(Number(n) || 0).toFixed(1)}%`
 
-const PERIODOS = {
+export const PERIODOS = {
   '30d':  { label: 'Últimos 30 días', dias: 30 },
   '90d':  { label: 'Últimos 90 días', dias: 90 },
   'anio': { label: 'Año en curso',    dias: null },
 }
 
-const TABS = [
-  { id: 'margen',    icon: '💰', label: 'Margen' },
-  { id: 'cliente',   icon: '👥', label: 'Por Cliente' },
-  { id: 'producto',  icon: '🥩', label: 'Por Producto' },
-  { id: 'canal',     icon: '⚖️', label: 'Minorista vs Mayorista' },
-  { id: 'temporal',  icon: '🕐', label: 'Temporal' },
-]
-
-export default function Reportes() {
-  const [periodo, setPeriodo] = useState('30d')
-  const [tab, setTab] = useState('margen')
+// Hook: carga compras + ventas + pedidos + clientes en el rango pedido.
+// El consumer recarga cuando cambia el periodo (clave del PERIODOS).
+export function useReportesData(periodo) {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState(null)
 
-  useEffect(() => { cargar() }, [periodo])
+  useEffect(() => {
+    let cancelado = false
+    async function cargar() {
+      setLoading(true)
+      const hoy = fechaHoyARG()
+      let desde
+      if (periodo === 'anio') {
+        desde = hoy.slice(0, 4) + '-01-01'
+      } else {
+        desde = fechaRelativaARG(-PERIODOS[periodo].dias + 1)
+      }
 
-  async function cargar() {
-    setLoading(true)
-    const hoy = fechaHoyARG()
-    let desde
-    if (periodo === 'anio') {
-      desde = hoy.slice(0, 4) + '-01-01'
-    } else {
-      desde = fechaRelativaARG(-PERIODOS[periodo].dias + 1)
+      const [entradas, salidas, ventasCaja, pedidos, clientes] = await Promise.all([
+        supabase.from('entradas_deposito').select('*').gte('fecha', desde).lte('fecha', hoy),
+        supabase.from('salidas_deposito').select('*').gte('fecha', desde).lte('fecha', hoy),
+        supabase.from('ventas_minoristas').select('*').eq('origen', 'caja').gte('fecha', desde).lte('fecha', hoy),
+        supabase.from('pedidos').select('*').gte('dia_entrega', desde).lte('dia_entrega', hoy).eq('estado', 'confirmado'),
+        supabase.from('clientes').select('id, nombre, tipo, lista_precios, saldo'),
+      ])
+
+      if (cancelado) return
+      setData({
+        entradas: entradas.data || [],
+        salidas: salidas.data || [],
+        ventasCaja: ventasCaja.data || [],
+        pedidos: pedidos.data || [],
+        clientes: clientes.data || [],
+        desde, hasta: hoy,
+      })
+      setLoading(false)
     }
+    cargar()
+    return () => { cancelado = true }
+  }, [periodo])
 
-    const [entradas, salidas, ventasCaja, pedidos, clientes] = await Promise.all([
-      supabase.from('entradas_deposito').select('*').gte('fecha', desde).lte('fecha', hoy),
-      supabase.from('salidas_deposito').select('*').gte('fecha', desde).lte('fecha', hoy),
-      supabase.from('ventas_minoristas').select('*').eq('origen', 'caja').gte('fecha', desde).lte('fecha', hoy),
-      supabase.from('pedidos').select('*').gte('dia_entrega', desde).lte('dia_entrega', hoy).eq('estado', 'confirmado'),
-      supabase.from('clientes').select('id, nombre, tipo, lista_precios, saldo'),
-    ])
+  return { loading, data }
+}
 
-    setData({
-      entradas: entradas.data || [],
-      salidas: salidas.data || [],
-      ventasCaja: ventasCaja.data || [],
-      pedidos: pedidos.data || [],
-      clientes: clientes.data || [],
-      desde, hasta: hoy,
-    })
-    setLoading(false)
-  }
-
+// Selector de período (toggle 30d / 90d / Año)
+export function SelectorPeriodo({ periodo, setPeriodo, data }) {
   return (
-    <div>
-      <div className="page-title">📊 REPORTES CEO</div>
-      <div className="page-sub">Análisis avanzado · Solo visible para vos</div>
-
-      {/* Selector de período */}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14, marginBottom: 16 }}>
-        {Object.entries(PERIODOS).map(([id, p]) => (
-          <button key={id} onClick={() => setPeriodo(id)}
-            style={{
-              padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border)',
-              background: periodo === id ? 'var(--gold)' : 'transparent',
-              color: periodo === id ? '#000' : 'var(--muted)',
-              cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12
-            }}>
-            {p.label}
-          </button>
-        ))}
-        {data && (
-          <div style={{ display: 'flex', alignItems: 'center', color: 'var(--muted)', fontSize: 11, marginLeft: 'auto' }}>
-            📅 {data.desde} → {data.hasta}
-          </div>
-        )}
-      </div>
-
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 16, borderBottom: '1px solid var(--border)' }}>
-        {TABS.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
-            style={{
-              padding: '10px 16px', border: 'none', background: 'transparent',
-              color: tab === t.id ? 'var(--gold)' : 'var(--muted)',
-              borderBottom: tab === t.id ? '2px solid var(--gold)' : '2px solid transparent',
-              cursor: 'pointer', fontWeight: 700, fontSize: 13,
-              fontFamily: "'DM Sans',sans-serif", marginBottom: -1
-            }}>
-            <span style={{ marginRight: 6 }}>{t.icon}</span>{t.label}
-          </button>
-        ))}
-      </div>
-
-      {loading ? (
-        <p style={{ color: 'var(--muted)' }}>Cargando reporte...</p>
-      ) : data ? (
-        <>
-          {tab === 'margen'   && <ReporteMargen data={data} />}
-          {tab === 'cliente'  && <ReporteCliente data={data} />}
-          {tab === 'producto' && <ReporteProducto data={data} />}
-          {tab === 'canal'    && <ReporteCanal data={data} />}
-          {tab === 'temporal' && <ReporteTemporal data={data} />}
-        </>
-      ) : null}
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+      {Object.entries(PERIODOS).map(([id, p]) => (
+        <button key={id} onClick={() => setPeriodo(id)}
+          style={{
+            padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border)',
+            background: periodo === id ? 'var(--gold)' : 'transparent',
+            color: periodo === id ? '#000' : 'var(--muted)',
+            cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12
+          }}>
+          {p.label}
+        </button>
+      ))}
+      {data && (
+        <div style={{ display: 'flex', alignItems: 'center', color: 'var(--muted)', fontSize: 11, marginLeft: 'auto' }}>
+          📅 {data.desde} → {data.hasta}
+        </div>
+      )}
     </div>
   )
 }
@@ -133,7 +100,7 @@ export default function Reportes() {
 // ═══════════════════════════════════════════════════════════════
 // 💰 MARGEN — % ganancia por semana
 // ═══════════════════════════════════════════════════════════════
-function ReporteMargen({ data }) {
+export function ReporteMargen({ data }) {
   const semanas = useMemo(() => agruparPorSemana(data), [data])
   const totales = useMemo(() => {
     const comprasMonto = data.entradas.reduce((s, e) => s + (Number(e.importe) || 0), 0)
@@ -298,7 +265,7 @@ function ComparativaKgCategoria({ data }) {
 // ═══════════════════════════════════════════════════════════════
 // 👥 POR CLIENTE — ranking
 // ═══════════════════════════════════════════════════════════════
-function ReporteCliente({ data }) {
+export function ReporteCliente({ data }) {
   const ranking = useMemo(() => {
     // Mayoristas: salidas_deposito + pedidos confirmados
     const acc = {}  // cliente_nombre → { compras, total, kg, ultimaCompra }
@@ -398,7 +365,7 @@ function ReporteCliente({ data }) {
 // ═══════════════════════════════════════════════════════════════
 // 🥩 POR PRODUCTO — ranking
 // ═══════════════════════════════════════════════════════════════
-function ReporteProducto({ data }) {
+export function ReporteProducto({ data }) {
   const ranking = useMemo(() => {
     const acc = {}
     const agregar = (items) => {
@@ -502,7 +469,7 @@ function ReporteProducto({ data }) {
 // ═══════════════════════════════════════════════════════════════
 // ⚖️ MINORISTA VS MAYORISTA — comparativa
 // ═══════════════════════════════════════════════════════════════
-function ReporteCanal({ data }) {
+export function ReporteCanal({ data }) {
   const stats = useMemo(() => {
     const caja = {
       total: data.ventasCaja.reduce((s, v) => s + (Number(v.total) || 0), 0),
@@ -619,7 +586,7 @@ function FilaComp({ label, a, b, fmtFn }) {
 // ═══════════════════════════════════════════════════════════════
 // 🕐 TEMPORAL — día de semana / hora del día
 // ═══════════════════════════════════════════════════════════════
-function ReporteTemporal({ data }) {
+export function ReporteTemporal({ data }) {
   const porDia = useMemo(() => {
     const dias = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
     const acc = dias.map(d => ({ dia: d, total: 0, ops: 0 }))
