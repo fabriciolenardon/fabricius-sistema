@@ -1,10 +1,10 @@
 // =============================================
 // CLIENTES & CUENTA CORRIENTE
 // =============================================
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
-import { parseNumero } from '../../lib/formatos'
+import { parseNumero, fmtPrecio } from '../../lib/formatos'
 import { getEtiquetaLista } from '../../lib/listasPrecios'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
@@ -19,6 +19,8 @@ export function Clientes() {
   const [showForm, setShowForm] = useState(false)
   const [showPago, setShowPago] = useState(false)
   const [editandoId, setEditandoId] = useState(null)
+  const [busquedaCliente, setBusquedaCliente] = useState('')   // filtro lista clientes
+  const [filtroSaldo, setFiltroSaldo] = useState('todos')      // todos | con_deuda | al_dia
   const [pago, setPago] = useState({ importe: '', forma: 'efectivo', fecha: fechaHoyARG(), notas: '' })
   const [form, setForm] = useState({ nombre: '', nombre_fantasia: '', tipo: 'carniceria', telefono: '', localidad: '', domicilio: '', cuit: '', lista_precios: 'carn', notas: '' })
   // Modal de gestion del portal: { tipo: 'habilitar'|'credenciales'|'revocar', cliente, email, credenciales, loading }
@@ -193,6 +195,18 @@ async function eliminarMovimiento(mov) {
   async function registrarPago() {
     if (!pago.importe || !seleccionado) return
     const importe = parseNumero(pago.importe)
+    if (importe <= 0) {
+      alert('❌ El importe debe ser mayor a 0')
+      return
+    }
+    // Confirmación explícita con el monto formateado — evita typos
+    // como "20" cuando querías "20000". Mostramos el número parseado tal
+    // cual se va a guardar, en formato AR, antes de tocar la DB.
+    const msg = `¿Confirmar pago de ${fmt(importe)} (${pago.forma}) a ${seleccionado.nombre}?\n\n` +
+                `Saldo actual: ${fmt(seleccionado.saldo)}\n` +
+                `Saldo después: ${fmt((seleccionado.saldo || 0) - importe)}`
+    if (!confirm(msg)) return
+
     const nuevoSaldo = (seleccionado.saldo || 0) - importe
     await supabase.from('movimientos_ctacte').insert({
       cliente_id: seleccionado.id,
@@ -206,6 +220,21 @@ async function eliminarMovimiento(mov) {
     await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', seleccionado.id)
     setPago({ importe: '', forma: 'efectivo', fecha: fechaHoyARG(), notas: '' })
     setShowPago(false)
+    await fetchClientes()
+    await seleccionar({ ...seleccionado, saldo: nuevoSaldo })
+  }
+
+  // Anula un pago específico — invierte el efecto en saldo y elimina el movimiento.
+  // Bajado desde eliminarMovimiento pero usable directamente desde la nueva
+  // tabla de pagos.
+  async function anularPago(mov) {
+    if (mov.tipo !== 'pago' && mov.tipo !== 'cheque') return
+    const msg = `¿Anular este pago de ${fmt(mov.haber)} (${mov.descripcion})?\n\n` +
+                `El saldo del cliente subirá en ${fmt(mov.haber)}.`
+    if (!confirm(msg)) return
+    await supabase.from('movimientos_ctacte').delete().eq('id', mov.id)
+    const nuevoSaldo = (seleccionado.saldo || 0) + Number(mov.haber || 0)
+    await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', seleccionado.id)
     await fetchClientes()
     await seleccionar({ ...seleccionado, saldo: nuevoSaldo })
   }
@@ -277,7 +306,7 @@ async function eliminarMovimiento(mov) {
     win.document.close()
   }
 
-  const fmt = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
+  const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
   const totalDeuda = clientes.filter(c => c.saldo > 0).reduce((s, c) => s + c.saldo, 0)
   const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }
 
@@ -336,29 +365,18 @@ async function eliminarMovimiento(mov) {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: seleccionado ? '1fr 2fr' : '1fr', gap: 16 }}>
-        <div className="card">
-          <div className="card-title">Clientes</div>
-          {clientes.map(c => (
-            <div key={c.id}
-              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 8px', borderBottom: '1px solid var(--border)', borderRadius: 6, background: seleccionado?.id === c.id ? 'var(--surface2)' : 'transparent' }}>
-              <div onClick={() => seleccionar(c)} style={{ flex: 1, cursor: 'pointer' }}>
-                <div style={{ fontWeight: 600 }}>{c.nombre}</div>
-                <div style={{ fontSize: 11, color: 'var(--muted)' }}>{c.nombre_fantasia ? `"${c.nombre_fantasia}" · ` : ''}{c.localidad} · {c.tipo}</div>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {c.tiene_portal && <span title="Portal habilitado" style={{ fontSize: 13, color: 'var(--green)' }}>📱</span>}
-                <span style={{ color: c.saldo > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 700, fontSize: 13 }}>
-                  {c.saldo > 0 ? fmt(c.saldo) + ' debe' : c.saldo < 0 ? fmt(Math.abs(c.saldo)) + ' a favor' : '✅ Al día'}
-                </span>
-                <button onClick={() => abrirFormEditar(c)}
-                  style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#000' }}>✏️</button>
-                <button onClick={() => eliminarCliente(c)}
-                  style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--red-light)' }}>🗑️</button>
-              </div>
-            </div>
-          ))}
-          {clientes.length === 0 && <p style={{ color: 'var(--muted)', textAlign: 'center', padding: 20 }}>Sin clientes registrados</p>}
-        </div>
+        <ListaClientes
+          clientes={clientes}
+          seleccionado={seleccionado}
+          onSeleccionar={seleccionar}
+          onEditar={abrirFormEditar}
+          onEliminar={eliminarCliente}
+          busqueda={busquedaCliente}
+          setBusqueda={setBusquedaCliente}
+          filtroSaldo={filtroSaldo}
+          setFiltroSaldo={setFiltroSaldo}
+          fmt={fmt}
+        />
 
         {seleccionado && (
           <div>
@@ -432,30 +450,72 @@ async function eliminarMovimiento(mov) {
 
               <button className="btn btn-gold" onClick={() => setShowPago(!showPago)}>💵 Registrar pago</button>
 
-              {showPago && (
-                <div style={{ marginTop: 16, padding: 16, background: 'var(--surface2)', borderRadius: 8 }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-                    <div className="form-group"><label>Importe ($)</label><input style={inp} type="number" value={pago.importe} onChange={e => setPago(p => ({ ...p, importe: e.target.value }))} placeholder="0" /></div>
-                    <div className="form-group"><label>Forma de pago</label>
-                      <select style={inp} value={pago.forma} onChange={e => setPago(p => ({ ...p, forma: e.target.value }))}>
-                        <option value="efectivo">Efectivo</option>
-                        <option value="transferencia">Transferencia</option>
-                        <option value="cheque">Cheque</option>
-                        <option value="echeq">E-cheq</option>
-                      </select>
+              {showPago && (() => {
+                const importeParseado = parseNumero(pago.importe)
+                const saldoDespues = (seleccionado.saldo || 0) - importeParseado
+                return (
+                  <div style={{ marginTop: 16, padding: 16, background: 'var(--surface2)', borderRadius: 8 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                      <div className="form-group">
+                        <label>Importe ($)</label>
+                        <input
+                          style={inp}
+                          type="text"
+                          inputMode="decimal"
+                          value={pago.importe}
+                          onChange={e => setPago(p => ({ ...p, importe: e.target.value }))}
+                          placeholder="Ej: 20000 o 20.000,50"
+                          autoFocus
+                        />
+                      </div>
+                      <div className="form-group"><label>Forma de pago</label>
+                        <select style={inp} value={pago.forma} onChange={e => setPago(p => ({ ...p, forma: e.target.value }))}>
+                          <option value="efectivo">Efectivo</option>
+                          <option value="transferencia">Transferencia</option>
+                          <option value="cheque">Cheque</option>
+                          <option value="echeq">E-cheq</option>
+                        </select>
+                      </div>
+                      <div className="form-group"><label>Fecha</label><input style={inp} type="date" value={pago.fecha} onChange={e => setPago(p => ({ ...p, fecha: e.target.value }))} /></div>
+                      <div className="form-group"><label>Notas</label><input style={inp} value={pago.notas} onChange={e => setPago(p => ({ ...p, notas: e.target.value }))} placeholder="Cheque nro., banco..." /></div>
                     </div>
-                    <div className="form-group"><label>Fecha</label><input style={inp} type="date" value={pago.fecha} onChange={e => setPago(p => ({ ...p, fecha: e.target.value }))} /></div>
-                    <div className="form-group"><label>Notas</label><input style={inp} value={pago.notas} onChange={e => setPago(p => ({ ...p, notas: e.target.value }))} placeholder="Cheque nro., banco..." /></div>
+
+                    {/* Preview anti-typo: muestra el monto parseado y el saldo después */}
+                    {pago.importe && (
+                      <div style={{
+                        background: importeParseado > 0 ? '#1a2a1a' : '#3a1a1a',
+                        border: `1px solid ${importeParseado > 0 ? 'var(--green)' : 'var(--red-light)'}`,
+                        borderRadius: 8, padding: '10px 14px', marginBottom: 12,
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8,
+                      }}>
+                        <div>
+                          <div style={{ fontSize: 10, color: 'var(--muted)' }}>VAS A REGISTRAR</div>
+                          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 28, color: importeParseado > 0 ? 'var(--green)' : 'var(--red-light)' }}>
+                            {fmt(importeParseado)}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: 10, color: 'var(--muted)' }}>SALDO DESPUÉS DEL PAGO</div>
+                          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: saldoDespues > 0 ? 'var(--red-light)' : 'var(--green)' }}>
+                            {fmt(saldoDespues)} {saldoDespues > 0 ? 'debe' : saldoDespues < 0 ? 'a favor' : '✅ al día'}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button className="btn btn-ghost" onClick={() => setShowPago(false)}>Cancelar</button>
+                      <button className="btn btn-gold" onClick={registrarPago} disabled={importeParseado <= 0}>
+                        ✅ Confirmar pago{importeParseado > 0 ? ` de ${fmt(importeParseado)}` : ''}
+                      </button>
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button className="btn btn-ghost" onClick={() => setShowPago(false)}>Cancelar</button>
-                    <button className="btn btn-gold" onClick={registrarPago}>✅ Confirmar pago</button>
-                  </div>
-                </div>
-              )}
+                )
+              })()}
             </div>
 
             <RemitosCliente remitos={remitos} imprimirRemito={imprimirRemito} />
+            <PagosCliente movimientos={movimientos} onAnular={anularPago} fmt={fmt} />
 {false && (
             <div className="card" style={{ marginBottom: 16 }}>
   <div className="card-title">🧾 Remitos</div>
@@ -636,6 +696,145 @@ function RemitosCliente({ remitos, imprimirRemito }) {
         </tbody>
       </table>
       <Paginador {...pag.controles} label="remitos" />
+    </div>
+  )
+}
+
+// ============================================================
+// LISTA DE CLIENTES — con búsqueda, filtro por saldo y paginación
+// ============================================================
+// Antes: render plano de todos los clientes (>100 filas). Lag y
+// scroll molesto. Ahora: input de búsqueda + toggle "todos/deuda/al día"
+// + paginador (20 por página).
+function ListaClientes({ clientes, seleccionado, onSeleccionar, onEditar, onEliminar, busqueda, setBusqueda, filtroSaldo, setFiltroSaldo, fmt }) {
+  const filtrados = useMemo(() => {
+    const q = (busqueda || '').toLowerCase().trim()
+    return clientes.filter(c => {
+      // Filtro búsqueda: nombre + nombre_fantasia + localidad
+      if (q) {
+        const hay = (
+          (c.nombre || '').toLowerCase() + ' ' +
+          (c.nombre_fantasia || '').toLowerCase() + ' ' +
+          (c.localidad || '').toLowerCase()
+        ).includes(q)
+        if (!hay) return false
+      }
+      // Filtro saldo
+      if (filtroSaldo === 'con_deuda' && !(Number(c.saldo) > 0)) return false
+      if (filtroSaldo === 'al_dia' && Number(c.saldo) > 0) return false
+      return true
+    })
+  }, [clientes, busqueda, filtroSaldo])
+
+  const pag = usePaginacion(filtrados, 20)
+
+  return (
+    <div className="card">
+      <div className="card-title">Clientes ({filtrados.length}{filtrados.length !== clientes.length ? ` de ${clientes.length}` : ''})</div>
+
+      {/* Búsqueda + filtros */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+        <input
+          type="text"
+          placeholder="🔍 Buscar nombre, fantasía o localidad..."
+          value={busqueda}
+          onChange={e => setBusqueda(e.target.value)}
+          style={{ flex: 1, minWidth: 180, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '6px 10px', fontSize: 12 }}
+        />
+        {busqueda && (
+          <button onClick={() => setBusqueda('')}
+            style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 6, padding: '6px 10px', cursor: 'pointer', fontSize: 12 }}>✕</button>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', gap: 4, marginBottom: 10, flexWrap: 'wrap' }}>
+        {[
+          { id: 'todos',     label: `Todos` },
+          { id: 'con_deuda', label: `💳 Con deuda` },
+          { id: 'al_dia',    label: `✅ Al día` },
+        ].map(opt => (
+          <button key={opt.id} onClick={() => setFiltroSaldo(opt.id)}
+            style={{
+              padding: '4px 10px', borderRadius: 6,
+              border: `1px solid ${filtroSaldo === opt.id ? 'var(--gold)' : 'var(--border)'}`,
+              background: filtroSaldo === opt.id ? 'var(--gold)' : 'transparent',
+              color: filtroSaldo === opt.id ? '#000' : 'var(--muted)',
+              cursor: 'pointer', fontSize: 11, fontWeight: 600,
+            }}>{opt.label}</button>
+        ))}
+      </div>
+
+      {pag.items.map(c => (
+        <div key={c.id}
+          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 8px', borderBottom: '1px solid var(--border)', borderRadius: 6, background: seleccionado?.id === c.id ? 'var(--surface2)' : 'transparent' }}>
+          <div onClick={() => onSeleccionar(c)} style={{ flex: 1, cursor: 'pointer' }}>
+            <div style={{ fontWeight: 600 }}>{c.nombre}</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>{c.nombre_fantasia ? `"${c.nombre_fantasia}" · ` : ''}{c.localidad} · {c.tipo}</div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {c.tiene_portal && <span title="Portal habilitado" style={{ fontSize: 13, color: 'var(--green)' }}>📱</span>}
+            <span style={{ color: c.saldo > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 700, fontSize: 13 }}>
+              {c.saldo > 0 ? fmt(c.saldo) + ' debe' : c.saldo < 0 ? fmt(Math.abs(c.saldo)) + ' a favor' : '✅ Al día'}
+            </span>
+            <button onClick={() => onEditar(c)}
+              style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#000' }}>✏️</button>
+            <button onClick={() => onEliminar(c)}
+              style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--red-light)' }}>🗑️</button>
+          </div>
+        </div>
+      ))}
+      {filtrados.length === 0 && (
+        <p style={{ color: 'var(--muted)', textAlign: 'center', padding: 20 }}>
+          {clientes.length === 0 ? 'Sin clientes registrados' : 'Ningún cliente con esos filtros'}
+        </p>
+      )}
+      <Paginador {...pag.controles} label="clientes" />
+    </div>
+  )
+}
+
+// ============================================================
+// PAGOS DEL CLIENTE — historial paginado con opción de anular
+// ============================================================
+// Antes los pagos se cargaban a movimientos_ctacte pero no había UI
+// para verlos ni anularlos. Solo aparecían sumarizados en "TOTAL PAGADO".
+// Ahora se muestran en una tabla espejo de la de remitos: paginada,
+// con botón 🗑️ Anular que revierte el saldo al cliente.
+function PagosCliente({ movimientos, onAnular, fmt }) {
+  const pagos = useMemo(() =>
+    (movimientos || []).filter(m => m.tipo === 'pago' || m.tipo === 'cheque'),
+    [movimientos])
+  const pag = usePaginacion(pagos, 20)
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card-title">💵 Pagos ({pagos.length})</div>
+      <table>
+        <thead><tr>
+          <th>Fecha</th>
+          <th>Descripción</th>
+          <th style={{ textAlign: 'right' }}>Importe</th>
+          <th style={{ textAlign: 'center' }}>Acciones</th>
+        </tr></thead>
+        <tbody>
+          {pag.items.map(p => (
+            <tr key={p.id}>
+              <td>{p.fecha}</td>
+              <td>{p.descripcion || '—'}</td>
+              <td style={{ textAlign: 'right', color: 'var(--green)', fontWeight: 700 }}>{fmt(p.haber)}</td>
+              <td style={{ textAlign: 'center' }}>
+                <button onClick={() => onAnular(p)}
+                  title="Anular este pago (revierte el saldo)"
+                  style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--red-light)' }}>
+                  🗑️ Anular
+                </button>
+              </td>
+            </tr>
+          ))}
+          {pagos.length === 0 && <tr><td colSpan={4} className="empty">Sin pagos registrados</td></tr>}
+        </tbody>
+      </table>
+      <Paginador {...pag.controles} label="pagos" />
     </div>
   )
 }
