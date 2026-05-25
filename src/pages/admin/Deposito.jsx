@@ -416,8 +416,12 @@ async function confirmarDesposteCerdo() {
     showAlert(`⚠️ La suma de piezas (${sumaPiezas.toFixed(1)} kg) supera al capón (${kgCapon} kg). Revisá los valores — probablemente sobra un dígito.`, 'error')
     return
   }
-  if (kgCapon > 150) {
-    if (!confirm(`⚠️ ${kgCapon} kg es bastante para un capón (típico: 80-130 kg). ¿Continuar?`)) return
+  // Rango real Fabricius para capones: 70-150 kg
+  if (kgCapon > 160) {
+    if (!confirm(`⚠️ ${kgCapon} kg es demasiado para un capón (rango real: 70-150 kg). ¿Continuar?`)) return
+  }
+  if (kgCapon > 0 && kgCapon < 60) {
+    if (!confirm(`⚠️ ${kgCapon} kg es muy bajo para un capón (rango real: 70-150 kg). ¿Continuar?`)) return
   }
 
   setLoading(true)
@@ -1253,21 +1257,31 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     if (!esCajaIndividual && !esSoloUnid && kgInput < 0) {
       showAlert({ type: 'error', msg: 'Los kilos no pueden ser negativos' }); return
     }
-    // Si la entrada es por unidad (cajón pollo/rebozado), el kg de cada unidad
-    // típicamente está entre 1 y 50. Si excede 200 sospechar typo.
-    if (TIPOS_EN_UNIDADES.includes(form.tipo) && !esSoloUnid && !esCajaIndividual && kgInput > 200) {
-      if (!confirm(`⚠️ ${kgInput} kg por unidad es bastante alto (típico: 10-25 kg). ¿Es correcto?`)) return
+    // Pollo por cajón: rango real Fabricius 10-30 kg por cajón.
+    // > 40 kg = sospechoso (probablemente sobra un dígito).
+    if (form.tipo === 'pollo' && kgInput > 40) {
+      if (!confirm(`⚠️ ${kgInput} kg por cajón de pollo es mucho (rango real: 10-30 kg). ¿Es correcto?`)) return
     }
-    // Para media res, rango real Fabricius: 70-140 kg. > 150 = sospechoso.
+    if (form.tipo === 'pollo' && kgInput > 0 && kgInput < 5) {
+      if (!confirm(`⚠️ ${kgInput} kg por cajón de pollo es muy poco (rango real: 10-30 kg). ¿Es correcto?`)) return
+    }
+    // Otros tipos en unidades (no pollo, no cajas individuales, no almacén)
+    if (TIPOS_EN_UNIDADES.includes(form.tipo) && form.tipo !== 'pollo' && !esSoloUnid && !esCajaIndividual && kgInput > 200) {
+      if (!confirm(`⚠️ ${kgInput} kg por unidad es bastante alto. ¿Es correcto?`)) return
+    }
+    // Media res: rango real Fabricius 70-140 kg
     if (form.tipo === 'bovino_mr' && kgInput > 150) {
       if (!confirm(`⚠️ ${kgInput} kg para una media res es demasiado (rango real: 70-140 kg). ¿Es correcto?`)) return
     }
     if (form.tipo === 'bovino_mr' && kgInput > 0 && kgInput < 50) {
       if (!confirm(`⚠️ ${kgInput} kg es muy bajo para una media res (rango real: 70-140 kg). ¿Es correcto?`)) return
     }
-    // Para capón, validar < 150 kg
-    if (form.tipo === 'cerdo' && kgInput > 150) {
-      if (!confirm(`⚠️ ${kgInput} kg para un capón es bastante (típico: 80-130 kg). ¿Es correcto?`)) return
+    // Capón cerdo: rango real Fabricius 70-150 kg
+    if (form.tipo === 'cerdo' && kgInput > 160) {
+      if (!confirm(`⚠️ ${kgInput} kg para un capón es demasiado (rango real: 70-150 kg). ¿Es correcto?`)) return
+    }
+    if (form.tipo === 'cerdo' && kgInput > 0 && kgInput < 60) {
+      if (!confirm(`⚠️ ${kgInput} kg es muy bajo para un capón (rango real: 70-150 kg). ¿Es correcto?`)) return
     }
 
     // ── CAJAS CB / PT: tracking individual ────────────────────────────
@@ -1285,6 +1299,16 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
       if (pesosValidos.length !== cantPesperada) {
         showAlert({ type: 'error', msg: `Cargá el peso de las ${cantPesperada} cajas (faltan ${cantPesperada - pesosValidos.length})` })
         return
+      }
+      // Sanity check: las cajas bovinas (CB/PT) van de 5 a 30 kg típicamente.
+      // > 40 kg = sospechoso, < 3 kg = sospechoso. Pide confirm.
+      const cajaInflada = pesosValidos.find(kg => kg > 40)
+      if (cajaInflada) {
+        if (!confirm(`⚠️ Hay al menos una caja con ${cajaInflada} kg (rango real: 5-30 kg). ¿Es correcto?`)) return
+      }
+      const cajaMuyBaja = pesosValidos.find(kg => kg < 3)
+      if (cajaMuyBaja) {
+        if (!confirm(`⚠️ Hay al menos una caja con ${cajaMuyBaja} kg (rango real: 5-30 kg). ¿Es correcto?`)) return
       }
       const productoCaja = productosCajas.find(p => p.id === form.cajaProductoId)
       const kgTotalCajas = pesosValidos.reduce((s, kg) => s + kg, 0)

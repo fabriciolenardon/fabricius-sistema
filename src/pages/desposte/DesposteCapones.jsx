@@ -76,6 +76,20 @@ export default function DesposteCapones() {
   async function confirmar() {
     if (!seleccionado) return
     if (kgPiezas === 0) return aviso('Cargá al menos una pieza con kilos', 'error')
+
+    // Validaciones anti kg-disparatado (mismo patrón que media res / FlujoDeposito)
+    // Rango real Fabricius para capones: 70-150 kg.
+    if (kgCapon > 0) {
+      // Pieza individual no puede pesar más que el capón
+      const piezaInflada = PIEZAS_CERDO.find(p => (Number(piezas[p.key]) || 0) > kgCapon)
+      if (piezaInflada) {
+        return aviso(`⚠️ "${piezaInflada.nombre}" tiene ${piezas[piezaInflada.key]} kg pero el capón es de ${fmt(kgCapon)} kg. Imposible.`, 'error')
+      }
+      // Suma de piezas no debe superar 1.1x el capón
+      if (kgPiezas > kgCapon * 1.1) {
+        return aviso(`⚠️ La suma de piezas (${fmt(kgPiezas)} kg) supera al capón (${fmt(kgCapon)} kg). Revisá los kg cargados — probablemente sobra un dígito.`, 'error')
+      }
+    }
     if (merma < 0) {
       if (!confirm(`⚠️ Las piezas suman MÁS que el capón.\nKg capón: ${fmt(kgCapon)} · Piezas: ${fmt(kgPiezas)}\n¿Guardar igual?`)) return
     }
