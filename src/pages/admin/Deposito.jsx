@@ -1548,7 +1548,13 @@ const CATEGORIA_A_STOCK = {
     pieza_parrillero: 'pieza_parrillero',
     caja_cb: 'caja_cb',
     caja_pt: 'caja_pt',
-    cerdo_corte: 'cerdo',
+    // ── CERDO ──────────────────────────────────────────────
+    // cerdo (capón entero) → stock_actual.tipo='cerdo' (capones)
+    // cerdo_corte / cerdo_pieza → usar stock_origen del producto si está
+    //   configurado (ej. 'cerdo_bondiola', 'cerdo_pierna'), sino caer en
+    //   el bucket genérico 'cerdo_pieza' que se SUMA al display de
+    //   "Cerdo Piezas" del dashboard. NUNCA descontar de 'cerdo' (capones).
+    cerdo_corte: 'cerdo_pieza',
     cerdo_pieza: 'cerdo_pieza',
     cerdo: 'cerdo',
     embutido: 'embutido',

@@ -192,6 +192,11 @@ export default function Caja() {
       producto_id: producto.id,
       descripcion: producto.nombre,
       categoria: producto.categoria,
+      // stock_origen del producto — usado en cerrarVenta para descontar
+      // del cut específico (ej. 'cerdo_bondiola') en lugar de la categoría
+      // genérica. Permite que productos como "Bondiola de cerdo" toquen
+      // stock_actual.cerdo_bondiola en vez del bucket cerdo_pieza general.
+      stock_origen: producto.stock_origen || null,
       kg: cant,            // se sigue llamando "kg" para no romper el resto; representa la cantidad
       unidad: pesable ? 'kg' : 'u',
       precio: parseFloat(precio),
@@ -319,6 +324,10 @@ export default function Caja() {
         precio: i.precio,
         importe: i.importe,
         producto_id: i.producto_id,
+        // Persistido para que anular-venta pueda revertir contra el cut
+        // específico (cerdo_bondiola, cerdo_pierna, etc.) en lugar de
+        // contra el bucket genérico cerdo_pieza.
+        stock_origen: i.stock_origen || null,
       })),
       total,
       efectivo: parseFloat(pago.efectivo) || 0,
@@ -356,17 +365,25 @@ export default function Caja() {
     //   3) Cajones de pollo/rebozado → descuenta KG DEL PRODUCTO BASE
     //      multiplicando unidades × kg_por_cajón (parseado del nombre,
     //      ej. "X20KG" → 20 kg por cada cajón vendido).
-    function mapearStock(cat) {
+    // Función que decide a qué tipo de stock_actual va una venta.
+    // Para cerdo_corte/cerdo_pieza usa el stock_origen del producto si está
+    // configurado (ej. cerdo_bondiola); sino cae en cerdo_pieza (bucket
+    // genérico que ya se suma al display "Cerdo Piezas" del dashboard).
+    // NUNCA descuenta de 'cerdo' (capones) — esos sólo bajan al despostar.
+    function mapearStock(cat, stockOrigen) {
       if (!cat) return null
+      if (stockOrigen) return stockOrigen
       if (cat === 'bovino_mr')        return 'bovino_mr'
       if (cat === 'bovino_corte')     return 'bovino_corte'
       if (cat === 'bovino_pieza')     return 'bovino_pieza'
       if (cat === 'bovino_brosa')     return 'bovino_brosa'
-      if (cat === 'cerdo_corte' || cat === 'cerdo_pieza' || cat === 'cerdo') return 'cerdo'
+      if (cat === 'cerdo')            return 'cerdo'         // capón entero
+      if (cat === 'cerdo_corte')      return 'cerdo_pieza'   // bucket genérico de piezas
+      if (cat === 'cerdo_pieza')      return 'cerdo_pieza'
       if (cat === 'pollo')            return 'pollo'
-      if (cat === 'pollo_cajon')      return 'pollo'      // unidad × kg_por_cajón
+      if (cat === 'pollo_cajon')      return 'pollo'         // unidad × kg_por_cajón
       if (cat === 'rebozado')         return 'rebozado'
-      if (cat === 'rebozado_cajon')   return 'rebozado'   // unidad × kg_por_cajón
+      if (cat === 'rebozado_cajon')   return 'rebozado'      // unidad × kg_por_cajón
       if (cat === 'embutido')         return 'embutido'
       if (cat === 'almacen')          return 'almacen'
       if (cat === 'bebidas')          return 'bebidas'
@@ -375,7 +392,7 @@ export default function Caja() {
       return null
     }
     for (const item of carrito) {
-      const tipoStock = mapearStock(item.categoria)
+      const tipoStock = mapearStock(item.categoria, item.stock_origen)
       if (!tipoStock) continue  // categoría sin tracking de stock → saltar
       // Para cajones de pollo/rebozado: multiplicar unidades × kg_por_cajón
       const esCajonAConvertir = item.categoria === 'pollo_cajon' || item.categoria === 'rebozado_cajon'
@@ -387,6 +404,10 @@ export default function Caja() {
         await supabase.from('stock_actual')
           .update({ kg_disponible: (stock.kg_disponible || 0) - cantidad })
           .eq('tipo', tipoStock)
+      } else {
+        // Si el tipo no existe todavía (ej. primera venta de cerdo_pieza),
+        // crear la fila con valor negativo — actualizarStock-style behavior.
+        await supabase.from('stock_actual').insert({ tipo: tipoStock, kg_disponible: -cantidad })
       }
     }
 

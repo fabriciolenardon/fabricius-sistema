@@ -34,14 +34,19 @@ function grupoDeCategoria(cat) {
   return 'otros'
 }
 
-// Mapeo categoría → tipo en stock_actual (igual al de Caja.jsx para mantener coherencia)
-function mapearStockTipo(cat) {
+// Mapeo categoría → tipo en stock_actual (igual al de Caja.jsx para mantener coherencia).
+// Recibe stock_origen opcional para revertir contra el cut específico si la
+// venta original lo guardó (ej. cerdo_bondiola). Sino usa fallback por categoría.
+function mapearStockTipo(cat, stockOrigen) {
   if (!cat) return null
+  if (stockOrigen) return stockOrigen
   if (cat === 'bovino_mr')        return 'bovino_mr'
   if (cat === 'bovino_corte')     return 'bovino_corte'
   if (cat === 'bovino_pieza')     return 'bovino_pieza'
   if (cat === 'bovino_brosa')     return 'bovino_brosa'
-  if (cat === 'cerdo_corte' || cat === 'cerdo_pieza' || cat === 'cerdo') return 'cerdo'
+  if (cat === 'cerdo')            return 'cerdo'        // capón
+  if (cat === 'cerdo_corte')      return 'cerdo_pieza'  // bucket genérico de piezas
+  if (cat === 'cerdo_pieza')      return 'cerdo_pieza'
   if (cat === 'pollo')            return 'pollo'
   if (cat === 'pollo_cajon')      return 'pollo'      // se revierte kg×cajón
   if (cat === 'rebozado')         return 'rebozado'
@@ -158,7 +163,7 @@ export default function HistorialCaja() {
     const items = Array.isArray(venta.items) ? venta.items : []
     const errores = []
     for (const item of items) {
-      const tipoStock = mapearStockTipo(item.categoria)
+      const tipoStock = mapearStockTipo(item.categoria, item.stock_origen)
       if (!tipoStock) continue
       try {
         const esCajonAConvertir = item.categoria === 'pollo_cajon' || item.categoria === 'rebozado_cajon'

@@ -26,6 +26,7 @@ const LABELS = {
   bovino_pieza: '🍖 Piezas Bovinas',
   bovino_brosa: '🫀 Brosa',
   cerdo: '🐷 Cerdo (capón entero)',
+  cerdo_pieza: '🐷 Cerdo — Piezas (genérico)',
   cerdo_pierna: '🦵 Cerdo — Piernas',
   cerdo_carre: '🥩 Cerdo — Carré',
   cerdo_pechito: '🍖 Cerdo — Pechitos',
