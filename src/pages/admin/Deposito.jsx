@@ -1982,6 +1982,17 @@ const item = {
     let clienteId = form.clienteId
     let clienteNombre = form.clienteNombre || form.destino
     let domicilio = form.domicilio
+    // Contacto adicional para el remito impreso (importante para el repartidor)
+    let telefono = ''
+    let localidad = ''
+    // Si el cliente esta en el dropdown, traer telefono + localidad del registro
+    if (clienteId) {
+      const cliReg = clientes.find(c => c.id === clienteId)
+      if (cliReg) {
+        telefono  = cliReg.telefono  || ''
+        localidad = cliReg.localidad || ''
+      }
+    }
 
     if (esFranquicia) {
       const nombreBuscar = DESTINOS_FRANQUICIA[form.destino]
@@ -1990,6 +2001,8 @@ const item = {
         clienteId = clienteFranquicia.id
         clienteNombre = clienteFranquicia.nombre
         domicilio = clienteFranquicia.domicilio || form.destino
+        telefono  = clienteFranquicia.telefono  || telefono
+        localidad = clienteFranquicia.localidad || localidad
       }
     }
 
@@ -2027,8 +2040,10 @@ for (const item of items) {
       setMediaSeleccionada(null)
       const { data: medias } = await supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false })
       setMediasDisponibles(medias || [])
-    const { data: remitoData } = await supabase.from('remitos').insert({     fecha: form.fecha, cliente_nombre: clienteNombre,
-      cliente_id: clienteId || null, domicilio,
+    const { data: remitoData } = await supabase.from('remitos').insert({
+      fecha: form.fecha, cliente_nombre: clienteNombre,
+      cliente_id: clienteId || null,
+      domicilio, telefono, localidad,
       items, total, cobro: form.cobro, notas: form.notas
     }).select().single()
 

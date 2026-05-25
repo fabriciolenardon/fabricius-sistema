@@ -241,6 +241,12 @@ async function eliminarMovimiento(mov) {
 
   function imprimirRemito(remito) {
     const items = remito.items || []
+    // Fallback: si el remito viejo no tiene telefono/localidad, usar
+    // los del cliente actual seleccionado (importante para remitos
+    // generados antes de la migracion 37).
+    const domicilio = remito.domicilio || seleccionado?.domicilio || ''
+    const telefono  = remito.telefono  || seleccionado?.telefono  || ''
+    const localidad = remito.localidad || seleccionado?.localidad || ''
     const win = window.open('', '_blank')
     win.document.write(`
       <html><head><title>Remito N° ${remito.numero}</title>
@@ -255,6 +261,10 @@ async function eliminarMovimiento(mov) {
         .nro { font-size: 13px; font-weight: 700; }
         .campo { border-bottom: 1px solid #000; margin-bottom: 8px; padding-bottom: 2px; }
         .campo label { font-size: 10px; font-weight: 700; margin-right: 6px; }
+        .reparto-box { background: #fffbe6; border: 2px solid #000; border-radius: 6px; padding: 8px 10px; margin: 10px 0; }
+        .reparto-title { font-size: 10px; font-weight: 900; letter-spacing: 1px; margin-bottom: 4px; }
+        .reparto-row { font-size: 12px; margin: 2px 0; }
+        .reparto-row strong { font-size: 13px; }
         table { width: 100%; border-collapse: collapse; margin: 12px 0; }
         th { border: 1px solid #000; padding: 4px; text-align: center; font-size: 10px; font-weight: 700; background: #f0f0f0; }
         td { border: 1px solid #000; padding: 4px; text-align: center; font-size: 11px; }
@@ -280,7 +290,14 @@ async function eliminarMovimiento(mov) {
         </div>
         <div style="font-size:11px;margin-bottom:8px">Fecha: <strong>${remito.fecha}</strong></div>
         <div class="campo"><label>Señor/a:</label>${remito.cliente_nombre || ''}</div>
-        <div class="campo"><label>Domicilio:</label>${remito.domicilio || ''}</div>
+
+        <!-- BLOQUE DESTACADO PARA EL REPARTIDOR -->
+        <div class="reparto-box">
+          <div class="reparto-title">🚚 DATOS PARA REPARTO</div>
+          <div class="reparto-row">📍 <strong>${domicilio || '— sin domicilio —'}</strong>${localidad ? `, ${localidad}` : ''}</div>
+          ${telefono ? `<div class="reparto-row">📱 <strong>${telefono}</strong></div>` : ''}
+        </div>
+
         <table>
           <thead><tr>
             <th style="width:40%">DESCRIPCIÓN</th>
