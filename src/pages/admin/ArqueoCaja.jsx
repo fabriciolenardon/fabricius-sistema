@@ -8,9 +8,13 @@
 // ============================================================
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
+import { useAuth } from '../../context/AuthContext'
 import { fechaHoyARG, horaHoyARG } from '../../lib/fechas'
 import { parseNumero, fmtPrecio } from '../../lib/formatos'
 import Paginador, { usePaginacion } from '../../components/Paginador'
+
+// Solo el CEO puede modificar / eliminar arqueos ya guardados
+const CEO_EMAIL = 'fabriciolenardon@gmail.com'
 
 const fmt$ = n => fmtPrecio(Math.abs(Number(n) || 0))
 
@@ -54,6 +58,12 @@ export default function ArqueoCaja() {
   const [modoRapido, setModoRapido] = useState(false)
   const [efectivoContadoRapido, setEfectivoContadoRapido] = useState('')
 
+  // EDICION: cuando setEditandoId !== null, el form esta editando un arqueo
+  // existente en lugar de crear uno nuevo. Solo el CEO puede editar.
+  const [editandoId, setEditandoId] = useState(null)
+  const { user } = useAuth()
+  const esCEO = user?.email === CEO_EMAIL
+
   // Recargar ventas cuando cambia la fecha seleccionada
   useEffect(() => { cargar() }, [fechaArqueo])
 
@@ -78,8 +88,12 @@ export default function ArqueoCaja() {
     setLoading(false)
   }
 
-  // Eliminar arqueo viejo (para corregir errores de carga manual)
+  // Eliminar arqueo viejo (solo CEO — protegido en UI y en runtime)
   async function eliminarArqueo(arqueo) {
+    if (!esCEO) {
+      showMsg('❌ Solo el CEO puede eliminar arqueos', 'error')
+      return
+    }
     if (!confirm(`¿Eliminar arqueo del ${arqueo.fecha} (${arqueo.hora || 'sin hora'})?\n\nEsta acción no se puede deshacer.`)) return
     const { error } = await supabase.from('arqueos_caja').delete().eq('id', arqueo.id)
     if (error) {
@@ -88,6 +102,48 @@ export default function ArqueoCaja() {
     }
     showMsg('✅ Arqueo eliminado', 'success')
     await cargar()
+  }
+
+  // Cargar los valores del arqueo viejo en el form para editarlo.
+  // Tambien cambia la fecha seleccionada para que el "esperado" se
+  // recalcule mostrando las ventas reales de ese dia.
+  function iniciarEdicion(arqueo) {
+    if (!esCEO) {
+      showMsg('❌ Solo el CEO puede editar arqueos', 'error')
+      return
+    }
+    setEditandoId(arqueo.id)
+    setFechaArqueo(arqueo.fecha)
+    setConteo(arqueo.billetes || {})
+    setDebitoReal(String(arqueo.debito_real || ''))
+    setTransferenciaReal(String(arqueo.transferencia_real || ''))
+    setNotas(arqueo.notas || '')
+    setCajero(arqueo.cajero || '')
+    // Si el arqueo viejo fue cargado en modo rapido (sin desglose),
+    // arrancamos en modo rapido con el total_contado precargado
+    const billetesObj = arqueo.billetes || {}
+    const sinDesglose = Object.keys(billetesObj).length === 0
+    if (sinDesglose && Number(arqueo.total_contado) > 0) {
+      setModoRapido(true)
+      setEfectivoContadoRapido(String(arqueo.total_contado))
+    } else {
+      setModoRapido(false)
+      setEfectivoContadoRapido('')
+    }
+    // Scroll al tope para que vea el form
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  function cancelarEdicion() {
+    setEditandoId(null)
+    setConteo({})
+    setDebitoReal('')
+    setTransferenciaReal('')
+    setEfectivoContadoRapido('')
+    setNotas('')
+    setCajero('')
+    setModoRapido(false)
+    setFechaArqueo(fechaHoyARG())
   }
 
   function showMsg(texto, tipo = 'success') {
@@ -131,12 +187,12 @@ export default function ArqueoCaja() {
     setGuardando(true)
     // En modo rapido no tenemos desglose por denominacion; guardamos
     // billetes como {} y agregamos nota indicando que fue backfill manual
+    const notaSinPrefix = (notas || '').replace(/^\[BACKFILL[^\]]*\]\s*/, '')  // evita acumular prefijos al editar
     const notaFinal = modoRapido
-      ? `[BACKFILL MANUAL — sin desglose billete-por-billete] ${notas || ''}`.trim()
-      : (notas || null)
-    const { error } = await supabase.from('arqueos_caja').insert({
+      ? `[BACKFILL MANUAL — sin desglose billete-por-billete] ${notaSinPrefix}`.trim()
+      : (notaSinPrefix || null)
+    const payload = {
       fecha: fechaArqueo,
-      hora: horaHoyARG(),
       billetes: modoRapido ? {} : conteo,
       total_contado: totalContado,
       efectivo_esperado: efectivoEsperado,
@@ -149,18 +205,30 @@ export default function ArqueoCaja() {
       transferencia_diferencia: transferenciaDif,
       notas: notaFinal,
       cajero: cajero || null,
-    })
+    }
+    // Si estamos editando preservamos la hora original y hacemos UPDATE.
+    // Si es nuevo, ponemos hora actual y hacemos INSERT.
+    let error
+    if (editandoId) {
+      const result = await supabase.from('arqueos_caja').update(payload).eq('id', editandoId)
+      error = result.error
+    } else {
+      const result = await supabase.from('arqueos_caja').insert({ ...payload, hora: horaHoyARG() })
+      error = result.error
+    }
     setGuardando(false)
     if (error) {
       showMsg('❌ Error: ' + error.message, 'error')
       return
     }
-    showMsg(`✅ Arqueo del ${fechaArqueo} guardado`, 'success')
+    showMsg(`✅ Arqueo del ${fechaArqueo} ${editandoId ? 'actualizado' : 'guardado'}`, 'success')
     setConteo({})
     setDebitoReal('')
     setTransferenciaReal('')
     setEfectivoContadoRapido('')
     setNotas('')
+    setCajero('')
+    setEditandoId(null)
     await cargar()
   }
 
@@ -186,6 +254,27 @@ export default function ArqueoCaja() {
           borderRadius: 8, padding: '10px 16px', marginBottom: 16,
           color: msg.tipo === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600,
         }}>{msg.texto}</div>
+      )}
+
+      {/* BANNER DE EDICION CEO */}
+      {editandoId && (
+        <div style={{
+          background: 'linear-gradient(90deg, #2a1a0a, #1a1408)',
+          border: '2px solid var(--gold)', borderRadius: 10,
+          padding: '12px 16px', marginBottom: 16,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8,
+        }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--gold)' }}>✏️ EDITANDO ARQUEO #{editandoId}</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+              Estás modificando un arqueo existente. Los valores que carges van a reemplazar a los actuales al guardar.
+            </div>
+          </div>
+          <button onClick={cancelarEdicion}
+            style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 6, padding: '8px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+            ✕ Cancelar edición
+          </button>
+        </div>
       )}
 
       {/* SELECTOR DE FECHA + MODO RAPIDO (backfill) */}
@@ -446,7 +535,11 @@ export default function ArqueoCaja() {
 
             <button onClick={guardarArqueo} disabled={guardando}
               style={{ marginTop: 12, width: '100%', padding: '12px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: guardando ? 'not-allowed' : 'pointer', fontWeight: 800, fontSize: 14, opacity: guardando ? 0.6 : 1 }}>
-              {guardando ? 'Guardando...' : `💾 Guardar arqueo del ${fechaArqueo}`}
+              {guardando
+                ? 'Guardando...'
+                : editandoId
+                  ? `✏️ Guardar cambios del arqueo del ${fechaArqueo}`
+                  : `💾 Guardar arqueo del ${fechaArqueo}`}
             </button>
           </div>
         </div>
@@ -460,7 +553,18 @@ export default function ArqueoCaja() {
           <p style={{ color: 'var(--muted)', fontSize: 13 }}>Todavía no hay arqueos guardados.</p>
         )}
         {!loading && historial.length > 0 && (
-          <HistorialArqueosPaginado historial={historial} onEliminar={eliminarArqueo} />
+          <HistorialArqueosPaginado
+            historial={historial}
+            onEliminar={eliminarArqueo}
+            onEditar={iniciarEdicion}
+            editandoId={editandoId}
+            esCEO={esCEO}
+          />
+        )}
+        {!loading && historial.length > 0 && !esCEO && (
+          <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10, textAlign: 'right' }}>
+            🔒 Solo el CEO puede modificar o eliminar arqueos.
+          </p>
         )}
       </div>
     </div>
@@ -468,12 +572,13 @@ export default function ArqueoCaja() {
 }
 
 // Sub-componente: pagina la lista de arqueos para evitar tabla interminable.
-function HistorialArqueosPaginado({ historial, onEliminar }) {
+// Las acciones (✏️ editar y 🗑️ eliminar) solo aparecen para el CEO.
+function HistorialArqueosPaginado({ historial, onEliminar, onEditar, editandoId, esCEO }) {
   const pag = usePaginacion(historial, 20)
   return (
     <>
       <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', fontSize: 12, minWidth: 980 }}>
+        <table style={{ width: '100%', fontSize: 12, minWidth: esCEO ? 1020 : 900 }}>
           <thead>
             <tr style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase' }}>
               <th style={{ textAlign: 'left', padding: '6px 4px' }}>Fecha</th>
@@ -483,7 +588,7 @@ function HistorialArqueosPaginado({ historial, onEliminar }) {
               <th style={{ textAlign: 'right', padding: '6px 4px' }}>💳 Débito/QR (esp/real/dif)</th>
               <th style={{ textAlign: 'right', padding: '6px 4px' }}>🔄 Transfer. (esp/real/dif)</th>
               <th style={{ textAlign: 'left', padding: '6px 4px' }}>Notas</th>
-              <th style={{ textAlign: 'center', padding: '6px 4px' }}>Acción</th>
+              {esCEO && <th style={{ textAlign: 'center', padding: '6px 4px' }}>Acciones</th>}
             </tr>
           </thead>
           <tbody>
@@ -497,8 +602,15 @@ function HistorialArqueosPaginado({ historial, onEliminar }) {
               const tieneDebito = a.debito_esperado != null || a.debito_real != null
               const tieneTrans  = a.transferencia_esperada != null || a.transferencia_real != null
               const esBackfill = (a.notas || '').startsWith('[BACKFILL')
+              const enEdicion = editandoId === a.id
               return (
-                <tr key={a.id} style={{ borderTop: '1px solid var(--border)', background: esBackfill ? 'rgba(255,209,122,0.04)' : 'transparent' }}>
+                <tr key={a.id} style={{
+                  borderTop: '1px solid var(--border)',
+                  background: enEdicion
+                    ? 'rgba(255,209,122,0.18)'
+                    : esBackfill ? 'rgba(255,209,122,0.04)' : 'transparent',
+                  outline: enEdicion ? '1px solid var(--gold)' : 'none',
+                }}>
                   <td style={{ padding: '6px 4px' }}>
                     {a.fecha}
                     {esBackfill && <span title="Cargado manualmente (backfill)" style={{ marginLeft: 6, fontSize: 10, color: '#ffd17a' }}>⚡</span>}
@@ -535,13 +647,27 @@ function HistorialArqueosPaginado({ historial, onEliminar }) {
                     ) : <span style={{ color: 'var(--muted)' }}>—</span>}
                   </td>
                   <td style={{ padding: '6px 4px', fontSize: 11, color: 'var(--muted)', maxWidth: 250 }}>{a.notas || '—'}</td>
-                  <td style={{ padding: '6px 4px', textAlign: 'center' }}>
-                    <button onClick={() => onEliminar(a)}
-                      title="Eliminar este arqueo"
-                      style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: 'var(--red-light)' }}>
-                      🗑️
-                    </button>
-                  </td>
+                  {esCEO && (
+                    <td style={{ padding: '6px 4px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                      <button onClick={() => onEditar(a)}
+                        disabled={enEdicion}
+                        title={enEdicion ? 'Ya estás editando este arqueo' : 'Editar este arqueo'}
+                        style={{
+                          background: enEdicion ? 'var(--surface2)' : 'var(--gold)',
+                          border: 'none', borderRadius: 6, padding: '3px 8px',
+                          cursor: enEdicion ? 'not-allowed' : 'pointer',
+                          fontSize: 11, fontWeight: 700, color: enEdicion ? 'var(--muted)' : '#000',
+                          marginRight: 4, opacity: enEdicion ? 0.6 : 1,
+                        }}>
+                        {enEdicion ? '✏️ en edición' : '✏️'}
+                      </button>
+                      <button onClick={() => onEliminar(a)}
+                        title="Eliminar este arqueo"
+                        style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: 'var(--red-light)' }}>
+                        🗑️
+                      </button>
+                    </td>
+                  )}
                 </tr>
               )
             })}
