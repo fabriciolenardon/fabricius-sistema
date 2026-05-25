@@ -10,6 +10,7 @@ import LogoFabricius from '../../components/LogoFabricius'
 const navItems = [
   { to: '/admin/dashboard',   icon: '📊', label: 'Dashboard' },
   { to: '/admin/ejecutivo',   icon: '⚡', label: 'Ejecutivo' },
+  { to: '/admin/reportes',    icon: '📈', label: 'Reportes' },
   { to: '/admin/caja',        icon: '💵', label: 'Caja' },
   { to: '/admin/ventas', icon: '📋', label: 'Mayorista' },
   { to: '/admin/deposito',    icon: '🏭', label: 'Depósito' },
@@ -299,7 +300,7 @@ function MenuMobile({ onClose }) {
 
         {/* Nav items */}
         <nav style={{ flex: 1, overflowY: 'auto', padding: '10px 12px' }}>
-          {navItems.filter(it => it.to !== '/admin/ejecutivo' || window.__ceoEmail === 'fabriciolenardon@gmail.com').map(item => {
+          {navItems.filter(it => (it.to !== '/admin/ejecutivo' && it.to !== '/admin/reportes') || window.__ceoEmail === 'fabriciolenardon@gmail.com').map(item => {
             const isActive = location.pathname === item.to
             return (
               <NavLink key={item.to} to={item.to} onClick={onClose}
@@ -338,6 +339,10 @@ export default function AdminLayout() {
   // (el sidebar mobile es un componente separado que no recibe estos valores como props)
   useEffect(() => { window.__flujosPendientes = flujosPendientes }, [flujosPendientes])
   useEffect(() => { window.__pedidosPendientes = pedidosPendientes }, [pedidosPendientes])
+  // Exponer el email del usuario actual para que el menú mobile pueda
+  // filtrar las opciones CEO-only (Ejecutivo, Reportes). Antes esto estaba
+  // referenciado pero nunca seteado → en mobile esos links nunca aparecían.
+  useEffect(() => { window.__ceoEmail = user?.email || null }, [user?.email])
   const [menuAbierto, setMenuAbierto] = useState(false)
   const [isMobile, setIsMobile] = useState(window.innerWidth < 900)
 
@@ -378,7 +383,7 @@ export default function AdminLayout() {
             </div>
             <div style={{ width: 1, height: 24, background: 'var(--border)' }} />
             <nav style={{ display: 'flex', gap: 2, flex: 1, overflowX: 'auto' }}>
-              {navItems.filter(it => it.to !== '/admin/ejecutivo' || user?.email === 'fabriciolenardon@gmail.com').map(item => (
+              {navItems.filter(it => (it.to !== '/admin/ejecutivo' && it.to !== '/admin/reportes') || user?.email === 'fabriciolenardon@gmail.com').map(item => (
                 <NavLink key={item.to} to={item.to}
                   style={({ isActive }) => ({ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 11px', borderRadius: 8, fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', textDecoration: 'none', transition: 'all 0.2s', border: '1px solid transparent', background: isActive ? 'var(--gold)' : 'transparent', color: isActive ? '#000' : 'var(--muted)', position: 'relative' })}>
                   <span>{item.icon}</span>{item.label}
