@@ -14,10 +14,14 @@ import { decodificarEANBalanza, esCodigoBalanza } from '../../lib/balanzaEAN'
 import { fechaHoyARG, horaHoyARG, horaNumARG } from '../../lib/fechas'
 import { kgPorUnidadDeProducto } from '../../lib/stockHelpers'
 import { cargarCajasDisponibles, venderCaja, CATEGORIA_A_TIPO_CAJA } from '../../lib/cajasStock'
+import { fmtPrecio, fmtKg, parseNumero } from '../../lib/formatos'
 import HistorialCaja from './HistorialCaja'
 import ArqueoCaja from './ArqueoCaja'
 
-const fmt = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
+// Wrapper que mantiene la firma vieja `fmt(n)` (precio con $) pero usa el
+// formatter centralizado — ahora muestra decimales si el numero los tiene
+// (ej. $4.445,50 en vez de $4.446) y siempre con coma decimal AR.
+const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
 
 // Categorías que por defecto NO se venden por kg (se venden por unidad/paquete)
 const CATEGORIAS_NO_PESABLES = new Set([
@@ -332,7 +336,8 @@ export default function Caja() {
   function editarKg(id, nuevoKg) {
     setCarrito(c => c.map(item => {
       if (item.id !== id) return item
-      const kg = parseFloat(nuevoKg) || 0
+      // parseNumero acepta "2,5" o "2.5" sin distinción
+      const kg = parseNumero(nuevoKg)
       return { ...item, kg, importe: kg * item.precio }
     }))
   }
@@ -364,10 +369,10 @@ export default function Caja() {
   }
 
   // ---- Totales ----
+  // parseNumero acepta "1500,50" o "1500.50" — el cajero puede tipear
+  // con coma o punto sin preocuparse del formato.
   const total = carrito.reduce((s, i) => s + i.importe, 0)
-  const cobrado = (parseFloat(pago.efectivo) || 0) +
-                  (parseFloat(pago.debito) || 0) +
-                  (parseFloat(pago.transferencia) || 0)
+  const cobrado = parseNumero(pago.efectivo) + parseNumero(pago.debito) + parseNumero(pago.transferencia)
   const vuelto = cobrado - total
 
   // Al cerrar el modal (cancelación o éxito) liberamos el client_id
@@ -439,9 +444,9 @@ export default function Caja() {
         pieza_tipo: i.pieza_tipo || null,
       })),
       total,
-      efectivo: parseFloat(pago.efectivo) || 0,
-      debito: parseFloat(pago.debito) || 0,
-      transferencia: parseFloat(pago.transferencia) || 0,
+      efectivo: parseNumero(pago.efectivo),
+      debito: parseNumero(pago.debito),
+      transferencia: parseNumero(pago.transferencia),
     }
 
     const { data, error } = await supabase
@@ -869,7 +874,7 @@ export default function Caja() {
               </div>
               <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 10, textAlign: 'center' }}>
                 <div style={{ fontSize: 9, color: 'var(--muted)' }}>Kg total</div>
-                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--green)' }}>{kgTotalHoy.toFixed(1)}</div>
+                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--green)' }}>{fmtKg(kgTotalHoy)}</div>
               </div>
               <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 10, textAlign: 'center' }}>
                 <div style={{ fontSize: 9, color: 'var(--muted)' }}>Facturado</div>
@@ -923,7 +928,7 @@ export default function Caja() {
                       </div>
                       <div style={{ fontSize: 10, color: 'var(--muted)' }}>{p.ops} {p.ops === 1 ? 'venta' : 'ventas'} · {fmt(p.importe)}</div>
                     </div>
-                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: 'var(--green)', marginLeft: 8 }}>{p.kg.toFixed(2)} kg</div>
+                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: 'var(--green)', marginLeft: 8 }}>{fmtKg(p.kg, { decimales: 2 })}</div>
                   </div>
                 ))}
               </div>
@@ -1009,8 +1014,8 @@ export default function Caja() {
                           <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>📦 Caja {c.tipo_caja} #{c.id}</div>
                           <div style={{ fontSize: 10, color: 'var(--muted)' }}>{c.proveedor_origen || 's/proveedor'} · {c.fecha_ingreso}</div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
-                            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{Number(c.kg).toFixed(1)} kg</span>
-                            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--green)' }}>${Math.round(importe).toLocaleString('es-AR')}</span>
+                            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{fmtKg(c.kg)}</span>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--green)' }}>{fmtPrecio(importe)}</span>
                           </div>
                         </div>
                       )
@@ -1068,8 +1073,8 @@ export default function Caja() {
                               <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>🥩 Pieza #{p.id}</div>
                               <div style={{ fontSize: 10, color: 'var(--muted)' }}>{p.proveedor_origen || 's/proveedor'} · {p.fecha_ingreso}{p.modelo_desposte ? ` · Mod. ${p.modelo_desposte}` : ''}</div>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
-                                <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{Number(p.kg).toFixed(1)} kg</span>
-                                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--green)' }}>${Math.round(importe).toLocaleString('es-AR')}</span>
+                                <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{fmtKg(p.kg)}</span>
+                                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--green)' }}>{fmtPrecio(importe)}</span>
                               </div>
                             </div>
                           )

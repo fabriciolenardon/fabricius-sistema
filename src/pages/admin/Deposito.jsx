@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
 import { resolverDescuentoStock } from '../../lib/stockHelpers'
 import { cargarCajasDisponibles, crearCajasIngreso, venderCaja, revertirVentaCaja, CATEGORIA_A_TIPO_CAJA } from '../../lib/cajasStock'
+import { fmtPrecio, fmtKg, parseNumero } from '../../lib/formatos'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 import FlujoDeposito from './FlujoDeposito'
 import AjusteStock from './AjusteStock'
@@ -51,7 +52,10 @@ const MODELOS_DESPOSTE = {
   },
 }
 
-const fmt = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
+// Wrapper que mantiene la firma vieja `fmt(n)` (precio en $) usando el
+// formatter centralizado — ahora muestra decimales si los hay, siempre con
+// coma decimal y punto miles (formato AR). Ver src/lib/formatos.js.
+const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
 
 export function Deposito() {
   const [tab, setTab] = useState('entradas')
@@ -1278,7 +1282,8 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
 
     // Sanity check de kg: cualquier valor numérico inválido o sospechosamente
     // alto debe ser bloqueado o confirmado.
-    const kgInput = parseFloat(form.kg) || 0
+    // parseNumero acepta "12,5" o "12.5" (coma o punto) sin distinción.
+    const kgInput = parseNumero(form.kg)
     if (!esCajaIndividual && !esSoloUnid && kgInput < 0) {
       showAlert({ type: 'error', msg: 'Los kilos no pueden ser negativos' }); return
     }
@@ -1319,7 +1324,8 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
         showAlert({ type: 'error', msg: 'Seleccioná el producto que va dentro de las cajas (ej. Bola de Lomo Caja PT)' })
         return
       }
-      const pesosValidos = cajasPesos.map(p => parseFloat(p)).filter(p => p > 0)
+      // parseNumero acepta "15,4" o "15.4" — el operario tipea como prefiera
+      const pesosValidos = cajasPesos.map(p => parseNumero(p)).filter(p => p > 0)
       const cantPesperada = Math.max(1, parseInt(form.cantidad) || 1)
       if (pesosValidos.length !== cantPesperada) {
         showAlert({ type: 'error', msg: `Cargá el peso de las ${cantPesperada} cajas (faltan ${cantPesperada - pesosValidos.length})` })
@@ -1337,7 +1343,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
       }
       const productoCaja = productosCajas.find(p => p.id === form.cajaProductoId)
       const kgTotalCajas = pesosValidos.reduce((s, kg) => s + kg, 0)
-      const importeCajas = parseFloat(form.importe) || 0
+      const importeCajas = parseNumero(form.importe)
       const precioPromedioKg = kgTotalCajas > 0 ? importeCajas / kgTotalCajas : 0
       const descripcionCajas = `${productoCaja?.nombre || form.descripcion || (form.tipo === 'caja_cb' ? 'Caja CB' : 'Caja PT')} ×${cantPesperada}`
       // 1) Registrar la entrada contable (suma de las cajas)
@@ -1387,12 +1393,13 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     const esEnUnidades = TIPOS_EN_UNIDADES.includes(form.tipo)
     const cantidad = esEnUnidades ? Math.max(1, parseInt(form.cantidad) || 1) : 1
     // Para almacén/bebidas: kg por unidad = 1, así la cantidad se suma directo al stock
-    const kgUnidad = esSoloUnid ? 1 : (parseFloat(form.kg) || 0)
+    // parseNumero acepta coma/punto indistintamente.
+    const kgUnidad = esSoloUnid ? 1 : parseNumero(form.kg)
     const kgTotal = kgUnidad * cantidad
-    const kgReal = kgTotal * (1 - (parseFloat(form.merma) || 0) / 100)
+    const kgReal = kgTotal * (1 - parseNumero(form.merma) / 100)
     const importe = form.tipo === 'bovino_mr'
-      ? kgTotal * parseFloat(form.precioKg)
-      : parseFloat(form.importe) || 0
+      ? kgTotal * parseNumero(form.precioKg)
+      : parseNumero(form.importe)
     // Si se seleccionó un producto pollo/rebozado, usar su nombre en la descripción.
     const productoSelec = productosFiltradosTipo.find(p => p.id === form.polloProductoId)
     const descripcionBase = productoSelec?.nombre || form.descripcion || form.tipo
@@ -1402,7 +1409,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     const { error } = await supabase.from('entradas_deposito').insert({
       fecha: form.fecha, tipo: form.tipo, proveedor_nombre: form.proveedor,
       descripcion: descripcionFinal, kg: kgTotal, kg_real: kgReal,
-      merma_pct: parseFloat(form.merma) || 0, precio_kg: parseFloat(form.precioKg) || 0,
+      merma_pct: parseNumero(form.merma), precio_kg: parseNumero(form.precioKg),
       importe, destino: form.destino, cantidad
     })
     if (error) { showAlert({ type: 'error', msg: error.message }); return }
@@ -1896,8 +1903,9 @@ async function agregarItem() {
     }
     const prodItem = (form.categoria !== 'bovino_mr' && form.categoria !== 'pieza_entera') ? todosPrecios.find(p => p.id === form.productoId) : null
     // Para cajas: kg viene de la caja seleccionada, no del form
-    const kgItem = esCajaLocal && cajaSeleccionada ? Number(cajaSeleccionada.kg) : parseFloat(form.kg)
-    const precioItem = parseFloat(form.precio)
+    // parseNumero acepta coma/punto (ej. "12,5" o "12.5" funcionan igual)
+    const kgItem = esCajaLocal && cajaSeleccionada ? Number(cajaSeleccionada.kg) : parseNumero(form.kg)
+    const precioItem = parseNumero(form.precio)
 const item = {
   descripcion,
   kg: kgItem,
@@ -1931,7 +1939,7 @@ const item = {
 
   function agregarItemManual() {
     const desc = formManual.descripcion.trim()
-    const imp = parseFloat(formManual.importe)
+    const imp = parseNumero(formManual.importe)
     if (!desc) { showAlert({ type: 'error', msg: 'Ingresá una descripción' }); return }
     if (!imp || imp <= 0) { showAlert({ type: 'error', msg: 'Ingresá un importe válido' }); return }
     setItems(prev => [...prev, {
