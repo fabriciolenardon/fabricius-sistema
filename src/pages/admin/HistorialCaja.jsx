@@ -172,6 +172,21 @@ export default function HistorialCaja() {
         if (error) errores.push(`Caja #${item.caja_id}: ${error}`)
         continue
       }
+      // Pieza entera — volver a 'disponible' en piezas_stock
+      if (item.pieza_id) {
+        const { error } = await supabase.from('piezas_stock').update({
+          estado: 'disponible',
+          destino: null,
+          cliente_id: null,
+          cliente_nombre: null,
+          precio_venta_kg: null,
+          total_venta: null,
+          fecha_salida: null,
+          notas_salida: null,
+        }).eq('id', item.pieza_id)
+        if (error) errores.push(`Pieza #${item.pieza_id}: ${error.message}`)
+        continue
+      }
       const tipoStock = mapearStockTipo(item.categoria, item.stock_origen)
       if (!tipoStock) continue
       try {
