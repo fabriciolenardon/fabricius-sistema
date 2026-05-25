@@ -16,8 +16,22 @@ export default function Ventas() {
   const [alert, setAlert] = useState(null)
   const [remitoActual, setRemitoActual] = useState(null)
 
-  function showAlert(msg, type = 'success') {
-    setAlert({ msg, type })
+  // Acepta dos formas:
+  //   showAlert('texto')                            → alert { msg: 'texto', type: 'success' }
+  //   showAlert('texto', 'error')                   → alert { msg: 'texto', type: 'error' }
+  //   showAlert({ msg: 'texto', type: 'success' })  → alert tal cual (forma usada por
+  //                                                    SalidaForm/EntradaForm extraidos de Deposito)
+  //   showAlert(null)                               → cierra alert
+  // Antes solo aceptaba (string, type) → cuando SalidaForm pasaba un objeto,
+  // `alert.msg` quedaba siendo el objeto entero → React error #31 al renderizar
+  // → pantalla negra al confirmar un despacho mayorista.
+  function showAlert(input, type = 'success') {
+    if (input === null) { setAlert(null); return }
+    if (input && typeof input === 'object') {
+      setAlert({ msg: input.msg, type: input.type || 'success' })
+    } else {
+      setAlert({ msg: input, type })
+    }
     setTimeout(() => setAlert(null), 4000)
   }
 
