@@ -92,6 +92,25 @@ export default function Precios() {
         return mostrarMsg('❌ Cargá los "Kg por cajón / unidad" — es obligatorio para esta categoría')
       }
     }
+
+    // Detectar nombres que claramente son embutidos pero están en otra categoría.
+    // Excluye "bife de chorizo" (corte bovino, no embutido).
+    const nombreLower = form.nombre.toLowerCase()
+    const pareceEmbutido = (
+      nombreLower.startsWith('chorizo')
+      || nombreLower.includes('morcilla')
+      || nombreLower.includes('salchicha')
+      || nombreLower.includes('salame')
+      || nombreLower.includes('longaniza')
+    ) && !nombreLower.includes('bife')
+    if (pareceEmbutido && form.categoria !== 'embutido') {
+      const ok = window.confirm(
+        `⚠️ "${form.nombre}" parece ser un embutido pero está en categoría "${form.categoria}".\n\n` +
+        `Si lo guardás así, al venderse descontará del stock de "${form.categoria}" en vez de "embutido".\n\n` +
+        `¿Estás seguro? Si querés que descuente de embutidos, cambiá la categoría a "🌭 Embutidos" antes de guardar.`
+      )
+      if (!ok) return
+    }
     setLoading(true)
     const nuevoPlu = form.codigo_balanza === '' ? null : Number(form.codigo_balanza)
     const datos = {
