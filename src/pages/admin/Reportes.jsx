@@ -56,9 +56,27 @@ export function useReportesData(periodo) {
       ])
 
       if (cancelado) return
+
+      // Filtrar movimientos internos del depósito (NO son ventas reales):
+      //   - cobro === 'interno' → conversiones de pieza a cortes (CONVERSIÓN A CORTES)
+      //   - lista === 'desposte' → backstop por si quedaron registros viejos sin cobro
+      //   - cliente_id === null + cliente_nombre matchea patrones internos
+      // Si no se filtra, aparece "CONVERSIÓN A CORTES" como cliente #1 mayorista
+      // y los reportes de Margen y Minorista-vs-Mayorista quedan inflados.
+      const esFlujoInterno = (s) => {
+        if (s.cobro === 'interno') return true
+        if (s.lista === 'desposte') return true
+        if (!s.cliente_id) {
+          const n = (s.cliente_nombre || '').toUpperCase()
+          if (n.includes('CONVERSI') || n.includes('AJUSTE') || n.includes('MERMA') || n.includes('FLUJO')) return true
+        }
+        return false
+      }
+      const salidasReales = (salidas.data || []).filter(s => !esFlujoInterno(s))
+
       setData({
         entradas: entradas.data || [],
-        salidas: salidas.data || [],
+        salidas: salidasReales,
         ventasCaja: ventasCaja.data || [],
         pedidos: pedidos.data || [],
         clientes: clientes.data || [],
