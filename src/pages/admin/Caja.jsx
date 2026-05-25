@@ -12,6 +12,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { decodificarEANBalanza, esCodigoBalanza } from '../../lib/balanzaEAN'
 import { fechaHoyARG, horaHoyARG, horaNumARG } from '../../lib/fechas'
+import { kgPorUnidadDeNombre } from '../../lib/stockHelpers'
 import HistorialCaja from './HistorialCaja'
 import ArqueoCaja from './ArqueoCaja'
 
@@ -348,8 +349,13 @@ export default function Caja() {
     }
 
     // Descontar stock — mapeo explícito de cada categoría a su tipo en stock_actual.
-    // Para almacén y bebidas, la unidad es "cantidad" (no kg). Para carnes es kg.
-    // En ambos casos se suma/resta sobre el mismo campo kg_disponible.
+    // Tres casos:
+    //   1) Carne x kg → descuenta kg del tipo correspondiente
+    //   2) Almacén/bebidas/cajas → descuenta unidades del tipo correspondiente
+    //      (el campo kg_disponible guarda cantidad para estos tipos)
+    //   3) Cajones de pollo/rebozado → descuenta KG DEL PRODUCTO BASE
+    //      multiplicando unidades × kg_por_cajón (parseado del nombre,
+    //      ej. "X20KG" → 20 kg por cada cajón vendido).
     function mapearStock(cat) {
       if (!cat) return null
       if (cat === 'bovino_mr')        return 'bovino_mr'
@@ -358,20 +364,28 @@ export default function Caja() {
       if (cat === 'bovino_brosa')     return 'bovino_brosa'
       if (cat === 'cerdo_corte' || cat === 'cerdo_pieza' || cat === 'cerdo') return 'cerdo'
       if (cat === 'pollo')            return 'pollo'
+      if (cat === 'pollo_cajon')      return 'pollo'      // unidad × kg_por_cajón
+      if (cat === 'rebozado')         return 'rebozado'
+      if (cat === 'rebozado_cajon')   return 'rebozado'   // unidad × kg_por_cajón
       if (cat === 'embutido')         return 'embutido'
       if (cat === 'almacen')          return 'almacen'
       if (cat === 'bebidas')          return 'bebidas'
-      // Sin tracking todavía: bovino_caja_cb, bovino_caja_pt,
-      // pollo_cajon, rebozado, rebozado_cajon (manejados por separado).
+      if (cat === 'bovino_caja_cb')   return 'caja_cb'
+      if (cat === 'bovino_caja_pt')   return 'caja_pt'
       return null
     }
     for (const item of carrito) {
       const tipoStock = mapearStock(item.categoria)
       if (!tipoStock) continue  // categoría sin tracking de stock → saltar
+      // Para cajones de pollo/rebozado: multiplicar unidades × kg_por_cajón
+      const esCajonAConvertir = item.categoria === 'pollo_cajon' || item.categoria === 'rebozado_cajon'
+      const cantidad = esCajonAConvertir
+        ? (item.kg || 0) * (kgPorUnidadDeNombre(item.descripcion) || 1)
+        : (item.kg || 0)
       const { data: stock } = await supabase.from('stock_actual').select('*').eq('tipo', tipoStock).maybeSingle()
       if (stock) {
         await supabase.from('stock_actual')
-          .update({ kg_disponible: (stock.kg_disponible || 0) - item.kg })
+          .update({ kg_disponible: (stock.kg_disponible || 0) - cantidad })
           .eq('tipo', tipoStock)
       }
     }

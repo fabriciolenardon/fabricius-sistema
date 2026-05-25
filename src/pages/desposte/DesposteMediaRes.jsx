@@ -84,6 +84,16 @@ export default function DesposteMediaRes() {
     const kg = Number(kgManual) || 0
     if (kg <= 0) return aviso('Cargá los kilos de la media res', 'error')
 
+    // Validación anti-error humano: la suma de piezas no debería ser más
+    // del 110% del peso de la media res. Si lo es, casi seguro es un typo
+    // (ej. 39400 en vez de 39.4 → bug histórico que dejó stock inflado).
+    if (submodo === 'piezas') {
+      const sumaPiezas = MODELOS_DESPOSTE[modelo].piezas.reduce((s, p) => s + (Number(piezasKg[p.nombre]) || 0), 0)
+      if (sumaPiezas > kg * 1.1) {
+        return aviso(`⚠️ La suma de piezas (${sumaPiezas.toFixed(1)} kg) supera el peso de la media res (${kg} kg). Revisá los valores — probablemente sobra un dígito.`, 'error')
+      }
+    }
+
     const tipoFlujo = submodo === 'piezas' ? 'media_res_piezas'
       : submodo === 'kilo' ? 'media_res_kilo'
       : submodo === 'mayorista' ? 'media_res_mayorista'

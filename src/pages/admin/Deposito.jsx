@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
+import { resolverDescuentoStock } from '../../lib/stockHelpers'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 import FlujoDeposito from './FlujoDeposito'
 import AjusteStock from './AjusteStock'
@@ -1684,8 +1685,11 @@ const item = {
     const kgPorTipo = {}
 for (const item of items) {
   if (item.manual) continue  // los items manuales (descartables/insumos) no descuentan stock
-  const tipoStock = item.stock_origen || CATEGORIA_A_STOCK[item.tipo] || item.tipo
-  kgPorTipo[tipoStock] = (kgPorTipo[tipoStock] || 0) + item.kg
+  // resolverDescuentoStock maneja el caso especial de cajones (pollo_cajon /
+  // rebozado_cajon) que descuentan kg del producto base, multiplicando
+  // unidades × kg_por_cajón (parseado del nombre, ej. "X20KG").
+  const { tipoStock, cantidad } = resolverDescuentoStock(item, CATEGORIA_A_STOCK)
+  kgPorTipo[tipoStock] = (kgPorTipo[tipoStock] || 0) + cantidad
 }
    for (const [tipo, kg] of Object.entries(kgPorTipo)) {
       await actualizarStock(tipo, -kg)
