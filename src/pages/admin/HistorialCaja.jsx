@@ -14,6 +14,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
 import { kgPorUnidadDeProducto } from '../../lib/stockHelpers'
+import { revertirVentaCaja } from '../../lib/cajasStock'
 import { useAuth } from '../../context/AuthContext'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
@@ -159,10 +160,18 @@ export default function HistorialCaja() {
     // Para cajones (pollo_cajon, rebozado_cajon) hay que multiplicar
     // las unidades vendidas por los kg que pesa cada cajón para
     // devolver al stock kg del producto base — mismo cálculo invertido
-    // que hace Caja.jsx al vender.
+    // que hace Caja.jsx al vender. Para cajas individuales (CB/PT) se
+    // llama revertirVentaCaja que vuelve la caja a 'disponible' y suma
+    // sus kg a stock_actual.
     const items = Array.isArray(venta.items) ? venta.items : []
     const errores = []
     for (const item of items) {
+      // Caja individual — revertir y saltar el flujo normal
+      if (item.caja_id) {
+        const { error } = await revertirVentaCaja(item.caja_id)
+        if (error) errores.push(`Caja #${item.caja_id}: ${error}`)
+        continue
+      }
       const tipoStock = mapearStockTipo(item.categoria, item.stock_origen)
       if (!tipoStock) continue
       try {
