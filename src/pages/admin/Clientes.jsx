@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
 import { parseNumero } from '../../lib/formatos'
+import { getEtiquetaLista } from '../../lib/listasPrecios'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
 // URL publica de produccion del portal — NO usar window.location.origin para evitar URLs de preview de Vercel
@@ -317,6 +318,7 @@ async function eliminarMovimiento(mov) {
               <select style={inp} value={form.lista_precios} onChange={e => setForm(f => ({ ...f, lista_precios: e.target.value }))}>
                 <option value="carn">🔴 Precio Carnicería</option>
                 <option value="may">🟡 Precio Mayorista</option>
+                <option value="min">🟢 Precio Minorista</option>
               </select>
             </div>
           </div>
@@ -378,7 +380,7 @@ async function eliminarMovimiento(mov) {
                   { label: 'Teléfono', val: seleccionado.telefono || '—' },
                   { label: 'Localidad', val: seleccionado.localidad || '—' },
                   { label: 'Domicilio', val: seleccionado.domicilio || '—' },
-                  { label: 'Lista precios', val: seleccionado.lista_precios === 'may' ? '🟡 Mayorista' : '🔴 Carnicería' },
+                  { label: 'Lista precios', val: getEtiquetaLista(seleccionado.lista_precios) },
                   { label: 'Tipo', val: seleccionado.tipo },
                 ].map(d => (
                   <div key={d.label} style={{ background: 'var(--surface2)', borderRadius: 8, padding: '8px 12px' }}>

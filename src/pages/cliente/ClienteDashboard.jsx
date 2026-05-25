@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
 import { fmtPrecio } from '../../lib/formatos'
+import { getLista } from '../../lib/listasPrecios'
 function fmt(n) { return fmtPrecio(Math.abs(Number(n) || 0)) }
 
 // Hook compartido: trae el cliente vinculado al profile actual
@@ -91,7 +92,12 @@ export function ClienteDashboard() {
         <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 30, color: 'var(--gold)', letterSpacing: 2 }}>👤 {cliente.nombre}</div>
         {cliente.nombre_fantasia && <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>"{cliente.nombre_fantasia}"</div>}
         <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>Cliente mayorista — Fabricius Carnicerías</div>
-        <span style={{ display: 'inline-block', marginTop: 10, background: 'var(--gold)', color: '#000', borderRadius: 6, padding: '3px 12px', fontSize: 11, fontWeight: 700 }}>{cliente.lista_precios === 'may' ? '🟡 LISTA MAYORISTA' : '🔴 LISTA CARNICERÍA'}</span>
+        {(() => {
+          const L = getLista(cliente.lista_precios)
+          return <span style={{ display: 'inline-block', marginTop: 10, background: 'var(--gold)', color: '#000', borderRadius: 6, padding: '3px 12px', fontSize: 11, fontWeight: 700 }}>
+            {L.labelEmoji.split(' ')[0]} LISTA {L.label.toUpperCase()}
+          </span>
+        })()}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 24 }}>

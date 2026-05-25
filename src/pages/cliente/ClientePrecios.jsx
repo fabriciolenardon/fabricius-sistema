@@ -14,6 +14,7 @@ const CATEGORIAS = {
 }
 
 import { fmtPrecio } from '../../lib/formatos'
+import { getLista } from '../../lib/listasPrecios'
 const fmt = n => n != null ? fmtPrecio(Number(n) || 0) : '—'
 
 export default function ClientePrecios() {
@@ -39,8 +40,9 @@ export default function ClientePrecios() {
     setLoading(false)
   }
 
-  const listaCliente = cliente?.lista_precios === 'may' ? 'precio_mayorista' : 'precio_carniceria'
-  const etiquetaLista = cliente?.lista_precios === 'may' ? '🟡 Mayorista' : '🔴 Carnicería'
+  const L = getLista(cliente?.lista_precios)
+  const listaCliente = L.campo
+  const etiquetaLista = L.labelEmoji
   const productosFiltrados = precios.filter(p => p.categoria === filtro)
 
   return (

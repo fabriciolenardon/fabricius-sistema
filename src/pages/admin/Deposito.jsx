@@ -4,6 +4,7 @@ import { fechaHoyARG } from '../../lib/fechas'
 import { resolverDescuentoStock } from '../../lib/stockHelpers'
 import { cargarCajasDisponibles, crearCajasIngreso, venderCaja, revertirVentaCaja, CATEGORIA_A_TIPO_CAJA } from '../../lib/cajasStock'
 import { fmtPrecio, fmtKg, parseNumero } from '../../lib/formatos'
+import { getCampoPrecio } from '../../lib/listasPrecios'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 import FlujoDeposito from './FlujoDeposito'
 import AjusteStock from './AjusteStock'
@@ -1858,19 +1859,39 @@ const CATEGORIA_A_STOCK = {
   const esClienteExterno = ['carniceria', 'mayorista'].includes(form.destino)
   const esFranquicia = ['CENTRO', 'MONTE CRISTO'].includes(form.destino)
 
-  function getLista(dest) { return dest === 'mayorista' ? 'precio_mayorista' : 'precio_carniceria' }
+  // Lista de precios para el despacho.
+  // Prioridad: si hay un cliente seleccionado con lista_precios definida
+  // (incluyendo 'min' minorista), esa pisa el fallback del destino.
+  // Esto permite que un cliente cuenta-corriente cargado como minorista
+  // reciba precios minoristas aunque el despacho sea por "carnicería".
+  function getLista(dest, clienteId = null) {
+    if (clienteId) {
+      const cli = clientes.find(c => c.id === clienteId)
+      if (cli?.lista_precios) return getCampoPrecio(cli.lista_precios)
+    }
+    return dest === 'mayorista' ? 'precio_mayorista' : 'precio_carniceria'
+  }
 
   function seleccionarCliente(c) {
     setForm(f => ({ ...f, clienteId: c.id, clienteNombre: c.nombre, domicilio: c.domicilio || '' }))
     setBusqueda(c.nombre)
     setMostrarClientes(false)
+    // Si ya había un producto seleccionado, recalcular el precio con la
+    // lista del cliente recién elegido (puede tener lista distinta al destino).
+    if (form.productoId) {
+      const prod = todosPrecios.find(p => p.id === form.productoId)
+      if (prod) {
+        const precio = prod[getLista(form.destino, c.id)] || prod.precio_mayorista || 0
+        setForm(f => ({ ...f, productoId: f.productoId, precio, clienteId: c.id, clienteNombre: c.nombre, domicilio: c.domicilio || '' }))
+      }
+    }
   }
 
   function onProductoChange(id) {
     if (!id) return
     const prod = todosPrecios.find(p => p.id === id)
     if (!prod) return
-    const precio = prod[getLista(form.destino)] || prod.precio_mayorista || 0
+    const precio = prod[getLista(form.destino, form.clienteId)] || prod.precio_mayorista || 0
     setForm(f => ({ ...f, productoId: id, precio }))
   }
 async function agregarItem() {
@@ -1977,7 +1998,7 @@ const item = {
         fecha: form.fecha, cliente_nombre: clienteNombre,
         tipo: item.tipo, descripcion: item.descripcion,
         kg: item.kg, precio_kg: item.precio,
-        total: item.importe, lista: getLista(form.destino),
+        total: item.importe, lista: getLista(form.destino, clienteId),
         cobro: form.cobro, notas: form.notas
       })
     }

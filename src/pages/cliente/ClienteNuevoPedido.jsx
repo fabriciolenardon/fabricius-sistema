@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import { fechaHoyARG } from '../../lib/fechas'
+import { getCampoPrecio } from '../../lib/listasPrecios'
 
 const CATEGORIAS = {
   bovino_corte: '🥩 Bovinos — Cortes',
@@ -84,7 +85,7 @@ export default function ClienteNuevoPedido() {
     setChat(c => [...c, { timestamp: ahora(), autor: 'cliente', texto }])
   }
 
-  const listaPrecioField = cliente?.lista_precios === 'may' ? 'precio_mayorista' : 'precio_carniceria'
+  const listaPrecioField = getCampoPrecio(cliente?.lista_precios)
   const productosPorCategoria = categoriaSel ? precios.filter(p => p.categoria === categoriaSel) : []
 
   // === ACCIONES ===
