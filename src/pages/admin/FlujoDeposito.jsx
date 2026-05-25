@@ -118,10 +118,17 @@ export default function FlujoDeposito() {
         return
       }
     }
-    // Guardia 2: sanity check de la media res en sí (no debería pasar 200kg)
-    if (f.kg_media_res > 200) {
+    // Guardia 2: sanity check de la media res en sí.
+    // Rango real Fabricius: 70-140 kg. > 150 kg casi seguro typo.
+    if (f.kg_media_res > 150) {
       const ok = window.confirm(
-        `⚠️ La media res declara ${f.kg_media_res} kg.\nUna media res típica pesa 100-150 kg. ¿Estás seguro?`
+        `⚠️ La media res declara ${f.kg_media_res} kg.\nRango real Fabricius: 70-140 kg.\n¿Estás seguro?`
+      )
+      if (!ok) { aviso('Aprobación cancelada.', 'error'); return }
+    }
+    if (f.kg_media_res > 0 && f.kg_media_res < 50) {
+      const ok = window.confirm(
+        `⚠️ La media res declara solo ${f.kg_media_res} kg.\nRango real Fabricius: 70-140 kg.\n¿Estás seguro?`
       )
       if (!ok) { aviso('Aprobación cancelada.', 'error'); return }
     }

@@ -83,10 +83,13 @@ export default function DesposteMediaRes() {
   async function enviar() {
     const kg = Number(kgManual) || 0
     if (kg <= 0) return aviso('Cargá los kilos de la media res', 'error')
-    // Sanity check: una media res rara vez pesa más de 200kg. Si lo hace,
-    // casi seguro es un typo (200kg = res entera, no media). Bloquear.
-    if (kg > 200) {
-      return aviso(`⚠️ ${kg} kg es demasiado para una media res (típico: 100-150 kg). Revisá el valor — ¿no sobra un dígito?`, 'error')
+    // Sanity check: las medias res de Fabricius van de 70 a 140 kg.
+    // > 150 kg es prácticamente seguro un typo (típico bug ×1000 o dígito extra).
+    if (kg > 150) {
+      return aviso(`⚠️ ${kg} kg es demasiado para una media res (rango real: 70-140 kg). Revisá el valor — ¿no sobra un dígito?`, 'error')
+    }
+    if (kg < 50) {
+      return aviso(`⚠️ ${kg} kg es muy bajo para una media res (rango real: 70-140 kg). Verificá el valor.`, 'error')
     }
 
     // Validaciones anti-error humano para modo piezas:

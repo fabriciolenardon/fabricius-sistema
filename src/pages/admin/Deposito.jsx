@@ -1258,9 +1258,12 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     if (TIPOS_EN_UNIDADES.includes(form.tipo) && !esSoloUnid && !esCajaIndividual && kgInput > 200) {
       if (!confirm(`⚠️ ${kgInput} kg por unidad es bastante alto (típico: 10-25 kg). ¿Es correcto?`)) return
     }
-    // Para media res, validar < 200 kg (típico 100-150 kg)
-    if (form.tipo === 'bovino_mr' && kgInput > 200) {
-      if (!confirm(`⚠️ ${kgInput} kg para una media res es demasiado (típico: 100-150 kg). ¿Es correcto?`)) return
+    // Para media res, rango real Fabricius: 70-140 kg. > 150 = sospechoso.
+    if (form.tipo === 'bovino_mr' && kgInput > 150) {
+      if (!confirm(`⚠️ ${kgInput} kg para una media res es demasiado (rango real: 70-140 kg). ¿Es correcto?`)) return
+    }
+    if (form.tipo === 'bovino_mr' && kgInput > 0 && kgInput < 50) {
+      if (!confirm(`⚠️ ${kgInput} kg es muy bajo para una media res (rango real: 70-140 kg). ¿Es correcto?`)) return
     }
     // Para capón, validar < 150 kg
     if (form.tipo === 'cerdo' && kgInput > 150) {
