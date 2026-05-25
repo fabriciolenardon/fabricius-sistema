@@ -82,6 +82,16 @@ export default function Precios() {
 
   async function guardar() {
     if (!form.nombre.trim()) return mostrarMsg('❌ El nombre es obligatorio')
+
+    // Validación dura: productos de categoría cajón (pollo_cajon, rebozado_cajon)
+    // DEBEN tener kg_por_unidad cargado, sino el sistema no sabe cuántos kg
+    // descontar del stock base al venderse → bugs silenciosos de stock negativo.
+    if (CATEGORIAS_CON_KG_POR_UNIDAD.has(form.categoria)) {
+      const kpu = Number(form.kg_por_unidad) || 0
+      if (kpu <= 0) {
+        return mostrarMsg('❌ Cargá los "Kg por cajón / unidad" — es obligatorio para esta categoría')
+      }
+    }
     setLoading(true)
     const nuevoPlu = form.codigo_balanza === '' ? null : Number(form.codigo_balanza)
     const datos = {

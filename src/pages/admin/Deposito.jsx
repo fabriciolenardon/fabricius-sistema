@@ -1186,23 +1186,48 @@ function HistorialElaboraciones({ elaboraciones }) {
 }
 
 function EntradaForm({ onSaved, showAlert, proveedores }) {
-  const [form, setForm] = useState({ tipo: '', proveedor: '', descripcion: '', fecha: fechaHoyARG(), kg: '', precioKg: '9800', merma: '', destino: 'DEPOSITO', importe: '', cantidad: '1', cajaProductoId: '' })
+  const [form, setForm] = useState({ tipo: '', proveedor: '', descripcion: '', fecha: fechaHoyARG(), kg: '', precioKg: '9800', merma: '', destino: 'DEPOSITO', importe: '', cantidad: '1', cajaProductoId: '', polloProductoId: '' })
   const [historial, setHistorial] = useState([])
   const [editando, setEditando] = useState(null)
   const [formEdit, setFormEdit] = useState({})
   // Para cajas CB/PT: array con el peso de cada caja individual.
   // Se sincroniza con form.cantidad cuando tipo es caja_cb / caja_pt.
   const [cajasPesos, setCajasPesos] = useState([])
-  // Productos de precios filtrados a categorías de cajas — selector cuando
-  // el usuario carga cajas para vincular cada caja al producto que contiene
-  // (ej. "Bola de Lomo Caja PT").
+  // Productos de precios filtrados — selectores para cargar entradas que
+  // necesitan vincular a un producto específico de la lista:
+  //   · Cajas (CB/PT) → cajas_stock con producto_id
+  //   · Pollo/Rebozado cajón → entrada normal, pero precarga kg_por_unidad
+  //     del producto seleccionado (Pechuga, Pollo entero, Pata muslo, etc.)
   const [productosCajas, setProductosCajas] = useState([])
+  const [productosPolloCajon, setProductosPolloCajon] = useState([])
+  const [productosRebozadoCajon, setProductosRebozadoCajon] = useState([])
   useEffect(() => {
-    supabase.from('precios').select('id, nombre, categoria')
-      .in('categoria', ['bovino_caja_cb', 'bovino_caja_pt'])
+    supabase.from('precios').select('id, nombre, categoria, kg_por_unidad')
+      .in('categoria', ['bovino_caja_cb', 'bovino_caja_pt', 'pollo_cajon', 'rebozado_cajon'])
       .order('nombre')
-      .then(({ data }) => setProductosCajas(data || []))
+      .then(({ data }) => {
+        const all = data || []
+        setProductosCajas(all.filter(p => p.categoria === 'bovino_caja_cb' || p.categoria === 'bovino_caja_pt'))
+        setProductosPolloCajon(all.filter(p => p.categoria === 'pollo_cajon'))
+        setProductosRebozadoCajon(all.filter(p => p.categoria === 'rebozado_cajon'))
+      })
   }, [])
+
+  // Helpers para detectar si el tipo actual requiere selector de producto
+  const esPolloCajon = form.tipo === 'pollo'
+  const esRebozadoCajon = form.tipo === 'rebozado'
+  const productosFiltradosTipo = esPolloCajon ? productosPolloCajon
+                                : esRebozadoCajon ? productosRebozadoCajon
+                                : []
+  // Cuando el usuario elige un producto pollo/rebozado, autocompletar kg_por_unidad
+  function onProductoCajonChange(productoId) {
+    const prod = productosFiltradosTipo.find(p => p.id === productoId)
+    setForm(f => ({
+      ...f,
+      polloProductoId: productoId,
+      kg: prod?.kg_por_unidad ? String(prod.kg_por_unidad) : f.kg,
+    }))
+  }
 
   // Tipos que tienen tracking individual (cada unidad es una fila en cajas_stock)
   const esCajaIndividual = form.tipo === 'caja_cb' || form.tipo === 'caja_pt'
@@ -1351,6 +1376,14 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     // ── FLUJO HISTÓRICO PARA EL RESTO DE TIPOS ────────────────────────
     if (esSoloUnid && !form.cantidad) { showAlert({ type: 'error', msg: 'Ingresá la cantidad de unidades' }); return }
     if (!esSoloUnid && !form.kg) { showAlert({ type: 'error', msg: 'Completá los campos requeridos' }); return }
+
+    // Para pollo/rebozado por cajones: producto obligatorio (Pollo entero,
+    // Pechuga, etc.) — sino no sabemos qué se está ingresando exactamente.
+    if ((esPolloCajon || esRebozadoCajon) && productosFiltradosTipo.length > 0 && !form.polloProductoId) {
+      showAlert({ type: 'error', msg: `Seleccioná el producto específico (${esPolloCajon ? 'Pollo entero, Pechuga, etc.' : 'tipo de rebozado'})` })
+      return
+    }
+
     const esEnUnidades = TIPOS_EN_UNIDADES.includes(form.tipo)
     const cantidad = esEnUnidades ? Math.max(1, parseInt(form.cantidad) || 1) : 1
     // Para almacén/bebidas: kg por unidad = 1, así la cantidad se suma directo al stock
@@ -1360,9 +1393,12 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     const importe = form.tipo === 'bovino_mr'
       ? kgTotal * parseFloat(form.precioKg)
       : parseFloat(form.importe) || 0
+    // Si se seleccionó un producto pollo/rebozado, usar su nombre en la descripción.
+    const productoSelec = productosFiltradosTipo.find(p => p.id === form.polloProductoId)
+    const descripcionBase = productoSelec?.nombre || form.descripcion || form.tipo
     const descripcionFinal = esEnUnidades && cantidad > 1
-      ? `${form.descripcion || form.tipo} ×${cantidad}`
-      : (form.descripcion || form.tipo)
+      ? `${descripcionBase} ×${cantidad}`
+      : descripcionBase
     const { error } = await supabase.from('entradas_deposito').insert({
       fecha: form.fecha, tipo: form.tipo, proveedor_nombre: form.proveedor,
       descripcion: descripcionFinal, kg: kgTotal, kg_real: kgReal,
@@ -1378,10 +1414,10 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
       kg: kgTotal, importe
     })
     const msgOK = esEnUnidades && cantidad > 1
-      ? `✅ ${cantidad} unidades registradas — ${kgTotal.toFixed(1)} kg al stock`
+      ? `✅ ${cantidad} unidades de ${descripcionBase} registradas — ${kgTotal.toFixed(1)} kg al stock`
       : '✅ Entrada registrada — Stock actualizado'
     showAlert({ type: 'success', msg: msgOK })
-    setForm(f => ({ ...f, descripcion: '', kg: '', importe: '', precioKg: '9800', cantidad: '1' }))
+    setForm(f => ({ ...f, descripcion: '', kg: '', importe: '', precioKg: '9800', cantidad: '1', polloProductoId: '' }))
     onSaved()
     cargarHistorial()
     setTimeout(() => showAlert(null), 3000)
@@ -1477,9 +1513,9 @@ async function eliminar(entrada) {
 <option value="caja_pt">📦 Caja bovina PT</option>
 <option value="bovino_brosa">🫀 Bovino — Brosa</option>
 <option value="cerdo">🐷 Cerdo — Capón</option>
-<option value="pollo">🍗 Pollo — Cajón</option>
+<option value="pollo">🍗 Pollo por Cajones</option>
 <option value="embutido">🌭 Embutido</option>
-<option value="rebozado">🧊 Rebozado/Congelado</option>
+<option value="rebozado">🧊 Rebozado por Cajones</option>
 <option value="almacen">🛒 Almacén (por unidad)</option>
 <option value="bebidas">🥤 Bebidas (por unidad)</option>
             </select>
@@ -1499,6 +1535,32 @@ async function eliminar(entrada) {
             <input placeholder="Ej: Novillito Premium..." value={form.descripcion} onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))} />
           </div>
         </div>
+        {/* Selector de producto específico para Pollo/Rebozado por cajones —
+            así sabemos qué tipo de pollo (entero, pechuga, pata muslo, etc.)
+            se está ingresando y autocompletamos kg_por_unidad de la lista. */}
+        {(esPolloCajon || esRebozadoCajon) && (
+          <div className="form-row">
+            <div className="form-group" style={{ gridColumn: '1/-1' }}>
+              <label>🍗 Producto específico</label>
+              <select
+                value={form.polloProductoId || ''}
+                onChange={e => onProductoCajonChange(e.target.value)}
+                style={{ borderColor: 'var(--gold)' }}
+              >
+                <option value="">— Seleccioná el producto —</option>
+                {productosFiltradosTipo.map(p => (
+                  <option key={p.id} value={p.id}>{p.nombre}{p.kg_por_unidad ? ` (${p.kg_por_unidad} kg/u)` : ' — sin kg cargado'}</option>
+                ))}
+              </select>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                {productosFiltradosTipo.length === 0
+                  ? <span style={{ color: '#ff8b8b' }}>⚠️ No hay productos de esta categoría cargados — agregalos primero en /admin/precios.</span>
+                  : 'Al elegir el producto se autocompleta los kg por unidad. Igual lo podés editar si este lote pesa distinto.'}
+              </div>
+            </div>
+          </div>
+        )}
+
         {TIPOS_EN_UNIDADES.includes(form.tipo) && (
           <div className="form-row">
             <div className="form-group"><label>{esSoloUnidades ? '📦 Cantidad de unidades' : esCajaIndividual ? '📦 Cantidad de cajas' : 'Cantidad de unidades'}</label>
