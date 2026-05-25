@@ -338,6 +338,10 @@ export default function AdminLayout() {
   // (el sidebar mobile es un componente separado que no recibe estos valores como props)
   useEffect(() => { window.__flujosPendientes = flujosPendientes }, [flujosPendientes])
   useEffect(() => { window.__pedidosPendientes = pedidosPendientes }, [pedidosPendientes])
+  // Exponer el email del usuario actual para que el menú mobile pueda
+  // filtrar las opciones CEO-only (Ejecutivo, Reportes). Antes esto estaba
+  // referenciado pero nunca seteado → en mobile esos links nunca aparecían.
+  useEffect(() => { window.__ceoEmail = user?.email || null }, [user?.email])
   const [menuAbierto, setMenuAbierto] = useState(false)
   const [isMobile, setIsMobile] = useState(window.innerWidth < 900)
 

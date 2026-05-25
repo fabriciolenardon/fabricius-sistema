@@ -18,8 +18,10 @@ import { revertirVentaCaja } from '../../lib/cajasStock'
 import { useAuth } from '../../context/AuthContext'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
-const fmt$ = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
-const fmtKg = n => (Number(n) || 0).toFixed(3) + ' kg'
+import { fmtPrecio, fmtKg as fmtKgAR } from '../../lib/formatos'
+const fmt$ = n => fmtPrecio(Math.abs(Number(n) || 0))
+// Histórico Caja muestra kg con 3 decimales (precisión balanza)
+const fmtKg = n => fmtKgAR(Number(n) || 0, { decimales: 3 })
 
 // Mapeo de categoría del producto a un grupo agregado del historial
 function grupoDeCategoria(cat) {

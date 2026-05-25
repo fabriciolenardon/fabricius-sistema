@@ -34,7 +34,9 @@ const CATEGORIAS_CON_KG_POR_UNIDAD = new Set(['pollo_cajon', 'rebozado_cajon'])
 // Las piezas bovinas son las únicas donde se vende un objeto físico único
 // (cada pierna, cuarto pistola, costillar, etc. con su peso propio).
 const CATEGORIAS_CON_PIEZA_ENTERA = new Set(['bovino_pieza'])
-const fmt = n => n != null ? '$' + Math.round(n).toLocaleString('es-AR') : '—'
+import { fmtPrecio } from '../../lib/formatos'
+// Precio en formato AR (35.600,50 con decimales si tiene)
+const fmt = n => n != null ? fmtPrecio(Number(n) || 0) : '—'
 const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }
 
 export default function Precios() {
@@ -91,6 +93,25 @@ export default function Precios() {
       if (kpu <= 0) {
         return mostrarMsg('❌ Cargá los "Kg por cajón / unidad" — es obligatorio para esta categoría')
       }
+    }
+
+    // Detectar nombres que claramente son embutidos pero están en otra categoría.
+    // Excluye "bife de chorizo" (corte bovino, no embutido).
+    const nombreLower = form.nombre.toLowerCase()
+    const pareceEmbutido = (
+      nombreLower.startsWith('chorizo')
+      || nombreLower.includes('morcilla')
+      || nombreLower.includes('salchicha')
+      || nombreLower.includes('salame')
+      || nombreLower.includes('longaniza')
+    ) && !nombreLower.includes('bife')
+    if (pareceEmbutido && form.categoria !== 'embutido') {
+      const ok = window.confirm(
+        `⚠️ "${form.nombre}" parece ser un embutido pero está en categoría "${form.categoria}".\n\n` +
+        `Si lo guardás así, al venderse descontará del stock de "${form.categoria}" en vez de "embutido".\n\n` +
+        `¿Estás seguro? Si querés que descuente de embutidos, cambiá la categoría a "🌭 Embutidos" antes de guardar.`
+      )
+      if (!ok) return
     }
     setLoading(true)
     const nuevoPlu = form.codigo_balanza === '' ? null : Number(form.codigo_balanza)

@@ -14,7 +14,9 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import { MODELOS_DESPOSTE } from '../../lib/modelosDesposte'
+import { parseNumero } from '../../lib/formatos'
 
+// fmt sin signo $ — numero generico formato AR con 2 decimales (uso kg)
 const fmt = n => (Number(n) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 const inp = {
@@ -81,7 +83,7 @@ export default function DesposteMediaRes() {
   }
 
   async function enviar() {
-    const kg = Number(kgManual) || 0
+    const kg = parseNumero(kgManual)
     if (kg <= 0) return aviso('Cargá los kilos de la media res', 'error')
     // Sanity check: las medias res de Fabricius van de 70 a 140 kg.
     // > 150 kg es prácticamente seguro un typo (típico bug ×1000 o dígito extra).
@@ -98,13 +100,13 @@ export default function DesposteMediaRes() {
     if (submodo === 'piezas') {
       // (a) Validación individual: detecta typos en una sola pieza
       for (const pieza of MODELOS_DESPOSTE[modelo].piezas) {
-        const pesoP = Number(piezasKg[pieza.nombre]) || 0
+        const pesoP = parseNumero(piezasKg[pieza.nombre])
         if (pesoP > kg) {
           return aviso(`⚠️ "${pieza.nombre}" tiene ${pesoP} kg pero la media res es de ${kg} kg. Una pieza no puede pesar más que la media res entera.`, 'error')
         }
       }
       // (b) Suma de piezas
-      const sumaPiezas = MODELOS_DESPOSTE[modelo].piezas.reduce((s, p) => s + (Number(piezasKg[p.nombre]) || 0), 0)
+      const sumaPiezas = MODELOS_DESPOSTE[modelo].piezas.reduce((s, p) => s + (parseNumero(piezasKg[p.nombre])), 0)
       if (sumaPiezas > kg * 1.1) {
         return aviso(`⚠️ La suma de piezas (${sumaPiezas.toFixed(1)} kg) supera el peso de la media res (${kg} kg). Revisá los valores — probablemente sobra un dígito.`, 'error')
       }
@@ -122,7 +124,7 @@ export default function DesposteMediaRes() {
       // Incluir las piezas con sus kilos cargados
       const piezasDetalle = MODELOS_DESPOSTE[modelo].piezas.map(p => ({
         nombre: p.nombre,
-        kg: Number(piezasKg[p.nombre]) || 0,
+        kg: parseNumero(piezasKg[p.nombre]),
         tipo_stock: p.tipo_stock,
       })).filter(p => p.kg > 0)
       payload.piezas = piezasDetalle
@@ -295,7 +297,7 @@ export default function DesposteMediaRes() {
             </div>
             {/* Totales */}
             {(() => {
-              const sumaPiezas = MODELOS_DESPOSTE[modelo].piezas.reduce((s, p) => s + (Number(piezasKg[p.nombre]) || 0), 0)
+              const sumaPiezas = MODELOS_DESPOSTE[modelo].piezas.reduce((s, p) => s + (parseNumero(piezasKg[p.nombre])), 0)
               const kgMR = Number(kgManual) || 0
               const merma = kgMR - sumaPiezas
               const mermaPct = kgMR > 0 ? (merma / kgMR) * 100 : 0

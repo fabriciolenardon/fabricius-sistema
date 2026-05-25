@@ -4,14 +4,18 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import DashboardCajaWidget from './DashboardCajaWidget'
 import AlertasAnomalias from './AlertasAnomalias'
+import { fmtPrecio } from '../../lib/formatos'
 
+// fmt compacto para KPIs grandes: "$22,7M" o "$345K" o "$12.345"
+// Reemplaza el "." de los decimales por coma para formato AR.
 function fmt(n) {
   const abs = Math.abs(Math.round(n || 0))
-  if (abs >= 1000000) return '$' + (abs / 1000000).toFixed(1) + 'M'
+  if (abs >= 1000000) return '$' + (abs / 1000000).toFixed(1).replace('.', ',') + 'M'
   if (abs >= 1000) return '$' + (abs / 1000).toFixed(0) + 'K'
   return '$' + abs.toLocaleString('es-AR')
 }
-function fmtFull(n) { return '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR') }
+// fmtFull = precio completo con formato AR (35.600,50)
+const fmtFull = n => fmtPrecio(Math.abs(Number(n) || 0))
 
 export default function Dashboard() {
   const { profile, isAdmin } = useAuth()

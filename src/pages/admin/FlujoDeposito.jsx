@@ -19,6 +19,8 @@ import { useAuth } from '../../context/AuthContext'
 import { MODELOS_DESPOSTE } from '../../lib/modelosDesposte'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
+import { fmtPrecio, fmtKg } from '../../lib/formatos'
+// fmt sin signo $ — formato AR para mostrar números genéricos con 2 decimales
 const fmt = n => (Number(n) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 const LABEL_TIPO = {

@@ -3,6 +3,8 @@ import { supabase } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
 import { resolverDescuentoStock } from '../../lib/stockHelpers'
 import { cargarCajasDisponibles, crearCajasIngreso, venderCaja, revertirVentaCaja, CATEGORIA_A_TIPO_CAJA } from '../../lib/cajasStock'
+import { fmtPrecio, fmtKg, parseNumero } from '../../lib/formatos'
+import { getCampoPrecio } from '../../lib/listasPrecios'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 import FlujoDeposito from './FlujoDeposito'
 import AjusteStock from './AjusteStock'
@@ -51,7 +53,10 @@ const MODELOS_DESPOSTE = {
   },
 }
 
-const fmt = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
+// Wrapper que mantiene la firma vieja `fmt(n)` (precio en $) usando el
+// formatter centralizado — ahora muestra decimales si los hay, siempre con
+// coma decimal y punto miles (formato AR). Ver src/lib/formatos.js.
+const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
 
 export function Deposito() {
   const [tab, setTab] = useState('entradas')
@@ -326,7 +331,7 @@ async function confirmarElaboracionEmbutido() {
   if (kgCerdo === 0) { showAlert('Ingresá al menos una pieza de cerdo', 'error'); return }
   setLoading(true)
   try {
-    const kgTotal = kgCerdo + (parseFloat(kgCarneBovinaEmbutido) || 0)
+    const kgTotal = kgCerdo + (parseNumero(kgCarneBovinaEmbutido))
     const kgFinal = parseFloat((kgTotal * (1 + pctAumentoEmbutido / 100)).toFixed(2))
     const piezasUsadas = Object.entries(piezasEmbutido)
       .filter(([, v]) => parseFloat(v) > 0)
@@ -335,14 +340,14 @@ async function confirmarElaboracionEmbutido() {
       fecha, tipo: 'embutido', tipo_embutido: tipoEmbutido,
       piezas_usadas: piezasUsadas,
       kg_carne_cerdo: kgCerdo,
-      kg_carne_bovina: parseFloat(kgCarneBovinaEmbutido) || 0,
+      kg_carne_bovina: parseNumero(kgCarneBovinaEmbutido),
       kg_elaborado: kgTotal, pct_aumento: pctAumentoEmbutido,
       kg_final: kgFinal, maduracion_completa: true, notas
     })
     for (const [tipo, v] of Object.entries(piezasEmbutido)) {
       if (parseFloat(v) > 0) await actualizarStock(tipo, -parseFloat(v))
     }
-    if (parseFloat(kgCarneBovinaEmbutido) > 0) await actualizarStock('bovino_corte', -parseFloat(kgCarneBovinaEmbutido))
+    if (parseNumero(kgCarneBovinaEmbutido) > 0) await actualizarStock('bovino_corte', -parseNumero(kgCarneBovinaEmbutido))
     await actualizarStock('embutido', kgFinal)
     showAlert(`✅ ${kgFinal.toFixed(1)} kg de embutidos elaborados al stock`)
     setPiezasEmbutido({ cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '', cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: '' })
@@ -357,7 +362,7 @@ async function confirmarElaboracionSalame() {
     if (kgCerdo === 0) { showAlert('Ingresá al menos una pieza de cerdo', 'error'); return }
     setLoading(true)
     try {
-      const kgTotal = kgCerdo + (parseFloat(kgCarneBovinaEmbutido) || 0) + (parseFloat(kgQuesoEmbutido) || 0)
+      const kgTotal = kgCerdo + (parseNumero(kgCarneBovinaEmbutido)) + (parseNumero(kgQuesoEmbutido))
       const fechaFin = new Date(fecha)
       fechaFin.setDate(fechaFin.getDate() + 21)
       const piezasUsadas = Object.entries(piezasEmbutido)
@@ -367,8 +372,8 @@ async function confirmarElaboracionSalame() {
         fecha, tipo: 'salame', tipo_embutido: tipoEmbutido,
         piezas_usadas: piezasUsadas,
         kg_carne_cerdo: kgCerdo,
-        kg_carne_bovina: parseFloat(kgCarneBovinaEmbutido) || 0,
-        kg_queso: parseFloat(kgQuesoEmbutido) || 0,
+        kg_carne_bovina: parseNumero(kgCarneBovinaEmbutido),
+        kg_queso: parseNumero(kgQuesoEmbutido),
         kg_elaborado: kgTotal, pct_aumento: 0,
         kg_final: 0, maduracion_completa: false,
         fecha_fin_maduracion: fechaHoyARG(fechaFin),
@@ -377,7 +382,7 @@ async function confirmarElaboracionSalame() {
       for (const [tipo, v] of Object.entries(piezasEmbutido)) {
         if (parseFloat(v) > 0) await actualizarStock(tipo, -parseFloat(v))
       }
-      if (parseFloat(kgCarneBovinaEmbutido) > 0) await actualizarStock('bovino_corte', -parseFloat(kgCarneBovinaEmbutido))
+      if (parseNumero(kgCarneBovinaEmbutido) > 0) await actualizarStock('bovino_corte', -parseNumero(kgCarneBovinaEmbutido))
       showAlert(`✅ Salame registrado — Maduración hasta ${fechaHoyARG(fechaFin)}`)
       setPiezasEmbutido({ cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '', cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: '' })
       setKgCarneBovinaEmbutido(''); setKgQuesoEmbutido(''); setNotas('')
@@ -389,17 +394,17 @@ async function confirmarDesposteCerdo() {
   if (!caponSeleccionado) { showAlert('Seleccioná un capón', 'error'); return }
   const kgCapon = caponSeleccionado.kg_real || caponSeleccionado.kg || 0
   const piezasRegistradas = [
-    { nombre: 'Piernas (x2)', kg: parseFloat(piezasCerdo.pierna) || 0, stock: 'cerdo_pierna' },
-    { nombre: 'Carrés (x2)', kg: parseFloat(piezasCerdo.carre) || 0, stock: 'cerdo_carre' },
-    { nombre: 'Pechitos (x2)', kg: parseFloat(piezasCerdo.pechito) || 0, stock: 'cerdo_pechito' },
-    { nombre: 'Matambres (x2)', kg: parseFloat(piezasCerdo.matambre) || 0, stock: 'cerdo_matambre' },
-    { nombre: 'Paletas (x2)', kg: parseFloat(piezasCerdo.paleta) || 0, stock: 'cerdo_paleta' },
-    { nombre: 'Carnaza', kg: parseFloat(piezasCerdo.parrillero) || 0, stock: 'cerdo_parrillero' },
-    { nombre: 'Huesos', kg: parseFloat(piezasCerdo.huesos) || 0, stock: 'cerdo_huesos' },
-    { nombre: 'Bondiola s/hueso', kg: parseFloat(piezasCerdo.bondiola) || 0, stock: 'cerdo_bondiola' },
-    { nombre: 'Tocino', kg: parseFloat(piezasCerdo.tocino) || 0, stock: 'cerdo_tocino' },
-    { nombre: 'Cuero', kg: parseFloat(piezasCerdo.cuero) || 0, stock: 'cerdo_cuero' },
-    { nombre: 'Cabeza', kg: parseFloat(piezasCerdo.cabeza) || 0, stock: 'cerdo_cabeza' },
+    { nombre: 'Piernas (x2)', kg: parseNumero(piezasCerdo.pierna), stock: 'cerdo_pierna' },
+    { nombre: 'Carrés (x2)', kg: parseNumero(piezasCerdo.carre), stock: 'cerdo_carre' },
+    { nombre: 'Pechitos (x2)', kg: parseNumero(piezasCerdo.pechito), stock: 'cerdo_pechito' },
+    { nombre: 'Matambres (x2)', kg: parseNumero(piezasCerdo.matambre), stock: 'cerdo_matambre' },
+    { nombre: 'Paletas (x2)', kg: parseNumero(piezasCerdo.paleta), stock: 'cerdo_paleta' },
+    { nombre: 'Carnaza', kg: parseNumero(piezasCerdo.parrillero), stock: 'cerdo_parrillero' },
+    { nombre: 'Huesos', kg: parseNumero(piezasCerdo.huesos), stock: 'cerdo_huesos' },
+    { nombre: 'Bondiola s/hueso', kg: parseNumero(piezasCerdo.bondiola), stock: 'cerdo_bondiola' },
+    { nombre: 'Tocino', kg: parseNumero(piezasCerdo.tocino), stock: 'cerdo_tocino' },
+    { nombre: 'Cuero', kg: parseNumero(piezasCerdo.cuero), stock: 'cerdo_cuero' },
+    { nombre: 'Cabeza', kg: parseNumero(piezasCerdo.cabeza), stock: 'cerdo_cabeza' },
   ].filter(p => p.kg > 0)
 
   // Validaciones anti-error humano (mismo patrón que media res bovina):
@@ -1001,8 +1006,8 @@ async function confirmarDesposteCerdo() {
       <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, marginBottom: 14 }}>
         {(() => {
           const kgCerdo = Object.values(piezasEmbutido).reduce((s, v) => s + (parseFloat(v) || 0), 0)
-          const kgBovino = parseFloat(kgCarneBovinaEmbutido) || 0
-          const kgQueso = parseFloat(kgQuesoEmbutido) || 0
+          const kgBovino = parseNumero(kgCarneBovinaEmbutido)
+          const kgQueso = parseNumero(kgQuesoEmbutido)
           const kgTotal = kgCerdo + kgBovino + kgQueso
           const kgFinal = tipoElaboracion === 'embutido' ? kgTotal * (1 + pctAumentoEmbutido / 100) : kgTotal * 0.5
           return (
@@ -1278,7 +1283,8 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
 
     // Sanity check de kg: cualquier valor numérico inválido o sospechosamente
     // alto debe ser bloqueado o confirmado.
-    const kgInput = parseFloat(form.kg) || 0
+    // parseNumero acepta "12,5" o "12.5" (coma o punto) sin distinción.
+    const kgInput = parseNumero(form.kg)
     if (!esCajaIndividual && !esSoloUnid && kgInput < 0) {
       showAlert({ type: 'error', msg: 'Los kilos no pueden ser negativos' }); return
     }
@@ -1319,7 +1325,8 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
         showAlert({ type: 'error', msg: 'Seleccioná el producto que va dentro de las cajas (ej. Bola de Lomo Caja PT)' })
         return
       }
-      const pesosValidos = cajasPesos.map(p => parseFloat(p)).filter(p => p > 0)
+      // parseNumero acepta "15,4" o "15.4" — el operario tipea como prefiera
+      const pesosValidos = cajasPesos.map(p => parseNumero(p)).filter(p => p > 0)
       const cantPesperada = Math.max(1, parseInt(form.cantidad) || 1)
       if (pesosValidos.length !== cantPesperada) {
         showAlert({ type: 'error', msg: `Cargá el peso de las ${cantPesperada} cajas (faltan ${cantPesperada - pesosValidos.length})` })
@@ -1337,7 +1344,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
       }
       const productoCaja = productosCajas.find(p => p.id === form.cajaProductoId)
       const kgTotalCajas = pesosValidos.reduce((s, kg) => s + kg, 0)
-      const importeCajas = parseFloat(form.importe) || 0
+      const importeCajas = parseNumero(form.importe)
       const precioPromedioKg = kgTotalCajas > 0 ? importeCajas / kgTotalCajas : 0
       const descripcionCajas = `${productoCaja?.nombre || form.descripcion || (form.tipo === 'caja_cb' ? 'Caja CB' : 'Caja PT')} ×${cantPesperada}`
       // 1) Registrar la entrada contable (suma de las cajas)
@@ -1387,12 +1394,13 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     const esEnUnidades = TIPOS_EN_UNIDADES.includes(form.tipo)
     const cantidad = esEnUnidades ? Math.max(1, parseInt(form.cantidad) || 1) : 1
     // Para almacén/bebidas: kg por unidad = 1, así la cantidad se suma directo al stock
-    const kgUnidad = esSoloUnid ? 1 : (parseFloat(form.kg) || 0)
+    // parseNumero acepta coma/punto indistintamente.
+    const kgUnidad = esSoloUnid ? 1 : parseNumero(form.kg)
     const kgTotal = kgUnidad * cantidad
-    const kgReal = kgTotal * (1 - (parseFloat(form.merma) || 0) / 100)
+    const kgReal = kgTotal * (1 - parseNumero(form.merma) / 100)
     const importe = form.tipo === 'bovino_mr'
-      ? kgTotal * parseFloat(form.precioKg)
-      : parseFloat(form.importe) || 0
+      ? kgTotal * parseNumero(form.precioKg)
+      : parseNumero(form.importe)
     // Si se seleccionó un producto pollo/rebozado, usar su nombre en la descripción.
     const productoSelec = productosFiltradosTipo.find(p => p.id === form.polloProductoId)
     const descripcionBase = productoSelec?.nombre || form.descripcion || form.tipo
@@ -1402,7 +1410,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     const { error } = await supabase.from('entradas_deposito').insert({
       fecha: form.fecha, tipo: form.tipo, proveedor_nombre: form.proveedor,
       descripcion: descripcionFinal, kg: kgTotal, kg_real: kgReal,
-      merma_pct: parseFloat(form.merma) || 0, precio_kg: parseFloat(form.precioKg) || 0,
+      merma_pct: parseNumero(form.merma), precio_kg: parseNumero(form.precioKg),
       importe, destino: form.destino, cantidad
     })
     if (error) { showAlert({ type: 'error', msg: error.message }); return }
@@ -1465,7 +1473,7 @@ async function eliminar(entrada) {
 
   async function guardarEdicion(entrada) {
     const kgAnterior = entrada.kg_real || entrada.kg || 0
-    const kgNuevo = parseFloat(formEdit.kg) || 0
+    const kgNuevo = parseNumero(formEdit.kg)
     const kgReal = kgNuevo * (1 - (entrada.merma_pct || 0) / 100)
     const diferencia = kgReal - kgAnterior
     await supabase.from('entradas_deposito').update({
@@ -1473,10 +1481,10 @@ async function eliminar(entrada) {
       descripcion: formEdit.descripcion,
       kg: kgNuevo,
       kg_real: kgReal,
-      precio_kg: parseFloat(formEdit.precioKg) || 0,
+      precio_kg: parseNumero(formEdit.precioKg),
       proveedor_nombre: formEdit.proveedor,
       destino: formEdit.destino,
-      importe: kgNuevo * (parseFloat(formEdit.precioKg) || 0)
+      importe: kgNuevo * (parseNumero(formEdit.precioKg))
     }).eq('id', entrada.id)
     if (diferencia !== 0) await actualizarStock(entrada.tipo, diferencia)
     setEditando(null)
@@ -1851,19 +1859,39 @@ const CATEGORIA_A_STOCK = {
   const esClienteExterno = ['carniceria', 'mayorista'].includes(form.destino)
   const esFranquicia = ['CENTRO', 'MONTE CRISTO'].includes(form.destino)
 
-  function getLista(dest) { return dest === 'mayorista' ? 'precio_mayorista' : 'precio_carniceria' }
+  // Lista de precios para el despacho.
+  // Prioridad: si hay un cliente seleccionado con lista_precios definida
+  // (incluyendo 'min' minorista), esa pisa el fallback del destino.
+  // Esto permite que un cliente cuenta-corriente cargado como minorista
+  // reciba precios minoristas aunque el despacho sea por "carnicería".
+  function getLista(dest, clienteId = null) {
+    if (clienteId) {
+      const cli = clientes.find(c => c.id === clienteId)
+      if (cli?.lista_precios) return getCampoPrecio(cli.lista_precios)
+    }
+    return dest === 'mayorista' ? 'precio_mayorista' : 'precio_carniceria'
+  }
 
   function seleccionarCliente(c) {
     setForm(f => ({ ...f, clienteId: c.id, clienteNombre: c.nombre, domicilio: c.domicilio || '' }))
     setBusqueda(c.nombre)
     setMostrarClientes(false)
+    // Si ya había un producto seleccionado, recalcular el precio con la
+    // lista del cliente recién elegido (puede tener lista distinta al destino).
+    if (form.productoId) {
+      const prod = todosPrecios.find(p => p.id === form.productoId)
+      if (prod) {
+        const precio = prod[getLista(form.destino, c.id)] || prod.precio_mayorista || 0
+        setForm(f => ({ ...f, productoId: f.productoId, precio, clienteId: c.id, clienteNombre: c.nombre, domicilio: c.domicilio || '' }))
+      }
+    }
   }
 
   function onProductoChange(id) {
     if (!id) return
     const prod = todosPrecios.find(p => p.id === id)
     if (!prod) return
-    const precio = prod[getLista(form.destino)] || prod.precio_mayorista || 0
+    const precio = prod[getLista(form.destino, form.clienteId)] || prod.precio_mayorista || 0
     setForm(f => ({ ...f, productoId: id, precio }))
   }
 async function agregarItem() {
@@ -1896,8 +1924,9 @@ async function agregarItem() {
     }
     const prodItem = (form.categoria !== 'bovino_mr' && form.categoria !== 'pieza_entera') ? todosPrecios.find(p => p.id === form.productoId) : null
     // Para cajas: kg viene de la caja seleccionada, no del form
-    const kgItem = esCajaLocal && cajaSeleccionada ? Number(cajaSeleccionada.kg) : parseFloat(form.kg)
-    const precioItem = parseFloat(form.precio)
+    // parseNumero acepta coma/punto (ej. "12,5" o "12.5" funcionan igual)
+    const kgItem = esCajaLocal && cajaSeleccionada ? Number(cajaSeleccionada.kg) : parseNumero(form.kg)
+    const precioItem = parseNumero(form.precio)
 const item = {
   descripcion,
   kg: kgItem,
@@ -1931,7 +1960,7 @@ const item = {
 
   function agregarItemManual() {
     const desc = formManual.descripcion.trim()
-    const imp = parseFloat(formManual.importe)
+    const imp = parseNumero(formManual.importe)
     if (!desc) { showAlert({ type: 'error', msg: 'Ingresá una descripción' }); return }
     if (!imp || imp <= 0) { showAlert({ type: 'error', msg: 'Ingresá un importe válido' }); return }
     setItems(prev => [...prev, {
@@ -1953,6 +1982,17 @@ const item = {
     let clienteId = form.clienteId
     let clienteNombre = form.clienteNombre || form.destino
     let domicilio = form.domicilio
+    // Contacto adicional para el remito impreso (importante para el repartidor)
+    let telefono = ''
+    let localidad = ''
+    // Si el cliente esta en el dropdown, traer telefono + localidad del registro
+    if (clienteId) {
+      const cliReg = clientes.find(c => c.id === clienteId)
+      if (cliReg) {
+        telefono  = cliReg.telefono  || ''
+        localidad = cliReg.localidad || ''
+      }
+    }
 
     if (esFranquicia) {
       const nombreBuscar = DESTINOS_FRANQUICIA[form.destino]
@@ -1961,6 +2001,8 @@ const item = {
         clienteId = clienteFranquicia.id
         clienteNombre = clienteFranquicia.nombre
         domicilio = clienteFranquicia.domicilio || form.destino
+        telefono  = clienteFranquicia.telefono  || telefono
+        localidad = clienteFranquicia.localidad || localidad
       }
     }
 
@@ -1969,7 +2011,7 @@ const item = {
         fecha: form.fecha, cliente_nombre: clienteNombre,
         tipo: item.tipo, descripcion: item.descripcion,
         kg: item.kg, precio_kg: item.precio,
-        total: item.importe, lista: getLista(form.destino),
+        total: item.importe, lista: getLista(form.destino, clienteId),
         cobro: form.cobro, notas: form.notas
       })
     }
@@ -1998,8 +2040,10 @@ for (const item of items) {
       setMediaSeleccionada(null)
       const { data: medias } = await supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false })
       setMediasDisponibles(medias || [])
-    const { data: remitoData } = await supabase.from('remitos').insert({     fecha: form.fecha, cliente_nombre: clienteNombre,
-      cliente_id: clienteId || null, domicilio,
+    const { data: remitoData } = await supabase.from('remitos').insert({
+      fecha: form.fecha, cliente_nombre: clienteNombre,
+      cliente_id: clienteId || null,
+      domicilio, telefono, localidad,
       items, total, cobro: form.cobro, notas: form.notas
     }).select().single()
 
@@ -2714,15 +2758,15 @@ function ProveedoresTab() {
 
   async function guardarCompra() {
     if (!formCompra.proveedor_nombre || !formCompra.importe) { showMsg('Completá proveedor e importe', 'error'); return }
-    await supabase.from('compras_proveedores').insert({ fecha: formCompra.fecha, semana_inicio: formCompra.semana_inicio || null, semana_fin: formCompra.semana_fin || null, proveedor_nombre: formCompra.proveedor_nombre, producto: formCompra.producto, kg: parseFloat(formCompra.kg) || 0, importe: parseFloat(formCompra.importe) || 0 })
+    await supabase.from('compras_proveedores').insert({ fecha: formCompra.fecha, semana_inicio: formCompra.semana_inicio || null, semana_fin: formCompra.semana_fin || null, proveedor_nombre: formCompra.proveedor_nombre, producto: formCompra.producto, kg: parseNumero(formCompra.kg), importe: parseNumero(formCompra.importe) })
     showMsg('✅ Compra registrada')
     setFormCompra(f => ({ ...f, producto: '', kg: '', importe: '', proveedor_nombre: '' })); fetchAll()
   }
 
   async function guardarPago() {
     if (!formPago.proveedor_nombre) { showMsg('Seleccioná un proveedor', 'error'); return }
-    const saldoAdeudado = (parseFloat(formPago.importe_compra) || 0) + (parseFloat(formPago.percepcion) || 0) + (parseFloat(formPago.saldo_anterior) || 0) - (parseFloat(formPago.entrega) || 0)
-    await supabase.from('pagos_proveedores_semanal').insert({ fecha: formPago.fecha, semana_inicio: formPago.semana_inicio || null, semana_fin: formPago.semana_fin || null, proveedor_nombre: formPago.proveedor_nombre, importe_compra: parseFloat(formPago.importe_compra) || 0, percepcion: parseFloat(formPago.percepcion) || 0, saldo_anterior: parseFloat(formPago.saldo_anterior) || 0, entrega: parseFloat(formPago.entrega) || 0, saldo_adeudado: saldoAdeudado, notas: formPago.notas })
+    const saldoAdeudado = (parseNumero(formPago.importe_compra)) + (parseNumero(formPago.percepcion)) + (parseNumero(formPago.saldo_anterior)) - (parseNumero(formPago.entrega))
+    await supabase.from('pagos_proveedores_semanal').insert({ fecha: formPago.fecha, semana_inicio: formPago.semana_inicio || null, semana_fin: formPago.semana_fin || null, proveedor_nombre: formPago.proveedor_nombre, importe_compra: parseNumero(formPago.importe_compra), percepcion: parseNumero(formPago.percepcion), saldo_anterior: parseNumero(formPago.saldo_anterior), entrega: parseNumero(formPago.entrega), saldo_adeudado: saldoAdeudado, notas: formPago.notas })
     showMsg('✅ Pago registrado')
     setFormPago(f => ({ ...f, importe_compra: '', percepcion: '', saldo_anterior: '', entrega: '', notas: '', proveedor_nombre: '' })); fetchAll()
   }
@@ -2905,11 +2949,11 @@ function ProveedoresTab() {
             </div>
             {(formPago.importe_compra || formPago.entrega) && (
               <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, display: 'flex', gap: 20, flexWrap: 'wrap' }}>
-                <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>Compra: </span><strong style={{ color: 'var(--amber)' }}>{fmt(parseFloat(formPago.importe_compra) || 0)}</strong></div>
-                <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>+ Percepción: </span><strong>{fmt(parseFloat(formPago.percepcion) || 0)}</strong></div>
-                <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>+ Saldo ant.: </span><strong>{fmt(parseFloat(formPago.saldo_anterior) || 0)}</strong></div>
-                <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>− Entrega: </span><strong style={{ color: 'var(--green)' }}>{fmt(parseFloat(formPago.entrega) || 0)}</strong></div>
-                <div style={{ fontSize: 14, fontWeight: 700 }}><span style={{ color: 'var(--muted)' }}>= Saldo adeudado: </span><strong style={{ color: ((parseFloat(formPago.importe_compra) || 0) + (parseFloat(formPago.percepcion) || 0) + (parseFloat(formPago.saldo_anterior) || 0) - (parseFloat(formPago.entrega) || 0)) > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt((parseFloat(formPago.importe_compra) || 0) + (parseFloat(formPago.percepcion) || 0) + (parseFloat(formPago.saldo_anterior) || 0) - (parseFloat(formPago.entrega) || 0))}</strong></div>
+                <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>Compra: </span><strong style={{ color: 'var(--amber)' }}>{fmt(parseNumero(formPago.importe_compra))}</strong></div>
+                <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>+ Percepción: </span><strong>{fmt(parseNumero(formPago.percepcion))}</strong></div>
+                <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>+ Saldo ant.: </span><strong>{fmt(parseNumero(formPago.saldo_anterior))}</strong></div>
+                <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>− Entrega: </span><strong style={{ color: 'var(--green)' }}>{fmt(parseNumero(formPago.entrega))}</strong></div>
+                <div style={{ fontSize: 14, fontWeight: 700 }}><span style={{ color: 'var(--muted)' }}>= Saldo adeudado: </span><strong style={{ color: ((parseNumero(formPago.importe_compra)) + (parseNumero(formPago.percepcion)) + (parseNumero(formPago.saldo_anterior)) - (parseNumero(formPago.entrega))) > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt((parseNumero(formPago.importe_compra)) + (parseNumero(formPago.percepcion)) + (parseNumero(formPago.saldo_anterior)) - (parseNumero(formPago.entrega)))}</strong></div>
               </div>
             )}
             <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Notas</label><input value={formPago.notas} onChange={e => setFormPago(f => ({ ...f, notas: e.target.value }))} placeholder="Cheque nro., banco, etc." style={{ ...inp, marginBottom: 12 }} /></div>
