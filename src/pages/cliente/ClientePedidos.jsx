@@ -5,7 +5,8 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
-const fmt = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
+import { fmtPrecio } from '../../lib/formatos'
+const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
 
 const ESTADO_INFO = {
   pendiente:  { label: '🟡 Pendiente',   color: 'var(--amber)',     bg: '#2a2410' },

@@ -5,7 +5,9 @@ import { fechaHoyARG } from '../../lib/fechas'
 import { parseNumero } from '../../lib/formatos'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
-function fmt(n) { return '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR') }
+// Display de precio con formato AR (incluye centavos si tiene)
+import { fmtPrecio } from '../../lib/formatos'
+function fmt(n) { return fmtPrecio(Math.abs(Number(n) || 0)) }
 
 const CATEGORIAS = [
   { value: 'vehiculo', label: '🚗 Vehículo' },

@@ -16,6 +16,7 @@ import { useAuth } from '../../context/AuthContext'
 import { MODELOS_DESPOSTE } from '../../lib/modelosDesposte'
 import { parseNumero } from '../../lib/formatos'
 
+// fmt sin signo $ — numero generico formato AR con 2 decimales (uso kg)
 const fmt = n => (Number(n) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 const inp = {

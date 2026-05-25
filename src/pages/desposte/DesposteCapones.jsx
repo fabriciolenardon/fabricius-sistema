@@ -25,6 +25,8 @@ async function sumarStock(tipo, kg) {
   }
 }
 
+import { fmtKg } from '../../lib/formatos'
+// fmt sin signo $: numero generico con 2 decimales formato AR (uso kg)
 const fmt = n => (Number(n) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 const inp = {

@@ -15,7 +15,8 @@ const CATEGORIAS = {
   rebozado: '🧊 Rebozados',
 }
 
-const fmt = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
+import { fmtPrecio } from '../../lib/formatos'
+const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
 const ahora = () => new Date().toISOString()
 
 function fechaMinimaEntrega() {

@@ -11,7 +11,8 @@ const CATEGORIAS = {
   rebozado: '🧊 Rebozados',
 }
 
-const fmt = n => n != null ? '$' + Math.round(n).toLocaleString('es-AR') : '—'
+import { fmtPrecio } from '../../lib/formatos'
+const fmt = n => n != null ? fmtPrecio(Number(n) || 0) : '—'
 
 export default function FranquiciaPrecios() {
   const [precios, setPrecios] = useState([])

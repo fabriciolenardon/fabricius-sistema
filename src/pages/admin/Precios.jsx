@@ -34,7 +34,9 @@ const CATEGORIAS_CON_KG_POR_UNIDAD = new Set(['pollo_cajon', 'rebozado_cajon'])
 // Las piezas bovinas son las únicas donde se vende un objeto físico único
 // (cada pierna, cuarto pistola, costillar, etc. con su peso propio).
 const CATEGORIAS_CON_PIEZA_ENTERA = new Set(['bovino_pieza'])
-const fmt = n => n != null ? '$' + Math.round(n).toLocaleString('es-AR') : '—'
+import { fmtPrecio } from '../../lib/formatos'
+// Precio en formato AR (35.600,50 con decimales si tiene)
+const fmt = n => n != null ? fmtPrecio(Number(n) || 0) : '—'
 const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }
 
 export default function Precios() {

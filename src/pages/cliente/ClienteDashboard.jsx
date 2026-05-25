@@ -4,7 +4,8 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
-function fmt(n) { return '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR') }
+import { fmtPrecio } from '../../lib/formatos'
+function fmt(n) { return fmtPrecio(Math.abs(Number(n) || 0)) }
 
 // Hook compartido: trae el cliente vinculado al profile actual
 function useCliente() {

@@ -62,7 +62,8 @@ function calcularHorasTurno(fichadas) {
   return Math.round(horas * 2) / 2 // redondear a 0.5
 }
 
-function fmt(n) { return '$' + Math.round(n || 0).toLocaleString('es-AR') }
+import { fmtPrecio } from '../../lib/formatos'
+function fmt(n) { return fmtPrecio(Number(n) || 0) }
 const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }
 
 export default function Sueldos() {
