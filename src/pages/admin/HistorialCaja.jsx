@@ -13,6 +13,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
+import { kgPorUnidadDeNombre } from '../../lib/stockHelpers'
 import { useAuth } from '../../context/AuthContext'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
@@ -42,9 +43,14 @@ function mapearStockTipo(cat) {
   if (cat === 'bovino_brosa')     return 'bovino_brosa'
   if (cat === 'cerdo_corte' || cat === 'cerdo_pieza' || cat === 'cerdo') return 'cerdo'
   if (cat === 'pollo')            return 'pollo'
+  if (cat === 'pollo_cajon')      return 'pollo'      // se revierte kg×cajón
+  if (cat === 'rebozado')         return 'rebozado'
+  if (cat === 'rebozado_cajon')   return 'rebozado'   // se revierte kg×cajón
   if (cat === 'embutido')         return 'embutido'
   if (cat === 'almacen')          return 'almacen'
   if (cat === 'bebidas')          return 'bebidas'
+  if (cat === 'bovino_caja_cb')   return 'caja_cb'
+  if (cat === 'bovino_caja_pt')   return 'caja_pt'
   return null
 }
 
@@ -145,16 +151,24 @@ export default function HistorialCaja() {
     }
 
     // 1) Reponer stock por cada item
+    // Para cajones (pollo_cajon, rebozado_cajon) hay que multiplicar
+    // las unidades vendidas por los kg que pesa cada cajón para
+    // devolver al stock kg del producto base — mismo cálculo invertido
+    // que hace Caja.jsx al vender.
     const items = Array.isArray(venta.items) ? venta.items : []
     const errores = []
     for (const item of items) {
       const tipoStock = mapearStockTipo(item.categoria)
       if (!tipoStock) continue
       try {
+        const esCajonAConvertir = item.categoria === 'pollo_cajon' || item.categoria === 'rebozado_cajon'
+        const cantidad = esCajonAConvertir
+          ? (Number(item.kg) || 0) * (kgPorUnidadDeNombre(item.descripcion) || 1)
+          : (Number(item.kg) || 0)
         const { data: stock } = await supabase.from('stock_actual').select('*').eq('tipo', tipoStock).maybeSingle()
         if (stock) {
           await supabase.from('stock_actual')
-            .update({ kg_disponible: (Number(stock.kg_disponible) || 0) + (Number(item.kg) || 0) })
+            .update({ kg_disponible: (Number(stock.kg_disponible) || 0) + cantidad })
             .eq('tipo', tipoStock)
         }
       } catch (e) {

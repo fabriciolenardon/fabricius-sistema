@@ -109,6 +109,21 @@ export default function FlujoDeposito() {
     const mermaCalc = f.kg_media_res > 0 && kgPiezasTotal > 0
       ? ((f.kg_media_res - kgPiezasTotal) / f.kg_media_res) * 100 : 0
 
+    // Guardia anti kg-inflados: si la suma de piezas supera al peso de la
+    // media res por más del 10%, casi seguro es un typo del operario
+    // (ej. tipear 39400 en vez de 39.4). Pedir confirmación explícita.
+    if (f.kg_media_res > 0 && kgPiezasTotal > f.kg_media_res * 1.1) {
+      const ok = window.confirm(
+        `⚠️ ATENCIÓN — Valores sospechosos\n\n` +
+        `Media res: ${f.kg_media_res} kg\n` +
+        `Suma de piezas: ${kgPiezasTotal.toFixed(1)} kg\n\n` +
+        `La suma de piezas supera al peso de la media res por mucho.\n` +
+        `Probablemente el operario tipeó un kg con un dígito de más.\n\n` +
+        `¿Aprobar igual? (No recomendado)`
+      )
+      if (!ok) { aviso('Aprobación cancelada. Pedile al operario que revise los kg.', 'error'); return }
+    }
+
     setProcesando(true)
 
     // Insertar desposte
