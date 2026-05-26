@@ -2940,6 +2940,7 @@ function ProveedoresTab() {
   const [formLegajo, setFormLegajo] = useState({ contacto: '', telefono: '', cuit: '', direccion: '', producto_principal: '', notas: '' })
   const [formCompra, setFormCompra] = useState({ fecha: fechaHoyARG(), semana_inicio: '', semana_fin: '', proveedor_nombre: '', producto: '', kg: '', importe: '' })
   const [formPago, setFormPago] = useState({ fecha: fechaHoyARG(), semana_inicio: '', semana_fin: '', proveedor_nombre: '', importe_compra: '', percepcion: '', saldo_anterior: '', entrega: '', notas: '' })
+  const [editandoPagoId, setEditandoPagoId] = useState(null)
 
   const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, width: '100%', boxSizing: 'border-box' }
 
@@ -3040,9 +3041,50 @@ function ProveedoresTab() {
   async function guardarPago() {
     if (!formPago.proveedor_nombre) { showMsg('Seleccioná un proveedor', 'error'); return }
     const saldoAdeudado = (parseNumero(formPago.importe_compra)) + (parseNumero(formPago.percepcion)) + (parseNumero(formPago.saldo_anterior)) - (parseNumero(formPago.entrega))
-    await supabase.from('pagos_proveedores_semanal').insert({ fecha: formPago.fecha, semana_inicio: formPago.semana_inicio || null, semana_fin: formPago.semana_fin || null, proveedor_nombre: formPago.proveedor_nombre, importe_compra: parseNumero(formPago.importe_compra), percepcion: parseNumero(formPago.percepcion), saldo_anterior: parseNumero(formPago.saldo_anterior), entrega: parseNumero(formPago.entrega), saldo_adeudado: saldoAdeudado, notas: formPago.notas })
-    showMsg('✅ Pago registrado')
+    const payload = { fecha: formPago.fecha, semana_inicio: formPago.semana_inicio || null, semana_fin: formPago.semana_fin || null, proveedor_nombre: formPago.proveedor_nombre, importe_compra: parseNumero(formPago.importe_compra), percepcion: parseNumero(formPago.percepcion), saldo_anterior: parseNumero(formPago.saldo_anterior), entrega: parseNumero(formPago.entrega), saldo_adeudado: saldoAdeudado, notas: formPago.notas }
+    if (editandoPagoId) {
+      const { error } = await supabase.from('pagos_proveedores_semanal').update(payload).eq('id', editandoPagoId)
+      if (error) { showMsg('❌ Error al actualizar: ' + error.message, 'error'); return }
+      showMsg('✅ Pago actualizado')
+      setEditandoPagoId(null)
+    } else {
+      const { error } = await supabase.from('pagos_proveedores_semanal').insert(payload)
+      if (error) { showMsg('❌ Error al registrar: ' + error.message, 'error'); return }
+      showMsg('✅ Pago registrado')
+    }
     setFormPago(f => ({ ...f, importe_compra: '', percepcion: '', saldo_anterior: '', entrega: '', notas: '', proveedor_nombre: '' })); fetchAll()
+  }
+
+  function iniciarEditarPago(p) {
+    setEditandoPagoId(p.id)
+    setFormPago({
+      fecha: p.fecha,
+      semana_inicio: p.semana_inicio || '',
+      semana_fin: p.semana_fin || '',
+      proveedor_nombre: p.proveedor_nombre || '',
+      importe_compra: String(p.importe_compra ?? ''),
+      percepcion: String(p.percepcion ?? ''),
+      saldo_anterior: String(p.saldo_anterior ?? ''),
+      entrega: String(p.entrega ?? ''),
+      notas: p.notas || '',
+    })
+    // Scroll al form para que el usuario vea los campos cargados.
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  function cancelarEditarPago() {
+    setEditandoPagoId(null)
+    setFormPago(f => ({ ...f, importe_compra: '', percepcion: '', saldo_anterior: '', entrega: '', notas: '', proveedor_nombre: '' }))
+  }
+
+  async function eliminarPago(p) {
+    if (!confirm(`¿Eliminar el pago de ${p.proveedor_nombre} del ${p.fecha} por ${fmt(p.importe_compra)}?\n\nAcción IRREVERSIBLE.`)) return
+    const { error } = await supabase.from('pagos_proveedores_semanal').delete().eq('id', p.id)
+    if (error) { showMsg('❌ Error al eliminar: ' + error.message, 'error'); return }
+    showMsg('✅ Pago eliminado')
+    // Si estábamos editando el que acabamos de borrar, salir del modo edición.
+    if (editandoPagoId === p.id) cancelarEditarPago()
+    fetchAll()
   }
 
   const proveedoresNombres = proveedoresDB.map(p => p.nombre)
@@ -3211,15 +3253,15 @@ function ProveedoresTab() {
 
       {subtab === 'pagos' && (
         <div>
-          <div className="card" style={{ marginBottom: 16 }}>
-            <div className="card-title">💰 Registrar pago semanal</div>
+          <div className="card" style={{ marginBottom: 16, borderColor: editandoPagoId ? 'var(--gold)' : undefined, borderWidth: editandoPagoId ? 2 : undefined }}>
+            <div className="card-title">{editandoPagoId ? '✏️ Editando pago semanal' : '💰 Registrar pago semanal'}</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
               <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Proveedor</label><select value={formPago.proveedor_nombre} onChange={e => setFormPago(f => ({ ...f, proveedor_nombre: e.target.value }))} style={inp}><option value="">— Seleccioná —</option>{proveedoresNombres.map(p => <option key={p}>{p}</option>)}</select></div>
               <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Fecha</label><input type="date" value={formPago.fecha} onChange={e => setFormPago(f => ({ ...f, fecha: e.target.value }))} style={inp} /></div>
-              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Importe compra ($)</label><input type="number" value={formPago.importe_compra} onChange={e => setFormPago(f => ({ ...f, importe_compra: e.target.value }))} placeholder="0" style={inp} /></div>
-              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Percepción ($)</label><input type="number" value={formPago.percepcion} onChange={e => setFormPago(f => ({ ...f, percepcion: e.target.value }))} placeholder="0" style={inp} /></div>
-              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Saldo semana anterior ($)</label><input type="number" value={formPago.saldo_anterior} onChange={e => setFormPago(f => ({ ...f, saldo_anterior: e.target.value }))} placeholder="0" style={inp} /></div>
-              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Lo que se entrega ($)</label><input type="number" value={formPago.entrega} onChange={e => setFormPago(f => ({ ...f, entrega: e.target.value }))} placeholder="0" style={{ ...inp, borderColor: 'var(--green)' }} /></div>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Importe compra ($)</label><input type="text" inputMode="decimal" value={formPago.importe_compra} onChange={e => setFormPago(f => ({ ...f, importe_compra: e.target.value }))} placeholder="Ej: 105.687,66" style={inp} /></div>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Percepción ($)</label><input type="text" inputMode="decimal" value={formPago.percepcion} onChange={e => setFormPago(f => ({ ...f, percepcion: e.target.value }))} placeholder="0" style={inp} /></div>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Saldo semana anterior ($)</label><input type="text" inputMode="decimal" value={formPago.saldo_anterior} onChange={e => setFormPago(f => ({ ...f, saldo_anterior: e.target.value }))} placeholder="0" style={inp} /></div>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Lo que se entrega ($)</label><input type="text" inputMode="decimal" value={formPago.entrega} onChange={e => setFormPago(f => ({ ...f, entrega: e.target.value }))} placeholder="0" style={{ ...inp, borderColor: 'var(--green)' }} /></div>
             </div>
             {(formPago.importe_compra || formPago.entrega) && (
               <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, display: 'flex', gap: 20, flexWrap: 'wrap' }}>
@@ -3231,12 +3273,29 @@ function ProveedoresTab() {
               </div>
             )}
             <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Notas</label><input value={formPago.notas} onChange={e => setFormPago(f => ({ ...f, notas: e.target.value }))} placeholder="Cheque nro., banco, etc." style={{ ...inp, marginBottom: 12 }} /></div>
-            <button className="btn btn-gold" onClick={guardarPago}>✅ Registrar pago semanal</button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-gold" onClick={guardarPago}>{editandoPagoId ? '💾 Guardar cambios' : '✅ Registrar pago semanal'}</button>
+              {editandoPagoId && <button className="btn btn-ghost" onClick={cancelarEditarPago}>✕ Cancelar edición</button>}
+            </div>
           </div>
           <div className="card">
             <div className="card-title">Historial de pagos semanales ({pagos.length})</div>
-            <table><thead><tr><th>Fecha</th><th>Proveedor</th><th>Compra</th><th>Percep.</th><th>Saldo ant.</th><th>Entrega</th><th>Saldo adeudado</th></tr></thead>
-            <tbody>{pagPagos.items.map(p => (<tr key={p.id}><td>{p.fecha}</td><td><strong>{p.proveedor_nombre}</strong></td><td style={{ color: 'var(--amber)' }}>{fmt(p.importe_compra)}</td><td>{p.percepcion > 0 ? fmt(p.percepcion) : '—'}</td><td>{p.saldo_anterior > 0 ? fmt(p.saldo_anterior) : '—'}</td><td style={{ color: 'var(--green)' }}>{fmt(p.entrega)}</td><td style={{ color: p.saldo_adeudado > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 700 }}>{fmt(p.saldo_adeudado)}</td></tr>))}{pagos.length === 0 && <tr><td colSpan={7} className="empty">Sin pagos registrados</td></tr>}</tbody></table>
+            <table><thead><tr><th>Fecha</th><th>Proveedor</th><th>Compra</th><th>Percep.</th><th>Saldo ant.</th><th>Entrega</th><th>Saldo adeudado</th><th>Acciones</th></tr></thead>
+            <tbody>{pagPagos.items.map(p => (
+              <tr key={p.id} style={{ background: editandoPagoId === p.id ? 'rgba(201,168,76,0.08)' : undefined }}>
+                <td>{p.fecha}</td>
+                <td><strong>{p.proveedor_nombre}</strong></td>
+                <td style={{ color: 'var(--amber)' }}>{fmt(p.importe_compra)}</td>
+                <td>{p.percepcion > 0 ? fmt(p.percepcion) : '—'}</td>
+                <td>{p.saldo_anterior > 0 ? fmt(p.saldo_anterior) : '—'}</td>
+                <td style={{ color: 'var(--green)' }}>{fmt(p.entrega)}</td>
+                <td style={{ color: p.saldo_adeudado > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 700 }}>{fmt(p.saldo_adeudado)}</td>
+                <td style={{ display: 'flex', gap: 4, whiteSpace: 'nowrap' }}>
+                  <button onClick={() => iniciarEditarPago(p)} title="Editar pago" style={{ background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>✏️ Editar</button>
+                  <button onClick={() => eliminarPago(p)} title="Eliminar pago" style={{ background: 'var(--red-light)', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>🗑️</button>
+                </td>
+              </tr>
+            ))}{pagos.length === 0 && <tr><td colSpan={8} className="empty">Sin pagos registrados</td></tr>}</tbody></table>
             <Paginador {...pagPagos.controles} label="pagos" />
           </div>
         </div>
