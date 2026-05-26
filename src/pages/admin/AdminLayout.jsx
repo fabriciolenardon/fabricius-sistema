@@ -6,6 +6,8 @@ import { useFlujoNotificaciones } from '../../lib/useFlujoNotificaciones'
 import { fechaHoyARG } from '../../lib/fechas'
 import BuscadorGlobal from '../../components/BuscadorGlobal'
 import LogoFabricius from '../../components/LogoFabricius'
+import UserDropdown from '../../components/UserDropdown'
+import CambiarPasswordModal from '../../components/CambiarPasswordModal'
 
 const navItems = [
   { to: '/admin/dashboard',   icon: '📊', label: 'Dashboard' },
@@ -267,6 +269,7 @@ function MenuMobile({ onClose }) {
   const location = useLocation()
   const navigate = useNavigate()
   const { profile, signOut, user } = useAuth()
+  const [modalPwd, setModalPwd] = useState(false)
 
   async function handleLogout() {
     await signOut()
@@ -317,20 +320,23 @@ function MenuMobile({ onClose }) {
           })}
         </nav>
 
-        {/* Logout */}
-        <div style={{ padding: '14px 12px', borderTop: '1px solid var(--border)' }}>
+        {/* Acciones de cuenta */}
+        <div style={{ padding: '14px 12px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <button onClick={() => setModalPwd(true)} style={{ width: '100%', padding: '12px', background: 'var(--surface2)', color: 'var(--text2)', border: '1px solid var(--border)', borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            🔑 Cambiar contraseña
+          </button>
           <button onClick={handleLogout} style={{ width: '100%', padding: '12px', background: '#3a1a1a', color: 'var(--red-light)', border: '1px solid #5a2a2a', borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
             🚪 Cerrar sesión
           </button>
         </div>
       </div>
+      {modalPwd && <CambiarPasswordModal onClose={() => setModalPwd(false)} />}
     </>
   )
 }
 
 export default function AdminLayout() {
-  const { profile, signOut, user } = useAuth()
-  const navigate = useNavigate()
+  const { user } = useAuth()
   const notifs = useNotificaciones()
   const pedidosPendientes = usePedidosPendientes()
   const { pendientes: flujosPendientes } = useFlujoNotificaciones()
@@ -350,10 +356,6 @@ export default function AdminLayout() {
     window.addEventListener('resize', check)
     return () => window.removeEventListener('resize', check)
   }, [])
-
-  async function handleLogout() { await signOut(); navigate('/login') }
-
-  const initiales = profile?.nombre?.split(' ').map(n => n[0]).slice(0, 2).join('') || 'U'
 
   return (
     <div style={{ minHeight: '100vh' }}>
@@ -397,19 +399,7 @@ export default function AdminLayout() {
             </nav>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>
               <CampanaNotificaciones notifs={notifs} />
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 20, padding: '5px 14px 5px 8px' }}>
-                <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--gold)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: '#000' }}>{initiales}</div>
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text2)', lineHeight: 1.2 }}>{profile?.nombre}</div>
-                  <div style={{ fontSize: 10, color: user?.email === 'fabriciolenardon@gmail.com' ? 'var(--gold)' : 'var(--muted)', fontWeight: user?.email === 'fabriciolenardon@gmail.com' ? 700 : 400, letterSpacing: user?.email === 'fabriciolenardon@gmail.com' ? 1 : 0 }}>{user?.email === 'fabriciolenardon@gmail.com' ? '👑 CEO' : 'Administrador'}</div>
-                </div>
-              </div>
-              <button onClick={handleLogout}
-                style={{ padding: '5px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--muted)', fontSize: 11, cursor: 'pointer' }}
-                onMouseOver={e => { e.target.style.borderColor = 'var(--red-light)'; e.target.style.color = 'var(--red-light)' }}
-                onMouseOut={e => { e.target.style.borderColor = 'var(--border)'; e.target.style.color = 'var(--muted)' }}>
-                Salir
-              </button>
+              <UserDropdown />
             </div>
           </>
         )}

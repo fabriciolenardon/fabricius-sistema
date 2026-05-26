@@ -2,12 +2,17 @@ import { useState } from 'react'
 import LogoFabricius from '../components/LogoFabricius'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { supabase } from '../lib/supabase'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  // 'login' | 'forgot' | 'forgot_sent' — controla qué form se muestra.
+  // Mantenemos los 3 estados en LoginPage en vez de una ruta aparte
+  // porque el flujo de "olvidé contraseña" es corto (un solo input).
+  const [vista, setVista] = useState('login')
   const { signIn } = useAuth()
   const navigate = useNavigate()
 
@@ -19,6 +24,23 @@ export default function LoginPage() {
     setLoading(false)
     if (error) { setError('Email o contraseña incorrectos'); return }
     navigate('/')
+  }
+
+  async function handleForgot(e) {
+    e.preventDefault()
+    setError('')
+    if (!email) { setError('Ingresá tu email'); return }
+    setLoading(true)
+    // El redirectTo lleva al usuario a /reset-password con el token en el hash
+    const { error: errReset } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    })
+    setLoading(false)
+    if (errReset) {
+      setError(errReset.message || 'No se pudo enviar el mail.')
+      return
+    }
+    setVista('forgot_sent')
   }
 
   return (
@@ -40,32 +62,89 @@ export default function LoginPage() {
 
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: 36, boxShadow: '0 0 60px rgba(0,0,0,0.5)' }}>
           <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 22, letterSpacing: 2, color: 'var(--text2)', marginBottom: 24 }}>
-            Iniciar sesión
+            {vista === 'login' ? 'Iniciar sesión' : vista === 'forgot' ? 'Recuperar contraseña' : 'Mail enviado'}
           </div>
 
-          <form onSubmit={handleLogin}>
-            <div className="form-group">
-              <label>Email</label>
-              <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="tu@email.com" required autoFocus />
-            </div>
-            <div className="form-group">
-              <label>Contraseña</label>
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required />
-            </div>
+          {vista === 'login' && (
+            <form onSubmit={handleLogin}>
+              <div className="form-group">
+                <label>Email</label>
+                <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="tu@email.com" required autoFocus />
+              </div>
+              <div className="form-group">
+                <label>Contraseña</label>
+                <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required />
+              </div>
 
-            {error && <div className="alert alert-error">{error}</div>}
+              {error && <div className="alert alert-error">{error}</div>}
 
-            <button type="submit" disabled={loading} style={{
-              width: '100%', padding: 14,
-              background: 'linear-gradient(135deg, var(--gold), var(--amber))',
-              border: 'none', borderRadius: 10, color: '#000',
-              fontFamily: "'DM Sans', sans-serif", fontSize: 14, fontWeight: 700,
-              letterSpacing: 1, textTransform: 'uppercase', cursor: loading ? 'not-allowed' : 'pointer',
-              opacity: loading ? 0.7 : 1, marginTop: 8, transition: 'all 0.2s'
-            }}>
-              {loading ? 'Ingresando...' : 'Ingresar al sistema'}
-            </button>
-          </form>
+              <button type="submit" disabled={loading} style={{
+                width: '100%', padding: 14,
+                background: 'linear-gradient(135deg, var(--gold), var(--amber))',
+                border: 'none', borderRadius: 10, color: '#000',
+                fontFamily: "'DM Sans', sans-serif", fontSize: 14, fontWeight: 700,
+                letterSpacing: 1, textTransform: 'uppercase', cursor: loading ? 'not-allowed' : 'pointer',
+                opacity: loading ? 0.7 : 1, marginTop: 8, transition: 'all 0.2s'
+              }}>
+                {loading ? 'Ingresando...' : 'Ingresar al sistema'}
+              </button>
+
+              <div style={{ textAlign: 'center', marginTop: 14 }}>
+                <button type="button" onClick={() => { setError(''); setVista('forgot') }}
+                  style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 12, textDecoration: 'underline', fontFamily: "'DM Sans', sans-serif" }}>
+                  ¿Olvidaste tu contraseña?
+                </button>
+              </div>
+            </form>
+          )}
+
+          {vista === 'forgot' && (
+            <form onSubmit={handleForgot}>
+              <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14, lineHeight: 1.5 }}>
+                Ingresá tu email y te mandamos un link para crear una contraseña nueva.
+              </div>
+              <div className="form-group">
+                <label>Email</label>
+                <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="tu@email.com" required autoFocus />
+              </div>
+
+              {error && <div className="alert alert-error">{error}</div>}
+
+              <button type="submit" disabled={loading} style={{
+                width: '100%', padding: 14,
+                background: 'linear-gradient(135deg, var(--gold), var(--amber))',
+                border: 'none', borderRadius: 10, color: '#000',
+                fontFamily: "'DM Sans', sans-serif", fontSize: 14, fontWeight: 700,
+                letterSpacing: 1, textTransform: 'uppercase', cursor: loading ? 'not-allowed' : 'pointer',
+                opacity: loading ? 0.7 : 1, marginTop: 8,
+              }}>
+                {loading ? 'Enviando...' : 'Enviar mail de recuperación'}
+              </button>
+              <div style={{ textAlign: 'center', marginTop: 14 }}>
+                <button type="button" onClick={() => { setError(''); setVista('login') }}
+                  style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 12, textDecoration: 'underline', fontFamily: "'DM Sans', sans-serif" }}>
+                  ← Volver al login
+                </button>
+              </div>
+            </form>
+          )}
+
+          {vista === 'forgot_sent' && (
+            <div style={{ textAlign: 'center', padding: '10px 0' }}>
+              <div style={{ fontSize: 40, marginBottom: 14 }}>📧</div>
+              <div style={{ fontSize: 14, color: 'var(--text2)', marginBottom: 8, fontWeight: 600 }}>
+                Listo, revisá tu mail.
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
+                Te enviamos un link a <strong style={{ color: 'var(--text2)' }}>{email}</strong> para que crees una contraseña nueva. El link expira en 1 hora.<br /><br />
+                Si no llega en 1-2 minutos, revisá la carpeta de spam.
+              </div>
+              <button onClick={() => { setVista('login'); setError('') }}
+                style={{ marginTop: 18, padding: '10px 20px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--muted)', cursor: 'pointer', fontSize: 12, fontFamily: "'DM Sans', sans-serif" }}>
+                Volver al login
+              </button>
+            </div>
+          )}
 
           <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--border)', textAlign: 'center' }}>
             <div style={{ fontSize: 10, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 12 }}>

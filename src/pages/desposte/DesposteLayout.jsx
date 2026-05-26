@@ -5,19 +5,11 @@
 // Muestra solo 2 pestañas: Capones y Media Reses.
 // El logout vuelve al login común.
 // ============================================================
-import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { useAuth } from '../../context/AuthContext'
+import { Outlet, NavLink } from 'react-router-dom'
 import LogoFabricius from '../../components/LogoFabricius'
+import UserDropdown from '../../components/UserDropdown'
 
 export default function DesposteLayout() {
-  const { signOut, profile } = useAuth()
-  const navigate = useNavigate()
-
-  async function salir() {
-    await signOut()
-    navigate('/login', { replace: true })
-  }
-
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
       {/* Header */}
@@ -34,17 +26,8 @@ export default function DesposteLayout() {
               🔪 SECTOR DESPOSTE
             </div>
           </div>
-          <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-            Carnicerías Fabricius — {profile?.nombre || 'Operario'}
-          </div>
         </div>
-        <button onClick={salir}
-          style={{
-            padding: '10px 18px', background: '#3a1a1a', border: '1px solid #5a2a2a',
-            color: '#ff8b8b', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 700,
-          }}>
-          🚪 Salir
-        </button>
+        <UserDropdown rolLabel="🔪 Desposte" />
       </header>
 
       {/* Tabs */}

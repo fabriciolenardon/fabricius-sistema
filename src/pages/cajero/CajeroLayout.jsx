@@ -7,18 +7,10 @@
 //
 // No tiene menú lateral ni acceso a otras páginas del sistema.
 // ============================================================
-import { Outlet, Navigate, useNavigate } from 'react-router-dom'
-import { useAuth } from '../../context/AuthContext'
+import { Outlet } from 'react-router-dom'
+import UserDropdown from '../../components/UserDropdown'
 
 export default function CajeroLayout() {
-  const { profile, signOut } = useAuth()
-  const navigate = useNavigate()
-
-  async function handleSignOut() {
-    await signOut()
-    navigate('/login', { replace: true })
-  }
-
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
       {/* HEADER fijo */}
@@ -35,20 +27,7 @@ export default function CajeroLayout() {
           </span>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: 13, fontWeight: 600 }}>{profile?.nombre || 'Cajero/a'}</div>
-            <div style={{ fontSize: 10, color: 'var(--muted)' }}>💵 Caja minorista</div>
-          </div>
-          <button onClick={handleSignOut}
-            style={{
-              padding: '6px 14px', background: 'transparent',
-              border: '1px solid var(--border)', borderRadius: 6,
-              color: 'var(--muted)', cursor: 'pointer', fontSize: 12, fontWeight: 600,
-            }}>
-            🚪 Salir
-          </button>
-        </div>
+        <UserDropdown rolLabel="💵 Caja minorista" />
       </header>
 
       {/* CONTENIDO */}
