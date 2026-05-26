@@ -34,6 +34,7 @@ export default function DesposteLayout() {
       <nav style={{ display: 'flex', gap: 4, padding: 12, background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
         <NavLinkBig to="/desposte/capones" icono="🐷" label="Desposte Capones" />
         <NavLinkBig to="/desposte/media-res" icono="🐄" label="Desposte Media Res" />
+        <NavLinkBig to="/desposte/historial" icono="📋" label="Historial" />
       </nav>
 
       {/* Main */}

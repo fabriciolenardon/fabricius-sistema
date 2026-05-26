@@ -65,6 +65,7 @@ const CajeroLayout = lazy(() => import('./pages/cajero/CajeroLayout'))
 const DesposteLayout = lazy(() => import('./pages/desposte/DesposteLayout'))
 const DesposteCapones = lazy(() => import('./pages/desposte/DesposteCapones'))
 const DesposteMediaRes = lazy(() => import('./pages/desposte/DesposteMediaRes'))
+const DesposteHistorial = lazy(() => import('./pages/desposte/DesposteHistorial'))
 
 function SoloCEO({ children }) {
   const { user, profile, profileMissing, loading } = useAuth()
@@ -165,6 +166,7 @@ export default function App() {
         <Route path="/desposte" element={<ProtectedRoute requiredRole="desposte"><DesposteLayout /></ProtectedRoute>}>
           <Route path="capones" element={<DesposteCapones />} />
           <Route path="media-res" element={<DesposteMediaRes />} />
+          <Route path="historial" element={<DesposteHistorial />} />
         </Route>
       </Routes>
       </Suspense>
