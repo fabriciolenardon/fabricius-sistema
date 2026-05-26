@@ -133,6 +133,12 @@ export default function DesposteCapones() {
       await sumarStock(p.stock, p.kg)
     }
 
+    // 4) Descontar el capón entero del stock de capones (tipo='cerdo').
+    // Mismo patrón que el admin en Deposito.jsx (confirmarDesposteCerdo).
+    if (kgCapon > 0) {
+      await sumarStock('cerdo', -kgCapon)
+    }
+
     aviso(`✅ Capón despostado · ${piezasDetalle.length} pieza(s) sumadas al stock`, 'success')
     setSeleccionado(null)
     setPiezas({})

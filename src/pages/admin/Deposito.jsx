@@ -11,25 +11,37 @@ import AjusteStock from './AjusteStock'
 import CajasTab from './CajasTab'
 
 async function actualizarStock(tipo, kg) {
-  const { data } = await supabase.from('stock_actual').select('*').eq('tipo', tipo).maybeSingle()
+  // Devuelve { error } para que el caller pueda chequear si la operación
+  // falló. Antes los errores se tragaban silenciosamente — eso causó que
+  // alguna vez la elaboración descontara las piezas pero no sumara los
+  // embutidos al stock (la operaria tuvo que ajustarlo a mano).
+  const { data, error: errSel } = await supabase.from('stock_actual').select('*').eq('tipo', tipo).maybeSingle()
+  if (errSel) return { error: errSel }
   if (data) {
-    await supabase.from('stock_actual').update({ kg_disponible: (data.kg_disponible || 0) + kg }).eq('tipo', tipo)
-  } else {
-    await supabase.from('stock_actual').insert({ tipo, kg_disponible: kg })
+    const { error } = await supabase.from('stock_actual')
+      .update({ kg_disponible: (data.kg_disponible || 0) + kg })
+      .eq('tipo', tipo)
+    return { error: error || null }
   }
+  const { error } = await supabase.from('stock_actual').insert({ tipo, kg_disponible: kg })
+  return { error: error || null }
 }
 
 // Helper: format de hora desde un timestamp de Postgres.
-// Convertimos created_at a hora local ARG con formato HH:MM. Si el string
-// no trae TZ explicita (caso de columnas legacy `timestamp without time zone`)
-// lo tratamos como UTC para evitar el shift de +3 horas que ya arreglamos
-// para despostes pero podria aparecer en otras tablas todavia.
+// Convertimos created_at a hora ARG con formato HH:MM. Dos pasos:
+//   1) Si el string no trae TZ explicita (caso de columnas legacy
+//      `timestamp without time zone`) lo tratamos como UTC.
+//   2) Forzamos timeZone ARG en el toLocaleTimeString — sino la maquina
+//      del cliente decide la TZ (ej. si la PC del local esta mal seteada).
 function fmtHora(ts) {
   if (!ts) return ''
   try {
     const tieneTZ = /(Z|[+\-]\d{2}:?\d{2})$/.test(String(ts).trim())
     const d = new Date(tieneTZ ? ts : ts.replace(' ', 'T') + 'Z')
-    return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
+    return d.toLocaleTimeString('es-AR', {
+      hour: '2-digit', minute: '2-digit',
+      timeZone: 'America/Argentina/Buenos_Aires',
+    })
   } catch {
     return ''
   }
@@ -212,7 +224,7 @@ const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(n
   supabase.from('precios').select('*').eq('categoria', 'bovino_pieza'),
   supabase.from('stock_actual').select('*'),
   supabase.from('entradas_deposito').select('*').eq('tipo', 'cerdo').eq('despostada', false).order('fecha', { ascending: false }).order('created_at', { ascending: false }),
-  supabase.from('elaboraciones_embutidos').select('*').order('fecha', { ascending: false }),
+  supabase.from('elaboraciones_embutidos').select('*').order('fecha', { ascending: false }).order('created_at', { ascending: false }),
   supabase.from('piezas_stock').select('*').order('fecha_ingreso', { ascending: false }).order('id', { ascending: false }),
   // Trazabilidad individual de medias reses con codigo MR-XXX.
   // Traemos TODAS las filas (cualquier estado) para alimentar tanto el mapeo
@@ -409,10 +421,27 @@ async function confirmarElaboracionEmbutido() {
       kg_final: kgFinal, maduracion_completa: true, notas
     })
     for (const [tipo, v] of Object.entries(piezasEmbutido)) {
-      if (parseFloat(v) > 0) await actualizarStock(tipo, -parseFloat(v))
+      if (parseFloat(v) > 0) {
+        const { error } = await actualizarStock(tipo, -parseFloat(v))
+        if (error) throw new Error(`No se descontó ${tipo}: ${error.message}`)
+      }
     }
-    if (parseNumero(kgCarneBovinaEmbutido) > 0) await actualizarStock('bovino_corte', -parseNumero(kgCarneBovinaEmbutido))
-    await actualizarStock('embutido', kgFinal)
+    if (parseNumero(kgCarneBovinaEmbutido) > 0) {
+      const { error } = await actualizarStock('bovino_corte', -parseNumero(kgCarneBovinaEmbutido))
+      if (error) throw new Error(`No se descontó bovino_corte: ${error.message}`)
+    }
+    // Suma al stock 'embutido' — paso crítico que antes fallaba en silencio.
+    // Verificamos con un re-read que efectivamente subió, así si algo se
+    // rompe lo vemos al instante en vez de tener que cuadrarlo a mano.
+    const { data: stockAntes } = await supabase.from('stock_actual').select('kg_disponible').eq('tipo', 'embutido').maybeSingle()
+    const kgEsperado = (Number(stockAntes?.kg_disponible) || 0) + kgFinal
+    const { error: errEmb } = await actualizarStock('embutido', kgFinal)
+    if (errEmb) throw new Error(`No se sumó al stock de embutidos: ${errEmb.message}`)
+    const { data: stockDespues } = await supabase.from('stock_actual').select('kg_disponible').eq('tipo', 'embutido').maybeSingle()
+    const kgReal = Number(stockDespues?.kg_disponible) || 0
+    if (Math.abs(kgReal - kgEsperado) > 0.01) {
+      throw new Error(`El stock de embutidos no se actualizó correctamente. Esperado: ${kgEsperado.toFixed(2)} kg, real: ${kgReal.toFixed(2)} kg. Revisá el ajuste manual.`)
+    }
     showAlert(`✅ ${kgFinal.toFixed(1)} kg de embutidos elaborados al stock`)
     setPiezasEmbutido({ cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '', cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: '' })
     setKgCarneBovinaEmbutido(''); setKgQuesoEmbutido(''); setNotas('')
@@ -444,9 +473,15 @@ async function confirmarElaboracionSalame() {
         notas
       })
       for (const [tipo, v] of Object.entries(piezasEmbutido)) {
-        if (parseFloat(v) > 0) await actualizarStock(tipo, -parseFloat(v))
+        if (parseFloat(v) > 0) {
+          const { error } = await actualizarStock(tipo, -parseFloat(v))
+          if (error) throw new Error(`No se descontó ${tipo}: ${error.message}`)
+        }
       }
-      if (parseNumero(kgCarneBovinaEmbutido) > 0) await actualizarStock('bovino_corte', -parseNumero(kgCarneBovinaEmbutido))
+      if (parseNumero(kgCarneBovinaEmbutido) > 0) {
+        const { error } = await actualizarStock('bovino_corte', -parseNumero(kgCarneBovinaEmbutido))
+        if (error) throw new Error(`No se descontó bovino_corte: ${error.message}`)
+      }
       showAlert(`✅ Salame registrado — Maduración hasta ${fechaHoyARG(fechaFin)}`)
       setPiezasEmbutido({ cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '', cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: '' })
       setKgCarneBovinaEmbutido(''); setKgQuesoEmbutido(''); setNotas('')
@@ -979,6 +1014,7 @@ async function confirmarDesposteCerdo() {
   </div>
 )}
 {subtab === 'embutidos' && (
+  <>
   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: 16 }}>
     <div>
       <div className="card" style={{ marginBottom: 16 }}>
@@ -1098,6 +1134,10 @@ async function confirmarDesposteCerdo() {
       </button>
     </div>
   </div>
+  <div style={{ marginTop: 16 }}>
+    <HistorialElaboraciones elaboraciones={elaboraciones} />
+  </div>
+  </>
 )}
 
 {subtab === 'medias_hist' && (
@@ -1343,7 +1383,7 @@ function HistorialElaboraciones({ elaboraciones }) {
                   {e.tipo === 'salame' ? '🥩 Salame' : '🌭'} {e.tipo === 'embutido' ? e.tipo_embutido?.replace(/_/g, ' ').toUpperCase() : ''}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                  {e.fecha} · {(e.kg_carne_cerdo || 0).toFixed(1)} kg cerdo + {(e.kg_carne_bovina || 0).toFixed(1)} kg bovino
+                  {e.fecha}{e.created_at ? ` · ${fmtHora(e.created_at)}` : ''} · {(e.kg_carne_cerdo || 0).toFixed(1)} kg cerdo + {(e.kg_carne_bovina || 0).toFixed(1)} kg bovino
                   {e.kg_queso > 0 ? ` + ${e.kg_queso.toFixed(1)} kg queso` : ''}
                 </div>
                 {e.tipo === 'salame' && !e.maduracion_completa && (
