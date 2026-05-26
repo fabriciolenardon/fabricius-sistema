@@ -156,12 +156,17 @@ const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(n
   useEffect(() => { cargarDatos() }, [])
 
   async function cargarDatos() {
+    // Orden: fecha DESC + created_at DESC para todas las queries de entradas_deposito.
+    // `fecha` es DATE (sin hora), así que entradas del mismo día caían en orden
+    // inestable. `id` no sirve como tiebreaker porque son UUIDs aleatorios.
+    // `created_at` (timestamp) es el único campo que refleja el orden real de
+    // creación.
     const [{ data: entradas }, { data: despostesData }, { data: preciosData }, { data: stockData }, { data: caponesData }, { data: elaboracionesData }, { data: piezasIndivData }] = await Promise.all([
-  supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).eq('reservada', false).order('fecha', { ascending: false }),
+  supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).eq('reservada', false).order('fecha', { ascending: false }).order('created_at', { ascending: false }),
   supabase.from('despostes').select('*').order('fecha', { ascending: false }),
   supabase.from('precios').select('*').eq('categoria', 'bovino_pieza'),
   supabase.from('stock_actual').select('*'),
-  supabase.from('entradas_deposito').select('*').eq('tipo', 'cerdo').eq('despostada', false).order('fecha', { ascending: false }),
+  supabase.from('entradas_deposito').select('*').eq('tipo', 'cerdo').eq('despostada', false).order('fecha', { ascending: false }).order('created_at', { ascending: false }),
   supabase.from('elaboraciones_embutidos').select('*').order('fecha', { ascending: false }),
   supabase.from('piezas_stock').select('*').order('fecha_ingreso', { ascending: false }).order('id', { ascending: false })
 ])
@@ -1255,11 +1260,15 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
   async function cargarHistorial() {
     // Antes estaba limitado a 100, lo que cortaba el historial de meses
     // anteriores. Ahora traemos todo y paginamos en cliente con usePaginacion.
+    // Orden: fecha DESC + created_at DESC. Antes se usaba `id` como tiebreaker
+    // pero `id` es UUID (aleatorio), no autoincremental, así que el orden de
+    // entradas del mismo día era impredecible. `created_at` es el timestamp
+    // real de inserción y SÍ refleja la hora.
     const { data } = await supabase
       .from('entradas_deposito')
       .select('*')
       .order('fecha', { ascending: false })
-      .order('id', { ascending: false })
+      .order('created_at', { ascending: false })
     setHistorial(data || [])
   }
 
@@ -1788,7 +1797,10 @@ export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   useEffect(() => {
     supabase.from('precios').select('*').order('nombre').then(({ data }) => setTodosPrecios(data || []))
     supabase.from('clientes').select('*').order('nombre').then(({ data }) => setClientes(data || []))
-  supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false }).then(({ data }) => setMediasDisponibles(data || []))
+  // Orden por created_at además de fecha: dos medias reses cargadas el mismo
+  // día necesitan ordenarse por hora real de creación (la columna `fecha` es
+  // DATE y `id` es UUID — ninguno sirve solo como criterio cronológico).
+  supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false }).order('created_at', { ascending: false }).then(({ data }) => setMediasDisponibles(data || []))
   recargarPiezasDispVenta()
   recargarCajasDispVenta()
   recargarStockMap()
@@ -2038,7 +2050,7 @@ for (const item of items) {
         await supabase.from('entradas_deposito').update({ despostada: true }).in('id', mediasIds)
       }
       setMediaSeleccionada(null)
-      const { data: medias } = await supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false })
+      const { data: medias } = await supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false }).order('created_at', { ascending: false })
       setMediasDisponibles(medias || [])
     const { data: remitoData } = await supabase.from('remitos').insert({
       fecha: form.fecha, cliente_nombre: clienteNombre,

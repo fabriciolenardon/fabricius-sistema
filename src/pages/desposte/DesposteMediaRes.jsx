@@ -49,9 +49,12 @@ export default function DesposteMediaRes() {
 
   async function cargar() {
     const [{ data: mr }, { data: env }] = await Promise.all([
+      // Orden cronológico real: fecha DESC + created_at DESC. La columna
+      // `fecha` es DATE (sin hora), entonces múltiples medias del mismo día
+      // necesitan `created_at` como desempate para ordenarse por hora real.
       supabase.from('entradas_deposito').select('*')
         .eq('tipo', 'bovino_mr').eq('despostada', false).eq('reservada', false)
-        .order('fecha', { ascending: false }),
+        .order('fecha', { ascending: false }).order('created_at', { ascending: false }),
       supabase.from('flujo_deposito').select('*')
         .order('created_at', { ascending: false }).limit(10),
     ])
