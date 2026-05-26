@@ -13,11 +13,17 @@ const EMPLEADOS_DEFAULT = [
   { id: 6, apellido: 'MANSILLA', nombre: 'PRISCILA', valor_hora: 5000, modalidad: 'hora', cbu: '' },
 ]
 
-// Mapeo de nombres del iVMS a IDs de empleados
+// Mapeo de nombres del iVMS a IDs de empleados.
+// Importante: las claves se comparan en lowercase y por inclusión, así
+// que conviene que sean substrings únicos del nombre real (ej. "colo"
+// solo matchea Elias Colo Arnaudo). El iVMS a veces emite el nombre
+// completo y a veces solo el apodo de la tarjeta — por eso hay varios
+// alias para la misma persona.
 const NOMBRE_A_EMPLEADO = {
   'alberto elias arnaudo': 2,
   'elias arnaudo': 2,
   'arnaudo': 2,
+  'colo': 2,                 // tarjeta secundaria del iVMS para el mismo empleado
   'german frontera': 1,
   'frontera german': 1,
   'german gabriel frontera': 1,
@@ -104,16 +110,29 @@ export default function Sueldos() {
 
     try {
       const text = await file.text()
-      const parser = new DOMParser()
-      const doc = parser.parseFromString(text, 'text/html')
-      const rows = Array.from(doc.querySelectorAll('tr'))
+      const esCSV = file.name.toLowerCase().endsWith('.csv')
+
+      // Para el .xls/.xlsx del iVMS (que en realidad es HTML disfrazado)
+      // parseamos con DOMParser y leemos <tr>/<td>. Para el nuevo formato
+      // .csv que exporta el iVMS actualizado parseamos por separador de
+      // comas — formato simple sin escapes (los nombres no tienen comas).
+      let filasCols
+      if (esCSV) {
+        const lineas = text.split(/\r?\n/).filter(l => l.trim())
+        // Saltar la fila del header
+        filasCols = lineas.slice(1).map(l => l.split(',').map(c => c.trim()))
+      } else {
+        const parser = new DOMParser()
+        const doc = parser.parseFromString(text, 'text/html')
+        filasCols = Array.from(doc.querySelectorAll('tr'))
+          .map(tr => Array.from(tr.querySelectorAll('td')).map(td => td.textContent.trim()))
+      }
 
       // Registros: { empleadoId, fecha, hora }
       const registros = []
-      for (const row of rows) {
-        const cols = Array.from(row.querySelectorAll('td')).map(td => td.textContent.trim())
+      for (const cols of filasCols) {
         if (cols.length < 4) continue
-        // Columnas: ID persona, Nombre, Departamento, Hora, ...
+        // Columnas (mismo orden en CSV y XLS): ID persona, Nombre, Departamento, Hora, ...
         const nombre = cols[1]
         const horaStr = cols[3] // '2026-04-29 14:21:24'
         if (!nombre || !horaStr || !horaStr.includes('-')) continue
@@ -230,8 +249,8 @@ export default function Sueldos() {
               Subí el archivo .xls exportado del iVMS y el sistema calculará las horas automáticamente.
             </div>
             <label style={{ display: 'inline-block', padding: '10px 20px', background: '#7c3aed', color: '#fff', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: "'DM Sans',sans-serif" }}>
-              {importando ? '⏳ Procesando...' : '📂 Seleccionar archivo iVMS (.xls)'}
-              <input type="file" accept=".xls,.xlsx,.html,.htm" onChange={importarExcel} style={{ display: 'none' }} disabled={importando} />
+              {importando ? '⏳ Procesando...' : '📂 Seleccionar archivo iVMS (.csv / .xls)'}
+              <input type="file" accept=".csv,.xls,.xlsx,.html,.htm" onChange={importarExcel} style={{ display: 'none' }} disabled={importando} />
             </label>
 
             {detalleImport.length > 0 && (
