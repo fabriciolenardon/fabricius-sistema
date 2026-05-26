@@ -19,6 +19,22 @@ async function actualizarStock(tipo, kg) {
   }
 }
 
+// Helper: format de hora desde un timestamp de Postgres.
+// Convertimos created_at a hora local ARG con formato HH:MM. Si el string
+// no trae TZ explicita (caso de columnas legacy `timestamp without time zone`)
+// lo tratamos como UTC para evitar el shift de +3 horas que ya arreglamos
+// para despostes pero podria aparecer en otras tablas todavia.
+function fmtHora(ts) {
+  if (!ts) return ''
+  try {
+    const tieneTZ = /(Z|[+\-]\d{2}:?\d{2})$/.test(String(ts).trim())
+    const d = new Date(tieneTZ ? ts : ts.replace(' ', 'T') + 'Z')
+    return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
+  } catch {
+    return ''
+  }
+}
+
 const MODELOS_DESPOSTE = {
   A: {
     nombre: 'Cuarto Pistola + Costillar Completo + Cortito',
@@ -1928,7 +1944,14 @@ async function eliminar(entrada) {
                 </tr>
               ) : (
                 <tr key={e.id}>
-                  <td>{e.fecha}</td>
+                  <td>
+                    <div style={{ fontWeight: 600 }}>{e.fecha}</div>
+                    {/* Hora real de ingreso (created_at) para que el orden
+                        cronologico dentro del mismo dia sea visible. Sin
+                        esto, todas las entradas del mismo dia se veian
+                        "iguales" aunque internamente esten bien ordenadas. */}
+                    <div style={{ fontSize: 10, color: 'var(--muted)' }}>{fmtHora(e.created_at)}</div>
+                  </td>
                   <td style={{ fontSize: 12 }}>{TIPOS[e.tipo] || e.tipo}</td>
                   <td>{e.proveedor_nombre}</td>
                   <td>{e.descripcion}</td>
