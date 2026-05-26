@@ -59,11 +59,29 @@ function calcularHorasTurno(fichadas) {
     return ((d * 3600 + e * 60 + f) - (a * 3600 + b * 60 + c)) / 3600
   }
 
-  if (manana.length >= 2) horas += diffHoras(manana[0], manana[manana.length - 1])
-  else if (manana.length === 1 && tarde.length === 0) horas += 7 // estimado si solo hay una fichada de mañana
+  // ---- Turno mañana ----
+  // Regla de Fabricio: primera marca = ingreso, segunda marca (si está antes
+  // de las 15hs) = egreso. Si NO hay marca de salida, asumir 14:00 como
+  // horario de salida — vale tanto para casos sin marcas de tarde como para
+  // casos donde el empleado siguió trabajando a la tarde (esa parte la cuenta
+  // el bloque de "tarde" más abajo).
+  if (manana.length >= 2) {
+    horas += diffHoras(manana[0], manana[manana.length - 1])
+  } else if (manana.length === 1) {
+    // Solo una fichada de mañana → entrada sin salida. Asumir egreso 14:00.
+    // Si la única marca cae después de las 14:00 (ej. el cajero marcó solo
+    // al salir, sin marcar la entrada), el cálculo daría negativo — en ese
+    // caso lo dejamos en 0 y el admin lo ajusta manualmente desde el form.
+    const hManana = diffHoras(manana[0], '14:00:00')
+    if (hManana > 0) horas += hManana
+  }
 
-  if (tarde.length >= 2) horas += diffHoras(tarde[0], tarde[tarde.length - 1])
-  else if (tarde.length === 1 && manana.length === 0) horas += 4 // estimado si solo hay una fichada de tarde
+  // ---- Turno tarde ----
+  if (tarde.length >= 2) {
+    horas += diffHoras(tarde[0], tarde[tarde.length - 1])
+  } else if (tarde.length === 1 && manana.length === 0) {
+    horas += 4 // estimado si solo hay una fichada de tarde
+  }
 
   return Math.round(horas * 2) / 2 // redondear a 0.5
 }
