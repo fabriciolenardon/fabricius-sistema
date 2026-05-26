@@ -146,6 +146,9 @@ const [kgQuesoEmbutido, setKgQuesoEmbutido] = useState('')
 const [pctAumentoEmbutido, setPctAumentoEmbutido] = useState(10)
 const [elaboraciones, setElaboraciones] = useState([])
 const [piezasIndividuales, setPiezasIndividuales] = useState([])
+// Historial completo de medias_stock (todos los estados) para la pestana
+// "Historial Medias". Se carga junto con cargarDatos.
+const [mediasStockAll, setMediasStockAll] = useState([])
 const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(null)
   const MERMAS_KILO = {
     novillo:  { label: 'Novillo / Novillito', merma: 0.24, color: 'var(--gold)' },
@@ -169,12 +172,15 @@ const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(n
   supabase.from('entradas_deposito').select('*').eq('tipo', 'cerdo').eq('despostada', false).order('fecha', { ascending: false }).order('created_at', { ascending: false }),
   supabase.from('elaboraciones_embutidos').select('*').order('fecha', { ascending: false }),
   supabase.from('piezas_stock').select('*').order('fecha_ingreso', { ascending: false }).order('id', { ascending: false }),
-  // Trazabilidad individual de medias reses con codigo MR-XXX
-  supabase.from('medias_stock').select('id, codigo, entrada_id, estado').order('id', { ascending: true }),
+  // Trazabilidad individual de medias reses con codigo MR-XXX.
+  // Traemos TODAS las filas (cualquier estado) para alimentar tanto el mapeo
+  // de codigos como el historial completo de medias en el sub-tab "Historial Medias".
+  supabase.from('medias_stock').select('*').order('id', { ascending: false }),
 ])
 // Enriquecer cada entrada con el codigo MR-XXX de medias_stock
 const codigoPorEntrada = {}
 ;(mediasStockData || []).forEach(m => { if (m.entrada_id) codigoPorEntrada[m.entrada_id] = m.codigo })
+setMediasStockAll(mediasStockData || [])
 setMediasRes((entradas || []).map(e => ({ ...e, codigo_media: codigoPorEntrada[e.id] || null })))
 setDespostes(despostesData || [])
 setPrecios(preciosData || [])
@@ -570,7 +576,7 @@ async function confirmarDesposteCerdo() {
       {alert && <div style={{ background: alert.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${alert.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: alert.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>{alert.msg}</div>}
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
         {[{ id: 'piezas', label: '🍖 Desposte en Piezas' }, { id: 'kilo', label: '⚖️ Desposte para venta por Kilo' }, { id: 'pieza_kilo', label: '🔄 Convertir Pieza a Cortes' }, { id: 'cerdo', label: '🐷 Desposte Cerdo' },
-{ id: 'embutidos', label: '🌭 Elaborar Embutidos' }, { id: 'historial', label: '📋 Historial' }].map(t => (
+{ id: 'embutidos', label: '🌭 Elaborar Embutidos' }, { id: 'medias_hist', label: '🐄 Historial Medias' }, { id: 'historial', label: '📋 Historial' }].map(t => (
           <button key={t.id} onClick={() => { setSubtab(t.id); setSeleccionada(null); setPiezas([]); cargarDatos() }}
             style={{ padding: '8px 16px', borderRadius: 8, border: `1px solid ${subtab === t.id ? 'var(--gold)' : 'var(--border)'}`, background: subtab === t.id ? 'var(--gold)' : 'transparent', color: subtab === t.id ? '#000' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
             {t.label}
@@ -1052,6 +1058,10 @@ async function confirmarDesposteCerdo() {
   </div>
 )}
 
+{subtab === 'medias_hist' && (
+  <HistorialMedias medias={mediasStockAll} />
+)}
+
 {subtab === 'historial' && (
   <div>
     <HistorialDespostes despostes={despostes} />
@@ -1132,6 +1142,112 @@ async function confirmarDesposteCerdo() {
 }
 // ───────────────────────────────────────────────────────────
 // Componentes auxiliares para paginar los historiales del tab
+// "Desposte → Historial Medias" — historial completo de medias_stock.
+// Una fila por cada media res fisica con su codigo MR-XXX, estado actual,
+// y trazabilidad (proveedor, fecha ingreso, destino, cliente, fecha salida).
+// Patron equivalente al de piezas individuales pero para medias.
+// ───────────────────────────────────────────────────────────
+function HistorialMedias({ medias }) {
+  const [filtroEstado, setFiltroEstado] = useState('todos')
+  const ESTADOS = [
+    { id: 'todos',      label: 'Todas', color: 'var(--muted)' },
+    { id: 'disponible', label: '🟢 Disponibles', color: '#7dff7d' },
+    { id: 'reservada',  label: '🟡 Reservadas', color: '#ffd17a' },
+    { id: 'despostada', label: '🔪 Despostadas', color: '#a78bfa' },
+    { id: 'vendida',    label: '💰 Vendidas (enteras)', color: '#7db5ff' },
+    { id: 'anulada',    label: '❌ Anuladas', color: '#ff8b8b' },
+  ]
+  const filtradas = (medias || []).filter(m => filtroEstado === 'todos' || m.estado === filtroEstado)
+  const pag = usePaginacion(filtradas, 25)
+  // Conteos por estado para los badges del filtro
+  const counts = {}
+  ;(medias || []).forEach(m => { counts[m.estado] = (counts[m.estado] || 0) + 1 })
+  counts.todos = (medias || []).length
+
+  function colorEstado(estado) {
+    return ESTADOS.find(e => e.id === estado)?.color || 'var(--muted)'
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card-title">🐄 Historial de Medias Reses ({(medias || []).length})</div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
+        Cada media res cargada al sistema tiene un código <strong style={{ color: 'var(--gold)' }}>MR-XXX</strong> para
+        trazarla en todo su ciclo: ingreso, reserva, desposte, venta.
+      </div>
+      {/* Filtros por estado */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
+        {ESTADOS.map(e => (
+          <button key={e.id} onClick={() => setFiltroEstado(e.id)}
+            style={{
+              padding: '6px 12px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+              border: `1px solid ${filtroEstado === e.id ? e.color : 'var(--border)'}`,
+              background: filtroEstado === e.id ? `${e.color}22` : 'transparent',
+              color: filtroEstado === e.id ? e.color : 'var(--muted)',
+              cursor: 'pointer', fontFamily: "'DM Sans',sans-serif",
+            }}>
+            {e.label} <span style={{ opacity: 0.7 }}>({counts[e.id] || 0})</span>
+          </button>
+        ))}
+      </div>
+
+      {filtradas.length === 0
+        ? <div className="empty">Sin medias reses en este filtro</div>
+        : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid var(--border)' }}>
+                  <th style={th}>Código</th>
+                  <th style={th}>Ingreso</th>
+                  <th style={th}>Proveedor</th>
+                  <th style={{ ...th, textAlign: 'right' }}>Kg</th>
+                  <th style={{ ...th, textAlign: 'right' }}>$/kg</th>
+                  <th style={th}>Estado</th>
+                  <th style={th}>Destino / Cliente</th>
+                  <th style={th}>Fecha salida</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pag.items.map(m => (
+                  <tr key={m.id} style={{ borderBottom: '1px solid var(--border)', fontSize: 12 }}>
+                    <td style={td}>
+                      <span style={{ background: 'var(--gold)', color: '#000', padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 800, letterSpacing: 0.5 }}>
+                        {m.codigo}
+                      </span>
+                    </td>
+                    <td style={td}>{m.fecha_ingreso}</td>
+                    <td style={td}>{m.proveedor_origen || '—'}</td>
+                    <td style={{ ...td, textAlign: 'right', fontFamily: "'Bebas Neue',cursive", fontSize: 15, color: 'var(--gold)' }}>
+                      {Number(m.kg || 0).toFixed(1)}
+                    </td>
+                    <td style={{ ...td, textAlign: 'right', color: 'var(--amber)' }}>
+                      {m.precio_costo_kg ? `$${Math.round(m.precio_costo_kg).toLocaleString('es-AR')}` : '—'}
+                    </td>
+                    <td style={td}>
+                      <span style={{ color: colorEstado(m.estado), fontWeight: 700 }}>
+                        {ESTADOS.find(e => e.id === m.estado)?.label?.replace(/^[^ ]+ /, '') || m.estado}
+                      </span>
+                    </td>
+                    <td style={td}>
+                      {m.cliente_nombre || m.destino || (m.estado === 'reservada' ? m.reservada_para : '—')}
+                    </td>
+                    <td style={td}>{m.fecha_salida || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <Paginador {...pag.controles} label="medias" />
+          </div>
+        )
+      }
+    </div>
+  )
+}
+const th = { textAlign: 'left', padding: '8px 10px', fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 700 }
+const td = { padding: '8px 10px', verticalAlign: 'middle' }
+
+// ───────────────────────────────────────────────────────────
 // "Desposte → Historial" (despostes + elaboraciones de embutidos/salames)
 // ───────────────────────────────────────────────────────────
 function HistorialDespostes({ despostes }) {
