@@ -293,7 +293,15 @@ function formatearFechaHora(timestamp, fechaFallback, horaFallback) {
   // desde fecha + hora del registro.
   try {
     if (timestamp) {
-      const d = new Date(timestamp)
+      // Parser defensivo: Postgres a veces devuelve `2026-05-26 15:00:00`
+      // sin TZ explicita para columnas `timestamp without time zone`. JS
+      // interpreta esos strings como hora local → bug de 3 horas en
+      // Argentina (UTC-3). Si detectamos que el string NO trae TZ,
+      // agregamos 'Z' para forzar interpretacion UTC (el server de
+      // Supabase guarda en UTC). Para columnas ya convertidas a TIMESTAMPTZ
+      // el string trae `+00:00` y este chequeo no las toca.
+      const tieneTZ = /(Z|[+\-]\d{2}:?\d{2})$/.test(timestamp.trim())
+      const d = new Date(tieneTZ ? timestamp : timestamp.replace(' ', 'T') + 'Z')
       return d.toLocaleString('es-AR', {
         day: '2-digit', month: '2-digit', year: '2-digit',
         hour: '2-digit', minute: '2-digit',
