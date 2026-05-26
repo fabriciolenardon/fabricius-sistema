@@ -104,7 +104,7 @@ export default function DesposteHistorial() {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
-        <h2 style={{ fontSize: 22, margin: 0 }}>📋 Historial del sector desposte</h2>
+        <h2 style={{ fontSize: 22, margin: 0 }}>📋 Historial desposte</h2>
         <div style={{ display: 'flex', gap: 6 }}>
           {[
             { id: 'todos',  label: '📋 Todo' },
@@ -305,6 +305,7 @@ function formatearFechaHora(timestamp, fechaFallback, horaFallback) {
       return d.toLocaleString('es-AR', {
         day: '2-digit', month: '2-digit', year: '2-digit',
         hour: '2-digit', minute: '2-digit',
+        timeZone: 'America/Argentina/Buenos_Aires',
       })
     }
   } catch {}
