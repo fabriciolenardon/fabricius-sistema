@@ -168,6 +168,32 @@ export default function Sueldos() {
         porEmpleadoFecha[key].horas.push(r.hora)
       }
 
+      // Deduplicar marcas cercanas dentro del mismo empleado-día.
+      // Caso 1: rebote del lector biométrico — la persona pasa la tarjeta
+      //   y como el lector no confirma al primer intento, pasa una segunda
+      //   vez, generando dos fichadas con apenas segundos de diferencia.
+      // Caso 2: empleado con dos tarjetas asignadas (ej. Arnaudo tiene
+      //   id 3 y id 25 en el iVMS). Las dos tarjetas suelen pasar al
+      //   mismo tiempo cuando el empleado entra → dos fichadas idénticas.
+      // Threshold: 5 minutos. Más conservador que eso (ej. 30 seg) deja
+      // pasar muchos rebotes; más amplio (ej. 30 min) pisaría marcas
+      // legítimas (ej. entrada → ir al baño → marca de salida).
+      const THRESH_DEDUP_SEG = 5 * 60
+      const horaASeg = h => {
+        const [a, b, c] = h.split(':').map(Number)
+        return a * 3600 + b * 60 + c
+      }
+      for (const val of Object.values(porEmpleadoFecha)) {
+        val.horas.sort()
+        const dedupe = []
+        for (const h of val.horas) {
+          if (dedupe.length === 0 || horaASeg(h) - horaASeg(dedupe[dedupe.length - 1]) >= THRESH_DEDUP_SEG) {
+            dedupe.push(h)
+          }
+        }
+        val.horas = dedupe
+      }
+
       // Calcular horas totales por empleado
       const horasPorEmpleado = {}
       const detalle = []
