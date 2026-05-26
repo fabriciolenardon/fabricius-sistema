@@ -161,16 +161,21 @@ const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(n
     // inestable. `id` no sirve como tiebreaker porque son UUIDs aleatorios.
     // `created_at` (timestamp) es el único campo que refleja el orden real de
     // creación.
-    const [{ data: entradas }, { data: despostesData }, { data: preciosData }, { data: stockData }, { data: caponesData }, { data: elaboracionesData }, { data: piezasIndivData }] = await Promise.all([
+    const [{ data: entradas }, { data: despostesData }, { data: preciosData }, { data: stockData }, { data: caponesData }, { data: elaboracionesData }, { data: piezasIndivData }, { data: mediasStockData }] = await Promise.all([
   supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).eq('reservada', false).order('fecha', { ascending: false }).order('created_at', { ascending: false }),
   supabase.from('despostes').select('*').order('fecha', { ascending: false }),
   supabase.from('precios').select('*').eq('categoria', 'bovino_pieza'),
   supabase.from('stock_actual').select('*'),
   supabase.from('entradas_deposito').select('*').eq('tipo', 'cerdo').eq('despostada', false).order('fecha', { ascending: false }).order('created_at', { ascending: false }),
   supabase.from('elaboraciones_embutidos').select('*').order('fecha', { ascending: false }),
-  supabase.from('piezas_stock').select('*').order('fecha_ingreso', { ascending: false }).order('id', { ascending: false })
+  supabase.from('piezas_stock').select('*').order('fecha_ingreso', { ascending: false }).order('id', { ascending: false }),
+  // Trazabilidad individual de medias reses con codigo MR-XXX
+  supabase.from('medias_stock').select('id, codigo, entrada_id, estado').order('id', { ascending: true }),
 ])
-setMediasRes(entradas || [])
+// Enriquecer cada entrada con el codigo MR-XXX de medias_stock
+const codigoPorEntrada = {}
+;(mediasStockData || []).forEach(m => { if (m.entrada_id) codigoPorEntrada[m.entrada_id] = m.codigo })
+setMediasRes((entradas || []).map(e => ({ ...e, codigo_media: codigoPorEntrada[e.id] || null })))
 setDespostes(despostesData || [])
 setPrecios(preciosData || [])
 setPiezasIndividuales(piezasIndivData || [])
@@ -179,8 +184,6 @@ const stockMap = {}
 setPiezasStock(stockMap)
 setCaponesDisponibles(caponesData || [])
 setElaboraciones(elaboracionesData || [])
-console.log('CAPONES:', caponesData)
-console.log('STOCK CARGADO:', stockMap)
   }
   function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(() => setAlert(null), 5000) }
 
@@ -246,6 +249,10 @@ console.log('STOCK CARGADO:', stockMap)
       }).select().single()
       if (error) throw error
       await supabase.from('entradas_deposito').update({ despostada: true, desposte_id: desposteData.id }).eq('id', seleccionada.id)
+      // Marcar la media res como despostada en medias_stock (trazabilidad individual)
+      await supabase.from('medias_stock').update({
+        estado: 'despostada', desposte_id: desposteData.id, fecha_salida: fecha,
+      }).eq('entrada_id', seleccionada.id)
       await actualizarStock('bovino_mr', -kgBase)
       // Stock agregado (compat) — sigue sumando al total bovino_pieza
       for (const pieza of piezas) { await actualizarStock('bovino_pieza', pieza.kg_editado) }
@@ -323,6 +330,10 @@ console.log('STOCK CARGADO:', stockMap)
       }).select().single()
       if (error) throw error
       await supabase.from('entradas_deposito').update({ despostada: true, desposte_id: desposteData.id }).eq('id', seleccionada.id)
+      // Marcar la media res como despostada en medias_stock (trazabilidad individual)
+      await supabase.from('medias_stock').update({
+        estado: 'despostada', desposte_id: desposteData.id, fecha_salida: fecha,
+      }).eq('entrada_id', seleccionada.id)
       await actualizarStock('bovino_mr', -kgBase)
       await actualizarStock('bovino_corte', kgNeto)
       showAlert('✅ Media res enviada a cortes — ' + kgNeto.toFixed(1) + ' kg al stock')
@@ -577,7 +588,10 @@ async function confirmarDesposteCerdo() {
                   style={{ padding: 12, borderRadius: 8, marginBottom: 8, cursor: 'pointer', border: `2px solid ${seleccionada?.id === e.id ? 'var(--gold)' : 'var(--border)'}`, background: seleccionada?.id === e.id ? 'rgba(201,168,76,0.08)' : 'var(--surface2)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <div>
-                      <div style={{ fontWeight: 700, fontSize: 13 }}>🐄 {e.descripcion || 'Media Res'}</div>
+                      <div style={{ fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {e.codigo_media && <span style={{ background: 'var(--gold)', color: '#000', padding: '2px 7px', borderRadius: 6, fontSize: 11, fontWeight: 800, letterSpacing: 0.5 }}>{e.codigo_media}</span>}
+                        🐄 {e.descripcion || 'Media Res'}
+                      </div>
                       <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.fecha} · {e.proveedor_nombre}</div>
                       {e.precio_kg > 0 && <div style={{ fontSize: 11, color: 'var(--amber)' }}>${Math.round(e.precio_kg).toLocaleString('es-AR')}/kg</div>}
                     </div>
@@ -674,7 +688,10 @@ async function confirmarDesposteCerdo() {
                   style={{ padding: 12, borderRadius: 8, marginBottom: 8, cursor: 'pointer', border: `2px solid ${seleccionada?.id === e.id ? 'var(--blue)' : 'var(--border)'}`, background: seleccionada?.id === e.id ? 'rgba(41,128,185,0.08)' : 'var(--surface2)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <div>
-                      <div style={{ fontWeight: 700, fontSize: 13 }}>🐄 {e.descripcion || 'Media Res'}</div>
+                      <div style={{ fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {e.codigo_media && <span style={{ background: 'var(--blue)', color: '#fff', padding: '2px 7px', borderRadius: 6, fontSize: 11, fontWeight: 800, letterSpacing: 0.5 }}>{e.codigo_media}</span>}
+                        🐄 {e.descripcion || 'Media Res'}
+                      </div>
                       <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.fecha} · {e.proveedor_nombre}</div>
                       {e.precio_kg > 0 && <div style={{ fontSize: 11, color: 'var(--amber)' }}>Costo: ${Math.round(e.precio_kg).toLocaleString('es-AR')}/kg</div>}
                     </div>
@@ -1416,15 +1433,46 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     const descripcionFinal = esEnUnidades && cantidad > 1
       ? `${descripcionBase} ×${cantidad}`
       : descripcionBase
-    const { error } = await supabase.from('entradas_deposito').insert({
+    // Para bovino_mr necesitamos el id de la entrada insertada para crear
+    // la fila correspondiente en medias_stock (el codigo MR-XXX se genera
+    // automaticamente desde el id de medias_stock por columna generada).
+    const { data: entradaInsertada, error } = await supabase.from('entradas_deposito').insert({
       fecha: form.fecha, tipo: form.tipo, proveedor_nombre: form.proveedor,
       descripcion: descripcionFinal, kg: kgTotal, kg_real: kgReal,
       merma_pct: parseNumero(form.merma), precio_kg: parseNumero(form.precioKg),
       importe, destino: form.destino, cantidad
-    })
+    }).select().single()
     if (error) { showAlert({ type: 'error', msg: error.message }); return }
     const kgSumar = form.tipo === 'bovino_mr' ? kgReal : kgTotal
     await actualizarStock(form.tipo, kgSumar)
+
+    // Tracking individual de medias reses: una fila por cada media fisica
+    // en medias_stock, con codigo visible MR-XXX. Si la entrada agrupa varias
+    // unidades (cantidad > 1, raro en bovino_mr pero posible), creamos una
+    // fila por unidad.
+    if (form.tipo === 'bovino_mr' && entradaInsertada) {
+      const filasMedias = []
+      // Si vino 1 sola media: 1 fila con todos los kg. Si vinieron varias en
+      // una sola carga (caso raro), repartimos kg en partes iguales. Esto es
+      // best-effort — lo ideal es cargar una entrada por media res fisica.
+      const kgPorMedia = kgReal / cantidad
+      for (let i = 0; i < cantidad; i++) {
+        filasMedias.push({
+          // Solo la primera fila tiene entrada_id (la columna es UNIQUE).
+          // Las demas quedan sin referencia a entradas_deposito — el codigo
+          // MR-XXX igual las identifica. Esto solo importa si cantidad > 1.
+          entrada_id: i === 0 ? entradaInsertada.id : null,
+          kg: kgPorMedia,
+          proveedor_origen: form.proveedor,
+          fecha_ingreso: form.fecha,
+          precio_costo_kg: parseNumero(form.precioKg),
+          descripcion: descripcionFinal,
+          estado: 'disponible',
+        })
+      }
+      const { error: errMedias } = await supabase.from('medias_stock').insert(filasMedias)
+      if (errMedias) console.warn('No se pudo crear fila en medias_stock:', errMedias.message)
+    }
     await supabase.from('compras_proveedores').insert({
       fecha: form.fecha, proveedor_nombre: form.proveedor,
       producto: descripcionFinal,
@@ -2048,6 +2096,15 @@ for (const item of items) {
       const mediasIds = items.map(it => it.media_res_id).filter(Boolean)
       if (mediasIds.length > 0) {
         await supabase.from('entradas_deposito').update({ despostada: true }).in('id', mediasIds)
+        // Marcar las medias como vendidas en medias_stock (no despostadas: en este
+        // flujo de venta mayorista la media se va entera al cliente).
+        await supabase.from('medias_stock').update({
+          estado: 'vendida',
+          cliente_nombre: clienteNombre,
+          cliente_id: clienteId || null,
+          fecha_salida: form.fecha,
+          destino: form.destino,
+        }).in('entrada_id', mediasIds)
       }
       setMediaSeleccionada(null)
       const { data: medias } = await supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false }).order('created_at', { ascending: false })
