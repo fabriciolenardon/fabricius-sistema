@@ -87,6 +87,32 @@ export default function Caja() {
   // ---- Carga inicial ----
   useEffect(() => { cargarTodo() }, [])
 
+  // Realtime: cuando el admin actualiza precios/ofertas o cuando el
+  // depostero suma piezas/cajas al stock, la Caja Rapida se entera al
+  // instante y refresca su catalogo. Asi la cajera nunca vende un
+  // producto con precio viejo ni intenta vender una caja que ya no
+  // existe.
+  // Debounce de 400ms para evitar tormentas de reloads cuando se hace
+  // un cambio masivo (ej. actualizacion masiva de precios).
+  useEffect(() => {
+    let timer = null
+    const debouncedReload = () => {
+      clearTimeout(timer)
+      timer = setTimeout(() => cargarTodo(), 400)
+    }
+    const canal = supabase.channel('caja-catalogo-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'precios' }, debouncedReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'ofertas' }, debouncedReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'config_sistema' }, debouncedReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cajas_stock' }, debouncedReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'piezas_stock' }, debouncedReload)
+      .subscribe()
+    return () => {
+      clearTimeout(timer)
+      supabase.removeChannel(canal)
+    }
+  }, [])
+
   async function cargarTodo() {
     const hoy = fechaHoyARG()  // Hora local ARG, NO UTC. Ver lib/fechas.js
     const [{ data: pre }, { data: cfg }, { data: ventas }, { data: ofs }, { data: cajas }, { data: piezas }] = await Promise.all([

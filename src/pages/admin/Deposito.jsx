@@ -158,6 +158,32 @@ const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(n
 
   useEffect(() => { cargarDatos() }, [])
 
+  // Realtime: cuando OTRO usuario (admin desde otra pestaña, desposte
+  // desde el tablet, cajero al vender) modifica el stock o las medias,
+  // recargamos los datos automaticamente para que esta pantalla siempre
+  // muestre la realidad — sin necesidad de F5.
+  // Usamos un canal por tabla critica y un debounce de 400ms para no
+  // disparar 10 recargas seguidas si llegan varios eventos juntos.
+  useEffect(() => {
+    let timer = null
+    const debouncedReload = () => {
+      clearTimeout(timer)
+      timer = setTimeout(() => cargarDatos(), 400)
+    }
+    const canal = supabase.channel('deposito-stock-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'entradas_deposito' }, debouncedReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'medias_stock' }, debouncedReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'piezas_stock' }, debouncedReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cajas_stock' }, debouncedReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_actual' }, debouncedReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'despostes' }, debouncedReload)
+      .subscribe()
+    return () => {
+      clearTimeout(timer)
+      supabase.removeChannel(canal)
+    }
+  }, [])
+
   async function cargarDatos() {
     // Orden: fecha DESC + created_at DESC para todas las queries de entradas_deposito.
     // `fecha` es DATE (sin hora), así que entradas del mismo día caían en orden
