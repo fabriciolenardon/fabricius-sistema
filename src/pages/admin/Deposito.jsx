@@ -2934,6 +2934,7 @@ function ProveedoresTab() {
   const [entradas, setEntradas] = useState([])           // entradas_deposito para detalle de remito
   const [proveedoresDB, setProveedoresDB] = useState([])
   const [inicializados, setInicializados] = useState(new Set())  // proveedor_id con cuenta corriente
+  const [ledgerTotales, setLedgerTotales] = useState({})         // proveedor_id → { debe, haber }
   const [alert, setAlert] = useState(null)
   const [nuevoProveedor, setNuevoProveedor] = useState('')
   const [legajoAbierto, setLegajoAbierto] = useState(null)
@@ -2963,16 +2964,23 @@ function ProveedoresTab() {
       supabase.from('pagos_proveedores_semanal').select('*').order('fecha', { ascending: false }),
       supabase.from('proveedores').select('*').eq('activo', true).order('nombre'),
       supabase.from('entradas_deposito').select('*').not('proveedor_nombre', 'is', null).order('fecha', { ascending: false }),
-      // Cuenta corriente: para saber qué proveedores ya están inicializados
-      // y mostrar su saldo del ledger (no del modelo semanal viejo).
-      supabase.from('movimientos_proveedores').select('proveedor_id').then(r => r).catch(() => ({ data: null })),
+      // Cuenta corriente: totales debe/haber por proveedor + saber quién
+      // está inicializado (para mostrar el saldo del ledger, no del semanal).
+      supabase.from('movimientos_proveedores').select('proveedor_id, debe, haber').then(r => r).catch(() => ({ data: null })),
     ])
     setCompras(c || [])
     setPagos(p || [])
     setProveedoresDB(prov || [])
     setEntradas(ent || [])
-    // Set de proveedor_id que ya tienen cuenta corriente inicializada
-    setInicializados(new Set((movs || []).map(m => m.proveedor_id)))
+    // Totales debe/haber del ledger por proveedor + set de inicializados
+    const tot = {}
+    ;(movs || []).forEach(m => {
+      if (!tot[m.proveedor_id]) tot[m.proveedor_id] = { debe: 0, haber: 0 }
+      tot[m.proveedor_id].debe  += Number(m.debe) || 0
+      tot[m.proveedor_id].haber += Number(m.haber) || 0
+    })
+    setLedgerTotales(tot)
+    setInicializados(new Set(Object.keys(tot)))
   }
 
   // Busca la entrada_deposito asociada a una compra por fecha + proveedor + importe.
@@ -3037,9 +3045,27 @@ function ProveedoresTab() {
   }
 
   async function eliminarProveedor(id, nombre) {
-    if (!confirm(`¿Eliminar el proveedor ${nombre}?`)) return
+    if (!confirm(
+      `⚠️ ELIMINAR PROVEEDOR "${nombre}"\n\n` +
+      `Se va a borrar PARA SIEMPRE:\n` +
+      `  • El proveedor\n` +
+      `  • Toda su cuenta corriente (compras, pagos, ajustes, saldo)\n` +
+      `  • Su historial de compras y pagos semanales\n\n` +
+      `Las entradas al depósito (stock) NO se tocan.\n\n` +
+      `Esta acción NO se puede deshacer. ¿Confirmás?`
+    )) return
+    // Segunda confirmación para una acción destructiva
+    if (!confirm(`Última confirmación: ¿borrar definitivamente a "${nombre}" y todo su historial?`)) return
+    // Cascada manual: no hay FK (proveedor_id es uuid sin REFERENCES, y
+    // las otras tablas referencian por proveedor_nombre que es texto).
+    await Promise.all([
+      supabase.from('movimientos_proveedores').delete().eq('proveedor_id', id),
+      supabase.from('compras_proveedores').delete().eq('proveedor_nombre', nombre),
+      supabase.from('pagos_proveedores_semanal').delete().eq('proveedor_nombre', nombre),
+      supabase.from('pagos_proveedores').delete().eq('proveedor_nombre', nombre),
+    ])
     await supabase.from('proveedores').delete().eq('id', id)
-    showMsg('🗑️ Proveedor eliminado')
+    showMsg('🗑️ Proveedor y todo su historial eliminados')
     if (legajoAbierto?.id === id) setLegajoAbierto(null)
     fetchAll()
   }
@@ -3155,24 +3181,27 @@ function ProveedoresTab() {
   const getResumenProv = (nombre, provId = null) => {
     const comprasProv = compras.filter(c => c.proveedor_nombre?.toUpperCase().includes(nombre))
     const pagosProv = pagos.filter(p => p.proveedor_nombre?.toUpperCase().includes(nombre))
-    const totalCompras = comprasProv.reduce((s, c) => s + (c.importe || 0), 0)
-    const totalEntregado = pagosProv.reduce((s, p) => s + (p.entrega || 0), 0)
-    // SALDO:
-    //   - Si el proveedor YA tiene cuenta corriente inicializada → usamos
-    //     proveedores.saldo_adeudado (mantenido por el ledger nuevo).
-    //   - Si NO → fallback al modelo semanal viejo (último saldo_adeudado),
-    //     para no romper los saldos que ya venía controlando.
-    //   saldo > 0 le debemos · < 0 a favor · = 0 al día
+    const weeklyCompras = comprasProv.reduce((s, c) => s + (c.importe || 0), 0)
+    const weeklyEntregado = pagosProv.reduce((s, p) => s + (p.entrega || 0), 0)
     const provReg = proveedoresDB.find(p => p.id === provId || p.nombre === nombre)
-    const usaLedger = provId ? inicializados.has(provId) : (provReg && inicializados.has(provReg.id))
+    const ledger = provReg ? ledgerTotales[provReg.id] : null
+    const usaLedger = !!ledger
+    // DEBE / HABER / SALDO:
+    //   - Inicializado (cuenta corriente) → debe=Σdebe, haber=Σhaber del ledger,
+    //     saldo = proveedores.saldo_adeudado (mantenido por el ledger).
+    //   - No inicializado → fallback al modelo semanal viejo (no rompe cuentas).
+    //   saldo > 0 le debemos · < 0 a favor · = 0 al día
+    const debe = usaLedger ? ledger.debe : weeklyCompras
+    const haber = usaLedger ? ledger.haber : weeklyEntregado
     let saldo
     if (usaLedger && provReg) {
       saldo = Number(provReg.saldo_adeudado) || 0
     } else {
       const ultimoPago = pagosProv[0]
-      saldo = ultimoPago?.saldo_adeudado ?? (totalCompras - totalEntregado)
+      saldo = ultimoPago?.saldo_adeudado ?? (weeklyCompras - weeklyEntregado)
     }
-    return { totalCompras, totalEntregado, saldo, comprasProv, pagosProv, usaLedger }
+    // totalCompras/totalEntregado quedan como alias para el header del legajo
+    return { debe, haber, saldo, totalCompras: debe, totalEntregado: haber, comprasProv, pagosProv, usaLedger }
   }
   // Total adeudado = suma de saldos positivos (lo que realmente debemos).
   // Los saldos a favor (negativos) no restan a la deuda total mostrada.
@@ -3296,10 +3325,10 @@ function ProveedoresTab() {
           <div className="card">
             <div className="card-title">Estado de cuenta por proveedor</div>
             <table>
-              <thead><tr><th>Proveedor</th><th style={{ color: 'var(--amber)' }}>Total compras</th><th style={{ color: 'var(--green)' }}>Total entregado</th><th>Saldo</th><th>Estado</th><th>Legajo</th></tr></thead>
+              <thead><tr><th>Proveedor</th><th style={{ color: 'var(--amber)', textAlign: 'right' }}>Debe</th><th style={{ color: 'var(--green)', textAlign: 'right' }}>Haber</th><th style={{ textAlign: 'right' }}>Saldo</th><th style={{ textAlign: 'center' }}>Estado</th><th style={{ textAlign: 'center' }}>Legajo</th><th style={{ textAlign: 'center' }}>Eliminar</th></tr></thead>
               <tbody>
-                {proveedoresDB.map(p => { const r = getResumenProv(p.nombre, p.id); const cSaldo = r.saldo > 0 ? 'var(--red-light)' : r.saldo < 0 ? 'var(--green)' : 'var(--muted)'; return (<tr key={p.id}><td><strong>{p.nombre}</strong>{!r.usaLedger && <span title="Cuenta corriente sin inicializar" style={{ marginLeft: 6, fontSize: 10, color: 'var(--amber)' }}>⏳</span>}</td><td style={{ color: 'var(--amber)' }}>{fmt(r.totalCompras)}</td><td style={{ color: 'var(--green)' }}>{fmt(r.totalEntregado)}</td><td style={{ color: cSaldo, fontWeight: 700 }}>{r.saldo < 0 ? `${fmt(r.saldo)} a favor` : fmt(r.saldo)}</td><td><span style={{ background: r.saldo > 0 ? '#3a1a1a' : '#1a3a1a', color: cSaldo, borderRadius: 4, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>{r.saldo > 0 ? 'DEBE' : r.saldo < 0 ? '💚 A FAVOR' : '✅ AL DÍA'}</span></td><td><button onClick={() => abrirLegajo(p)} style={{ background: 'var(--amber)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#fff' }}>📋 Ver legajo</button></td></tr>) })}
-                {proveedoresDB.length === 0 && <tr><td colSpan={6} className="empty">Sin proveedores registrados</td></tr>}
+                {proveedoresDB.map(p => { const r = getResumenProv(p.nombre, p.id); const cSaldo = r.saldo > 0 ? 'var(--red-light)' : r.saldo < 0 ? 'var(--green)' : 'var(--muted)'; return (<tr key={p.id}><td><strong>{p.nombre}</strong>{!r.usaLedger && <span title="Cuenta corriente sin inicializar" style={{ marginLeft: 6, fontSize: 10, color: 'var(--amber)' }}>⏳</span>}</td><td style={{ color: 'var(--amber)', textAlign: 'right' }}>{fmt(r.debe)}</td><td style={{ color: 'var(--green)', textAlign: 'right' }}>{fmt(r.haber)}</td><td style={{ color: cSaldo, fontWeight: 700, textAlign: 'right' }}>{r.saldo < 0 ? `${fmt(r.saldo)} a favor` : fmt(r.saldo)}</td><td style={{ textAlign: 'center' }}><span style={{ background: r.saldo > 0 ? '#3a1a1a' : '#1a3a1a', color: cSaldo, borderRadius: 4, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>{r.saldo > 0 ? 'DEBE' : r.saldo < 0 ? '💚 A FAVOR' : '✅ AL DÍA'}</span></td><td style={{ textAlign: 'center' }}><button onClick={() => abrirLegajo(p)} style={{ background: 'var(--amber)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#fff' }}>📋 Ver legajo</button></td><td style={{ textAlign: 'center' }}><button onClick={() => eliminarProveedor(p.id, p.nombre)} title="Eliminar proveedor y todo su historial" style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--red-light)' }}>🗑️</button></td></tr>) })}
+                {proveedoresDB.length === 0 && <tr><td colSpan={7} className="empty">Sin proveedores registrados</td></tr>}
               </tbody>
             </table>
           </div>
