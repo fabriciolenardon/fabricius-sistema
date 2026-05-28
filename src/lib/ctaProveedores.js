@@ -112,6 +112,22 @@ export async function eliminarMovimiento(movId, proveedorId) {
   return { error: null }
 }
 
+// Revierte el/los movimiento(s) de compra asociados a una entrada al
+// depósito (por entrada_id) cuando esa entrada se elimina. Recalcula el
+// saldo de cada proveedor afectado.
+export async function revertirCompraDeEntrada(entradaId) {
+  if (!entradaId) return
+  const { data: movs } = await supabase
+    .from('movimientos_proveedores').select('id, proveedor_id').eq('entrada_id', entradaId)
+  if (!movs || movs.length === 0) return
+  const provIds = new Set()
+  for (const m of movs) {
+    await supabase.from('movimientos_proveedores').delete().eq('id', m.id)
+    if (m.proveedor_id) provIds.add(m.proveedor_id)
+  }
+  for (const pid of provIds) await recalcularSaldo(pid)
+}
+
 // ¿El proveedor ya tiene su cuenta corriente inicializada?
 // (al menos un movimiento). Sirve para mostrar el botón de migración.
 export async function tieneMovimientos(proveedorId) {
@@ -120,4 +136,26 @@ export async function tieneMovimientos(proveedorId) {
     .select('id', { count: 'exact', head: true })
     .eq('proveedor_id', proveedorId)
   return (count || 0) > 0
+}
+
+// Crea un movimiento de COMPRA (debe) en la cuenta corriente del proveedor
+// a partir de una entrada al depósito. SOLO si:
+//   - el proveedor existe en la tabla proveedores, y
+//   - ya tiene cuenta corriente inicializada (al menos un movimiento)
+// Si el proveedor no está inicializado, no hace nada (la compra igual
+// queda registrada en compras_proveedores para el fallback semanal, y
+// cuando el admin inicialice la cta cte podrá cargar el saldo correcto).
+// Devuelve { creado: boolean }.
+export async function registrarCompraDesdeEntrada({ proveedorNombre, fecha, importe, descripcion, entradaId }) {
+  if (!proveedorNombre || !(Number(importe) > 0)) return { creado: false }
+  const { data: prov } = await supabase
+    .from('proveedores').select('id, nombre').ilike('nombre', proveedorNombre).maybeSingle()
+  if (!prov) return { creado: false }
+  const yaInit = await tieneMovimientos(prov.id)
+  if (!yaInit) return { creado: false }
+  await registrarCompraProv({
+    proveedorId: prov.id, proveedorNombre: prov.nombre,
+    fecha, importe, descripcion, entradaId,
+  })
+  return { creado: true }
 }

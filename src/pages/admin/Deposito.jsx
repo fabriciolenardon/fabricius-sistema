@@ -6,7 +6,7 @@ import { cargarCajasDisponibles, crearCajasIngreso, venderCaja, revertirVentaCaj
 import { fmtPrecio, fmtKg, parseNumero } from '../../lib/formatos'
 import { getCampoPrecio } from '../../lib/listasPrecios'
 import CuentaCorrienteProveedor from './CuentaCorrienteProveedor'
-import { agregarMovimiento, eliminarMovimiento } from '../../lib/ctaProveedores'
+import { agregarMovimiento, eliminarMovimiento, registrarCompraDesdeEntrada, revertirCompraDeEntrada } from '../../lib/ctaProveedores'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 import FlujoDeposito from './FlujoDeposito'
 import AjusteStock from './AjusteStock'
@@ -1597,6 +1597,12 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
         fecha: form.fecha, proveedor_nombre: form.proveedor,
         producto: descripcionCajas, kg: kgTotalCajas, importe: importeCajas,
       })
+      // Si el proveedor tiene cuenta corriente inicializada, la compra de
+      // cajas va sola a su cuenta corriente (debe).
+      await registrarCompraDesdeEntrada({
+        proveedorNombre: form.proveedor, fecha: form.fecha, importe: importeCajas,
+        descripcion: descripcionCajas, entradaId: entradaIns?.id,
+      })
       showAlert({ type: 'success', msg: `✅ ${cantPesperada} cajas de ${productoCaja?.nombre || 'sin nombre'} registradas — ${kgTotalCajas.toFixed(1)} kg en total` })
       setForm(f => ({ ...f, descripcion: '', kg: '', importe: '', precioKg: '9800', cantidad: '1', cajaProductoId: '' }))
       setCajasPesos([])
@@ -1678,6 +1684,13 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
       producto: descripcionFinal,
       kg: kgTotal, importe
     })
+    // Si el proveedor tiene cuenta corriente inicializada, esta compra
+    // va sola a su cuenta corriente (debe). Si no está inicializada, no
+    // hace nada (queda en compras_proveedores para el fallback).
+    await registrarCompraDesdeEntrada({
+      proveedorNombre: form.proveedor, fecha: form.fecha, importe,
+      descripcion: descripcionFinal, entradaId: entradaInsertada?.id,
+    })
     const msgOK = esEnUnidades && cantidad > 1
       ? `✅ ${cantidad} unidades de ${descripcionBase} registradas — ${kgTotal.toFixed(1)} kg al stock`
       : '✅ Entrada registrada — Stock actualizado'
@@ -1709,6 +1722,8 @@ async function eliminar(entrada) {
   .eq('fecha', entrada.fecha)
   .eq('proveedor_nombre', entrada.proveedor_nombre)
   .eq('kg', entrada.kg)
+  // Revertir la compra en la cuenta corriente (si esta entrada la generó)
+  await revertirCompraDeEntrada(entrada.id)
   await supabase.from('entradas_deposito').delete().eq('id', entrada.id)
   await actualizarStock(entrada.tipo, -(entrada.kg_real || entrada.kg))
   showAlert({ type: 'success', msg: '🗑️ Entrada y desposte eliminados — Stock revertido' })
