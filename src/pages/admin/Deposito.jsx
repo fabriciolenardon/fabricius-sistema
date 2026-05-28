@@ -3150,14 +3150,19 @@ function ProveedoresTab() {
     const pagosProv = pagos.filter(p => p.proveedor_nombre?.toUpperCase().includes(nombre))
     const totalCompras = comprasProv.reduce((s, c) => s + (c.importe || 0), 0)
     const totalEntregado = pagosProv.reduce((s, p) => s + (p.entrega || 0), 0)
-    const ultimoPago = pagosProv[0]
-    const saldoAdeudado = ultimoPago?.saldo_adeudado ?? (totalCompras - totalEntregado)
-    return { totalCompras, totalEntregado, saldoAdeudado, comprasProv, pagosProv }
+    // SALDO = total comprado − total pagado. Cada pago lo reduce.
+    //   saldo > 0  → le DEBEMOS al proveedor
+    //   saldo < 0  → tenemos saldo A FAVOR (le pagamos de más)
+    //   saldo = 0  → al día
+    const saldo = totalCompras - totalEntregado
+    return { totalCompras, totalEntregado, saldo, comprasProv, pagosProv }
   }
-  const totalDeuda = proveedoresDB.reduce((s, p) => s + Math.max(0, getResumenProv(p.nombre).saldoAdeudado), 0)
+  // Total adeudado = suma de saldos positivos (lo que realmente debemos).
+  // Los saldos a favor (negativos) no restan a la deuda total mostrada.
+  const totalDeuda = proveedoresDB.reduce((s, p) => s + Math.max(0, getResumenProv(p.nombre).saldo), 0)
 
   if (legajoAbierto) {
-    const { totalCompras, totalEntregado, saldoAdeudado, comprasProv, pagosProv } = getResumenProv(legajoAbierto.nombre)
+    const { totalCompras, totalEntregado, saldo, comprasProv, pagosProv } = getResumenProv(legajoAbierto.nombre)
     return (
       <div>
         <button onClick={() => setLegajoAbierto(null)} className="btn btn-ghost" style={{ marginBottom: 16 }}>← Volver a proveedores</button>
@@ -3188,9 +3193,9 @@ function ProveedoresTab() {
               {legajoAbierto.producto_principal && <div style={{ fontSize: 12, color: 'var(--gold)', marginTop: 4 }}>🥩 {legajoAbierto.producto_principal}</div>}
             </div>
             <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Saldo adeudado</div>
-              <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 36, color: saldoAdeudado > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(saldoAdeudado)}</div>
-              <div style={{ fontSize: 11, color: saldoAdeudado > 0 ? 'var(--red-light)' : 'var(--green)' }}>{saldoAdeudado > 0 ? '⚠️ Con deuda' : '✅ Al día'}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Saldo</div>
+              <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 36, color: saldo > 0 ? 'var(--red-light)' : saldo < 0 ? 'var(--green)' : 'var(--muted)' }}>{fmt(saldo)}</div>
+              <div style={{ fontSize: 11, color: saldo > 0 ? 'var(--red-light)' : saldo < 0 ? 'var(--green)' : 'var(--muted)' }}>{saldo > 0 ? '⚠️ Le debemos' : saldo < 0 ? '✅ Saldo a favor' : '✅ Al día'}</div>
             </div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginTop: 16 }}>
@@ -3264,9 +3269,9 @@ function ProveedoresTab() {
           <div className="card">
             <div className="card-title">Estado de cuenta por proveedor</div>
             <table>
-              <thead><tr><th>Proveedor</th><th style={{ color: 'var(--amber)' }}>Total compras</th><th style={{ color: 'var(--green)' }}>Total entregado</th><th style={{ color: 'var(--red-light)' }}>Saldo adeudado</th><th>Estado</th><th>Legajo</th></tr></thead>
+              <thead><tr><th>Proveedor</th><th style={{ color: 'var(--amber)' }}>Total compras</th><th style={{ color: 'var(--green)' }}>Total entregado</th><th>Saldo</th><th>Estado</th><th>Legajo</th></tr></thead>
               <tbody>
-                {proveedoresDB.map(p => { const r = getResumenProv(p.nombre); return (<tr key={p.id}><td><strong>{p.nombre}</strong></td><td style={{ color: 'var(--amber)' }}>{fmt(r.totalCompras)}</td><td style={{ color: 'var(--green)' }}>{fmt(r.totalEntregado)}</td><td style={{ color: r.saldoAdeudado > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 700 }}>{fmt(r.saldoAdeudado)}</td><td><span style={{ background: r.saldoAdeudado > 0 ? '#3a1a1a' : '#1a3a1a', color: r.saldoAdeudado > 0 ? 'var(--red-light)' : 'var(--green)', borderRadius: 4, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>{r.saldoAdeudado > 0 ? 'DEBE' : '✅ AL DÍA'}</span></td><td><button onClick={() => abrirLegajo(p)} style={{ background: 'var(--amber)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#fff' }}>📋 Ver legajo</button></td></tr>) })}
+                {proveedoresDB.map(p => { const r = getResumenProv(p.nombre); const cSaldo = r.saldo > 0 ? 'var(--red-light)' : r.saldo < 0 ? 'var(--green)' : 'var(--muted)'; return (<tr key={p.id}><td><strong>{p.nombre}</strong></td><td style={{ color: 'var(--amber)' }}>{fmt(r.totalCompras)}</td><td style={{ color: 'var(--green)' }}>{fmt(r.totalEntregado)}</td><td style={{ color: cSaldo, fontWeight: 700 }}>{r.saldo < 0 ? `${fmt(r.saldo)} a favor` : fmt(r.saldo)}</td><td><span style={{ background: r.saldo > 0 ? '#3a1a1a' : '#1a3a1a', color: cSaldo, borderRadius: 4, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>{r.saldo > 0 ? 'DEBE' : r.saldo < 0 ? '💚 A FAVOR' : '✅ AL DÍA'}</span></td><td><button onClick={() => abrirLegajo(p)} style={{ background: 'var(--amber)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#fff' }}>📋 Ver legajo</button></td></tr>) })}
                 {proveedoresDB.length === 0 && <tr><td colSpan={6} className="empty">Sin proveedores registrados</td></tr>}
               </tbody>
             </table>
