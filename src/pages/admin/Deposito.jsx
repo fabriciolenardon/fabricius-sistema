@@ -11,11 +11,39 @@ import AjusteStock from './AjusteStock'
 import CajasTab from './CajasTab'
 
 async function actualizarStock(tipo, kg) {
-  const { data } = await supabase.from('stock_actual').select('*').eq('tipo', tipo).maybeSingle()
+  // Devuelve { error } para que el caller pueda chequear si la operación
+  // falló. Antes los errores se tragaban silenciosamente — eso causó que
+  // alguna vez la elaboración descontara las piezas pero no sumara los
+  // embutidos al stock (la operaria tuvo que ajustarlo a mano).
+  const { data, error: errSel } = await supabase.from('stock_actual').select('*').eq('tipo', tipo).maybeSingle()
+  if (errSel) return { error: errSel }
   if (data) {
-    await supabase.from('stock_actual').update({ kg_disponible: (data.kg_disponible || 0) + kg }).eq('tipo', tipo)
-  } else {
-    await supabase.from('stock_actual').insert({ tipo, kg_disponible: kg })
+    const { error } = await supabase.from('stock_actual')
+      .update({ kg_disponible: (data.kg_disponible || 0) + kg })
+      .eq('tipo', tipo)
+    return { error: error || null }
+  }
+  const { error } = await supabase.from('stock_actual').insert({ tipo, kg_disponible: kg })
+  return { error: error || null }
+}
+
+// Helper: format de hora desde un timestamp de Postgres.
+// Convertimos created_at a hora ARG con formato HH:MM. Dos pasos:
+//   1) Si el string no trae TZ explicita (caso de columnas legacy
+//      `timestamp without time zone`) lo tratamos como UTC.
+//   2) Forzamos timeZone ARG en el toLocaleTimeString — sino la maquina
+//      del cliente decide la TZ (ej. si la PC del local esta mal seteada).
+function fmtHora(ts) {
+  if (!ts) return ''
+  try {
+    const tieneTZ = /(Z|[+\-]\d{2}:?\d{2})$/.test(String(ts).trim())
+    const d = new Date(tieneTZ ? ts : ts.replace(' ', 'T') + 'Z')
+    return d.toLocaleTimeString('es-AR', {
+      hour: '2-digit', minute: '2-digit',
+      timeZone: 'America/Argentina/Buenos_Aires',
+    })
+  } catch {
+    return ''
   }
 }
 
@@ -146,6 +174,9 @@ const [kgQuesoEmbutido, setKgQuesoEmbutido] = useState('')
 const [pctAumentoEmbutido, setPctAumentoEmbutido] = useState(10)
 const [elaboraciones, setElaboraciones] = useState([])
 const [piezasIndividuales, setPiezasIndividuales] = useState([])
+// Historial completo de medias_stock (todos los estados) para la pestana
+// "Historial Medias". Se carga junto con cargarDatos.
+const [mediasStockAll, setMediasStockAll] = useState([])
 const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(null)
   const MERMAS_KILO = {
     novillo:  { label: 'Novillo / Novillito', merma: 0.24, color: 'var(--gold)' },
@@ -155,17 +186,56 @@ const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(n
 
   useEffect(() => { cargarDatos() }, [])
 
+  // Realtime: cuando OTRO usuario (admin desde otra pestaña, desposte
+  // desde el tablet, cajero al vender) modifica el stock o las medias,
+  // recargamos los datos automaticamente para que esta pantalla siempre
+  // muestre la realidad — sin necesidad de F5.
+  // Usamos un canal por tabla critica y un debounce de 400ms para no
+  // disparar 10 recargas seguidas si llegan varios eventos juntos.
+  useEffect(() => {
+    let timer = null
+    const debouncedReload = () => {
+      clearTimeout(timer)
+      timer = setTimeout(() => cargarDatos(), 400)
+    }
+    const canal = supabase.channel('deposito-stock-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'entradas_deposito' }, debouncedReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'medias_stock' }, debouncedReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'piezas_stock' }, debouncedReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cajas_stock' }, debouncedReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_actual' }, debouncedReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'despostes' }, debouncedReload)
+      .subscribe()
+    return () => {
+      clearTimeout(timer)
+      supabase.removeChannel(canal)
+    }
+  }, [])
+
   async function cargarDatos() {
-    const [{ data: entradas }, { data: despostesData }, { data: preciosData }, { data: stockData }, { data: caponesData }, { data: elaboracionesData }, { data: piezasIndivData }] = await Promise.all([
-  supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).eq('reservada', false).order('fecha', { ascending: false }),
+    // Orden: fecha DESC + created_at DESC para todas las queries de entradas_deposito.
+    // `fecha` es DATE (sin hora), así que entradas del mismo día caían en orden
+    // inestable. `id` no sirve como tiebreaker porque son UUIDs aleatorios.
+    // `created_at` (timestamp) es el único campo que refleja el orden real de
+    // creación.
+    const [{ data: entradas }, { data: despostesData }, { data: preciosData }, { data: stockData }, { data: caponesData }, { data: elaboracionesData }, { data: piezasIndivData }, { data: mediasStockData }] = await Promise.all([
+  supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).eq('reservada', false).order('fecha', { ascending: false }).order('created_at', { ascending: false }),
   supabase.from('despostes').select('*').order('fecha', { ascending: false }),
   supabase.from('precios').select('*').eq('categoria', 'bovino_pieza'),
   supabase.from('stock_actual').select('*'),
-  supabase.from('entradas_deposito').select('*').eq('tipo', 'cerdo').eq('despostada', false).order('fecha', { ascending: false }),
-  supabase.from('elaboraciones_embutidos').select('*').order('fecha', { ascending: false }),
-  supabase.from('piezas_stock').select('*').order('fecha_ingreso', { ascending: false }).order('id', { ascending: false })
+  supabase.from('entradas_deposito').select('*').eq('tipo', 'cerdo').eq('despostada', false).order('fecha', { ascending: false }).order('created_at', { ascending: false }),
+  supabase.from('elaboraciones_embutidos').select('*').order('fecha', { ascending: false }).order('created_at', { ascending: false }),
+  supabase.from('piezas_stock').select('*').order('fecha_ingreso', { ascending: false }).order('id', { ascending: false }),
+  // Trazabilidad individual de medias reses con codigo MR-XXX.
+  // Traemos TODAS las filas (cualquier estado) para alimentar tanto el mapeo
+  // de codigos como el historial completo de medias en el sub-tab "Historial Medias".
+  supabase.from('medias_stock').select('*').order('id', { ascending: false }),
 ])
-setMediasRes(entradas || [])
+// Enriquecer cada entrada con el codigo MR-XXX de medias_stock
+const codigoPorEntrada = {}
+;(mediasStockData || []).forEach(m => { if (m.entrada_id) codigoPorEntrada[m.entrada_id] = m.codigo })
+setMediasStockAll(mediasStockData || [])
+setMediasRes((entradas || []).map(e => ({ ...e, codigo_media: codigoPorEntrada[e.id] || null })))
 setDespostes(despostesData || [])
 setPrecios(preciosData || [])
 setPiezasIndividuales(piezasIndivData || [])
@@ -174,8 +244,6 @@ const stockMap = {}
 setPiezasStock(stockMap)
 setCaponesDisponibles(caponesData || [])
 setElaboraciones(elaboracionesData || [])
-console.log('CAPONES:', caponesData)
-console.log('STOCK CARGADO:', stockMap)
   }
   function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(() => setAlert(null), 5000) }
 
@@ -241,6 +309,10 @@ console.log('STOCK CARGADO:', stockMap)
       }).select().single()
       if (error) throw error
       await supabase.from('entradas_deposito').update({ despostada: true, desposte_id: desposteData.id }).eq('id', seleccionada.id)
+      // Marcar la media res como despostada en medias_stock (trazabilidad individual)
+      await supabase.from('medias_stock').update({
+        estado: 'despostada', desposte_id: desposteData.id, fecha_salida: fecha,
+      }).eq('entrada_id', seleccionada.id)
       await actualizarStock('bovino_mr', -kgBase)
       // Stock agregado (compat) — sigue sumando al total bovino_pieza
       for (const pieza of piezas) { await actualizarStock('bovino_pieza', pieza.kg_editado) }
@@ -318,6 +390,10 @@ console.log('STOCK CARGADO:', stockMap)
       }).select().single()
       if (error) throw error
       await supabase.from('entradas_deposito').update({ despostada: true, desposte_id: desposteData.id }).eq('id', seleccionada.id)
+      // Marcar la media res como despostada en medias_stock (trazabilidad individual)
+      await supabase.from('medias_stock').update({
+        estado: 'despostada', desposte_id: desposteData.id, fecha_salida: fecha,
+      }).eq('entrada_id', seleccionada.id)
       await actualizarStock('bovino_mr', -kgBase)
       await actualizarStock('bovino_corte', kgNeto)
       showAlert('✅ Media res enviada a cortes — ' + kgNeto.toFixed(1) + ' kg al stock')
@@ -345,10 +421,27 @@ async function confirmarElaboracionEmbutido() {
       kg_final: kgFinal, maduracion_completa: true, notas
     })
     for (const [tipo, v] of Object.entries(piezasEmbutido)) {
-      if (parseFloat(v) > 0) await actualizarStock(tipo, -parseFloat(v))
+      if (parseFloat(v) > 0) {
+        const { error } = await actualizarStock(tipo, -parseFloat(v))
+        if (error) throw new Error(`No se descontó ${tipo}: ${error.message}`)
+      }
     }
-    if (parseNumero(kgCarneBovinaEmbutido) > 0) await actualizarStock('bovino_corte', -parseNumero(kgCarneBovinaEmbutido))
-    await actualizarStock('embutido', kgFinal)
+    if (parseNumero(kgCarneBovinaEmbutido) > 0) {
+      const { error } = await actualizarStock('bovino_corte', -parseNumero(kgCarneBovinaEmbutido))
+      if (error) throw new Error(`No se descontó bovino_corte: ${error.message}`)
+    }
+    // Suma al stock 'embutido' — paso crítico que antes fallaba en silencio.
+    // Verificamos con un re-read que efectivamente subió, así si algo se
+    // rompe lo vemos al instante en vez de tener que cuadrarlo a mano.
+    const { data: stockAntes } = await supabase.from('stock_actual').select('kg_disponible').eq('tipo', 'embutido').maybeSingle()
+    const kgEsperado = (Number(stockAntes?.kg_disponible) || 0) + kgFinal
+    const { error: errEmb } = await actualizarStock('embutido', kgFinal)
+    if (errEmb) throw new Error(`No se sumó al stock de embutidos: ${errEmb.message}`)
+    const { data: stockDespues } = await supabase.from('stock_actual').select('kg_disponible').eq('tipo', 'embutido').maybeSingle()
+    const kgReal = Number(stockDespues?.kg_disponible) || 0
+    if (Math.abs(kgReal - kgEsperado) > 0.01) {
+      throw new Error(`El stock de embutidos no se actualizó correctamente. Esperado: ${kgEsperado.toFixed(2)} kg, real: ${kgReal.toFixed(2)} kg. Revisá el ajuste manual.`)
+    }
     showAlert(`✅ ${kgFinal.toFixed(1)} kg de embutidos elaborados al stock`)
     setPiezasEmbutido({ cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '', cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: '' })
     setKgCarneBovinaEmbutido(''); setKgQuesoEmbutido(''); setNotas('')
@@ -380,9 +473,15 @@ async function confirmarElaboracionSalame() {
         notas
       })
       for (const [tipo, v] of Object.entries(piezasEmbutido)) {
-        if (parseFloat(v) > 0) await actualizarStock(tipo, -parseFloat(v))
+        if (parseFloat(v) > 0) {
+          const { error } = await actualizarStock(tipo, -parseFloat(v))
+          if (error) throw new Error(`No se descontó ${tipo}: ${error.message}`)
+        }
       }
-      if (parseNumero(kgCarneBovinaEmbutido) > 0) await actualizarStock('bovino_corte', -parseNumero(kgCarneBovinaEmbutido))
+      if (parseNumero(kgCarneBovinaEmbutido) > 0) {
+        const { error } = await actualizarStock('bovino_corte', -parseNumero(kgCarneBovinaEmbutido))
+        if (error) throw new Error(`No se descontó bovino_corte: ${error.message}`)
+      }
       showAlert(`✅ Salame registrado — Maduración hasta ${fechaHoyARG(fechaFin)}`)
       setPiezasEmbutido({ cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '', cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: '' })
       setKgCarneBovinaEmbutido(''); setKgQuesoEmbutido(''); setNotas('')
@@ -554,7 +653,7 @@ async function confirmarDesposteCerdo() {
       {alert && <div style={{ background: alert.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${alert.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: alert.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>{alert.msg}</div>}
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
         {[{ id: 'piezas', label: '🍖 Desposte en Piezas' }, { id: 'kilo', label: '⚖️ Desposte para venta por Kilo' }, { id: 'pieza_kilo', label: '🔄 Convertir Pieza a Cortes' }, { id: 'cerdo', label: '🐷 Desposte Cerdo' },
-{ id: 'embutidos', label: '🌭 Elaborar Embutidos' }, { id: 'historial', label: '📋 Historial' }].map(t => (
+{ id: 'embutidos', label: '🌭 Elaborar Embutidos' }, { id: 'medias_hist', label: '🐄 Historial Medias' }, { id: 'historial', label: '📋 Historial' }].map(t => (
           <button key={t.id} onClick={() => { setSubtab(t.id); setSeleccionada(null); setPiezas([]); cargarDatos() }}
             style={{ padding: '8px 16px', borderRadius: 8, border: `1px solid ${subtab === t.id ? 'var(--gold)' : 'var(--border)'}`, background: subtab === t.id ? 'var(--gold)' : 'transparent', color: subtab === t.id ? '#000' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
             {t.label}
@@ -572,7 +671,10 @@ async function confirmarDesposteCerdo() {
                   style={{ padding: 12, borderRadius: 8, marginBottom: 8, cursor: 'pointer', border: `2px solid ${seleccionada?.id === e.id ? 'var(--gold)' : 'var(--border)'}`, background: seleccionada?.id === e.id ? 'rgba(201,168,76,0.08)' : 'var(--surface2)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <div>
-                      <div style={{ fontWeight: 700, fontSize: 13 }}>🐄 {e.descripcion || 'Media Res'}</div>
+                      <div style={{ fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {e.codigo_media && <span style={{ background: 'var(--gold)', color: '#000', padding: '2px 7px', borderRadius: 6, fontSize: 11, fontWeight: 800, letterSpacing: 0.5 }}>{e.codigo_media}</span>}
+                        🐄 {e.descripcion || 'Media Res'}
+                      </div>
                       <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.fecha} · {e.proveedor_nombre}</div>
                       {e.precio_kg > 0 && <div style={{ fontSize: 11, color: 'var(--amber)' }}>${Math.round(e.precio_kg).toLocaleString('es-AR')}/kg</div>}
                     </div>
@@ -669,7 +771,10 @@ async function confirmarDesposteCerdo() {
                   style={{ padding: 12, borderRadius: 8, marginBottom: 8, cursor: 'pointer', border: `2px solid ${seleccionada?.id === e.id ? 'var(--blue)' : 'var(--border)'}`, background: seleccionada?.id === e.id ? 'rgba(41,128,185,0.08)' : 'var(--surface2)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <div>
-                      <div style={{ fontWeight: 700, fontSize: 13 }}>🐄 {e.descripcion || 'Media Res'}</div>
+                      <div style={{ fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {e.codigo_media && <span style={{ background: 'var(--blue)', color: '#fff', padding: '2px 7px', borderRadius: 6, fontSize: 11, fontWeight: 800, letterSpacing: 0.5 }}>{e.codigo_media}</span>}
+                        🐄 {e.descripcion || 'Media Res'}
+                      </div>
                       <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.fecha} · {e.proveedor_nombre}</div>
                       {e.precio_kg > 0 && <div style={{ fontSize: 11, color: 'var(--amber)' }}>Costo: ${Math.round(e.precio_kg).toLocaleString('es-AR')}/kg</div>}
                     </div>
@@ -909,6 +1014,7 @@ async function confirmarDesposteCerdo() {
   </div>
 )}
 {subtab === 'embutidos' && (
+  <>
   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: 16 }}>
     <div>
       <div className="card" style={{ marginBottom: 16 }}>
@@ -1028,6 +1134,14 @@ async function confirmarDesposteCerdo() {
       </button>
     </div>
   </div>
+  <div style={{ marginTop: 16 }}>
+    <HistorialElaboraciones elaboraciones={elaboraciones} />
+  </div>
+  </>
+)}
+
+{subtab === 'medias_hist' && (
+  <HistorialMedias medias={mediasStockAll} />
 )}
 
 {subtab === 'historial' && (
@@ -1110,6 +1224,112 @@ async function confirmarDesposteCerdo() {
 }
 // ───────────────────────────────────────────────────────────
 // Componentes auxiliares para paginar los historiales del tab
+// "Desposte → Historial Medias" — historial completo de medias_stock.
+// Una fila por cada media res fisica con su codigo MR-XXX, estado actual,
+// y trazabilidad (proveedor, fecha ingreso, destino, cliente, fecha salida).
+// Patron equivalente al de piezas individuales pero para medias.
+// ───────────────────────────────────────────────────────────
+function HistorialMedias({ medias }) {
+  const [filtroEstado, setFiltroEstado] = useState('todos')
+  const ESTADOS = [
+    { id: 'todos',      label: 'Todas', color: 'var(--muted)' },
+    { id: 'disponible', label: '🟢 Disponibles', color: '#7dff7d' },
+    { id: 'reservada',  label: '🟡 Reservadas', color: '#ffd17a' },
+    { id: 'despostada', label: '🔪 Despostadas', color: '#a78bfa' },
+    { id: 'vendida',    label: '💰 Vendidas (enteras)', color: '#7db5ff' },
+    { id: 'anulada',    label: '❌ Anuladas', color: '#ff8b8b' },
+  ]
+  const filtradas = (medias || []).filter(m => filtroEstado === 'todos' || m.estado === filtroEstado)
+  const pag = usePaginacion(filtradas, 25)
+  // Conteos por estado para los badges del filtro
+  const counts = {}
+  ;(medias || []).forEach(m => { counts[m.estado] = (counts[m.estado] || 0) + 1 })
+  counts.todos = (medias || []).length
+
+  function colorEstado(estado) {
+    return ESTADOS.find(e => e.id === estado)?.color || 'var(--muted)'
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card-title">🐄 Historial de Medias Reses ({(medias || []).length})</div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
+        Cada media res cargada al sistema tiene un código <strong style={{ color: 'var(--gold)' }}>MR-XXX</strong> para
+        trazarla en todo su ciclo: ingreso, reserva, desposte, venta.
+      </div>
+      {/* Filtros por estado */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
+        {ESTADOS.map(e => (
+          <button key={e.id} onClick={() => setFiltroEstado(e.id)}
+            style={{
+              padding: '6px 12px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+              border: `1px solid ${filtroEstado === e.id ? e.color : 'var(--border)'}`,
+              background: filtroEstado === e.id ? `${e.color}22` : 'transparent',
+              color: filtroEstado === e.id ? e.color : 'var(--muted)',
+              cursor: 'pointer', fontFamily: "'DM Sans',sans-serif",
+            }}>
+            {e.label} <span style={{ opacity: 0.7 }}>({counts[e.id] || 0})</span>
+          </button>
+        ))}
+      </div>
+
+      {filtradas.length === 0
+        ? <div className="empty">Sin medias reses en este filtro</div>
+        : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid var(--border)' }}>
+                  <th style={th}>Código</th>
+                  <th style={th}>Ingreso</th>
+                  <th style={th}>Proveedor</th>
+                  <th style={{ ...th, textAlign: 'right' }}>Kg</th>
+                  <th style={{ ...th, textAlign: 'right' }}>$/kg</th>
+                  <th style={th}>Estado</th>
+                  <th style={th}>Destino / Cliente</th>
+                  <th style={th}>Fecha salida</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pag.items.map(m => (
+                  <tr key={m.id} style={{ borderBottom: '1px solid var(--border)', fontSize: 12 }}>
+                    <td style={td}>
+                      <span style={{ background: 'var(--gold)', color: '#000', padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 800, letterSpacing: 0.5 }}>
+                        {m.codigo}
+                      </span>
+                    </td>
+                    <td style={td}>{m.fecha_ingreso}</td>
+                    <td style={td}>{m.proveedor_origen || '—'}</td>
+                    <td style={{ ...td, textAlign: 'right', fontFamily: "'Bebas Neue',cursive", fontSize: 15, color: 'var(--gold)' }}>
+                      {Number(m.kg || 0).toFixed(1)}
+                    </td>
+                    <td style={{ ...td, textAlign: 'right', color: 'var(--amber)' }}>
+                      {m.precio_costo_kg ? `$${Math.round(m.precio_costo_kg).toLocaleString('es-AR')}` : '—'}
+                    </td>
+                    <td style={td}>
+                      <span style={{ color: colorEstado(m.estado), fontWeight: 700 }}>
+                        {ESTADOS.find(e => e.id === m.estado)?.label?.replace(/^[^ ]+ /, '') || m.estado}
+                      </span>
+                    </td>
+                    <td style={td}>
+                      {m.cliente_nombre || m.destino || (m.estado === 'reservada' ? m.reservada_para : '—')}
+                    </td>
+                    <td style={td}>{m.fecha_salida || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <Paginador {...pag.controles} label="medias" />
+          </div>
+        )
+      }
+    </div>
+  )
+}
+const th = { textAlign: 'left', padding: '8px 10px', fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 700 }
+const td = { padding: '8px 10px', verticalAlign: 'middle' }
+
+// ───────────────────────────────────────────────────────────
 // "Desposte → Historial" (despostes + elaboraciones de embutidos/salames)
 // ───────────────────────────────────────────────────────────
 function HistorialDespostes({ despostes }) {
@@ -1163,7 +1383,7 @@ function HistorialElaboraciones({ elaboraciones }) {
                   {e.tipo === 'salame' ? '🥩 Salame' : '🌭'} {e.tipo === 'embutido' ? e.tipo_embutido?.replace(/_/g, ' ').toUpperCase() : ''}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                  {e.fecha} · {(e.kg_carne_cerdo || 0).toFixed(1)} kg cerdo + {(e.kg_carne_bovina || 0).toFixed(1)} kg bovino
+                  {e.fecha}{e.created_at ? ` · ${fmtHora(e.created_at)}` : ''} · {(e.kg_carne_cerdo || 0).toFixed(1)} kg cerdo + {(e.kg_carne_bovina || 0).toFixed(1)} kg bovino
                   {e.kg_queso > 0 ? ` + ${e.kg_queso.toFixed(1)} kg queso` : ''}
                 </div>
                 {e.tipo === 'salame' && !e.maduracion_completa && (
@@ -1255,11 +1475,15 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
   async function cargarHistorial() {
     // Antes estaba limitado a 100, lo que cortaba el historial de meses
     // anteriores. Ahora traemos todo y paginamos en cliente con usePaginacion.
+    // Orden: fecha DESC + created_at DESC. Antes se usaba `id` como tiebreaker
+    // pero `id` es UUID (aleatorio), no autoincremental, así que el orden de
+    // entradas del mismo día era impredecible. `created_at` es el timestamp
+    // real de inserción y SÍ refleja la hora.
     const { data } = await supabase
       .from('entradas_deposito')
       .select('*')
       .order('fecha', { ascending: false })
-      .order('id', { ascending: false })
+      .order('created_at', { ascending: false })
     setHistorial(data || [])
   }
 
@@ -1407,15 +1631,46 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     const descripcionFinal = esEnUnidades && cantidad > 1
       ? `${descripcionBase} ×${cantidad}`
       : descripcionBase
-    const { error } = await supabase.from('entradas_deposito').insert({
+    // Para bovino_mr necesitamos el id de la entrada insertada para crear
+    // la fila correspondiente en medias_stock (el codigo MR-XXX se genera
+    // automaticamente desde el id de medias_stock por columna generada).
+    const { data: entradaInsertada, error } = await supabase.from('entradas_deposito').insert({
       fecha: form.fecha, tipo: form.tipo, proveedor_nombre: form.proveedor,
       descripcion: descripcionFinal, kg: kgTotal, kg_real: kgReal,
       merma_pct: parseNumero(form.merma), precio_kg: parseNumero(form.precioKg),
       importe, destino: form.destino, cantidad
-    })
+    }).select().single()
     if (error) { showAlert({ type: 'error', msg: error.message }); return }
     const kgSumar = form.tipo === 'bovino_mr' ? kgReal : kgTotal
     await actualizarStock(form.tipo, kgSumar)
+
+    // Tracking individual de medias reses: una fila por cada media fisica
+    // en medias_stock, con codigo visible MR-XXX. Si la entrada agrupa varias
+    // unidades (cantidad > 1, raro en bovino_mr pero posible), creamos una
+    // fila por unidad.
+    if (form.tipo === 'bovino_mr' && entradaInsertada) {
+      const filasMedias = []
+      // Si vino 1 sola media: 1 fila con todos los kg. Si vinieron varias en
+      // una sola carga (caso raro), repartimos kg en partes iguales. Esto es
+      // best-effort — lo ideal es cargar una entrada por media res fisica.
+      const kgPorMedia = kgReal / cantidad
+      for (let i = 0; i < cantidad; i++) {
+        filasMedias.push({
+          // Solo la primera fila tiene entrada_id (la columna es UNIQUE).
+          // Las demas quedan sin referencia a entradas_deposito — el codigo
+          // MR-XXX igual las identifica. Esto solo importa si cantidad > 1.
+          entrada_id: i === 0 ? entradaInsertada.id : null,
+          kg: kgPorMedia,
+          proveedor_origen: form.proveedor,
+          fecha_ingreso: form.fecha,
+          precio_costo_kg: parseNumero(form.precioKg),
+          descripcion: descripcionFinal,
+          estado: 'disponible',
+        })
+      }
+      const { error: errMedias } = await supabase.from('medias_stock').insert(filasMedias)
+      if (errMedias) console.warn('No se pudo crear fila en medias_stock:', errMedias.message)
+    }
     await supabase.from('compras_proveedores').insert({
       fecha: form.fecha, proveedor_nombre: form.proveedor,
       producto: descripcionFinal,
@@ -1729,7 +1984,14 @@ async function eliminar(entrada) {
                 </tr>
               ) : (
                 <tr key={e.id}>
-                  <td>{e.fecha}</td>
+                  <td>
+                    <div style={{ fontWeight: 600 }}>{e.fecha}</div>
+                    {/* Hora real de ingreso (created_at) para que el orden
+                        cronologico dentro del mismo dia sea visible. Sin
+                        esto, todas las entradas del mismo dia se veian
+                        "iguales" aunque internamente esten bien ordenadas. */}
+                    <div style={{ fontSize: 10, color: 'var(--muted)' }}>{fmtHora(e.created_at)}</div>
+                  </td>
                   <td style={{ fontSize: 12 }}>{TIPOS[e.tipo] || e.tipo}</td>
                   <td>{e.proveedor_nombre}</td>
                   <td>{e.descripcion}</td>
@@ -1788,7 +2050,10 @@ export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   useEffect(() => {
     supabase.from('precios').select('*').order('nombre').then(({ data }) => setTodosPrecios(data || []))
     supabase.from('clientes').select('*').order('nombre').then(({ data }) => setClientes(data || []))
-  supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false }).then(({ data }) => setMediasDisponibles(data || []))
+  // Orden por created_at además de fecha: dos medias reses cargadas el mismo
+  // día necesitan ordenarse por hora real de creación (la columna `fecha` es
+  // DATE y `id` es UUID — ninguno sirve solo como criterio cronológico).
+  supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false }).order('created_at', { ascending: false }).then(({ data }) => setMediasDisponibles(data || []))
   recargarPiezasDispVenta()
   recargarCajasDispVenta()
   recargarStockMap()
@@ -2036,9 +2301,18 @@ for (const item of items) {
       const mediasIds = items.map(it => it.media_res_id).filter(Boolean)
       if (mediasIds.length > 0) {
         await supabase.from('entradas_deposito').update({ despostada: true }).in('id', mediasIds)
+        // Marcar las medias como vendidas en medias_stock (no despostadas: en este
+        // flujo de venta mayorista la media se va entera al cliente).
+        await supabase.from('medias_stock').update({
+          estado: 'vendida',
+          cliente_nombre: clienteNombre,
+          cliente_id: clienteId || null,
+          fecha_salida: form.fecha,
+          destino: form.destino,
+        }).in('entrada_id', mediasIds)
       }
       setMediaSeleccionada(null)
-      const { data: medias } = await supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false })
+      const { data: medias } = await supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false }).order('created_at', { ascending: false })
       setMediasDisponibles(medias || [])
     const { data: remitoData } = await supabase.from('remitos').insert({
       fecha: form.fecha, cliente_nombre: clienteNombre,
@@ -2667,6 +2941,7 @@ function ProveedoresTab() {
   const [formLegajo, setFormLegajo] = useState({ contacto: '', telefono: '', cuit: '', direccion: '', producto_principal: '', notas: '' })
   const [formCompra, setFormCompra] = useState({ fecha: fechaHoyARG(), semana_inicio: '', semana_fin: '', proveedor_nombre: '', producto: '', kg: '', importe: '' })
   const [formPago, setFormPago] = useState({ fecha: fechaHoyARG(), semana_inicio: '', semana_fin: '', proveedor_nombre: '', importe_compra: '', percepcion: '', saldo_anterior: '', entrega: '', notas: '' })
+  const [editandoPagoId, setEditandoPagoId] = useState(null)
 
   // Filtros y modal de detalle del nuevo buscador de compras
   const [filtroDesde, setFiltroDesde] = useState('')
@@ -2823,9 +3098,50 @@ function ProveedoresTab() {
   async function guardarPago() {
     if (!formPago.proveedor_nombre) { showMsg('Seleccioná un proveedor', 'error'); return }
     const saldoAdeudado = (parseNumero(formPago.importe_compra)) + (parseNumero(formPago.percepcion)) + (parseNumero(formPago.saldo_anterior)) - (parseNumero(formPago.entrega))
-    await supabase.from('pagos_proveedores_semanal').insert({ fecha: formPago.fecha, semana_inicio: formPago.semana_inicio || null, semana_fin: formPago.semana_fin || null, proveedor_nombre: formPago.proveedor_nombre, importe_compra: parseNumero(formPago.importe_compra), percepcion: parseNumero(formPago.percepcion), saldo_anterior: parseNumero(formPago.saldo_anterior), entrega: parseNumero(formPago.entrega), saldo_adeudado: saldoAdeudado, notas: formPago.notas })
-    showMsg('✅ Pago registrado')
+    const payload = { fecha: formPago.fecha, semana_inicio: formPago.semana_inicio || null, semana_fin: formPago.semana_fin || null, proveedor_nombre: formPago.proveedor_nombre, importe_compra: parseNumero(formPago.importe_compra), percepcion: parseNumero(formPago.percepcion), saldo_anterior: parseNumero(formPago.saldo_anterior), entrega: parseNumero(formPago.entrega), saldo_adeudado: saldoAdeudado, notas: formPago.notas }
+    if (editandoPagoId) {
+      const { error } = await supabase.from('pagos_proveedores_semanal').update(payload).eq('id', editandoPagoId)
+      if (error) { showMsg('❌ Error al actualizar: ' + error.message, 'error'); return }
+      showMsg('✅ Pago actualizado')
+      setEditandoPagoId(null)
+    } else {
+      const { error } = await supabase.from('pagos_proveedores_semanal').insert(payload)
+      if (error) { showMsg('❌ Error al registrar: ' + error.message, 'error'); return }
+      showMsg('✅ Pago registrado')
+    }
     setFormPago(f => ({ ...f, importe_compra: '', percepcion: '', saldo_anterior: '', entrega: '', notas: '', proveedor_nombre: '' })); fetchAll()
+  }
+
+  function iniciarEditarPago(p) {
+    setEditandoPagoId(p.id)
+    setFormPago({
+      fecha: p.fecha,
+      semana_inicio: p.semana_inicio || '',
+      semana_fin: p.semana_fin || '',
+      proveedor_nombre: p.proveedor_nombre || '',
+      importe_compra: String(p.importe_compra ?? ''),
+      percepcion: String(p.percepcion ?? ''),
+      saldo_anterior: String(p.saldo_anterior ?? ''),
+      entrega: String(p.entrega ?? ''),
+      notas: p.notas || '',
+    })
+    // Scroll al form para que el usuario vea los campos cargados.
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  function cancelarEditarPago() {
+    setEditandoPagoId(null)
+    setFormPago(f => ({ ...f, importe_compra: '', percepcion: '', saldo_anterior: '', entrega: '', notas: '', proveedor_nombre: '' }))
+  }
+
+  async function eliminarPago(p) {
+    if (!confirm(`¿Eliminar el pago de ${p.proveedor_nombre} del ${p.fecha} por ${fmt(p.importe_compra)}?\n\nAcción IRREVERSIBLE.`)) return
+    const { error } = await supabase.from('pagos_proveedores_semanal').delete().eq('id', p.id)
+    if (error) { showMsg('❌ Error al eliminar: ' + error.message, 'error'); return }
+    showMsg('✅ Pago eliminado')
+    // Si estábamos editando el que acabamos de borrar, salir del modo edición.
+    if (editandoPagoId === p.id) cancelarEditarPago()
+    fetchAll()
   }
 
   const proveedoresNombres = proveedoresDB.map(p => p.nombre)
@@ -3057,15 +3373,15 @@ function ProveedoresTab() {
 
       {subtab === 'pagos' && (
         <div>
-          <div className="card" style={{ marginBottom: 16 }}>
-            <div className="card-title">💰 Registrar pago semanal</div>
+          <div className="card" style={{ marginBottom: 16, borderColor: editandoPagoId ? 'var(--gold)' : undefined, borderWidth: editandoPagoId ? 2 : undefined }}>
+            <div className="card-title">{editandoPagoId ? '✏️ Editando pago semanal' : '💰 Registrar pago semanal'}</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
               <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Proveedor</label><select value={formPago.proveedor_nombre} onChange={e => setFormPago(f => ({ ...f, proveedor_nombre: e.target.value }))} style={inp}><option value="">— Seleccioná —</option>{proveedoresNombres.map(p => <option key={p}>{p}</option>)}</select></div>
               <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Fecha</label><input type="date" value={formPago.fecha} onChange={e => setFormPago(f => ({ ...f, fecha: e.target.value }))} style={inp} /></div>
-              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Importe compra ($)</label><input type="number" value={formPago.importe_compra} onChange={e => setFormPago(f => ({ ...f, importe_compra: e.target.value }))} placeholder="0" style={inp} /></div>
-              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Percepción ($)</label><input type="number" value={formPago.percepcion} onChange={e => setFormPago(f => ({ ...f, percepcion: e.target.value }))} placeholder="0" style={inp} /></div>
-              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Saldo semana anterior ($)</label><input type="number" value={formPago.saldo_anterior} onChange={e => setFormPago(f => ({ ...f, saldo_anterior: e.target.value }))} placeholder="0" style={inp} /></div>
-              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Lo que se entrega ($)</label><input type="number" value={formPago.entrega} onChange={e => setFormPago(f => ({ ...f, entrega: e.target.value }))} placeholder="0" style={{ ...inp, borderColor: 'var(--green)' }} /></div>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Importe compra ($)</label><input type="text" inputMode="decimal" value={formPago.importe_compra} onChange={e => setFormPago(f => ({ ...f, importe_compra: e.target.value }))} placeholder="Ej: 105.687,66" style={inp} /></div>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Percepción ($)</label><input type="text" inputMode="decimal" value={formPago.percepcion} onChange={e => setFormPago(f => ({ ...f, percepcion: e.target.value }))} placeholder="0" style={inp} /></div>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Saldo semana anterior ($)</label><input type="text" inputMode="decimal" value={formPago.saldo_anterior} onChange={e => setFormPago(f => ({ ...f, saldo_anterior: e.target.value }))} placeholder="0" style={inp} /></div>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Lo que se entrega ($)</label><input type="text" inputMode="decimal" value={formPago.entrega} onChange={e => setFormPago(f => ({ ...f, entrega: e.target.value }))} placeholder="0" style={{ ...inp, borderColor: 'var(--green)' }} /></div>
             </div>
             {(formPago.importe_compra || formPago.entrega) && (
               <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, display: 'flex', gap: 20, flexWrap: 'wrap' }}>
@@ -3077,12 +3393,29 @@ function ProveedoresTab() {
               </div>
             )}
             <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Notas</label><input value={formPago.notas} onChange={e => setFormPago(f => ({ ...f, notas: e.target.value }))} placeholder="Cheque nro., banco, etc." style={{ ...inp, marginBottom: 12 }} /></div>
-            <button className="btn btn-gold" onClick={guardarPago}>✅ Registrar pago semanal</button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-gold" onClick={guardarPago}>{editandoPagoId ? '💾 Guardar cambios' : '✅ Registrar pago semanal'}</button>
+              {editandoPagoId && <button className="btn btn-ghost" onClick={cancelarEditarPago}>✕ Cancelar edición</button>}
+            </div>
           </div>
           <div className="card">
             <div className="card-title">Historial de pagos semanales ({pagos.length})</div>
-            <table><thead><tr><th>Fecha</th><th>Proveedor</th><th>Compra</th><th>Percep.</th><th>Saldo ant.</th><th>Entrega</th><th>Saldo adeudado</th></tr></thead>
-            <tbody>{pagPagos.items.map(p => (<tr key={p.id}><td>{p.fecha}</td><td><strong>{p.proveedor_nombre}</strong></td><td style={{ color: 'var(--amber)' }}>{fmt(p.importe_compra)}</td><td>{p.percepcion > 0 ? fmt(p.percepcion) : '—'}</td><td>{p.saldo_anterior > 0 ? fmt(p.saldo_anterior) : '—'}</td><td style={{ color: 'var(--green)' }}>{fmt(p.entrega)}</td><td style={{ color: p.saldo_adeudado > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 700 }}>{fmt(p.saldo_adeudado)}</td></tr>))}{pagos.length === 0 && <tr><td colSpan={7} className="empty">Sin pagos registrados</td></tr>}</tbody></table>
+            <table><thead><tr><th>Fecha</th><th>Proveedor</th><th>Compra</th><th>Percep.</th><th>Saldo ant.</th><th>Entrega</th><th>Saldo adeudado</th><th>Acciones</th></tr></thead>
+            <tbody>{pagPagos.items.map(p => (
+              <tr key={p.id} style={{ background: editandoPagoId === p.id ? 'rgba(201,168,76,0.08)' : undefined }}>
+                <td>{p.fecha}</td>
+                <td><strong>{p.proveedor_nombre}</strong></td>
+                <td style={{ color: 'var(--amber)' }}>{fmt(p.importe_compra)}</td>
+                <td>{p.percepcion > 0 ? fmt(p.percepcion) : '—'}</td>
+                <td>{p.saldo_anterior > 0 ? fmt(p.saldo_anterior) : '—'}</td>
+                <td style={{ color: 'var(--green)' }}>{fmt(p.entrega)}</td>
+                <td style={{ color: p.saldo_adeudado > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 700 }}>{fmt(p.saldo_adeudado)}</td>
+                <td style={{ display: 'flex', gap: 4, whiteSpace: 'nowrap' }}>
+                  <button onClick={() => iniciarEditarPago(p)} title="Editar pago" style={{ background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>✏️ Editar</button>
+                  <button onClick={() => eliminarPago(p)} title="Eliminar pago" style={{ background: 'var(--red-light)', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>🗑️</button>
+                </td>
+              </tr>
+            ))}{pagos.length === 0 && <tr><td colSpan={8} className="empty">Sin pagos registrados</td></tr>}</tbody></table>
             <Paginador {...pagPagos.controles} label="pagos" />
           </div>
         </div>

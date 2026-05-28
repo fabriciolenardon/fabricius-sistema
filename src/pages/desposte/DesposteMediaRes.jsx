@@ -48,14 +48,22 @@ export default function DesposteMediaRes() {
   useEffect(() => { cargar() }, [])
 
   async function cargar() {
-    const [{ data: mr }, { data: env }] = await Promise.all([
+    const [{ data: mr }, { data: env }, { data: medias }] = await Promise.all([
+      // Orden cronológico real: fecha DESC + created_at DESC. La columna
+      // `fecha` es DATE (sin hora), entonces múltiples medias del mismo día
+      // necesitan `created_at` como desempate para ordenarse por hora real.
       supabase.from('entradas_deposito').select('*')
         .eq('tipo', 'bovino_mr').eq('despostada', false).eq('reservada', false)
-        .order('fecha', { ascending: false }),
+        .order('fecha', { ascending: false }).order('created_at', { ascending: false }),
       supabase.from('flujo_deposito').select('*')
         .order('created_at', { ascending: false }).limit(10),
+      // Trazabilidad individual: trae el codigo MR-XXX de cada media
+      supabase.from('medias_stock').select('entrada_id, codigo'),
     ])
-    setMediasRes(mr || [])
+    // Enriquecer cada media con su codigo MR-XXX
+    const codigoPor = {}
+    ;(medias || []).forEach(m => { if (m.entrada_id) codigoPor[m.entrada_id] = m.codigo })
+    setMediasRes((mr || []).map(m => ({ ...m, codigo_media: codigoPor[m.id] || null })))
     setMisEnvios(env || [])
   }
 
@@ -227,10 +235,12 @@ export default function DesposteMediaRes() {
       {mediasRes.length > 0 && (
         <div style={{ marginBottom: 20 }}>
           <label style={{ fontSize: 13, color: 'var(--muted)', display: 'block', marginBottom: 8 }}>
-            Media res del stock (opcional — también podés tipear los kilos a mano abajo)
+            Media res del stock ({mediasRes.length} disponibles) — opcional, también podés tipear los kilos a mano abajo
           </label>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
-            {mediasRes.slice(0, 8).map(mr => {
+          {/* Antes habia un .slice(0,8) que ocultaba el resto si habia mas de 8
+              medias. Ahora se muestran todas con scroll vertical limitado. */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8, maxHeight: 320, overflowY: 'auto', padding: 4 }}>
+            {mediasRes.map(mr => {
               const sel = seleccionada?.id === mr.id
               return (
                 <button key={mr.id} onClick={() => { setSeleccionada(sel ? null : mr); setKgManual(sel ? '' : String(mr.kg_real || mr.kg || '')) }}
@@ -240,9 +250,12 @@ export default function DesposteMediaRes() {
                     color: sel ? 'var(--gold)' : 'var(--text)',
                     borderRadius: 10, cursor: 'pointer', textAlign: 'left',
                   }}>
-                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>{mr.fecha}</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    {mr.codigo_media && <span style={{ background: 'var(--gold)', color: '#000', padding: '2px 7px', borderRadius: 6, fontSize: 11, fontWeight: 800, letterSpacing: 0.5 }}>{mr.codigo_media}</span>}
+                    <span style={{ fontSize: 11, color: 'var(--muted)' }}>{mr.fecha}</span>
+                  </div>
                   <div style={{ fontSize: 20, fontWeight: 700 }}>{fmt(mr.kg_real || mr.kg)} kg</div>
-                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>{mr.proveedor || '—'}</div>
+                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>{mr.proveedor_nombre || mr.proveedor || '—'}</div>
                 </button>
               )
             })}

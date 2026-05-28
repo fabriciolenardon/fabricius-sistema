@@ -65,10 +65,12 @@ export default function Dashboard() {
     setDetalleEntradas([])
     setDetalleSalidas([])
     setFechaCorte('')
-    // Sin limite - traemos todo el historial
+    // Sin limite - traemos todo el historial.
+    // Tiebreaker por created_at: la columna `fecha` es DATE (sin hora), así
+    // que dos entradas del mismo día caían en orden inestable.
     const [entradasRes, salidasRes] = await Promise.all([
-      supabase.from('entradas_deposito').select('*').in('tipo', cat.tiposEntradas).order('fecha', { ascending: false }),
-      supabase.from('salidas_deposito').select('*').in('tipo', cat.tiposSalidas).order('fecha', { ascending: false })
+      supabase.from('entradas_deposito').select('*').in('tipo', cat.tiposEntradas).order('fecha', { ascending: false }).order('created_at', { ascending: false }),
+      supabase.from('salidas_deposito').select('*').in('tipo', cat.tiposSalidas).order('fecha', { ascending: false }).order('created_at', { ascending: false })
     ])
     setDetalleEntradas(entradasRes.data || [])
     setDetalleSalidas(salidasRes.data || [])

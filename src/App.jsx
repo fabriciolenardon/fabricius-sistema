@@ -1,41 +1,71 @@
-import Ventas from './pages/admin/Ventas'
-import Caja from './pages/admin/Caja'
-import Etiquetas from './pages/admin/Etiquetas'
-import Franquicias from './pages/admin/Franquicias'
+// ============================================================
+// App.jsx — Router con lazy-loading para reducir el bundle inicial
+// ============================================================
+// Antes todos los componentes se importaban sincronicamente, lo que
+// metia ~1,2 MB de JS en el primer load aunque el usuario solo
+// vaya a su pantalla (un cajero no necesita Sueldos, una franquicia
+// no necesita Deposito, etc.).
+//
+// Ahora:
+// - Eager (sincrono): Login, RootRedirect, AdminLayout, Dashboard,
+//   Deposito, Caja, Precios → las pantallas que el admin abre apenas
+//   entra y que el cajero usa todo el dia.
+// - Lazy (asincrono): el resto. Se descarga on-demand cuando el
+//   usuario navega a esa ruta. Beneficios concretos:
+//   * Portales cliente/franquicia/cajero/desposte → solo bajan para
+//     el rol respectivo, no para todos.
+//   * Pantallas pesadas (DashboardEjecutivo, Reportes, Facturacion,
+//     Auditoria) → solo se cargan cuando se abren.
+// ============================================================
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
+import { lazy, Suspense } from 'react'
 import LoginPage from './pages/LoginPage'
+import ResetPasswordPage from './pages/ResetPasswordPage'
 import AdminLayout from './pages/admin/AdminLayout'
 import Dashboard from './pages/admin/Dashboard'
 import Deposito from './pages/admin/Deposito'
-import Clientes from './pages/admin/Clientes'
-import Sueldos from './pages/admin/Sueldos'
-import Gastos from './pages/admin/Gastos'
-import Cheques from './pages/admin/Cheques'
-import Cierre from './pages/admin/Cierre'
+import Caja from './pages/admin/Caja'
 import Precios from './pages/admin/Precios'
-import Facturacion from './pages/admin/Facturacion'
-import Auditoria from './pages/admin/Auditoria'
-import DashboardEjecutivo from './pages/admin/DashboardEjecutivo'
-import FranquiciaLayout from './pages/franquicia/FranquiciaLayout'
-import FranquiciaDashboard from './pages/franquicia/FranquiciaDashboard'
-import FranquiciaCtaCte from './pages/franquicia/FranquiciaCtaCte'
-import FranquiciaRemitos from './pages/franquicia/FranquiciaRemitos'
-import FranquiciaPrecios from './pages/franquicia/FranquiciaPrecios'
-import ClienteLayout from './pages/cliente/ClienteLayout'
-import ClienteDashboard from './pages/cliente/ClienteDashboard'
-import ClienteCtaCte from './pages/cliente/ClienteCtaCte'
-import ClienteRemitos from './pages/cliente/ClienteRemitos'
-import ClientePrecios from './pages/cliente/ClientePrecios'
-import ClienteNuevoPedido from './pages/cliente/ClienteNuevoPedido'
-import ClientePedidos from './pages/cliente/ClientePedidos'
-import Pedidos from './pages/admin/Pedidos'
 import AsistenteIA from './components/AsistenteIA'
 import PerfilPendiente from './components/PerfilPendiente'
-import CajeroLayout from './pages/cajero/CajeroLayout'
-import DesposteLayout from './pages/desposte/DesposteLayout'
-import DesposteCapones from './pages/desposte/DesposteCapones'
-import DesposteMediaRes from './pages/desposte/DesposteMediaRes'
+
+// Lazy: pantallas admin que NO se usan en cada sesion
+const Clientes = lazy(() => import('./pages/admin/Clientes'))
+const Sueldos = lazy(() => import('./pages/admin/Sueldos'))
+const Gastos = lazy(() => import('./pages/admin/Gastos'))
+const Cheques = lazy(() => import('./pages/admin/Cheques'))
+const Cierre = lazy(() => import('./pages/admin/Cierre'))
+const Facturacion = lazy(() => import('./pages/admin/Facturacion'))
+const Auditoria = lazy(() => import('./pages/admin/Auditoria'))
+const DashboardEjecutivo = lazy(() => import('./pages/admin/DashboardEjecutivo'))
+const Ventas = lazy(() => import('./pages/admin/Ventas'))
+const Etiquetas = lazy(() => import('./pages/admin/Etiquetas'))
+const Franquicias = lazy(() => import('./pages/admin/Franquicias'))
+const Pedidos = lazy(() => import('./pages/admin/Pedidos'))
+
+// Lazy: portal franquicia (solo lo usa el rol franquicia)
+const FranquiciaLayout = lazy(() => import('./pages/franquicia/FranquiciaLayout'))
+const FranquiciaDashboard = lazy(() => import('./pages/franquicia/FranquiciaDashboard'))
+const FranquiciaCtaCte = lazy(() => import('./pages/franquicia/FranquiciaCtaCte'))
+const FranquiciaRemitos = lazy(() => import('./pages/franquicia/FranquiciaRemitos'))
+const FranquiciaPrecios = lazy(() => import('./pages/franquicia/FranquiciaPrecios'))
+
+// Lazy: portal cliente mayorista
+const ClienteLayout = lazy(() => import('./pages/cliente/ClienteLayout'))
+const ClienteDashboard = lazy(() => import('./pages/cliente/ClienteDashboard'))
+const ClienteCtaCte = lazy(() => import('./pages/cliente/ClienteCtaCte'))
+const ClienteRemitos = lazy(() => import('./pages/cliente/ClienteRemitos'))
+const ClientePrecios = lazy(() => import('./pages/cliente/ClientePrecios'))
+const ClienteNuevoPedido = lazy(() => import('./pages/cliente/ClienteNuevoPedido'))
+const ClientePedidos = lazy(() => import('./pages/cliente/ClientePedidos'))
+
+// Lazy: portales cajero y desposte (cada rol carga solo su layout)
+const CajeroLayout = lazy(() => import('./pages/cajero/CajeroLayout'))
+const DesposteLayout = lazy(() => import('./pages/desposte/DesposteLayout'))
+const DesposteCapones = lazy(() => import('./pages/desposte/DesposteCapones'))
+const DesposteMediaRes = lazy(() => import('./pages/desposte/DesposteMediaRes'))
+const DesposteHistorial = lazy(() => import('./pages/desposte/DesposteHistorial'))
 
 function SoloCEO({ children }) {
   const { user, profile, profileMissing, loading } = useAuth()
@@ -90,8 +120,12 @@ export default function App() {
   const { user, profile } = useAuth()
   return (
     <>
+      {/* Suspense fallback se muestra mientras se descarga un chunk lazy.
+          LoadingScreen reusable mantiene el branding mientras carga. */}
+      <Suspense fallback={<LoadingScreen />}>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/perfil-pendiente" element={<PerfilPendienteRoute />} />
         <Route path="/" element={<RootRedirect />} />
         <Route path="/admin" element={<ProtectedRoute requiredRole="admin"><AdminLayout /></ProtectedRoute>}>
@@ -132,8 +166,10 @@ export default function App() {
         <Route path="/desposte" element={<ProtectedRoute requiredRole="desposte"><DesposteLayout /></ProtectedRoute>}>
           <Route path="capones" element={<DesposteCapones />} />
           <Route path="media-res" element={<DesposteMediaRes />} />
+          <Route path="historial" element={<DesposteHistorial />} />
         </Route>
       </Routes>
+      </Suspense>
       {user && profile && profile.rol !== 'cajero' && profile.rol !== 'desposte' && <AsistenteIA />}
     </>
   )
