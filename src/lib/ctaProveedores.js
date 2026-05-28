@@ -1,0 +1,123 @@
+// ============================================================
+// CUENTA CORRIENTE DE PROVEEDORES — helpers DEBE/HABER/SALDO
+// ============================================================
+// Espejo de la cuenta corriente de clientes (movimientos_ctacte) pero
+// para proveedores. Encapsula las operaciones contra
+// `movimientos_proveedores`:
+//   - listar movimientos de un proveedor
+//   - registrar compra (debe), pago/entrega (haber), ajuste, saldo inicial
+//   - recalcular el saldo corriente y replicarlo en proveedores.saldo_adeudado
+//
+// Convención de signos (NUESTRA deuda con el proveedor):
+//   debe  → compra (aumenta lo que le debemos)
+//   haber → pago/entrega (reduce lo que le debemos)
+//   saldo = Σdebe − Σhaber
+//     > 0  le debemos · < 0  saldo a favor · = 0  al día
+// ============================================================
+import { supabase } from './supabase'
+
+// Trae todos los movimientos de un proveedor, MÁS antiguos primero
+// (para poder recalcular el saldo corriente acumulando en orden).
+export async function cargarMovimientos(proveedorId) {
+  if (!proveedorId) return []
+  const { data } = await supabase
+    .from('movimientos_proveedores')
+    .select('*')
+    .eq('proveedor_id', proveedorId)
+    .order('fecha', { ascending: true })
+    .order('id', { ascending: true })
+  return data || []
+}
+
+// Recalcula el saldo corriente de TODOS los movimientos de un proveedor
+// en orden cronológico y lo persiste en cada fila + en
+// proveedores.saldo_adeudado (saldo final). Se llama después de insertar,
+// editar o borrar un movimiento para mantener la cadena consistente.
+export async function recalcularSaldo(proveedorId) {
+  const movs = await cargarMovimientos(proveedorId)
+  let saldo = 0
+  for (const m of movs) {
+    saldo += (Number(m.debe) || 0) - (Number(m.haber) || 0)
+    // Solo actualizamos si cambió, para minimizar writes
+    if (Number(m.saldo) !== saldo) {
+      await supabase.from('movimientos_proveedores').update({ saldo }).eq('id', m.id)
+    }
+  }
+  await supabase.from('proveedores').update({ saldo_adeudado: saldo }).eq('id', proveedorId)
+  return saldo
+}
+
+// Inserta un movimiento genérico y recalcula el saldo del proveedor.
+// mov: { fecha, proveedorId, proveedorNombre, tipo, descripcion, debe, haber, entradaId, forma, notas }
+export async function agregarMovimiento(mov) {
+  const fila = {
+    fecha: mov.fecha,
+    proveedor_id: mov.proveedorId,
+    proveedor_nombre: mov.proveedorNombre || null,
+    tipo: mov.tipo || 'compra',
+    descripcion: mov.descripcion || null,
+    debe: Number(mov.debe) || 0,
+    haber: Number(mov.haber) || 0,
+    saldo: 0, // se recalcula abajo
+    entrada_id: mov.entradaId || null,
+    forma: mov.forma || null,
+    notas: mov.notas || null,
+  }
+  const { data, error } = await supabase.from('movimientos_proveedores').insert(fila).select().single()
+  if (error) return { error: error.message }
+  await recalcularSaldo(mov.proveedorId)
+  return { data, error: null }
+}
+
+// Atajos semánticos
+export function registrarCompraProv({ proveedorId, proveedorNombre, fecha, importe, descripcion, entradaId }) {
+  return agregarMovimiento({
+    proveedorId, proveedorNombre, fecha, tipo: 'compra',
+    descripcion: descripcion || 'Compra', debe: importe, haber: 0, entradaId,
+  })
+}
+
+export function registrarPagoProv({ proveedorId, proveedorNombre, fecha, importe, forma, notas }) {
+  return agregarMovimiento({
+    proveedorId, proveedorNombre, fecha, tipo: 'pago',
+    descripcion: `Pago${forma ? ' — ' + forma : ''}${notas ? ' — ' + notas : ''}`,
+    debe: 0, haber: importe, forma, notas,
+  })
+}
+
+export function registrarAjusteProv({ proveedorId, proveedorNombre, fecha, debe, haber, descripcion }) {
+  return agregarMovimiento({
+    proveedorId, proveedorNombre, fecha, tipo: 'ajuste',
+    descripcion: descripcion || 'Ajuste', debe: debe || 0, haber: haber || 0,
+  })
+}
+
+// Saldo inicial al migrar: si saldoInicial > 0 lo cargamos como DEBE
+// (le debíamos), si < 0 como HABER (teníamos a favor).
+export function registrarSaldoInicialProv({ proveedorId, proveedorNombre, fecha, saldoInicial }) {
+  const s = Number(saldoInicial) || 0
+  return agregarMovimiento({
+    proveedorId, proveedorNombre, fecha, tipo: 'saldo_inicial',
+    descripcion: 'Saldo inicial (migración de cuentas)',
+    debe: s > 0 ? s : 0,
+    haber: s < 0 ? Math.abs(s) : 0,
+  })
+}
+
+// Elimina un movimiento y recalcula el saldo del proveedor.
+export async function eliminarMovimiento(movId, proveedorId) {
+  const { error } = await supabase.from('movimientos_proveedores').delete().eq('id', movId)
+  if (error) return { error: error.message }
+  await recalcularSaldo(proveedorId)
+  return { error: null }
+}
+
+// ¿El proveedor ya tiene su cuenta corriente inicializada?
+// (al menos un movimiento). Sirve para mostrar el botón de migración.
+export async function tieneMovimientos(proveedorId) {
+  const { count } = await supabase
+    .from('movimientos_proveedores')
+    .select('id', { count: 'exact', head: true })
+    .eq('proveedor_id', proveedorId)
+  return (count || 0) > 0
+}
