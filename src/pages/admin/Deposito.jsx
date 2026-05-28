@@ -3150,11 +3150,16 @@ function ProveedoresTab() {
     const pagosProv = pagos.filter(p => p.proveedor_nombre?.toUpperCase().includes(nombre))
     const totalCompras = comprasProv.reduce((s, c) => s + (c.importe || 0), 0)
     const totalEntregado = pagosProv.reduce((s, p) => s + (p.entrega || 0), 0)
-    // SALDO = total comprado − total pagado. Cada pago lo reduce.
+    // SALDO: usamos el saldo del ÚLTIMO pago semanal (pagosProv[0], ordenado
+    // por fecha desc) que YA contempla el arrastre de saldo_anterior semana
+    // a semana — es la fuente de verdad de la liquidación. NO recalculamos
+    // como compras−pagos para no romper las cuentas existentes.
+    // Si no hay pagos cargados todavía, caemos a (compras − entregado).
     //   saldo > 0  → le DEBEMOS al proveedor
-    //   saldo < 0  → tenemos saldo A FAVOR (le pagamos de más)
+    //   saldo < 0  → saldo A FAVOR (le pagamos de más)
     //   saldo = 0  → al día
-    const saldo = totalCompras - totalEntregado
+    const ultimoPago = pagosProv[0]
+    const saldo = ultimoPago?.saldo_adeudado ?? (totalCompras - totalEntregado)
     return { totalCompras, totalEntregado, saldo, comprasProv, pagosProv }
   }
   // Total adeudado = suma de saldos positivos (lo que realmente debemos).
