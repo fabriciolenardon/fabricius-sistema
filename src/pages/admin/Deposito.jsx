@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
 import { resolverDescuentoStock } from '../../lib/stockHelpers'
@@ -2930,6 +2930,7 @@ function ProveedoresTab() {
   const [subtab, setSubtab] = useState('resumen')
   const [compras, setCompras] = useState([])
   const [pagos, setPagos] = useState([])
+  const [entradas, setEntradas] = useState([])           // entradas_deposito para detalle de remito
   const [proveedoresDB, setProveedoresDB] = useState([])
   const [alert, setAlert] = useState(null)
   const [nuevoProveedor, setNuevoProveedor] = useState('')
@@ -2942,24 +2943,80 @@ function ProveedoresTab() {
   const [formPago, setFormPago] = useState({ fecha: fechaHoyARG(), semana_inicio: '', semana_fin: '', proveedor_nombre: '', importe_compra: '', percepcion: '', saldo_anterior: '', entrega: '', notas: '' })
   const [editandoPagoId, setEditandoPagoId] = useState(null)
 
+  // Filtros y modal de detalle del nuevo buscador de compras
+  const [filtroDesde, setFiltroDesde] = useState('')
+  const [filtroHasta, setFiltroHasta] = useState('')
+  const [filtroProvSel, setFiltroProvSel] = useState('todos')
+  const [filtroTexto, setFiltroTexto] = useState('')
+  const [remitoDetalle, setRemitoDetalle] = useState(null)  // { compra, entrada } o null
+
   const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, width: '100%', boxSizing: 'border-box' }
 
   useEffect(() => { fetchAll() }, [])
 
   async function fetchAll() {
     // Sin .limit — paginamos en cliente para mostrar todo el historial
-    const [{ data: c }, { data: p }, { data: prov }] = await Promise.all([
+    const [{ data: c }, { data: p }, { data: prov }, { data: ent }] = await Promise.all([
       supabase.from('compras_proveedores').select('*').order('fecha', { ascending: false }),
       supabase.from('pagos_proveedores_semanal').select('*').order('fecha', { ascending: false }),
-      supabase.from('proveedores').select('*').eq('activo', true).order('nombre')
+      supabase.from('proveedores').select('*').eq('activo', true).order('nombre'),
+      supabase.from('entradas_deposito').select('*').not('proveedor_nombre', 'is', null).order('fecha', { ascending: false }),
     ])
     setCompras(c || [])
     setPagos(p || [])
     setProveedoresDB(prov || [])
+    setEntradas(ent || [])
+  }
+
+  // Busca la entrada_deposito asociada a una compra por fecha + proveedor + importe.
+  // Es un "best effort match" ya que no hay FK explicita entre las tablas.
+  function getEntradaPara(compra) {
+    if (!compra) return null
+    return entradas.find(e =>
+      e.fecha === compra.fecha &&
+      (e.proveedor_nombre || '').toUpperCase() === (compra.proveedor_nombre || '').toUpperCase() &&
+      Math.abs(Number(e.importe || 0) - Number(compra.importe || 0)) < 1
+    ) || null
+  }
+
+  function abrirDetalleRemito(compra) {
+    setRemitoDetalle({ compra, entrada: getEntradaPara(compra) })
+  }
+
+  // Lista de compras filtrada por los inputs de la sub-tab "Compras"
+  const comprasFiltradas = useMemo(() => {
+    return compras.filter(c => {
+      if (filtroDesde && c.fecha < filtroDesde) return false
+      if (filtroHasta && c.fecha > filtroHasta) return false
+      if (filtroProvSel !== 'todos' && c.proveedor_nombre !== filtroProvSel) return false
+      if (filtroTexto) {
+        const q = filtroTexto.toLowerCase()
+        const hay = (
+          (c.proveedor_nombre || '').toLowerCase() + ' ' +
+          (c.producto || '').toLowerCase()
+        ).includes(q)
+        if (!hay) return false
+      }
+      return true
+    })
+  }, [compras, filtroDesde, filtroHasta, filtroProvSel, filtroTexto])
+
+  const sumaFiltrada = useMemo(() =>
+    comprasFiltradas.reduce((s, c) => s + (Number(c.importe) || 0), 0),
+    [comprasFiltradas])
+  const kgFiltrados = useMemo(() =>
+    comprasFiltradas.reduce((s, c) => s + (Number(c.kg) || 0), 0),
+    [comprasFiltradas])
+
+  function limpiarFiltros() {
+    setFiltroDesde('')
+    setFiltroHasta('')
+    setFiltroProvSel('todos')
+    setFiltroTexto('')
   }
 
   // Paginadores del tab Proveedores
-  const pagCompras = usePaginacion(compras, 20)
+  const pagCompras = usePaginacion(comprasFiltradas, 20)
   const pagPagos = usePaginacion(pagos, 20)
 
   function showMsg(msg, type = 'success') { setAlert({ msg, type }); setTimeout(() => setAlert(null), 3000) }
@@ -3170,31 +3227,21 @@ function ProveedoresTab() {
             )}
           </div>
           <div className="card">
-            <div className="card-title">💰 Últimos pagos</div>
-            {pagosProv.length === 0 ? <div className="empty">Sin pagos registrados</div> : pagosProv.slice(0, 6).map(p => (
-              <div key={p.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>{p.fecha}</span>
-                  <span style={{ fontSize: 12, color: p.saldo_adeudado > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 600 }}>Saldo: {fmt(p.saldo_adeudado)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)' }}>
-                  <span>Compra: {fmt(p.importe_compra)}</span>
-                  <span style={{ color: 'var(--green)' }}>Entrega: {fmt(p.entrega)}</span>
-                </div>
-              </div>
-            ))}
+            <PagosProveedorPaginados pagos={pagosProv} fmt={fmt} />
           </div>
         </div>
         <div className="card">
-          <div className="card-title">📥 Historial de compras</div>
-          <table>
-            <thead><tr><th>Fecha</th><th>Producto</th><th>Kg</th><th>Importe</th></tr></thead>
-            <tbody>
-              {comprasProv.slice(0, 15).map(c => (<tr key={c.id}><td>{c.fecha}</td><td>{c.producto || '—'}</td><td>{c.kg > 0 ? c.kg + ' kg' : '—'}</td><td style={{ color: 'var(--amber)', fontWeight: 600 }}>{fmt(c.importe)}</td></tr>))}
-              {comprasProv.length === 0 && <tr><td colSpan={4} className="empty">Sin compras registradas</td></tr>}
-            </tbody>
-          </table>
+          <ComprasProveedorPaginadas
+            compras={comprasProv}
+            fmt={fmt}
+            onVerDetalle={abrirDetalleRemito}
+          />
         </div>
+
+        {/* Modal de detalle también disponible dentro del legajo */}
+        {remitoDetalle && (
+          <RemitoIngresoDetalle remitoDetalle={remitoDetalle} onClose={() => setRemitoDetalle(null)} fmt={fmt} />
+        )}
       </div>
     )
   }
@@ -3242,13 +3289,86 @@ function ProveedoresTab() {
             </div>
             <button className="btn btn-gold" onClick={guardarCompra}>✅ Registrar compra</button>
           </div>
+
+          {/* BUSCADOR DE REMITOS DE INGRESO */}
+          <div className="card" style={{ marginBottom: 16, borderColor: 'var(--gold)' }}>
+            <div className="card-title">🔍 Buscar remitos de ingreso</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.5fr 1.5fr auto', gap: 10, marginBottom: 12, alignItems: 'end' }}>
+              <div>
+                <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>📅 Desde</label>
+                <input type="date" value={filtroDesde} onChange={e => setFiltroDesde(e.target.value)} style={inp} />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>📅 Hasta</label>
+                <input type="date" value={filtroHasta} onChange={e => setFiltroHasta(e.target.value)} style={inp} />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>🏭 Proveedor</label>
+                <select value={filtroProvSel} onChange={e => setFiltroProvSel(e.target.value)} style={inp}>
+                  <option value="todos">Todos los proveedores</option>
+                  {proveedoresNombres.map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>🔎 Buscar texto</label>
+                <input value={filtroTexto} onChange={e => setFiltroTexto(e.target.value)} placeholder="Producto, proveedor..." style={inp} />
+              </div>
+              <button onClick={limpiarFiltros} style={{ padding: '8px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>✕ Limpiar</button>
+            </div>
+
+            {/* KPIs del resultado filtrado */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 4 }}>
+              <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, textAlign: 'center' }}>
+                <div style={{ fontSize: 10, color: 'var(--muted)' }}>REMITOS ENCONTRADOS</div>
+                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 28, color: 'var(--gold)' }}>{comprasFiltradas.length}</div>
+              </div>
+              <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, textAlign: 'center' }}>
+                <div style={{ fontSize: 10, color: 'var(--muted)' }}>KG TOTALES</div>
+                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 28, color: 'var(--amber)' }}>{kgFiltrados > 0 ? kgFiltrados.toFixed(0) + ' kg' : '—'}</div>
+              </div>
+              <div style={{ background: 'rgba(255,209,122,0.06)', border: '1px solid var(--amber)', borderRadius: 8, padding: 12, textAlign: 'center' }}>
+                <div style={{ fontSize: 10, color: 'var(--muted)' }}>SUMA TOTAL $</div>
+                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 32, color: 'var(--amber)' }}>{fmt(sumaFiltrada)}</div>
+              </div>
+            </div>
+          </div>
+
           <div className="card">
-            <div className="card-title">Historial de compras ({compras.length})</div>
-            <table><thead><tr><th>Fecha</th><th>Proveedor</th><th>Producto</th><th>Kg</th><th>Importe</th></tr></thead>
-            <tbody>{pagCompras.items.map(c => (<tr key={c.id}><td>{c.fecha}</td><td><strong>{c.proveedor_nombre}</strong></td><td>{c.producto || '—'}</td><td>{c.kg > 0 ? c.kg + ' kg' : '—'}</td><td style={{ color: 'var(--amber)', fontWeight: 600 }}>{fmt(c.importe)}</td></tr>))}{compras.length === 0 && <tr><td colSpan={5} className="empty">Sin compras registradas</td></tr>}</tbody></table>
-            <Paginador {...pagCompras.controles} label="compras" />
+            <div className="card-title">
+              📥 Resultados ({comprasFiltradas.length}
+              {comprasFiltradas.length !== compras.length ? ` de ${compras.length}` : ''})
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ minWidth: 700 }}>
+                <thead><tr><th>Fecha</th><th>Proveedor</th><th>Producto</th><th>Kg</th><th style={{ textAlign: 'right' }}>Importe</th><th style={{ textAlign: 'center' }}>Detalle</th></tr></thead>
+                <tbody>
+                  {pagCompras.items.map(c => (
+                    <tr key={c.id}>
+                      <td>{c.fecha}</td>
+                      <td><strong>{c.proveedor_nombre}</strong></td>
+                      <td>{c.producto || '—'}</td>
+                      <td>{c.kg > 0 ? c.kg + ' kg' : '—'}</td>
+                      <td style={{ color: 'var(--amber)', fontWeight: 600, textAlign: 'right' }}>{fmt(c.importe)}</td>
+                      <td style={{ textAlign: 'center' }}>
+                        <button onClick={() => abrirDetalleRemito(c)}
+                          style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#000' }}>
+                          🔍 Ver
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {comprasFiltradas.length === 0 && <tr><td colSpan={6} className="empty">{compras.length === 0 ? 'Sin compras registradas' : 'Ningún remito coincide con esos filtros'}</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            <Paginador {...pagCompras.controles} label="remitos" />
           </div>
         </div>
+      )}
+
+      {/* MODAL DETALLE DE REMITO */}
+      {remitoDetalle && (
+        <RemitoIngresoDetalle remitoDetalle={remitoDetalle} onClose={() => setRemitoDetalle(null)} fmt={fmt} />
       )}
 
       {subtab === 'pagos' && (
@@ -3350,6 +3470,171 @@ function ProveedoresTab() {
   )
 }
 
+// =============================================
+// HISTORIAL DE COMPRAS DEL PROVEEDOR (paginado + ver detalle)
+// =============================================
+function ComprasProveedorPaginadas({ compras, fmt, onVerDetalle }) {
+  const pag = usePaginacion(compras || [], 15)
+  const totalImporte = (compras || []).reduce((s, c) => s + (Number(c.importe) || 0), 0)
+  return (
+    <>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <div className="card-title" style={{ margin: 0 }}>📥 Historial de compras ({(compras || []).length})</div>
+        {compras.length > 0 && (
+          <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+            Total: <strong style={{ color: 'var(--amber)' }}>{fmt(totalImporte)}</strong>
+          </div>
+        )}
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ minWidth: 540 }}>
+          <thead><tr><th>Fecha</th><th>Producto</th><th>Kg</th><th style={{ textAlign: 'right' }}>Importe</th><th style={{ textAlign: 'center' }}>Detalle</th></tr></thead>
+          <tbody>
+            {pag.items.map(c => (
+              <tr key={c.id}>
+                <td>{c.fecha}</td>
+                <td>{c.producto || '—'}</td>
+                <td>{c.kg > 0 ? c.kg + ' kg' : '—'}</td>
+                <td style={{ color: 'var(--amber)', fontWeight: 600, textAlign: 'right' }}>{fmt(c.importe)}</td>
+                <td style={{ textAlign: 'center' }}>
+                  <button onClick={() => onVerDetalle(c)}
+                    style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#000' }}>
+                    🔍 Ver
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {compras.length === 0 && <tr><td colSpan={5} className="empty">Sin compras registradas</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <Paginador {...pag.controles} label="compras" />
+    </>
+  )
+}
+
+// =============================================
+// HISTORIAL DE PAGOS DEL PROVEEDOR (paginado)
+// =============================================
+function PagosProveedorPaginados({ pagos, fmt }) {
+  const pag = usePaginacion(pagos || [], 10)
+  const totalEntregado = (pagos || []).reduce((s, p) => s + (Number(p.entrega) || 0), 0)
+  return (
+    <>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <div className="card-title" style={{ margin: 0 }}>💰 Historial de pagos ({(pagos || []).length})</div>
+        {pagos.length > 0 && (
+          <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+            Total entregado: <strong style={{ color: 'var(--green)' }}>{fmt(totalEntregado)}</strong>
+          </div>
+        )}
+      </div>
+      {pagos.length === 0 ? (
+        <div className="empty">Sin pagos registrados</div>
+      ) : (
+        <>
+          {pag.items.map(p => (
+            <div key={p.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>{p.fecha}</span>
+                <span style={{ fontSize: 12, color: p.saldo_adeudado > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 600 }}>Saldo: {fmt(p.saldo_adeudado)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)' }}>
+                <span>Compra: {fmt(p.importe_compra)}{Number(p.percepcion) > 0 ? ` (+perc. ${fmt(p.percepcion)})` : ''}</span>
+                <span style={{ color: 'var(--green)' }}>Entrega: {fmt(p.entrega)}</span>
+              </div>
+              {p.notas && <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4, fontStyle: 'italic' }}>{p.notas}</div>}
+            </div>
+          ))}
+          <Paginador {...pag.controles} label="pagos" />
+        </>
+      )}
+    </>
+  )
+}
+
+// =============================================
+// MODAL DETALLE DE REMITO DE INGRESO
+// =============================================
+// Muestra la info de la compra + si encontramos la entrada_deposito
+// asociada, todos los detalles del remito real (tipo, descripcion,
+// kg_real, merma, precio_kg, destino, etc).
+function RemitoIngresoDetalle({ remitoDetalle, onClose, fmt }) {
+  const { compra, entrada } = remitoDetalle
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div onClick={e => e.stopPropagation()}
+        style={{ background: 'var(--surface)', border: '1px solid var(--gold)', borderRadius: 16, padding: 24, maxWidth: 600, width: '100%', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div>
+            <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: 'var(--gold)', letterSpacing: 2 }}>📥 REMITO DE INGRESO</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+              {compra.fecha} · {compra.proveedor_nombre}
+            </div>
+          </div>
+          <button onClick={onClose}
+            style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 6, padding: '6px 10px', cursor: 'pointer', fontSize: 16 }}>✕</button>
+        </div>
+
+        {/* Datos de la compra (siempre disponible) */}
+        <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 14, marginBottom: 12 }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
+            💰 Registro de compra
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <DetalleItem label="Producto" valor={compra.producto || '—'} />
+            <DetalleItem label="Fecha" valor={compra.fecha} />
+            <DetalleItem label="Kg" valor={compra.kg > 0 ? compra.kg + ' kg' : '—'} />
+            <DetalleItem label="Importe" valor={fmt(compra.importe)} highlight />
+            {compra.semana_inicio && <DetalleItem label="Semana" valor={`${compra.semana_inicio} → ${compra.semana_fin || '—'}`} />}
+          </div>
+        </div>
+
+        {/* Datos extra de la entrada al depósito (si la encontramos) */}
+        {entrada ? (
+          <div style={{ background: 'rgba(255,209,122,0.04)', border: '1px solid var(--gold)', borderRadius: 8, padding: 14 }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
+              🏭 Detalle del remito (Entrada Depósito #{entrada.id})
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <DetalleItem label="Tipo" valor={entrada.tipo || '—'} />
+              <DetalleItem label="Descripción" valor={entrada.descripcion || '—'} />
+              <DetalleItem label="Kg declarado" valor={entrada.kg > 0 ? `${entrada.kg} kg` : '—'} />
+              <DetalleItem label="Kg real" valor={entrada.kg_real > 0 ? `${entrada.kg_real} kg` : '—'} />
+              {Number(entrada.merma_pct) > 0 && (
+                <DetalleItem label="Merma" valor={`${Number(entrada.merma_pct).toFixed(1)}%`} />
+              )}
+              <DetalleItem label="Precio $/kg" valor={fmt(entrada.precio_kg)} />
+              <DetalleItem label="Importe" valor={fmt(entrada.importe)} highlight />
+              {entrada.cantidad > 1 && <DetalleItem label="Cantidad" valor={entrada.cantidad} />}
+              {entrada.destino && <DetalleItem label="Destino" valor={entrada.destino} />}
+            </div>
+          </div>
+        ) : (
+          <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 14, textAlign: 'center', color: 'var(--muted)', fontSize: 12 }}>
+            ℹ️ No se encontró una entrada al depósito asociada a este registro.
+            <div style={{ fontSize: 11, marginTop: 4 }}>
+              (Probablemente sea una compra cargada manualmente sin pasar por el form de entrada al depósito)
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+          <button onClick={onClose} className="btn btn-gold">Cerrar</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DetalleItem({ label, valor, highlight }) {
+  return (
+    <div style={{ background: 'var(--surface)', borderRadius: 6, padding: '6px 10px' }}>
+      <div style={{ fontSize: 10, color: 'var(--muted)' }}>{label}</div>
+      <div style={{ fontSize: 13, fontWeight: highlight ? 700 : 500, color: highlight ? 'var(--gold)' : 'var(--text)' }}>{valor}</div>
+    </div>
+  )
+}
 
 // =============================================
 // PESTAÑA HISTORIAL/STOCK DE PIEZAS INDIVIDUALES
