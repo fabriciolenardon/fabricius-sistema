@@ -1779,7 +1779,18 @@ async function eliminar(entrada) {
         <div className="card-title">Registrar entrada al depósito</div>
         <div className="form-row">
           <div className="form-group"><label>Tipo de producto</label>
-            <select value={form.tipo} onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))}>
+            <select value={form.tipo} onChange={e => {
+              const tipo = e.target.value
+              // Autocompletar proveedor por regla: CB→CEIBA, PT→PRETTO.
+              // Busca el nombre en la lista real de proveedores (case-insensitive).
+              // Si no lo encuentra, deja el proveedor actual para elegir a mano.
+              setForm(f => {
+                let proveedor = f.proveedor
+                if (tipo === 'caja_cb') { const m = proveedores.find(p => p.toUpperCase().includes('CEIBA')); if (m) proveedor = m }
+                else if (tipo === 'caja_pt') { const m = proveedores.find(p => p.toUpperCase().includes('PRETTO')); if (m) proveedor = m }
+                return { ...f, tipo, proveedor }
+              })
+            }}>
               <option value="">— Seleccioná —</option>
 <option value="bovino_mr">🐄 Media Res</option>
 <option value="pieza_pierna">🦵 Pierna bovina con hueso</option>
