@@ -23,7 +23,11 @@
 CREATE TABLE IF NOT EXISTS movimientos_proveedores (
   id              SERIAL PRIMARY KEY,
   fecha           DATE NOT NULL DEFAULT CURRENT_DATE,
-  proveedor_id    INT REFERENCES proveedores(id) ON DELETE CASCADE,
+  -- proveedores.id es UUID en producción (aunque el schema canónico dice
+  -- serial). Usamos UUID sin FK explícita, mismo patrón que migración 34
+  -- (cajas_stock.entrada_id), para evitar el error
+  -- "integer and uuid are of incompatible types".
+  proveedor_id    UUID,
   proveedor_nombre TEXT,                          -- denormalizado para display
   tipo            TEXT NOT NULL DEFAULT 'compra'
                   CHECK (tipo IN ('compra', 'pago', 'ajuste', 'saldo_inicial')),
@@ -31,8 +35,8 @@ CREATE TABLE IF NOT EXISTS movimientos_proveedores (
   debe            NUMERIC DEFAULT 0,              -- compra / lo que aumenta la deuda
   haber           NUMERIC DEFAULT 0,              -- pago / lo que la reduce
   saldo           NUMERIC DEFAULT 0,              -- saldo corriente tras este movimiento
-  -- Trazabilidad
-  entrada_id      INT,                            -- link al remito de ingreso (entradas_deposito.id) si aplica
+  -- Trazabilidad. entradas_deposito.id también es UUID en producción.
+  entrada_id      UUID,                           -- link al remito de ingreso si aplica
   forma           TEXT,                           -- efectivo / transferencia / cheque (para pagos)
   notas           TEXT,
   created_at      TIMESTAMPTZ DEFAULT NOW()
