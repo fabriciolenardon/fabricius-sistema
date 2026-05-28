@@ -6,6 +6,7 @@ import { cargarCajasDisponibles, crearCajasIngreso, venderCaja, revertirVentaCaj
 import { fmtPrecio, fmtKg, parseNumero } from '../../lib/formatos'
 import { getCampoPrecio } from '../../lib/listasPrecios'
 import CuentaCorrienteProveedor from './CuentaCorrienteProveedor'
+import { agregarMovimiento, eliminarMovimiento } from '../../lib/ctaProveedores'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 import FlujoDeposito from './FlujoDeposito'
 import AjusteStock from './AjusteStock'
@@ -2943,8 +2944,8 @@ function ProveedoresTab() {
   const [nombreEditando, setNombreEditando] = useState('')
   const [formLegajo, setFormLegajo] = useState({ contacto: '', telefono: '', cuit: '', direccion: '', producto_principal: '', notas: '' })
   const [formCompra, setFormCompra] = useState({ fecha: fechaHoyARG(), semana_inicio: '', semana_fin: '', proveedor_nombre: '', producto: '', kg: '', importe: '' })
-  const [formPago, setFormPago] = useState({ fecha: fechaHoyARG(), semana_inicio: '', semana_fin: '', proveedor_nombre: '', importe_compra: '', percepcion: '', saldo_anterior: '', entrega: '', notas: '' })
-  const [editandoPagoId, setEditandoPagoId] = useState(null)
+  const [formPago, setFormPago] = useState({ fecha: fechaHoyARG(), proveedor_nombre: '', percepcion: '', entrega: '', notas: '' })
+  const [pagosLedger, setPagosLedger] = useState([])  // movimientos tipo 'pago' para el historial global
 
   // Filtros y modal de detalle del nuevo buscador de compras
   const [filtroDesde, setFiltroDesde] = useState('')
@@ -2964,9 +2965,9 @@ function ProveedoresTab() {
       supabase.from('pagos_proveedores_semanal').select('*').order('fecha', { ascending: false }),
       supabase.from('proveedores').select('*').eq('activo', true).order('nombre'),
       supabase.from('entradas_deposito').select('*').not('proveedor_nombre', 'is', null).order('fecha', { ascending: false }),
-      // Cuenta corriente: totales debe/haber por proveedor + saber quién
-      // está inicializado (para mostrar el saldo del ledger, no del semanal).
-      supabase.from('movimientos_proveedores').select('proveedor_id, debe, haber').then(r => r).catch(() => ({ data: null })),
+      // Cuenta corriente: movimientos completos para totales debe/haber,
+      // saber quién está inicializado, y el historial global de pagos.
+      supabase.from('movimientos_proveedores').select('*').order('fecha', { ascending: false }).order('id', { ascending: false }).then(r => r).catch(() => ({ data: null })),
     ])
     setCompras(c || [])
     setPagos(p || [])
@@ -2981,6 +2982,8 @@ function ProveedoresTab() {
     })
     setLedgerTotales(tot)
     setInicializados(new Set(Object.keys(tot)))
+    // Historial global de pagos = movimientos tipo 'pago' (ya vienen desc)
+    setPagosLedger((movs || []).filter(m => m.tipo === 'pago'))
   }
 
   // Busca la entrada_deposito asociada a una compra por fecha + proveedor + importe.
@@ -3032,7 +3035,7 @@ function ProveedoresTab() {
 
   // Paginadores del tab Proveedores
   const pagCompras = usePaginacion(comprasFiltradas, 20)
-  const pagPagos = usePaginacion(pagos, 20)
+  const pagPagos = usePaginacion(pagosLedger, 20)
 
   function showMsg(msg, type = 'success') { setAlert({ msg, type }); setTimeout(() => setAlert(null), 3000) }
 
@@ -3128,52 +3131,38 @@ function ProveedoresTab() {
     setFormCompra(f => ({ ...f, producto: '', kg: '', importe: '', proveedor_nombre: '' })); fetchAll()
   }
 
+  // Registra un PAGO directo en la cuenta corriente del proveedor:
+  //   entrega   → HABER (baja lo que le debemos)
+  //   percepción → DEBE (la percepción aumenta lo que debemos, como en el modelo viejo)
   async function guardarPago() {
     if (!formPago.proveedor_nombre) { showMsg('Seleccioná un proveedor', 'error'); return }
-    const saldoAdeudado = (parseNumero(formPago.importe_compra)) + (parseNumero(formPago.percepcion)) + (parseNumero(formPago.saldo_anterior)) - (parseNumero(formPago.entrega))
-    const payload = { fecha: formPago.fecha, semana_inicio: formPago.semana_inicio || null, semana_fin: formPago.semana_fin || null, proveedor_nombre: formPago.proveedor_nombre, importe_compra: parseNumero(formPago.importe_compra), percepcion: parseNumero(formPago.percepcion), saldo_anterior: parseNumero(formPago.saldo_anterior), entrega: parseNumero(formPago.entrega), saldo_adeudado: saldoAdeudado, notas: formPago.notas }
-    if (editandoPagoId) {
-      const { error } = await supabase.from('pagos_proveedores_semanal').update(payload).eq('id', editandoPagoId)
-      if (error) { showMsg('❌ Error al actualizar: ' + error.message, 'error'); return }
-      showMsg('✅ Pago actualizado')
-      setEditandoPagoId(null)
-    } else {
-      const { error } = await supabase.from('pagos_proveedores_semanal').insert(payload)
-      if (error) { showMsg('❌ Error al registrar: ' + error.message, 'error'); return }
-      showMsg('✅ Pago registrado')
+    const prov = proveedoresDB.find(p => p.nombre === formPago.proveedor_nombre)
+    if (!prov) { showMsg('Proveedor no encontrado', 'error'); return }
+    if (!inicializados.has(prov.id)) {
+      showMsg(`⚠️ ${prov.nombre} no tiene cuenta corriente inicializada. Entrá a su legajo y cargá el saldo inicial primero.`, 'error')
+      return
     }
-    setFormPago(f => ({ ...f, importe_compra: '', percepcion: '', saldo_anterior: '', entrega: '', notas: '', proveedor_nombre: '' })); fetchAll()
-  }
-
-  function iniciarEditarPago(p) {
-    setEditandoPagoId(p.id)
-    setFormPago({
-      fecha: p.fecha,
-      semana_inicio: p.semana_inicio || '',
-      semana_fin: p.semana_fin || '',
-      proveedor_nombre: p.proveedor_nombre || '',
-      importe_compra: String(p.importe_compra ?? ''),
-      percepcion: String(p.percepcion ?? ''),
-      saldo_anterior: String(p.saldo_anterior ?? ''),
-      entrega: String(p.entrega ?? ''),
-      notas: p.notas || '',
+    const entrega = parseNumero(formPago.entrega)
+    const percepcion = parseNumero(formPago.percepcion)
+    if (entrega <= 0 && percepcion <= 0) { showMsg('Ingresá una entrega o una percepción', 'error'); return }
+    const { error } = await agregarMovimiento({
+      proveedorId: prov.id, proveedorNombre: prov.nombre, fecha: formPago.fecha,
+      tipo: 'pago',
+      descripcion: `Pago${formPago.notas ? ' — ' + formPago.notas : ''}${percepcion > 0 ? ` (percepción ${fmt(percepcion)})` : ''}`,
+      debe: percepcion, haber: entrega, notas: formPago.notas,
     })
-    // Scroll al form para que el usuario vea los campos cargados.
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+    if (error) { showMsg('❌ ' + error, 'error'); return }
+    showMsg('✅ Pago registrado en cuenta corriente')
+    setFormPago({ fecha: fechaHoyARG(), proveedor_nombre: '', percepcion: '', entrega: '', notas: '' })
+    fetchAll()
   }
 
-  function cancelarEditarPago() {
-    setEditandoPagoId(null)
-    setFormPago(f => ({ ...f, importe_compra: '', percepcion: '', saldo_anterior: '', entrega: '', notas: '', proveedor_nombre: '' }))
-  }
-
+  // Elimina un pago de la cuenta corriente (recalcula el saldo del proveedor)
   async function eliminarPago(p) {
-    if (!confirm(`¿Eliminar el pago de ${p.proveedor_nombre} del ${p.fecha} por ${fmt(p.importe_compra)}?\n\nAcción IRREVERSIBLE.`)) return
-    const { error } = await supabase.from('pagos_proveedores_semanal').delete().eq('id', p.id)
-    if (error) { showMsg('❌ Error al eliminar: ' + error.message, 'error'); return }
+    if (!confirm(`¿Eliminar el pago de ${p.proveedor_nombre} del ${p.fecha} por ${fmt(p.haber)}?\n\nSe recalculará el saldo. Acción irreversible.`)) return
+    const { error } = await eliminarMovimiento(p.id, p.proveedor_id)
+    if (error) { showMsg('❌ Error al eliminar: ' + error, 'error'); return }
     showMsg('✅ Pago eliminado')
-    // Si estábamos editando el que acabamos de borrar, salir del modo edición.
-    if (editandoPagoId === p.id) cancelarEditarPago()
     fetchAll()
   }
 
@@ -3311,7 +3300,7 @@ function ProveedoresTab() {
     <div>
       {alert && <div style={{ background: alert.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${alert.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: alert.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>{alert.msg}</div>}
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
-        {[{ id: 'resumen', label: '📊 Resumen' }, { id: 'compras', label: '📥 Compras' }, { id: 'pagos', label: '💰 Pagos semanales' }, { id: 'gestionar', label: '⚙️ Gestionar proveedores' }].map(t => (
+        {[{ id: 'resumen', label: '📊 Resumen' }, { id: 'compras', label: '📥 Compras' }, { id: 'pagos', label: '💰 Pagos' }, { id: 'gestionar', label: '⚙️ Gestionar proveedores' }].map(t => (
           <button key={t.id} onClick={() => setSubtab(t.id)} style={{ padding: '7px 16px', borderRadius: 8, border: `1px solid ${subtab === t.id ? 'var(--amber)' : 'var(--border)'}`, background: subtab === t.id ? 'var(--amber)' : 'transparent', color: subtab === t.id ? '#fff' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>{t.label}</button>
         ))}
       </div>
@@ -3434,49 +3423,41 @@ function ProveedoresTab() {
 
       {subtab === 'pagos' && (
         <div>
-          <div className="card" style={{ marginBottom: 16, borderColor: editandoPagoId ? 'var(--gold)' : undefined, borderWidth: editandoPagoId ? 2 : undefined }}>
-            <div className="card-title">{editandoPagoId ? '✏️ Editando pago semanal' : '💰 Registrar pago semanal'}</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div className="card-title">💰 Registrar pago</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
+              El pago se registra en la cuenta corriente del proveedor (baja lo que le debemos).
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
               <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Proveedor</label><select value={formPago.proveedor_nombre} onChange={e => setFormPago(f => ({ ...f, proveedor_nombre: e.target.value }))} style={inp}><option value="">— Seleccioná —</option>{proveedoresNombres.map(p => <option key={p}>{p}</option>)}</select></div>
               <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Fecha</label><input type="date" value={formPago.fecha} onChange={e => setFormPago(f => ({ ...f, fecha: e.target.value }))} style={inp} /></div>
-              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Importe compra ($)</label><input type="text" inputMode="decimal" value={formPago.importe_compra} onChange={e => setFormPago(f => ({ ...f, importe_compra: e.target.value }))} placeholder="Ej: 105.687,66" style={inp} /></div>
               <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Percepción ($)</label><input type="text" inputMode="decimal" value={formPago.percepcion} onChange={e => setFormPago(f => ({ ...f, percepcion: e.target.value }))} placeholder="0" style={inp} /></div>
-              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Saldo semana anterior ($)</label><input type="text" inputMode="decimal" value={formPago.saldo_anterior} onChange={e => setFormPago(f => ({ ...f, saldo_anterior: e.target.value }))} placeholder="0" style={inp} /></div>
               <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Lo que se entrega ($)</label><input type="text" inputMode="decimal" value={formPago.entrega} onChange={e => setFormPago(f => ({ ...f, entrega: e.target.value }))} placeholder="0" style={{ ...inp, borderColor: 'var(--green)' }} /></div>
+              <div style={{ gridColumn: 'span 2' }}><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Notas</label><input value={formPago.notas} onChange={e => setFormPago(f => ({ ...f, notas: e.target.value }))} placeholder="Cheque nro., banco, etc." style={inp} /></div>
             </div>
-            {(formPago.importe_compra || formPago.entrega) && (
+            {(formPago.entrega || formPago.percepcion) && (
               <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, display: 'flex', gap: 20, flexWrap: 'wrap' }}>
-                <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>Compra: </span><strong style={{ color: 'var(--amber)' }}>{fmt(parseNumero(formPago.importe_compra))}</strong></div>
-                <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>+ Percepción: </span><strong>{fmt(parseNumero(formPago.percepcion))}</strong></div>
-                <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>+ Saldo ant.: </span><strong>{fmt(parseNumero(formPago.saldo_anterior))}</strong></div>
-                <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>− Entrega: </span><strong style={{ color: 'var(--green)' }}>{fmt(parseNumero(formPago.entrega))}</strong></div>
-                <div style={{ fontSize: 14, fontWeight: 700 }}><span style={{ color: 'var(--muted)' }}>= Saldo adeudado: </span><strong style={{ color: ((parseNumero(formPago.importe_compra)) + (parseNumero(formPago.percepcion)) + (parseNumero(formPago.saldo_anterior)) - (parseNumero(formPago.entrega))) > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt((parseNumero(formPago.importe_compra)) + (parseNumero(formPago.percepcion)) + (parseNumero(formPago.saldo_anterior)) - (parseNumero(formPago.entrega)))}</strong></div>
+                <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>💵 Entrega (baja deuda): </span><strong style={{ color: 'var(--green)' }}>{fmt(parseNumero(formPago.entrega))}</strong></div>
+                {parseNumero(formPago.percepcion) > 0 && <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>📋 Percepción (sube deuda): </span><strong style={{ color: 'var(--amber)' }}>{fmt(parseNumero(formPago.percepcion))}</strong></div>}
               </div>
             )}
-            <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Notas</label><input value={formPago.notas} onChange={e => setFormPago(f => ({ ...f, notas: e.target.value }))} placeholder="Cheque nro., banco, etc." style={{ ...inp, marginBottom: 12 }} /></div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn btn-gold" onClick={guardarPago}>{editandoPagoId ? '💾 Guardar cambios' : '✅ Registrar pago semanal'}</button>
-              {editandoPagoId && <button className="btn btn-ghost" onClick={cancelarEditarPago}>✕ Cancelar edición</button>}
-            </div>
+            <button className="btn btn-gold" onClick={guardarPago}>✅ Registrar pago</button>
           </div>
           <div className="card">
-            <div className="card-title">Historial de pagos semanales ({pagos.length})</div>
-            <table><thead><tr><th>Fecha</th><th>Proveedor</th><th>Compra</th><th>Percep.</th><th>Saldo ant.</th><th>Entrega</th><th>Saldo adeudado</th><th>Acciones</th></tr></thead>
+            <div className="card-title">Historial de pagos ({pagosLedger.length})</div>
+            <table><thead><tr><th>Fecha</th><th>Proveedor</th><th>Percep.</th><th>Entrega</th><th>Saldo</th><th>Acciones</th></tr></thead>
             <tbody>{pagPagos.items.map(p => (
-              <tr key={p.id} style={{ background: editandoPagoId === p.id ? 'rgba(201,168,76,0.08)' : undefined }}>
+              <tr key={p.id}>
                 <td>{p.fecha}</td>
                 <td><strong>{p.proveedor_nombre}</strong></td>
-                <td style={{ color: 'var(--amber)' }}>{fmt(p.importe_compra)}</td>
-                <td>{p.percepcion > 0 ? fmt(p.percepcion) : '—'}</td>
-                <td>{p.saldo_anterior > 0 ? fmt(p.saldo_anterior) : '—'}</td>
-                <td style={{ color: 'var(--green)' }}>{fmt(p.entrega)}</td>
-                <td style={{ color: p.saldo_adeudado > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 700 }}>{fmt(p.saldo_adeudado)}</td>
-                <td style={{ display: 'flex', gap: 4, whiteSpace: 'nowrap' }}>
-                  <button onClick={() => iniciarEditarPago(p)} title="Editar pago" style={{ background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>✏️ Editar</button>
-                  <button onClick={() => eliminarPago(p)} title="Eliminar pago" style={{ background: 'var(--red-light)', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>🗑️</button>
+                <td>{Number(p.debe) > 0 ? fmt(p.debe) : '—'}</td>
+                <td style={{ color: 'var(--green)' }}>{fmt(p.haber)}</td>
+                <td style={{ color: Number(p.saldo) > 0 ? 'var(--red-light)' : Number(p.saldo) < 0 ? 'var(--green)' : 'var(--muted)', fontWeight: 700 }}>{fmt(p.saldo)}{Number(p.saldo) < 0 ? ' a favor' : ''}</td>
+                <td>
+                  <button onClick={() => eliminarPago(p)} title="Eliminar pago" style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', color: 'var(--red-light)', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>🗑️</button>
                 </td>
               </tr>
-            ))}{pagos.length === 0 && <tr><td colSpan={8} className="empty">Sin pagos registrados</td></tr>}</tbody></table>
+            ))}{pagosLedger.length === 0 && <tr><td colSpan={6} className="empty">Sin pagos registrados</td></tr>}</tbody></table>
             <Paginador {...pagPagos.controles} label="pagos" />
           </div>
         </div>
