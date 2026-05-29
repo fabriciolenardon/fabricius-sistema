@@ -30,9 +30,10 @@ export async function cargarMovimientos(proveedorId) {
 }
 
 // Recalcula el saldo corriente de TODOS los movimientos de un proveedor
-// en orden cronológico y lo persiste en cada fila + en
-// proveedores.saldo_adeudado (saldo final). Se llama después de insertar,
-// editar o borrar un movimiento para mantener la cadena consistente.
+// en orden cronológico y lo persiste en cada fila (columna saldo). Se llama
+// después de insertar, editar o borrar un movimiento para mantener la cadena
+// consistente. El saldo total = Σdebe − Σhaber se deriva on-the-fly (no se
+// guarda en la tabla proveedores, que no tiene esa columna en producción).
 export async function recalcularSaldo(proveedorId) {
   const movs = await cargarMovimientos(proveedorId)
   let saldo = 0
@@ -43,7 +44,10 @@ export async function recalcularSaldo(proveedorId) {
       await supabase.from('movimientos_proveedores').update({ saldo }).eq('id', m.id)
     }
   }
-  await supabase.from('proveedores').update({ saldo_adeudado: saldo }).eq('id', proveedorId)
+  // NOTA: el saldo NO se persiste en proveedores (esa columna no existe en
+  // producción). El saldo se calcula siempre como Σdebe − Σhaber de los
+  // movimientos, que es la fuente de verdad. El saldo por-movimiento queda
+  // guardado arriba para el extracto de la cuenta corriente.
   return saldo
 }
 
