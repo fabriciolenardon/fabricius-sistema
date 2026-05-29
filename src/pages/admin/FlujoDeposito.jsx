@@ -86,23 +86,27 @@ export default function FlujoDeposito() {
     aviso('Rechazado — la media res vuelve a estar disponible')
   }
 
-  async function aprobarSimple(f) {
-    // Aprobación simple sin procesar (admin lo cargó manualmente en Depósito)
-    if (!confirm('Marcar como aprobado sin crear desposte automático?\n(usá esto si ya lo procesaste a mano en Depósito)')) return
+  // Aprobar = confirmar recepción de la info. NO toca el stock ni crea un
+  // desposte. El despacho/desposte de esta media res se carga MANUALMENTE
+  // desde Depósito (ahí recién se descuenta el stock y se marca despostada).
+  // La media queda como "Aprobada" (reservada) en el sector desposte hasta
+  // que el admin cargue el despacho a mano.
+  async function aprobar(f) {
+    if (!confirm(
+      '¿Confirmar recepción de esta info?\n\n' +
+      'Esto marca el flujo como APROBADO (recibido). ' +
+      'El stock NO se toca acá — el despacho/desposte de esta media res ' +
+      'lo cargás vos a mano desde Depósito.'
+    )) return
     const { error } = await supabase.from('flujo_deposito').update({
       estado: 'aprobado',
-      notas_admin: 'Procesado manualmente desde Depósito',
+      notas_admin: 'Recepción confirmada. El despacho/desposte se carga manualmente desde Depósito.',
       aprobado_por: user?.id,
       aprobado_por_nombre: profile?.nombre || null,
       aprobado_at: new Date().toISOString(),
     }).eq('id', f.id)
     if (error) aviso('❌ ' + error.message, 'error')
-    else aviso('✅ Aprobado')
-  }
-
-  // Abre el modal de confirmación con preview detallado
-  function aprobarCreandoDesposte(f) {
-    setConfirmando(f)
+    else aviso('✅ Recepción confirmada')
   }
 
   // Ejecuta la aprobación (llamada desde el modal de confirmación)
@@ -309,19 +313,18 @@ export default function FlujoDeposito() {
                       )}
                     </div>
                     {f.estado === 'pendiente' && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 200 }}>
-                        <button onClick={() => aprobarCreandoDesposte(f)}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 220 }}>
+                        <button onClick={() => aprobar(f)}
                           style={{ padding: '10px 14px', background: 'var(--green)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
-                          ✅ Aprobar y crear desposte
-                        </button>
-                        <button onClick={() => aprobarSimple(f)}
-                          style={{ padding: '8px 14px', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, cursor: 'pointer', fontWeight: 600, fontSize: 12 }}>
-                          ✔ Marcar OK (procesé a mano)
+                          ✅ Aprobar (confirmar recepción)
                         </button>
                         <button onClick={() => rechazar(f)}
                           style={{ padding: '8px 14px', background: 'transparent', border: '1px solid #5a2a2a', color: '#ff8b8b', borderRadius: 8, cursor: 'pointer', fontWeight: 600, fontSize: 12 }}>
                           ❌ Rechazar
                         </button>
+                        <div style={{ fontSize: 10, color: 'var(--muted)', textAlign: 'center', marginTop: 2 }}>
+                          El despacho/desposte se carga a mano desde Depósito
+                        </div>
                       </div>
                     )}
                   </div>
@@ -333,14 +336,6 @@ export default function FlujoDeposito() {
         </>
       )}
 
-      {confirmando && (
-        <ModalConfirmarDesposte
-          flujo={confirmando}
-          procesando={procesando}
-          onConfirmar={() => ejecutarAprobacion(confirmando)}
-          onCancelar={() => setConfirmando(null)}
-        />
-      )}
     </div>
   )
 }
