@@ -31,7 +31,7 @@ const LABEL_TIPO = {
 }
 
 export default function FlujoDeposito() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const [flujos, setFlujos] = useState([])
   const [loading, setLoading] = useState(true)
   const [filtroEstado, setFiltroEstado] = useState('pendiente')
@@ -75,10 +75,15 @@ export default function FlujoDeposito() {
       estado: 'rechazado',
       notas_admin: motivo || 'Rechazado sin motivo',
       aprobado_por: user?.id,
+      aprobado_por_nombre: profile?.nombre || null,
       aprobado_at: new Date().toISOString(),
     }).eq('id', f.id)
-    if (error) aviso('❌ ' + error.message, 'error')
-    else aviso('Rechazado')
+    if (error) { aviso('❌ ' + error.message, 'error'); return }
+    // Liberar la media res reservada: vuelve a estar disponible para el desposte
+    if (f.entrada_id) {
+      await supabase.from('entradas_deposito').update({ reservada: false }).eq('id', f.entrada_id)
+    }
+    aviso('Rechazado — la media res vuelve a estar disponible')
   }
 
   async function aprobarSimple(f) {
@@ -88,6 +93,7 @@ export default function FlujoDeposito() {
       estado: 'aprobado',
       notas_admin: 'Procesado manualmente desde Depósito',
       aprobado_por: user?.id,
+      aprobado_por_nombre: profile?.nombre || null,
       aprobado_at: new Date().toISOString(),
     }).eq('id', f.id)
     if (error) aviso('❌ ' + error.message, 'error')
@@ -191,6 +197,7 @@ export default function FlujoDeposito() {
       desposte_id: desp.id,
       notas_admin: 'Procesado automáticamente con confirmación',
       aprobado_por: user?.id,
+      aprobado_por_nombre: profile?.nombre || null,
       aprobado_at: new Date().toISOString(),
     }).eq('id', f.id)
     setProcesando(false)
