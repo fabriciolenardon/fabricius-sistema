@@ -3190,20 +3190,16 @@ function ProveedoresTab() {
     const provReg = proveedoresDB.find(p => p.id === provId || p.nombre === nombre)
     const ledger = provReg ? ledgerTotales[provReg.id] : null
     const usaLedger = !!ledger
-    // DEBE / HABER / SALDO:
-    //   - Inicializado (cuenta corriente) → debe=Σdebe, haber=Σhaber del ledger,
-    //     saldo = proveedores.saldo_adeudado (mantenido por el ledger).
-    //   - No inicializado → fallback al modelo semanal viejo (no rompe cuentas).
-    //   saldo > 0 le debemos · < 0 a favor · = 0 al día
+    // DEBE / HABER:
+    //   - Inicializado (cuenta corriente) → Σdebe / Σhaber del ledger
+    //   - No inicializado → fallback al modelo semanal viejo
     const debe = usaLedger ? ledger.debe : weeklyCompras
     const haber = usaLedger ? ledger.haber : weeklyEntregado
-    let saldo
-    if (usaLedger && provReg) {
-      saldo = Number(provReg.saldo_adeudado) || 0
-    } else {
-      const ultimoPago = pagosProv[0]
-      saldo = ultimoPago?.saldo_adeudado ?? (weeklyCompras - weeklyEntregado)
-    }
+    // SALDO = DEBE − HABER (siempre). Coherente con las columnas mostradas.
+    // No leemos proveedores.saldo_adeudado (esa columna no existe en prod);
+    // el saldo se deriva directo de debe − haber.
+    //   saldo > 0 le debemos · < 0 a favor · = 0 al día
+    const saldo = debe - haber
     // totalCompras/totalEntregado quedan como alias para el header del legajo
     return { debe, haber, saldo, totalCompras: debe, totalEntregado: haber, comprasProv, pagosProv, usaLedger }
   }
