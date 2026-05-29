@@ -2081,6 +2081,7 @@ export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   // Mapa { tipo: kg_disponible } cargado de stock_actual — se usa para mostrar
   // disponibilidad de cajas CB/PT al cajero y validar que no sobre-venda.
   const [stockMap, setStockMap] = useState({})
+  const [ofertas, setOfertas] = useState([])   // ofertas vigentes para aplicar al precio del despacho
   async function recargarPiezasDispVenta() {
     const { data } = await supabase.from('piezas_stock').select('*').eq('estado', 'disponible').order('fecha_ingreso', { ascending: true }).order('id', { ascending: true })
     setPiezasDispVenta(data || [])
@@ -2098,6 +2099,12 @@ export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   useEffect(() => {
     supabase.from('precios').select('*').order('nombre').then(({ data }) => setTodosPrecios(data || []))
     supabase.from('clientes').select('*').order('nombre').then(({ data }) => setClientes(data || []))
+    // Ofertas vigentes (activas y dentro del rango de fechas) para aplicar
+    // el precio de oferta en los despachos, igual que en Caja Rápida.
+    const hoyOf = fechaHoyARG()
+    supabase.from('ofertas').select('*').eq('activa', true)
+      .lte('fecha_inicio', hoyOf).gte('fecha_fin', hoyOf)
+      .then(({ data }) => setOfertas(data || []))
   // Orden por created_at además de fecha: dos medias reses cargadas el mismo
   // día necesitan ordenarse por hora real de creación (la columna `fecha` es
   // DATE y `id` es UUID — ninguno sirve solo como criterio cronológico).
@@ -2185,16 +2192,45 @@ const CATEGORIA_A_STOCK = {
     return dest === 'mayorista' ? 'precio_mayorista' : 'precio_carniceria'
   }
 
+  // Mapa campo de lista → flag de la oferta que indica si aplica a esa lista
+  const LISTA_A_FLAG_OFERTA = {
+    precio_mayorista: 'aplica_mayorista',
+    precio_carniceria: 'aplica_carniceria',
+    precio_minorista: 'aplica_minorista',
+  }
+
+  // Resuelve el precio de un producto para una lista, aplicando la oferta
+  // vigente si existe y aplica a esa lista. Igual que resolverPrecio en Caja:
+  // si hay descuento_pct lo aplica sobre el precio base; si hay precio_oferta
+  // fijo, usa ese. Si no hay oferta, devuelve el precio normal de la lista.
+  function precioConOferta(prod, listaField) {
+    if (!prod) return 0
+    const base = Number(prod[listaField]) || Number(prod.precio_mayorista) || 0
+    const flag = LISTA_A_FLAG_OFERTA[listaField] || 'aplica_mayorista'
+    // Ofertas viejas sin flags se asumen aplicables (default DB es TRUE)
+    const oferta = ofertas.find(o => o.precio_id === prod.id && o[flag] !== false)
+    if (oferta) {
+      if (oferta.descuento_pct != null && Number(oferta.descuento_pct) > 0) {
+        return Math.round(base * (1 - Number(oferta.descuento_pct) / 100))
+      }
+      if (oferta.precio_oferta != null && Number(oferta.precio_oferta) > 0) {
+        return Number(oferta.precio_oferta)
+      }
+    }
+    return base
+  }
+
   function seleccionarCliente(c) {
     setForm(f => ({ ...f, clienteId: c.id, clienteNombre: c.nombre, domicilio: c.domicilio || '' }))
     setBusqueda(c.nombre)
     setMostrarClientes(false)
     // Si ya había un producto seleccionado, recalcular el precio con la
-    // lista del cliente recién elegido (puede tener lista distinta al destino).
+    // lista del cliente recién elegido (puede tener lista distinta al destino),
+    // aplicando la oferta vigente si corresponde.
     if (form.productoId) {
       const prod = todosPrecios.find(p => p.id === form.productoId)
       if (prod) {
-        const precio = prod[getLista(form.destino, c.id)] || prod.precio_mayorista || 0
+        const precio = precioConOferta(prod, getLista(form.destino, c.id))
         setForm(f => ({ ...f, productoId: f.productoId, precio, clienteId: c.id, clienteNombre: c.nombre, domicilio: c.domicilio || '' }))
       }
     }
@@ -2204,7 +2240,8 @@ const CATEGORIA_A_STOCK = {
     if (!id) return
     const prod = todosPrecios.find(p => p.id === id)
     if (!prod) return
-    const precio = prod[getLista(form.destino, form.clienteId)] || prod.precio_mayorista || 0
+    // Precio según la lista del despacho, aplicando la oferta vigente si la hay
+    const precio = precioConOferta(prod, getLista(form.destino, form.clienteId))
     setForm(f => ({ ...f, productoId: id, precio }))
   }
 async function agregarItem() {
@@ -2631,6 +2668,23 @@ for (const item of items) {
           </div>
           <div className="form-group"><label>{esCaja ? 'Precio por kg ($)' : esUnidad ? 'Precio por unidad' : 'Precio/kg'}</label>
             <input type="number" value={form.precio} onChange={e => setForm(f => ({ ...f, precio: e.target.value }))} style={{ borderColor: 'var(--gold)' }} />
+            {(() => {
+              // Indicador de oferta: si el producto seleccionado tiene oferta vigente
+              // para la lista del despacho y el precio cargado es el de oferta.
+              const prodSel = todosPrecios.find(p => p.id === form.productoId)
+              if (!prodSel) return null
+              const listaField = getLista(form.destino, form.clienteId)
+              const base = Number(prodSel[listaField]) || 0
+              const conOf = precioConOferta(prodSel, listaField)
+              if (conOf < base && base > 0) {
+                return (
+                  <div style={{ fontSize: 11, color: '#7dff7d', marginTop: 4, fontWeight: 700 }}>
+                    🏷️ Oferta aplicada — antes ${Math.round(base).toLocaleString('es-AR')}
+                  </div>
+                )
+              }
+              return null
+            })()}
           </div>
         </div>
 
