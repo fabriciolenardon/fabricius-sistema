@@ -1679,6 +1679,37 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
       const { error: errMedias } = await supabase.from('medias_stock').insert(filasMedias)
       if (errMedias) console.warn('No se pudo crear fila en medias_stock:', errMedias.message)
     }
+
+    // Compras DIRECTAS de piezas bovinas (pierna, cortito, etc.) al frigorífico:
+    // además del stock agregado, creamos su fila individual en piezas_stock para
+    // que aparezcan en la pestaña Piezas (igual que las que salen del desposte
+    // de medias reses). Solo aplica a entradas manuales de tipo pieza_* bovino;
+    // las piezas que vienen del desposte ya crean su propia fila por otro flujo.
+    const TIPOS_PIEZA_BOVINA = {
+      pieza_pierna: 'Pierna', pieza_cuarto_pistola: 'Cuarto Pistola',
+      pieza_costillar: 'Costillar Completo', pieza_cortito: 'Cortito',
+      pieza_carre: 'Carré', pieza_paleta: 'Paleta', pieza_parrillero: 'Parrillero',
+    }
+    if (TIPOS_PIEZA_BOVINA[form.tipo] && entradaInsertada) {
+      const kgPorPieza = kgTotal / cantidad
+      const filasPiezas = []
+      for (let i = 0; i < cantidad; i++) {
+        filasPiezas.push({
+          entrada_id: entradaInsertada.id,
+          tipo_pieza: TIPOS_PIEZA_BOVINA[form.tipo],
+          tipo_stock: form.tipo,
+          kg: kgPorPieza,
+          precio_costo_kg: parseNumero(form.precioKg) || null,
+          fecha_ingreso: form.fecha,
+          proveedor_origen: form.proveedor,
+          descripcion_origen: form.descripcion || TIPOS_PIEZA_BOVINA[form.tipo],
+          estado: 'disponible',
+        })
+      }
+      const { error: errPz } = await supabase.from('piezas_stock').insert(filasPiezas)
+      if (errPz) console.warn('No se pudo crear fila en piezas_stock:', errPz.message)
+    }
+
     await supabase.from('compras_proveedores').insert({
       fecha: form.fecha, proveedor_nombre: form.proveedor,
       producto: descripcionFinal,
