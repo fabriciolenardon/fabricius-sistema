@@ -27,6 +27,7 @@ export default function Dashboard() {
   const [gastos, setGastos] = useState([])
   const [cheques, setCheques] = useState([])
   const [precios, setPrecios] = useState([])
+  const [mediasMR, setMediasMR] = useState({ count: 0, kg: 0 })  // medias reses individuales disponibles
   const [loading, setLoading] = useState(true)
   // Estado del modal de detalle de stock (entradas y salidas por categoria)
   const [detalleAbierto, setDetalleAbierto] = useState(null)
@@ -38,7 +39,7 @@ export default function Dashboard() {
   useEffect(() => { fetchData() }, [])
 
   async function fetchData() {
-    const [c, cl, st, r, g, ch, pr] = await Promise.all([
+    const [c, cl, st, r, g, ch, pr, md] = await Promise.all([
       supabase.from('cierres_semanales').select('*').order('semana_inicio', { ascending: false }).limit(8),
       supabase.from('clientes').select('*').order('saldo', { ascending: false }),
       supabase.from('stock_actual').select('*'),
@@ -46,6 +47,9 @@ export default function Dashboard() {
       supabase.from('gastos').select('*').order('fecha', { ascending: false }).limit(5),
       supabase.from('cheques').select('*').order('fecha_pago', { ascending: true }).limit(20),
       supabase.from('precios').select('categoria'),
+      // Medias reses individuales disponibles (fuente de verdad para el conteo,
+      // igual que el historial). Evita estimar las medias por kg/105.
+      supabase.from('medias_stock').select('kg').eq('estado', 'disponible'),
     ])
     setCierres(c.data || [])
     setClientes(cl.data || [])
@@ -56,6 +60,8 @@ export default function Dashboard() {
     setGastos(g.data || [])
     setCheques(ch.data || [])
     setPrecios(pr.data || [])
+    const medias = md?.data || []
+    setMediasMR({ count: medias.length, kg: medias.reduce((acc, m) => acc + (Number(m.kg) || 0), 0) })
     setLoading(false)
   }
 
@@ -140,7 +146,11 @@ export default function Dashboard() {
   const totMesCompras = mesActual.reduce((s, c) => s + (c.compras || 0), 0)
   const totMesGastos = mesActual.reduce((s, c) => s + (c.gastos || 0), 0)
 
-  const stockBovino = Math.max(0, stock.bovino_mr || 0)
+  // Preferimos el kg/conteo REAL de las medias individuales (medias_stock),
+  // que es la fuente de verdad y lo que muestra el historial. El agregado
+  // stock_actual.bovino_mr puede desincronizarse con los despostes/ventas.
+  // Fallback a stock_actual si todavía no hay medias trackeadas (legacy).
+  const stockBovino = mediasMR.count > 0 ? mediasMR.kg : Math.max(0, stock.bovino_mr || 0)
   // El desposte acumula el stock real en 'bovino_pieza' (genérico). Si por algún flujo
   // legacy hay stock acumulado en los tipos granulares, lo sumamos como fallback.
   const stockPiezas = Math.max(0, (stock.bovino_pieza || 0) + (stock.pieza_pierna || 0) + (stock.pieza_cuarto_pistola || 0) + (stock.pieza_costillar || 0) + (stock.pieza_cortito || 0) + (stock.pieza_carre || 0) + (stock.pieza_paleta || 0) + (stock.pieza_parrillero || 0))
@@ -336,7 +346,7 @@ export default function Dashboard() {
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
           {[
-            { label: '🐄 Bovino Media Res', valor: stockBovino.toFixed(1) + ' kg', color: 'var(--gold)', aprox: Math.round(stockBovino / 105) + ' medias', bajo: stockBovino < 100, stockKg: stockBovino, tiposEntradas: ['bovino_mr'], tiposSalidas: ['bovino_mr'] },
+            { label: '🐄 Bovino Media Res', valor: stockBovino.toFixed(1) + ' kg', color: 'var(--gold)', aprox: (mediasMR.count > 0 ? mediasMR.count : Math.round(stockBovino / 105)) + ' medias', bajo: stockBovino < 100, stockKg: stockBovino, tiposEntradas: ['bovino_mr'], tiposSalidas: ['bovino_mr'] },
             { label: '🍖 Piezas Bovinas', valor: stockPiezas.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockPiezas < 30, stockKg: stockPiezas, tiposEntradas: ['bovino_pieza','pieza_pierna','pieza_cuarto_pistola','pieza_costillar','pieza_cortito','pieza_carre','pieza_paleta','pieza_parrillero'], tiposSalidas: ['bovino_pieza','pieza_entera','pieza_pierna','pieza_cuarto_pistola','pieza_costillar','pieza_cortito','pieza_carre','pieza_paleta','pieza_parrillero'] },
             { label: '📦 Cajas Bovinas', valor: stockCajas.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockCajas < 20, stockKg: stockCajas, tiposEntradas: ['caja_cb','caja_pt'], tiposSalidas: ['bovino_caja_cb','bovino_caja_pt','caja_cb','caja_pt'] },
             { label: '🥩 Bovino Cortes', valor: stockCortes.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockCortes < 50, stockKg: stockCortes, tiposEntradas: ['bovino_corte'], tiposSalidas: ['bovino_corte'] },
