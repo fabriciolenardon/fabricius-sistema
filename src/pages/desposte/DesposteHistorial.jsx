@@ -19,6 +19,7 @@
 // ============================================================
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
+import Paginador, { usePaginacion } from '../../components/Paginador'
 
 const FECHA_FMT = { day: '2-digit', month: '2-digit', year: '2-digit' }
 const fmtKg = n => (Number(n) || 0).toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })
@@ -90,6 +91,7 @@ export default function DesposteHistorial() {
         piezas: f.payload?.piezas,
         notas: f.notas,
         notas_admin: f.notas_admin,
+        aprobado_por_nombre: f.aprobado_por_nombre,
         estado: f.estado, // pendiente | aprobado | rechazado
         empleado: f.empleado_nombre,
       })),
@@ -100,6 +102,7 @@ export default function DesposteHistorial() {
   }
 
   const filtrados = items.filter(it => filtro === 'todos' || it.tipo_animal === filtro)
+  const pag = usePaginacion(filtrados, 20)
 
   return (
     <div>
@@ -137,16 +140,19 @@ export default function DesposteHistorial() {
           Sin actividad registrada en este filtro.
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {filtrados.map(it => (
-            <ItemHistorial
-              key={it.id}
-              item={it}
-              expandido={expandido === it.id}
-              onToggle={() => setExpandido(expandido === it.id ? null : it.id)}
-            />
-          ))}
-        </div>
+        <>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {pag.items.map(it => (
+              <ItemHistorial
+                key={it.id}
+                item={it}
+                expandido={expandido === it.id}
+                onToggle={() => setExpandido(expandido === it.id ? null : it.id)}
+              />
+            ))}
+          </div>
+          <Paginador {...pag.controles} label="registros" />
+        </>
       )}
     </div>
   )
@@ -187,6 +193,9 @@ function ItemHistorial({ item, expandido, onToggle }) {
           <div style={{ fontSize: 12, color: 'var(--muted)' }}>
             {fechaHora}
             {item.empleado && <span> · por <strong style={{ color: 'var(--text2)' }}>{item.empleado}</strong></span>}
+            {item.estado === 'aprobado' && item.aprobado_por_nombre && (
+              <span> · aprobó <strong style={{ color: '#7dff7d' }}>{item.aprobado_por_nombre}</strong></span>
+            )}
           </div>
         </div>
         <div style={{ textAlign: 'right', flexShrink: 0 }}>
