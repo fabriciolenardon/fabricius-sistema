@@ -655,7 +655,7 @@ async function confirmarDesposteCerdo() {
       {alert && <div style={{ background: alert.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${alert.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: alert.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>{alert.msg}</div>}
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
         {[{ id: 'piezas', label: '🍖 Desposte en Piezas' }, { id: 'kilo', label: '⚖️ Desposte para venta por Kilo' }, { id: 'pieza_kilo', label: '🔄 Convertir Pieza a Cortes' }, { id: 'cerdo', label: '🐷 Desposte Cerdo' },
-{ id: 'embutidos', label: '🌭 Elaborar Embutidos' }, { id: 'medias_hist', label: '🐄 Historial Medias' }, { id: 'historial', label: '📋 Historial' }].map(t => (
+{ id: 'embutidos', label: '🌭 Elaborar Embutidos' }, { id: 'medias_hist', label: '🐄 Historial Medias' }, { id: 'historial', label: '📋 Historial Desposte' }].map(t => (
           <button key={t.id} onClick={() => { setSubtab(t.id); setSeleccionada(null); setPiezas([]); cargarDatos() }}
             style={{ padding: '8px 16px', borderRadius: 8, border: `1px solid ${subtab === t.id ? 'var(--gold)' : 'var(--border)'}`, background: subtab === t.id ? 'var(--gold)' : 'transparent', color: subtab === t.id ? '#000' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
             {t.label}
