@@ -82,44 +82,40 @@ export default function Dashboard() {
     let entradas = entradasRes.data || []
 
     // Algunas categorías no se "compran" directamente — se generan por
-    // desposte (ej: Bovino Cortes vienen del desposte de piezas o medias
-    // res). En esos casos también consultamos la tabla `despostes` y
+    // desposte (ej: Bovino Cortes vienen del desposte de medias res o
+    // de la conversión pieza→kilo). En esos casos consultamos la tabla
+    // `despostes` filtrando por `tipo_desposte` (que es el discriminador
+    // real, no `tipo_animal`, que puede ser novillo/bovino/ternera) y
     // mostramos cada desposte como una "entrada virtual" para que el
     // historial cuadre con el stock acumulado.
-    if (cat.incluyeDespostes) {
-      const { tipoAnimal, tipoStock } = cat.incluyeDespostes
+    if (cat.incluyeDespostes?.tiposDesposte) {
+      const { tiposDesposte } = cat.incluyeDespostes
       const { data: despostes } = await supabase
         .from('despostes')
         .select('id, fecha, modelo, tipo_desposte, tipo_animal, kg_neto, kg_media_res, piezas, notas, entrada_id')
-        .eq('tipo_animal', tipoAnimal)
+        .in('tipo_desposte', tiposDesposte)
         .order('fecha', { ascending: false })
         .order('created_at', { ascending: false })
 
-      // Para cada desposte sumamos sólo los kg de piezas que corresponden
-      // al `tipoStock` buscado (ej: 'bovino_corte'). Si la pieza no tiene
-      // tipo_stock explícito, usamos el nombre como heurística.
-      const entradasDesdeDespostes = (despostes || [])
-        .map(d => {
-          const piezasArr = Array.isArray(d.piezas) ? d.piezas : []
-          const kgCortes = piezasArr.reduce((s, p) => {
-            const matchTipo = p.tipo_stock === tipoStock
-            const matchNombre = !p.tipo_stock && /corte|molida|picada|carne/i.test(p.nombre || '')
-            if (matchTipo || matchNombre) return s + (Number(p.kg) || 0)
-            return s
-          }, 0)
-          if (kgCortes <= 0) return null
-          const modeloLabel = d.tipo_desposte === 'cortes' ? 'Conversión a cortes' : `Desposte modelo ${d.modelo || '—'}`
-          return {
-            id: `desp-${d.id}`,
-            fecha: d.fecha,
-            descripcion: `🔪 ${modeloLabel}${d.notas ? ` · ${d.notas}` : ''}`,
-            proveedor_nombre: 'Desposte interno',
-            kg: kgCortes,
-            kg_real: kgCortes,
-            _virtual: true,
-          }
-        })
-        .filter(Boolean)
+      const entradasDesdeDespostes = (despostes || []).map(d => {
+        const piezasArr = Array.isArray(d.piezas) ? d.piezas : []
+        const nombrePiezas = piezasArr.map(p => p.nombre).filter(Boolean).join(', ') || '—'
+        const kg = Number(d.kg_neto) || 0
+        let modeloLabel
+        if (d.tipo_desposte === 'pieza_kilo') modeloLabel = `Conversión pieza → cortes (${nombrePiezas})`
+        else if (d.tipo_desposte === 'kilo')  modeloLabel = `Desposte por kilo (${nombrePiezas})`
+        else if (d.tipo_desposte === 'piezas') modeloLabel = `Desposte MR modelo ${d.modelo || '—'} (${piezasArr.length} piezas)`
+        else                                   modeloLabel = `Desposte ${d.tipo_desposte} ${d.modelo || ''}`.trim()
+        return {
+          id: `desp-${d.id}`,
+          fecha: d.fecha,
+          descripcion: `🔪 ${modeloLabel}${d.notas ? ` · ${d.notas}` : ''}`,
+          proveedor_nombre: `Desposte ${d.tipo_animal || ''}`.trim(),
+          kg,
+          kg_real: kg,
+          _virtual: true,
+        }
+      }).filter(d => d.kg > 0)
 
       // Mergeamos y reordenamos por fecha desc
       entradas = [...entradas, ...entradasDesdeDespostes].sort((a, b) => {
@@ -397,9 +393,9 @@ export default function Dashboard() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
           {[
             { label: '🐄 Bovino Media Res', valor: stockBovino.toFixed(1) + ' kg', color: 'var(--gold)', aprox: (mediasMR.count > 0 ? mediasMR.count : Math.round(stockBovino / 105)) + ' medias', bajo: stockBovino < 100, stockKg: stockBovino, tiposEntradas: ['bovino_mr'], tiposSalidas: ['bovino_mr'] },
-            { label: '🍖 Piezas Bovinas', valor: stockPiezas.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockPiezas < 30, stockKg: stockPiezas, tiposEntradas: ['bovino_pieza','pieza_pierna','pieza_cuarto_pistola','pieza_costillar','pieza_cortito','pieza_carre','pieza_paleta','pieza_parrillero'], tiposSalidas: ['bovino_pieza','pieza_entera','pieza_pierna','pieza_cuarto_pistola','pieza_costillar','pieza_cortito','pieza_carre','pieza_paleta','pieza_parrillero'], incluyeDespostes: { tipoAnimal: 'bovino', tipoStock: 'bovino_pieza' } },
+            { label: '🍖 Piezas Bovinas', valor: stockPiezas.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockPiezas < 30, stockKg: stockPiezas, tiposEntradas: ['bovino_pieza','pieza_pierna','pieza_cuarto_pistola','pieza_costillar','pieza_cortito','pieza_carre','pieza_paleta','pieza_parrillero'], tiposSalidas: ['bovino_pieza','pieza_entera','pieza_pierna','pieza_cuarto_pistola','pieza_costillar','pieza_cortito','pieza_carre','pieza_paleta','pieza_parrillero'], incluyeDespostes: { tiposDesposte: ['piezas'] } },
             { label: '📦 Cajas Bovinas', valor: stockCajas.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockCajas < 20, stockKg: stockCajas, tiposEntradas: ['caja_cb','caja_pt'], tiposSalidas: ['bovino_caja_cb','bovino_caja_pt','caja_cb','caja_pt'] },
-            { label: '🥩 Bovino Cortes', valor: stockCortes.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockCortes < 50, stockKg: stockCortes, tiposEntradas: ['bovino_corte'], tiposSalidas: ['bovino_corte'], incluyeDespostes: { tipoAnimal: 'bovino', tipoStock: 'bovino_corte' } },
+            { label: '🥩 Bovino Cortes', valor: stockCortes.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockCortes < 50, stockKg: stockCortes, tiposEntradas: ['bovino_corte'], tiposSalidas: ['bovino_corte'], incluyeDespostes: { tiposDesposte: ['kilo', 'pieza_kilo'] } },
             { label: '🐷 Cerdo Capones', valor: stockCerdo.toFixed(1) + ' kg', color: 'var(--amber)', aprox: Math.round(stockCerdo / 107) + ' capones', bajo: stockCerdo < 50, stockKg: stockCerdo, tiposEntradas: ['cerdo'], tiposSalidas: ['cerdo','cerdo_corte'] },
             { label: '🐷 Cerdo Piezas', valor: stockCerdoPiezas.toFixed(1) + ' kg', color: 'var(--amber)', aprox: 'al peso', bajo: stockCerdoPiezas < 20, stockKg: stockCerdoPiezas, tiposEntradas: ['cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza'], tiposSalidas: ['cerdo_pieza','cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza'] },
             { label: '🍗 Pollo', valor: stockPollo.toFixed(1) + ' kg', color: 'var(--blue)', aprox: Math.round(stockPollo / 20) + ' cajones', bajo: stockPollo < 50, stockKg: stockPollo, tiposEntradas: ['pollo'], tiposSalidas: ['pollo'] },
