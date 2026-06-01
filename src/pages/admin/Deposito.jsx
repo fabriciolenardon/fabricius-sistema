@@ -2866,11 +2866,16 @@ export function RemitosTab({ remitoActual }) {
   // como disponibles), las piezas enteras quedaban vendidas, y los kg seguían
   // descontados del stock_actual. Ahora se devuelve todo.
 
-  // Medias res → vuelven a 'disponible' y la entrada deja de estar despostada,
-  // así reaparece tanto en el Historial de Medias como en el despacho.
+  // Medias res → vuelven a 'disponible' y la entrada se libera por completo:
+  //   despostada=false  → reaparece para despachar/despostar
+  //   reservada=false   → se suelta la reserva (flujo) hacia la franquicia, así
+  //                       vuelve a la lista de "Medias Reses disponibles" del
+  //                       Desposte (esa lista filtra reservada=false). Sin esto
+  //                       la media figura disponible en el Historial pero NO se
+  //                       puede despostar/vender.
   const mediasIds = (remito.items || []).map(it => it.media_res_id).filter(Boolean)
   if (mediasIds.length > 0) {
-    await supabase.from('entradas_deposito').update({ despostada: false }).in('id', mediasIds)
+    await supabase.from('entradas_deposito').update({ despostada: false, reservada: false }).in('id', mediasIds)
     await supabase.from('medias_stock').update({
       estado: 'disponible',
       cliente_nombre: null, cliente_id: null, fecha_salida: null, destino: null,
