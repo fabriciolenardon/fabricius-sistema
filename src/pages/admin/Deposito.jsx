@@ -256,7 +256,10 @@ const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(n
     // `created_at` (timestamp) es el único campo que refleja el orden real de
     // creación.
     const [{ data: entradas }, { data: despostesData }, { data: preciosData }, { data: stockData }, { data: caponesData }, { data: elaboracionesData }, { data: piezasIndivData }, { data: mediasStockData }] = await Promise.all([
-  supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).eq('reservada', false).order('fecha', { ascending: false }).order('created_at', { ascending: false }),
+  // NOTA: NO se filtra por `reservada`. El Flujo Depósito es solo informativo
+  // y no debe sacar medias de circulación; toda media no despostada está
+  // disponible para despostar/vender. (Ver DesposteMediaRes — ya no reserva.)
+  supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false }).order('created_at', { ascending: false }),
   supabase.from('despostes').select('*').order('fecha', { ascending: false }),
   supabase.from('precios').select('*').eq('categoria', 'bovino_pieza'),
   supabase.from('stock_actual').select('*'),

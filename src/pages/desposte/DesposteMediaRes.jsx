@@ -167,12 +167,11 @@ export default function DesposteMediaRes() {
     })
     if (error) { setGuardando(false); return aviso('❌ ' + error.message, 'error') }
 
-    // Reservar la media res elegida del stock: deja de aparecer como
-    // disponible/clickeable y pasa a "Pendiente de aprobación" hasta que
-    // el admin procese (o rechace) el flujo. Evita que se cargue dos veces.
-    if (seleccionada?.id) {
-      await supabase.from('entradas_deposito').update({ reservada: true }).eq('id', seleccionada.id)
-    }
+    // IMPORTANTE: el Flujo Depósito es SOLO un flujo de información. Enviar
+    // al admin (y que él apruebe) NO debe modificar NADA del sistema: la media
+    // res NO se reserva ni se descuenta de stock. Queda 100% disponible para
+    // que el admin la seleccione y la desposte/venda como quiera desde
+    // Depósito. Por eso acá NO se toca `entradas_deposito.reservada`.
     setGuardando(false)
 
     aviso('✅ Enviado al admin para que procese · la media queda como PENDIENTE hasta su aprobación', 'success')
@@ -251,40 +250,16 @@ export default function DesposteMediaRes() {
       {mediasRes.length > 0 && (
         <div style={{ marginBottom: 20 }}>
           <label style={{ fontSize: 13, color: 'var(--muted)', display: 'block', marginBottom: 8 }}>
-            Media res del stock ({mediasRes.filter(m => !m.reservada).length} disponibles) — opcional, también podés tipear los kilos a mano abajo
+            Media res del stock ({mediasRes.length} disponibles) — opcional, también podés tipear los kilos a mano abajo
           </label>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8, maxHeight: 360, overflowY: 'auto', padding: 4 }}>
             {mediasRes.map(mr => {
-              // ── Media RESERVADA: enviada al admin, bloqueada (no clickeable) ──
-              if (mr.reservada) {
-                const aprobada = mr.flujo?.estado === 'aprobado'
-                const quien = mr.flujo?.aprobado_por_nombre
-                return (
-                  <div key={mr.id} title="Esta media res ya fue enviada al admin"
-                    style={{
-                      padding: 12, background: 'var(--surface2)',
-                      border: `2px dashed ${aprobada ? '#7dff7d55' : '#ffd17a55'}`,
-                      borderRadius: 10, cursor: 'not-allowed', opacity: 0.7, position: 'relative',
-                    }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                      {mr.codigo_media && <span style={{ background: 'var(--muted)', color: '#000', padding: '2px 7px', borderRadius: 6, fontSize: 11, fontWeight: 800, letterSpacing: 0.5 }}>{mr.codigo_media}</span>}
-                      <span style={{ fontSize: 11, color: 'var(--muted)' }}>{mr.fecha}</span>
-                    </div>
-                    <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--muted)' }}>{fmt(mr.kg_real || mr.kg)} kg</div>
-                    <div style={{ fontSize: 10, color: 'var(--muted)' }}>{mr.proveedor_nombre || mr.proveedor || '—'}</div>
-                    <div style={{
-                      marginTop: 6, fontSize: 11, fontWeight: 700,
-                      color: aprobada ? '#7dff7d' : '#ffd17a',
-                    }}>
-                      {aprobada
-                        ? `✅ Aprobada${quien ? ' por ' + quien : ''}`
-                        : '⏳ Pendiente de aprobación'}
-                    </div>
-                  </div>
-                )
-              }
-              // ── Media DISPONIBLE: clickeable ──
+              // El Flujo Depósito NO reserva ni bloquea nada: TODAS las medias
+              // quedan seleccionables. Si una ya fue enviada al admin, se
+              // muestra solo como dato informativo (no impide volver a usarla).
               const sel = seleccionada?.id === mr.id
+              const flujoActivo = mr.flujo
+              const aprobada = flujoActivo?.estado === 'aprobado'
               return (
                 <button key={mr.id} onClick={() => { setSeleccionada(sel ? null : mr); setKgManual(sel ? '' : String(mr.kg_real || mr.kg || '')) }}
                   style={{
@@ -299,6 +274,11 @@ export default function DesposteMediaRes() {
                   </div>
                   <div style={{ fontSize: 20, fontWeight: 700 }}>{fmt(mr.kg_real || mr.kg)} kg</div>
                   <div style={{ fontSize: 10, color: 'var(--muted)' }}>{mr.proveedor_nombre || mr.proveedor || '—'}</div>
+                  {flujoActivo && (
+                    <div style={{ marginTop: 6, fontSize: 10, fontWeight: 700, color: aprobada ? '#7dff7d' : '#ffd17a' }}>
+                      {aprobada ? 'ℹ️ Ya enviada al admin (aprobada)' : 'ℹ️ Ya enviada al admin (pendiente)'} · sigue disponible
+                    </div>
+                  )}
                 </button>
               )
             })}
