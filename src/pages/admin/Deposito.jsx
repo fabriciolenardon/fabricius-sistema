@@ -1519,12 +1519,21 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     // pero `id` es UUID (aleatorio), no autoincremental, así que el orden de
     // entradas del mismo día era impredecible. `created_at` es el timestamp
     // real de inserción y SÍ refleja la hora.
-    const { data } = await supabase
-      .from('entradas_deposito')
-      .select('*')
-      .order('fecha', { ascending: false })
-      .order('created_at', { ascending: false })
-    setHistorial(data || [])
+    const [{ data }, { data: medias }] = await Promise.all([
+      supabase
+        .from('entradas_deposito')
+        .select('*')
+        .order('fecha', { ascending: false })
+        .order('created_at', { ascending: false }),
+      // Código MR-XXX de cada media res (vive en medias_stock, no en la
+      // entrada). Lo asociamos por entrada_id para mostrarlo en el historial
+      // de ingresos y tener trazabilidad: el mismo código del Historial de
+      // Medias y del usuario de Desposte.
+      supabase.from('medias_stock').select('entrada_id, codigo'),
+    ])
+    const codigoPorEntrada = {}
+    ;(medias || []).forEach(m => { if (m.entrada_id) codigoPorEntrada[m.entrada_id] = m.codigo })
+    setHistorial((data || []).map(e => ({ ...e, codigo_media: codigoPorEntrada[e.id] || null })))
   }
 
   // Paginación del historial — 20 por página por defecto, opciones 10/20/50/100
@@ -2053,6 +2062,7 @@ async function eliminar(entrada) {
           <thead>
             <tr>
               <th>Fecha</th>
+              <th>Código</th>
               <th>Tipo</th>
               <th>Proveedor</th>
               <th>Descripción</th>
@@ -2066,6 +2076,7 @@ async function eliminar(entrada) {
               editando === e.id ? (
                 <tr key={e.id} style={{ background: 'rgba(201,168,76,0.08)' }}>
                   <td><input type="date" value={formEdit.fecha} onChange={x => setFormEdit(f => ({ ...f, fecha: x.target.value }))} style={{ ...inp, width: 130 }} /></td>
+                  <td>{e.codigo_media ? <span style={{ background: 'var(--gold)', color: '#000', padding: '2px 7px', borderRadius: 6, fontSize: 11, fontWeight: 800, letterSpacing: 0.5 }}>{e.codigo_media}</span> : <span style={{ color: 'var(--muted)' }}>—</span>}</td>
                   <td style={{ color: 'var(--muted)', fontSize: 12 }}>{TIPOS[e.tipo] || e.tipo}</td>
                   <td><input value={formEdit.proveedor} onChange={x => setFormEdit(f => ({ ...f, proveedor: x.target.value }))} style={{ ...inp, width: 110 }} /></td>
                   <td><input value={formEdit.descripcion} onChange={x => setFormEdit(f => ({ ...f, descripcion: x.target.value }))} style={{ ...inp, width: 130 }} /></td>
@@ -2088,6 +2099,7 @@ async function eliminar(entrada) {
                         "iguales" aunque internamente esten bien ordenadas. */}
                     <div style={{ fontSize: 10, color: 'var(--muted)' }}>{fmtHora(e.created_at)}</div>
                   </td>
+                  <td>{e.codigo_media ? <span style={{ background: 'var(--gold)', color: '#000', padding: '2px 7px', borderRadius: 6, fontSize: 11, fontWeight: 800, letterSpacing: 0.5 }}>{e.codigo_media}</span> : <span style={{ color: 'var(--muted)' }}>—</span>}</td>
                   <td style={{ fontSize: 12 }}>{TIPOS[e.tipo] || e.tipo}</td>
                   <td>{e.proveedor_nombre}</td>
                   <td>{e.descripcion}</td>
@@ -2102,7 +2114,7 @@ async function eliminar(entrada) {
                 </tr>
               )
             ))}
-            {historial.length === 0 && <tr><td colSpan={7} className="empty">Sin entradas registradas</td></tr>}
+            {historial.length === 0 && <tr><td colSpan={8} className="empty">Sin entradas registradas</td></tr>}
           </tbody>
         </table>
         <Paginador {...pag.controles} label="entradas" />
