@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
 import { resolverDescuentoStock } from '../../lib/stockHelpers'
@@ -256,7 +256,10 @@ const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(n
     // `created_at` (timestamp) es el único campo que refleja el orden real de
     // creación.
     const [{ data: entradas }, { data: despostesData }, { data: preciosData }, { data: stockData }, { data: caponesData }, { data: elaboracionesData }, { data: piezasIndivData }, { data: mediasStockData }] = await Promise.all([
-  supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).eq('reservada', false).order('fecha', { ascending: false }).order('created_at', { ascending: false }),
+  // NOTA: NO se filtra por `reservada`. El Flujo Depósito es solo informativo
+  // y no debe sacar medias de circulación; toda media no despostada está
+  // disponible para despostar/vender. (Ver DesposteMediaRes — ya no reserva.)
+  supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false }).order('created_at', { ascending: false }),
   supabase.from('despostes').select('*').order('fecha', { ascending: false }),
   supabase.from('precios').select('*').eq('categoria', 'bovino_pieza'),
   supabase.from('stock_actual').select('*'),
@@ -1516,12 +1519,21 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     // pero `id` es UUID (aleatorio), no autoincremental, así que el orden de
     // entradas del mismo día era impredecible. `created_at` es el timestamp
     // real de inserción y SÍ refleja la hora.
-    const { data } = await supabase
-      .from('entradas_deposito')
-      .select('*')
-      .order('fecha', { ascending: false })
-      .order('created_at', { ascending: false })
-    setHistorial(data || [])
+    const [{ data }, { data: medias }] = await Promise.all([
+      supabase
+        .from('entradas_deposito')
+        .select('*')
+        .order('fecha', { ascending: false })
+        .order('created_at', { ascending: false }),
+      // Código MR-XXX de cada media res (vive en medias_stock, no en la
+      // entrada). Lo asociamos por entrada_id para mostrarlo en el historial
+      // de ingresos y tener trazabilidad: el mismo código del Historial de
+      // Medias y del usuario de Desposte.
+      supabase.from('medias_stock').select('entrada_id, codigo'),
+    ])
+    const codigoPorEntrada = {}
+    ;(medias || []).forEach(m => { if (m.entrada_id) codigoPorEntrada[m.entrada_id] = m.codigo })
+    setHistorial((data || []).map(e => ({ ...e, codigo_media: codigoPorEntrada[e.id] || null })))
   }
 
   // Paginación del historial — 20 por página por defecto, opciones 10/20/50/100
@@ -2050,6 +2062,7 @@ async function eliminar(entrada) {
           <thead>
             <tr>
               <th>Fecha</th>
+              <th>Código</th>
               <th>Tipo</th>
               <th>Proveedor</th>
               <th>Descripción</th>
@@ -2063,6 +2076,7 @@ async function eliminar(entrada) {
               editando === e.id ? (
                 <tr key={e.id} style={{ background: 'rgba(201,168,76,0.08)' }}>
                   <td><input type="date" value={formEdit.fecha} onChange={x => setFormEdit(f => ({ ...f, fecha: x.target.value }))} style={{ ...inp, width: 130 }} /></td>
+                  <td>{e.codigo_media ? <span style={{ background: 'var(--gold)', color: '#000', padding: '2px 7px', borderRadius: 6, fontSize: 11, fontWeight: 800, letterSpacing: 0.5 }}>{e.codigo_media}</span> : <span style={{ color: 'var(--muted)' }}>—</span>}</td>
                   <td style={{ color: 'var(--muted)', fontSize: 12 }}>{TIPOS[e.tipo] || e.tipo}</td>
                   <td><input value={formEdit.proveedor} onChange={x => setFormEdit(f => ({ ...f, proveedor: x.target.value }))} style={{ ...inp, width: 110 }} /></td>
                   <td><input value={formEdit.descripcion} onChange={x => setFormEdit(f => ({ ...f, descripcion: x.target.value }))} style={{ ...inp, width: 130 }} /></td>
@@ -2085,6 +2099,7 @@ async function eliminar(entrada) {
                         "iguales" aunque internamente esten bien ordenadas. */}
                     <div style={{ fontSize: 10, color: 'var(--muted)' }}>{fmtHora(e.created_at)}</div>
                   </td>
+                  <td>{e.codigo_media ? <span style={{ background: 'var(--gold)', color: '#000', padding: '2px 7px', borderRadius: 6, fontSize: 11, fontWeight: 800, letterSpacing: 0.5 }}>{e.codigo_media}</span> : <span style={{ color: 'var(--muted)' }}>—</span>}</td>
                   <td style={{ fontSize: 12 }}>{TIPOS[e.tipo] || e.tipo}</td>
                   <td>{e.proveedor_nombre}</td>
                   <td>{e.descripcion}</td>
@@ -2099,7 +2114,7 @@ async function eliminar(entrada) {
                 </tr>
               )
             ))}
-            {historial.length === 0 && <tr><td colSpan={7} className="empty">Sin entradas registradas</td></tr>}
+            {historial.length === 0 && <tr><td colSpan={8} className="empty">Sin entradas registradas</td></tr>}
           </tbody>
         </table>
         <Paginador {...pag.controles} label="entradas" />
@@ -2111,6 +2126,12 @@ async function eliminar(entrada) {
 export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   const [form, setForm] = useState({ destino: 'MITRE', clienteId: '', clienteNombre: '', domicilio: '', fecha: fechaHoyARG(), categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
   const [items, setItems] = useState([])
+  // Anti-doble-emisión: el ref bloquea de forma SÍNCRONA (un segundo click
+  // entra antes de que React re-renderice con guardando=true), y el state
+  // deshabilita el botón. Sin esto se emitían 2 remitos idénticos por
+  // doble click (ver remitos 198/199 de Alvear).
+  const [guardando, setGuardando] = useState(false)
+  const guardandoRef = useRef(false)
   const [todosPrecios, setTodosPrecios] = useState([])
   const [clientes, setClientes] = useState([])
   const [busqueda, setBusqueda] = useState('')
@@ -2345,7 +2366,12 @@ const item = {
   const total = items.reduce((s, i) => s + i.importe, 0)
 
   async function guardar() {
+    // Bloqueo síncrono contra doble emisión (doble click / doble envío).
+    if (guardandoRef.current) return
     if (items.length === 0) { showAlert({ type: 'error', msg: 'Agregá al menos un producto' }); return }
+    guardandoRef.current = true
+    setGuardando(true)
+    try {
     let clienteId = form.clienteId
     let clienteNombre = form.clienteNombre || form.destino
     let domicilio = form.domicilio
@@ -2479,6 +2505,12 @@ for (const item of items) {
     recargarStockMap()
     onSaved()
     setTimeout(() => { showAlert(null); setTab('remitos') }, 1500)
+    } catch (err) {
+      showAlert({ type: 'error', msg: '❌ Error al registrar el despacho: ' + (err?.message || err) })
+    } finally {
+      guardandoRef.current = false
+      setGuardando(false)
+    }
   }
 
   return (
@@ -2770,7 +2802,7 @@ for (const item of items) {
             <input placeholder="Observaciones" value={form.notas} onChange={e => setForm(f => ({ ...f, notas: e.target.value }))} />
           </div>
         </div>
-        <button className="btn btn-gold" onClick={guardar}>📤 Registrar despacho y generar remito</button>
+        <button className="btn btn-gold" onClick={guardar} disabled={guardando} style={{ opacity: guardando ? 0.5 : 1, cursor: guardando ? 'not-allowed' : 'pointer' }}>{guardando ? '⏳ Registrando…' : '📤 Registrar despacho y generar remito'}</button>
       </div>
     </div>
   )
@@ -2849,11 +2881,16 @@ export function RemitosTab({ remitoActual }) {
   // como disponibles), las piezas enteras quedaban vendidas, y los kg seguían
   // descontados del stock_actual. Ahora se devuelve todo.
 
-  // Medias res → vuelven a 'disponible' y la entrada deja de estar despostada,
-  // así reaparece tanto en el Historial de Medias como en el despacho.
+  // Medias res → vuelven a 'disponible' y la entrada se libera por completo:
+  //   despostada=false  → reaparece para despachar/despostar
+  //   reservada=false   → se suelta la reserva (flujo) hacia la franquicia, así
+  //                       vuelve a la lista de "Medias Reses disponibles" del
+  //                       Desposte (esa lista filtra reservada=false). Sin esto
+  //                       la media figura disponible en el Historial pero NO se
+  //                       puede despostar/vender.
   const mediasIds = (remito.items || []).map(it => it.media_res_id).filter(Boolean)
   if (mediasIds.length > 0) {
-    await supabase.from('entradas_deposito').update({ despostada: false }).in('id', mediasIds)
+    await supabase.from('entradas_deposito').update({ despostada: false, reservada: false }).in('id', mediasIds)
     await supabase.from('medias_stock').update({
       estado: 'disponible',
       cliente_nombre: null, cliente_id: null, fecha_salida: null, destino: null,
