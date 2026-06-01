@@ -88,6 +88,41 @@ const MODELOS_DESPOSTE = {
 // coma decimal y punto miles (formato AR). Ver src/lib/formatos.js.
 const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
 
+// Mapeo categoría de item de despacho → tipo de stock_actual a descontar.
+// Vive a nivel de módulo (no dentro de un componente) porque lo usan tanto
+// SalidaForm (al despachar, descuenta stock) como RemitosTab (al anular un
+// remito, devuelve el mismo stock). Si quedara local en SalidaForm, el revert
+// de la anulación no podría calcular qué stock devolver.
+const CATEGORIA_A_STOCK = {
+  bovino_mr: 'bovino_mr',
+  bovino_corte: 'bovino_corte',
+  bovino_brosa: 'bovino_brosa',
+  bovino_pieza: 'bovino_pieza',
+  bovino_caja_cb: 'caja_cb',
+  bovino_caja_pt: 'caja_pt',
+  pieza_pierna: 'pieza_pierna',
+  pieza_cuarto_pistola: 'pieza_cuarto_pistola',
+  pieza_costillar: 'pieza_costillar',
+  pieza_cortito: 'pieza_cortito',
+  pieza_carre: 'pieza_carre',
+  pieza_paleta: 'pieza_paleta',
+  pieza_parrillero: 'pieza_parrillero',
+  caja_cb: 'caja_cb',
+  caja_pt: 'caja_pt',
+  // ── CERDO ──────────────────────────────────────────────
+  // cerdo (capón entero) → stock_actual.tipo='cerdo' (capones)
+  // cerdo_corte / cerdo_pieza → usar stock_origen del producto si está
+  //   configurado (ej. 'cerdo_bondiola', 'cerdo_pierna'), sino caer en
+  //   el bucket genérico 'cerdo_pieza' que se SUMA al display de
+  //   "Cerdo Piezas" del dashboard. NUNCA descontar de 'cerdo' (capones).
+  cerdo_corte: 'cerdo_pieza',
+  cerdo_pieza: 'cerdo_pieza',
+  cerdo: 'cerdo',
+  embutido: 'embutido',
+  pollo: 'pollo',
+  rebozado: 'rebozado',
+}
+
 export function Deposito() {
   const [tab, setTab] = useState('entradas')
   const [alert, setAlert] = useState(null)
@@ -108,7 +143,7 @@ export function Deposito() {
       {alert && <div className={`alert alert-${alert?.type || 'success'}`}>{alert?.msg || alert}</div>}
       <div style={{ display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap' }}>
         {[
-          { id: 'entradas', label: '📥 Entradas' },
+          { id: 'entradas', label: '📥 Ingresos' },
           { id: 'desposte', label: '🔪 Desposte' },
           { id: 'piezas', label: '🥩 Piezas' },
           { id: 'cajas', label: '📦 Cajas' },
@@ -1755,6 +1790,16 @@ async function eliminar(entrada) {
   .eq('kg', entrada.kg)
   // Revertir la compra en la cuenta corriente (si esta entrada la generó)
   await revertirCompraDeEntrada(entrada.id)
+  // Si la entrada era una media res, anular su fila en medias_stock. Antes se
+  // borraba la entrada pero la media quedaba "huérfana" (sin entrada que la
+  // respalde) y seguía contando como disponible en el Historial de Medias,
+  // descuadrando el conteo contra el Historial de Ingresos. Se marca 'anulada'
+  // (no se borra) para conservar el código MR-XXX en la pestaña Anuladas.
+  if (entrada.tipo === 'bovino_mr') {
+    const { error: errMedia } = await supabase.from('medias_stock')
+      .update({ estado: 'anulada' }).eq('entrada_id', entrada.id)
+    if (errMedia) console.warn('No se pudo anular la media asociada:', errMedia.message)
+  }
   await supabase.from('entradas_deposito').delete().eq('id', entrada.id)
   await actualizarStock(entrada.tipo, -(entrada.kg_real || entrada.kg))
   showAlert({ type: 'success', msg: '🗑️ Entrada y desposte eliminados — Stock revertido' })
@@ -2000,7 +2045,7 @@ async function eliminar(entrada) {
       </div>
 
       <div className="card">
-        <div className="card-title">📋 Historial de entradas ({historial.length})</div>
+        <div className="card-title">📋 Historial de ingresos ({historial.length})</div>
         <table>
           <thead>
             <tr>
@@ -2142,36 +2187,8 @@ const CATEGORIAS = {
     pollo: '🍗 Pollo Cajones',
     rebozado: '🧊 Rebozados',
   }
-const CATEGORIA_A_STOCK = {
-    bovino_mr: 'bovino_mr',
-    bovino_corte: 'bovino_corte',
-    bovino_brosa: 'bovino_brosa',
-    bovino_pieza: 'bovino_pieza',
-    bovino_caja_cb: 'caja_cb',
-    bovino_caja_pt: 'caja_pt',
-    pieza_pierna: 'pieza_pierna',
-    pieza_cuarto_pistola: 'pieza_cuarto_pistola',
-    pieza_costillar: 'pieza_costillar',
-    pieza_cortito: 'pieza_cortito',
-    pieza_carre: 'pieza_carre',
-    pieza_paleta: 'pieza_paleta',
-    pieza_parrillero: 'pieza_parrillero',
-    caja_cb: 'caja_cb',
-    caja_pt: 'caja_pt',
-    // ── CERDO ──────────────────────────────────────────────
-    // cerdo (capón entero) → stock_actual.tipo='cerdo' (capones)
-    // cerdo_corte / cerdo_pieza → usar stock_origen del producto si está
-    //   configurado (ej. 'cerdo_bondiola', 'cerdo_pierna'), sino caer en
-    //   el bucket genérico 'cerdo_pieza' que se SUMA al display de
-    //   "Cerdo Piezas" del dashboard. NUNCA descontar de 'cerdo' (capones).
-    cerdo_corte: 'cerdo_pieza',
-    cerdo_pieza: 'cerdo_pieza',
-    cerdo: 'cerdo',
-    embutido: 'embutido',
-    pollo: 'pollo',
-    rebozado: 'rebozado',
-  }
-  
+  // CATEGORIA_A_STOCK se movió a nivel de módulo (arriba) para que RemitosTab
+  // también pueda usarlo al revertir el stock de un remito anulado.
   const DESTINOS_FRANQUICIA = { 'CENTRO': 'ALVEAR', 'MONTE CRISTO': 'MONTE CRISTO' }
   const categorias = [...new Set(todosPrecios.map(p => p.categoria))]
   const productosFiltrados = todosPrecios.filter(p => p.categoria === form.categoria)
@@ -2825,6 +2842,50 @@ export function RemitosTab({ remitoActual }) {
     const { error } = await revertirVentaCaja(it.caja_id)
     if (error) console.warn('No se pudo revertir caja vendida:', error)
   }
+
+  // ── REVERTIR MEDIAS / PIEZAS / STOCK ───────────────────────────────────
+  // Espejo de lo que hace SalidaForm.guardar() al despachar. Antes faltaba:
+  // al anular un remito, las medias quedaban 'vendida' (no volvían a aparecer
+  // como disponibles), las piezas enteras quedaban vendidas, y los kg seguían
+  // descontados del stock_actual. Ahora se devuelve todo.
+
+  // Medias res → vuelven a 'disponible' y la entrada deja de estar despostada,
+  // así reaparece tanto en el Historial de Medias como en el despacho.
+  const mediasIds = (remito.items || []).map(it => it.media_res_id).filter(Boolean)
+  if (mediasIds.length > 0) {
+    await supabase.from('entradas_deposito').update({ despostada: false }).in('id', mediasIds)
+    await supabase.from('medias_stock').update({
+      estado: 'disponible',
+      cliente_nombre: null, cliente_id: null, fecha_salida: null, destino: null,
+    }).in('entrada_id', mediasIds)
+  }
+
+  // Piezas enteras → vuelven a 'disponible', limpiando los datos de la venta.
+  const itemsPiezaEntera = (remito.items || []).filter(it => it.tipo === 'pieza_entera' && it.pieza_id)
+  for (const it of itemsPiezaEntera) {
+    const { error } = await supabase.from('piezas_stock').update({
+      estado: 'disponible',
+      destino: null, cliente_id: null, cliente_nombre: null,
+      precio_venta_kg: null, total_venta: null, fecha_salida: null, notas_salida: null,
+    }).eq('id', it.pieza_id)
+    if (error) console.warn('No se pudo revertir pieza vendida:', error.message)
+  }
+
+  // Devolver el stock descontado. Mismo criterio que guardar(): se saltean
+  // los items manuales (no descontaron stock) y las cajas individuales (ya se
+  // revirtieron arriba con revertirVentaCaja, que ajusta stock_actual).
+  const kgPorTipoDevolver = {}
+  for (const it of (remito.items || [])) {
+    if (it.manual) continue
+    if (it.caja_id) continue
+    const { tipoStock, cantidad } = resolverDescuentoStock(it, CATEGORIA_A_STOCK)
+    if (!tipoStock || !cantidad) continue
+    kgPorTipoDevolver[tipoStock] = (kgPorTipoDevolver[tipoStock] || 0) + cantidad
+  }
+  for (const [tipo, kg] of Object.entries(kgPorTipoDevolver)) {
+    await actualizarStock(tipo, kg)
+  }
+
   showAlert('🗑️ Remito anulado', 'success')
   setAnulando(false)
   cargarRemitos()
