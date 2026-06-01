@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
 import { resolverDescuentoStock } from '../../lib/stockHelpers'
@@ -2111,6 +2111,12 @@ async function eliminar(entrada) {
 export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   const [form, setForm] = useState({ destino: 'MITRE', clienteId: '', clienteNombre: '', domicilio: '', fecha: fechaHoyARG(), categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
   const [items, setItems] = useState([])
+  // Anti-doble-emisión: el ref bloquea de forma SÍNCRONA (un segundo click
+  // entra antes de que React re-renderice con guardando=true), y el state
+  // deshabilita el botón. Sin esto se emitían 2 remitos idénticos por
+  // doble click (ver remitos 198/199 de Alvear).
+  const [guardando, setGuardando] = useState(false)
+  const guardandoRef = useRef(false)
   const [todosPrecios, setTodosPrecios] = useState([])
   const [clientes, setClientes] = useState([])
   const [busqueda, setBusqueda] = useState('')
@@ -2345,7 +2351,12 @@ const item = {
   const total = items.reduce((s, i) => s + i.importe, 0)
 
   async function guardar() {
+    // Bloqueo síncrono contra doble emisión (doble click / doble envío).
+    if (guardandoRef.current) return
     if (items.length === 0) { showAlert({ type: 'error', msg: 'Agregá al menos un producto' }); return }
+    guardandoRef.current = true
+    setGuardando(true)
+    try {
     let clienteId = form.clienteId
     let clienteNombre = form.clienteNombre || form.destino
     let domicilio = form.domicilio
@@ -2479,6 +2490,12 @@ for (const item of items) {
     recargarStockMap()
     onSaved()
     setTimeout(() => { showAlert(null); setTab('remitos') }, 1500)
+    } catch (err) {
+      showAlert({ type: 'error', msg: '❌ Error al registrar el despacho: ' + (err?.message || err) })
+    } finally {
+      guardandoRef.current = false
+      setGuardando(false)
+    }
   }
 
   return (
@@ -2770,7 +2787,7 @@ for (const item of items) {
             <input placeholder="Observaciones" value={form.notas} onChange={e => setForm(f => ({ ...f, notas: e.target.value }))} />
           </div>
         </div>
-        <button className="btn btn-gold" onClick={guardar}>📤 Registrar despacho y generar remito</button>
+        <button className="btn btn-gold" onClick={guardar} disabled={guardando} style={{ opacity: guardando ? 0.5 : 1, cursor: guardando ? 'not-allowed' : 'pointer' }}>{guardando ? '⏳ Registrando…' : '📤 Registrar despacho y generar remito'}</button>
       </div>
     </div>
   )
