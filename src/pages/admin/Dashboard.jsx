@@ -79,7 +79,32 @@ export default function Dashboard() {
       supabase.from('salidas_deposito').select('*').in('tipo', cat.tiposSalidas).order('fecha', { ascending: false }).order('created_at', { ascending: false })
     ])
     setDetalleEntradas(entradasRes.data || [])
-    setDetalleSalidas(salidasRes.data || [])
+
+    let salidas = salidasRes.data || []
+    // Capones: la "salida" real del stock de capones es el desposte (capón
+    // entero → piezas). Lo traemos de la tabla `despostes` y lo mostramos como
+    // salida, con el detalle del despiece. Las ventas de piezas NO van acá.
+    if (cat.despostesCerdo) {
+      const { data: despCerdo } = await supabase.from('despostes')
+        .select('*').eq('tipo_desposte', 'cerdo')
+        .order('fecha', { ascending: false }).order('created_at', { ascending: false })
+      const despostesComoSalidas = (despCerdo || []).map(d => {
+        const piezas = Array.isArray(d.piezas) ? d.piezas : []
+        const detalle = piezas.map(p => `${p.nombre} ${Number(p.kg || 0).toFixed(1)}kg`).join(' · ')
+        return {
+          id: 'desp-' + d.id,
+          fecha: d.fecha,
+          descripcion: `🔪 Capón despostado (${Number(d.kg_media_res || 0).toFixed(1)} kg)` + (detalle ? ` → ${detalle}` : ''),
+          cliente_nombre: 'Desposte interno',
+          kg: d.kg_media_res || d.kg_neto || 0,
+          total: 0,
+          esDesposte: true,
+        }
+      })
+      salidas = [...despostesComoSalidas, ...salidas]
+        .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)))
+    }
+    setDetalleSalidas(salidas)
     setLoadingDetalle(false)
   }
 
@@ -350,8 +375,12 @@ export default function Dashboard() {
             { label: '🍖 Piezas Bovinas', valor: stockPiezas.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockPiezas < 30, stockKg: stockPiezas, tiposEntradas: ['bovino_pieza','pieza_pierna','pieza_cuarto_pistola','pieza_costillar','pieza_cortito','pieza_carre','pieza_paleta','pieza_parrillero'], tiposSalidas: ['bovino_pieza','pieza_entera','pieza_pierna','pieza_cuarto_pistola','pieza_costillar','pieza_cortito','pieza_carre','pieza_paleta','pieza_parrillero'] },
             { label: '📦 Cajas Bovinas', valor: stockCajas.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockCajas < 20, stockKg: stockCajas, tiposEntradas: ['caja_cb','caja_pt'], tiposSalidas: ['bovino_caja_cb','bovino_caja_pt','caja_cb','caja_pt'] },
             { label: '🥩 Bovino Cortes', valor: stockCortes.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockCortes < 50, stockKg: stockCortes, tiposEntradas: ['bovino_corte'], tiposSalidas: ['bovino_corte'] },
-            { label: '🐷 Cerdo Capones', valor: stockCerdo.toFixed(1) + ' kg', color: 'var(--amber)', aprox: Math.round(stockCerdo / 107) + ' capones', bajo: stockCerdo < 50, stockKg: stockCerdo, tiposEntradas: ['cerdo'], tiposSalidas: ['cerdo','cerdo_corte'] },
-            { label: '🐷 Cerdo Piezas', valor: stockCerdoPiezas.toFixed(1) + ' kg', color: 'var(--amber)', aprox: 'al peso', bajo: stockCerdoPiezas < 20, stockKg: stockCerdoPiezas, tiposEntradas: ['cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza'], tiposSalidas: ['cerdo_pieza','cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza'] },
+            // Capones: ingresan ENTEROS y "salen" del stock de capones al despostarse
+            // (capón entero → piezas). Por eso sus salidas son los despostes de cerdo
+            // (despostesCerdo), NO las ventas de piezas. Las ventas/elaborados de piezas
+            // (matambre, pulpa, etc. = cerdo_corte/cerdo_pieza) se descuentan de Cerdo Piezas.
+            { label: '🐷 Cerdo Capones', valor: stockCerdo.toFixed(1) + ' kg', color: 'var(--amber)', aprox: Math.round(stockCerdo / 107) + ' capones', bajo: stockCerdo < 50, stockKg: stockCerdo, tiposEntradas: ['cerdo'], tiposSalidas: ['cerdo'], despostesCerdo: true },
+            { label: '🐷 Cerdo Piezas', valor: stockCerdoPiezas.toFixed(1) + ' kg', color: 'var(--amber)', aprox: 'al peso', bajo: stockCerdoPiezas < 20, stockKg: stockCerdoPiezas, tiposEntradas: ['cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza'], tiposSalidas: ['cerdo_pieza','cerdo_corte','cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza'] },
             { label: '🍗 Pollo', valor: stockPollo.toFixed(1) + ' kg', color: 'var(--blue)', aprox: Math.round(stockPollo / 20) + ' cajones', bajo: stockPollo < 50, stockKg: stockPollo, tiposEntradas: ['pollo'], tiposSalidas: ['pollo'] },
             { label: '🫀 Brosas', valor: stockBrosas.toFixed(1) + ' kg', color: 'var(--amber)', aprox: 'al peso', bajo: stockBrosas < 20, stockKg: stockBrosas, tiposEntradas: ['bovino_brosa'], tiposSalidas: ['bovino_brosa'] },
             { label: '🌭 Embutidos', valor: stockEmbutido.toFixed(1) + ' kg', color: 'var(--purple)', aprox: 'al peso', bajo: stockEmbutido < 20, stockKg: stockEmbutido, tiposEntradas: ['embutido'], tiposSalidas: ['embutido'] },
@@ -574,12 +603,12 @@ export default function Dashboard() {
                             const esUnid = detalleAbierto.tiposEntradas && (detalleAbierto.tiposEntradas[0] === 'almacen' || detalleAbierto.tiposEntradas[0] === 'bebidas')
                             const val = s.kg || 0
                             return (
-                              <tr key={s.id}>
+                              <tr key={s.id} style={s.esDesposte ? { background: 'rgba(201,168,76,0.06)' } : undefined}>
                                 <td style={{ whiteSpace: 'nowrap' }}>{s.fecha}</td>
                                 <td>{s.descripcion}</td>
                                 <td style={{ color: 'var(--muted)' }}>{s.cliente_nombre || '—'}</td>
                                 <td style={{ textAlign: 'right', color: 'var(--red-light)', fontWeight: 600 }}>{esUnid ? Math.round(val) + ' u' : val.toFixed(1)}</td>
-                                <td style={{ textAlign: 'right', color: 'var(--gold)' }}>${Math.round(s.total || 0).toLocaleString('es-AR')}</td>
+                                <td style={{ textAlign: 'right', color: 'var(--gold)' }}>{s.esDesposte ? '—' : '$' + Math.round(s.total || 0).toLocaleString('es-AR')}</td>
                               </tr>
                             )
                           })}
