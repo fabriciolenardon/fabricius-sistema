@@ -20,9 +20,9 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import Paginador, { usePaginacion } from '../../components/Paginador'
+import { fmtKg } from '../../lib/formatos'
 
 const FECHA_FMT = { day: '2-digit', month: '2-digit', year: '2-digit' }
-const fmtKg = n => (Number(n) || 0).toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })
 
 export default function DesposteHistorial() {
   const [items, setItems] = useState([])
@@ -200,11 +200,11 @@ function ItemHistorial({ item, expandido, onToggle }) {
         </div>
         <div style={{ textAlign: 'right', flexShrink: 0 }}>
           <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 24, color: 'var(--gold)' }}>
-            {fmtKg(item.kg_total)} kg
+            {fmtKg(item.kg_total)}
           </div>
           {item.kg_neto > 0 && item.kg_neto !== item.kg_total && (
             <div style={{ fontSize: 10, color: 'var(--green)' }}>
-              Neto: {fmtKg(item.kg_neto)} kg
+              Neto: {fmtKg(item.kg_neto)}
             </div>
           )}
         </div>
@@ -225,7 +225,7 @@ function ItemHistorial({ item, expandido, onToggle }) {
                 {item.piezas.map((p, i) => (
                   <div key={i} style={{ padding: '6px 10px', background: 'var(--surface)', borderRadius: 6, fontSize: 12 }}>
                     <div style={{ color: 'var(--muted)' }}>{p.nombre}</div>
-                    <div style={{ fontWeight: 700, color: 'var(--gold)' }}>{fmtKg(p.kg)} kg</div>
+                    <div style={{ fontWeight: 700, color: 'var(--gold)' }}>{fmtKg(p.kg)}</div>
                   </div>
                 ))}
               </div>

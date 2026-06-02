@@ -15,6 +15,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { enviarWhatsapp, fmtArs } from '../../lib/whatsapp'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
+import { fmtKg } from '../../lib/formatos'
 import {
   useReportesData, SelectorPeriodo,
   ReporteMargen, ReporteCliente, ReporteProducto, ReporteCanal, ReporteTemporal,
@@ -327,7 +328,7 @@ function ResumenEjecutivo() {
     if (data.topProductosHoy.length > 0) {
       msg += `*🏆 Top productos de hoy:*\n`
       data.topProductosHoy.slice(0, 3).forEach((p, i) => {
-        msg += `${i + 1}. ${p.nombre} · ${p.kg.toFixed(1)} kg · ${fmtArs(p.importe)}\n`
+        msg += `${i + 1}. ${p.nombre} · ${fmtKg(p.kg)} · ${fmtArs(p.importe)}\n`
       })
       msg += `\n`
     }
@@ -335,7 +336,7 @@ function ResumenEjecutivo() {
     if (data.stockCritico.length > 0) {
       msg += `*⚠️ Stock bajo:*\n`
       data.stockCritico.forEach(s => {
-        msg += `· ${s.label}: ${s.kg.toFixed(0)} kg (mínimo ${s.minimo})\n`
+        msg += `· ${s.label}: ${fmtKg(s.kg)} (mínimo ${s.minimo})\n`
       })
       msg += `\n`
     }
@@ -407,7 +408,7 @@ function ResumenEjecutivo() {
                   <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
                     <td style={{ padding: '6px 4px', width: 24, color: 'var(--muted)' }}>{i + 1}.</td>
                     <td style={{ padding: '6px 4px', fontWeight: 600 }}>{p.nombre}</td>
-                    <td style={{ padding: '6px 4px', textAlign: 'right', color: 'var(--muted)' }}>{p.kg.toFixed(1)} kg</td>
+                    <td style={{ padding: '6px 4px', textAlign: 'right', color: 'var(--muted)' }}>{fmtKg(p.kg)}</td>
                     <td style={{ padding: '6px 4px', textAlign: 'right', color: 'var(--gold)', fontWeight: 700 }}>{fmtArs(p.importe)}</td>
                   </tr>
                 ))}
@@ -427,7 +428,7 @@ function ResumenEjecutivo() {
             data.stockCritico.map(s => (
               <div key={s.tipo} style={{ padding: '8px 12px', background: '#3a1a1a', borderRadius: 6, marginBottom: 6, fontSize: 12, display: 'flex', justifyContent: 'space-between' }}>
                 <span>{s.label}</span>
-                <strong style={{ color: '#ff8b8b' }}>{s.kg.toFixed(0)} kg <span style={{ color: 'var(--muted)', fontSize: 10 }}>(mín {s.minimo})</span></strong>
+                <strong style={{ color: '#ff8b8b' }}>{fmtKg(s.kg)} <span style={{ color: 'var(--muted)', fontSize: 10 }}>(mín {s.minimo})</span></strong>
               </div>
             ))
           )}
@@ -578,8 +579,8 @@ function PanelControl({ data }) {
           label="📦 CAJAS DISP."
           valor={pc.cajasInfo.total}
           sub={pc.cajasInfo.viejasCount > 0
-            ? `⚠️ ${pc.cajasInfo.viejasCount} con >15 días · ${(pc.cajasInfo.kg).toFixed(0)} kg`
-            : `${(pc.cajasInfo.kg).toFixed(0)} kg · todas frescas`}
+            ? `⚠️ ${pc.cajasInfo.viejasCount} con >15 días · ${fmtKg(pc.cajasInfo.kg)}`
+            : `${fmtKg(pc.cajasInfo.kg)} · todas frescas`}
           color={pc.cajasInfo.viejasCount > 0 ? '#ffd17a' : '#7db5ff'} />
 
         {/* 7) % sueldos sobre facturación */}
@@ -626,7 +627,7 @@ function CentroAlertas({ data }) {
     data.stockCritico.forEach(s => alertas.push({
       tipo: 'danger', icono: '📦',
       titulo: `Stock bajo: ${s.label}`,
-      detalle: `Solo ${s.kg.toFixed(0)} kg (mínimo ${s.minimo}) — pedí mercadería`,
+      detalle: `Solo ${fmtKg(s.kg)} (mínimo ${s.minimo}) — pedí mercadería`,
     }))
   }
 

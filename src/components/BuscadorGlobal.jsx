@@ -9,6 +9,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { fmtPrecio } from '../lib/formatos'
 
 export default function BuscadorGlobal() {
   const [abierto, setAbierto] = useState(false)
@@ -70,12 +71,12 @@ export default function BuscadorGlobal() {
       const items = []
       ;(precios.data || []).forEach(p => items.push({
         tipo: 'producto', icono: '🏷️', titulo: p.nombre,
-        sub: `${p.categoria || ''} ${p.codigo_balanza ? `· PLU ${p.codigo_balanza}` : ''} · $${Math.round(p.precio_minorista || 0).toLocaleString('es-AR')}/kg`,
+        sub: `${p.categoria || ''} ${p.codigo_balanza ? `· PLU ${p.codigo_balanza}` : ''} · ${fmtPrecio(p.precio_minorista || 0)}/kg`,
         accion: () => navigate('/admin/precios'),
       }))
       ;(clientes.data || []).forEach(c => items.push({
         tipo: 'cliente', icono: '👤', titulo: c.nombre,
-        sub: `${c.telefono || '—'} · Saldo: $${Math.round(c.saldo || 0).toLocaleString('es-AR')}`,
+        sub: `${c.telefono || '—'} · Saldo: ${fmtPrecio(c.saldo || 0)}`,
         accion: () => navigate('/admin/clientes'),
       }))
       ;(contrapartes.data || []).forEach(c => items.push({
@@ -85,12 +86,12 @@ export default function BuscadorGlobal() {
       }))
       ;(facturas.data || []).forEach(f => items.push({
         tipo: 'factura', icono: '🧾', titulo: `Factura ${f.numero || `#${f.id}`}`,
-        sub: `${f.contraparte_nombre || '—'} · ${f.fecha} · $${Math.round(f.monto_total || 0).toLocaleString('es-AR')}`,
+        sub: `${f.contraparte_nombre || '—'} · ${f.fecha} · ${fmtPrecio(f.monto_total || 0)}`,
         accion: () => navigate('/admin/facturacion'),
       }))
       ;(ventas.data || []).forEach(v => items.push({
         tipo: 'venta', icono: '💵', titulo: `Venta #${v.id}`,
-        sub: `${v.fecha} ${v.hora?.slice(0, 5) || ''} · $${Math.round(v.total || 0).toLocaleString('es-AR')}`,
+        sub: `${v.fecha} ${v.hora?.slice(0, 5) || ''} · ${fmtPrecio(v.total || 0)}`,
         accion: () => navigate('/admin/caja'),
       }))
 

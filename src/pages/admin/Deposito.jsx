@@ -717,11 +717,11 @@ async function confirmarDesposteCerdo() {
                         🐄 {e.descripcion || 'Media Res'}
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.fecha} · {e.proveedor_nombre}</div>
-                      {e.precio_kg > 0 && <div style={{ fontSize: 11, color: 'var(--amber)' }}>${Math.round(e.precio_kg).toLocaleString('es-AR')}/kg</div>}
+                      {e.precio_kg > 0 && <div style={{ fontSize: 11, color: 'var(--amber)' }}>{fmtPrecio(e.precio_kg)}/kg</div>}
                     </div>
                     <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{(e.kg_real || e.kg || 0).toFixed(1)} kg</div>
-                      <div style={{ fontSize: 10, color: 'var(--muted)' }}>Neto: {((e.kg_real || e.kg || 0) * 0.975).toFixed(1)} kg</div>
+                      <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{fmtKg(e.kg_real || e.kg || 0, { decimales: 2 })}</div>
+                      <div style={{ fontSize: 10, color: 'var(--muted)' }}>Neto: {fmtKg((e.kg_real || e.kg || 0) * 0.975, { decimales: 2 })}</div>
                     </div>
                   </div>
                 </div>
@@ -732,9 +732,9 @@ async function confirmarDesposteCerdo() {
             <div className="card" style={{ borderColor: 'var(--gold)' }}>
               <div className="card-title">🔪 Despostar en piezas: {seleccionada.descripcion || 'Media Res'}</div>
               <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-                <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg entrada</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{kgBase.toFixed(1)} kg</div></div>
-                <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)' }}>Merma 2.5%</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--red-light)' }}>-{(kgBase * 0.025).toFixed(1)} kg</div></div>
-                <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg neto</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--green)' }}>{kgNetoPiezas.toFixed(1)} kg</div></div>
+                <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg entrada</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{fmtKg(kgBase, { decimales: 2 })}</div></div>
+                <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)' }}>Merma 2.5%</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--red-light)' }}>-{fmtKg(kgBase * 0.025, { decimales: 2 })}</div></div>
+                <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg neto</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--green)' }}>{fmtKg(kgNetoPiezas, { decimales: 2 })}</div></div>
               </div>
               <div className="form-row" style={{ marginBottom: 14 }}>
                 <div className="form-group"><label>Fecha</label><input type="date" value={fecha} onChange={e => setFecha(e.target.value)} style={inp} /></div>
@@ -762,11 +762,11 @@ async function confirmarDesposteCerdo() {
                     <tr key={i}>
                       <td style={{ fontWeight: 600 }}>{p.nombre}</td>
                       <td style={{ color: 'var(--muted)', fontSize: 11 }}>{(MODELOS_DESPOSTE[modelo].piezas[i]?.pct * 100).toFixed(1)}%</td>
-                      <td style={{ color: 'var(--muted)', fontSize: 11 }}>{p.kg.toFixed(1)} kg</td>
+                      <td style={{ color: 'var(--muted)', fontSize: 11 }}>{fmtKg(p.kg, { decimales: 2 })}</td>
                       <td><input type="number" step="0.1" value={p.kg_editado} onChange={e => editarKg(i, e.target.value)} style={{ ...inp, width: 75, borderColor: Math.abs(p.kg_editado - p.kg) > 2 ? 'var(--amber)' : 'var(--border)' }} /></td>
                       <td style={{ color: 'var(--gold)', fontSize: 11, fontWeight: 600 }}>{pctReal.toFixed(1)}%</td>
                       <td><input type="number" value={p.precio_venta} onChange={e => editarPrecio(i, e.target.value)} style={{ ...inp, width: 100, borderColor: 'var(--gold)' }} /></td>
-                      <td style={{ color: 'var(--green)', fontWeight: 600, fontSize: 12 }}>${Math.round((p.kg_editado || 0) * (p.precio_venta || 0)).toLocaleString('es-AR')}</td>
+                      <td style={{ color: 'var(--green)', fontWeight: 600, fontSize: 12 }}>{fmtPrecio((p.kg_editado || 0) * (p.precio_venta || 0))}</td>
                     </tr>
                   )})}
                 </tbody>
@@ -774,19 +774,19 @@ async function confirmarDesposteCerdo() {
               <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
                 <div>
                   <div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg en piezas</div>
-                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{kgTotalPiezas.toFixed(1)} kg</div>
+                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{fmtKg(kgTotalPiezas, { decimales: 2 })}</div>
                 </div>
                 <div>
                   <div style={{ fontSize: 10, color: 'var(--muted)' }}>
                     Merma desposte <span style={{ opacity: 0.7 }}>(sug. {mermaDesposteSugeridaPct.toFixed(0)}%)</span>
                   </div>
                   <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: Math.abs(mermaDesposteRealPct - mermaDesposteSugeridaPct) > 3 ? 'var(--red-light)' : (Math.abs(mermaDesposteRealPct - mermaDesposteSugeridaPct) > 1.5 ? 'var(--amber)' : 'var(--green)') }}>
-                    {mermaDesposteKg.toFixed(1)} kg · {mermaDesposteRealPct.toFixed(1)}%
+                    {fmtKg(mermaDesposteKg, { decimales: 2 })} · {mermaDesposteRealPct.toFixed(1)}%
                   </div>
                 </div>
                 <div>
                   <div style={{ fontSize: 10, color: 'var(--muted)' }}>Valor total</div>
-                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--green)' }}>${Math.round(piezas.reduce((s, p) => s + (p.kg_editado || 0) * (p.precio_venta || 0), 0)).toLocaleString('es-AR')}</div>
+                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--green)' }}>{fmtPrecio(piezas.reduce((s, p) => s + (p.kg_editado || 0) * (p.precio_venta || 0), 0))}</div>
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
@@ -817,9 +817,9 @@ async function confirmarDesposteCerdo() {
                         🐄 {e.descripcion || 'Media Res'}
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.fecha} · {e.proveedor_nombre}</div>
-                      {e.precio_kg > 0 && <div style={{ fontSize: 11, color: 'var(--amber)' }}>Costo: ${Math.round(e.precio_kg).toLocaleString('es-AR')}/kg</div>}
+                      {e.precio_kg > 0 && <div style={{ fontSize: 11, color: 'var(--amber)' }}>Costo: {fmtPrecio(e.precio_kg)}/kg</div>}
                     </div>
-                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--blue)' }}>{(e.kg_real || e.kg || 0).toFixed(1)} kg</div>
+                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--blue)' }}>{fmtKg(e.kg_real || e.kg || 0, { decimales: 2 })}</div>
                   </div>
                 </div>
               ))}
@@ -842,14 +842,14 @@ async function confirmarDesposteCerdo() {
               </div>
               <div style={{ background: 'var(--surface2)', borderRadius: 10, padding: 16, marginBottom: 16 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
-                  <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>Kg entrada</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24 }}>{kgBase.toFixed(1)} kg</div></div>
-                  <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>Merma {(mermaKilo.merma * 100).toFixed(0)}%</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: 'var(--red-light)' }}>-{(kgBase * mermaKilo.merma).toFixed(1)} kg</div></div>
-                  <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>Kg vendibles</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: 'var(--green)' }}>{kgNetoKilo.toFixed(1)} kg</div></div>
+                  <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>Kg entrada</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24 }}>{fmtKg(kgBase, { decimales: 2 })}</div></div>
+                  <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>Merma {(mermaKilo.merma * 100).toFixed(0)}%</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: 'var(--red-light)' }}>-{fmtKg(kgBase * mermaKilo.merma, { decimales: 2 })}</div></div>
+                  <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>Kg vendibles</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: 'var(--green)' }}>{fmtKg(kgNetoKilo, { decimales: 2 })}</div></div>
                 </div>
                 {seleccionada.precio_kg > 0 && (
                   <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ fontSize: 12, color: 'var(--muted)' }}>Costo compra: <strong style={{ color: 'var(--text)' }}>${Math.round(seleccionada.precio_kg).toLocaleString('es-AR')}/kg</strong></div>
-                    <div style={{ fontSize: 13, fontWeight: 700 }}>Costo real: <span style={{ color: 'var(--amber)', fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>${parseInt(precioCostoKilo).toLocaleString('es-AR')}/kg</span></div>
+                    <div style={{ fontSize: 12, color: 'var(--muted)' }}>Costo compra: <strong style={{ color: 'var(--text)' }}>{fmtPrecio(seleccionada.precio_kg)}/kg</strong></div>
+                    <div style={{ fontSize: 13, fontWeight: 700 }}>Costo real: <span style={{ color: 'var(--amber)', fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{fmtPrecio(precioCostoKilo)}/kg</span></div>
                   </div>
                 )}
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>ℹ️ El costo real sube porque el mismo precio pagado rinde menos kg útiles.</div>
@@ -860,7 +860,7 @@ async function confirmarDesposteCerdo() {
               </div>
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
                 <button className="btn btn-ghost" onClick={() => setSeleccionada(null)}>Cancelar</button>
-                <button className="btn btn-gold" onClick={confirmarDesposteKilo} disabled={loading}>{loading ? '⏳ Procesando...' : `⚖️ Confirmar — ${kgNetoKilo.toFixed(1)} kg a Bovino Cortes`}</button>
+                <button className="btn btn-gold" onClick={confirmarDesposteKilo} disabled={loading}>{loading ? '⏳ Procesando...' : `⚖️ Confirmar — ${fmtKg(kgNetoKilo, { decimales: 2 })} a Bovino Cortes`}</button>
               </div>
             </div>
           )}
@@ -884,7 +884,7 @@ async function confirmarDesposteCerdo() {
           return Object.entries(porTipo).map(([tipo, lista]) => (
             <div key={tipo} style={{ marginBottom: 12 }}>
               <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6, paddingBottom: 4, borderBottom: '1px dashed var(--border)' }}>
-                {tipo} <span style={{ color: 'var(--gold)' }}>· {lista.length} {lista.length === 1 ? 'pieza' : 'piezas'} · {lista.reduce((s, x) => s + (x.kg || 0), 0).toFixed(1)} kg total</span>
+                {tipo} <span style={{ color: 'var(--gold)' }}>· {lista.length} {lista.length === 1 ? 'pieza' : 'piezas'} · {fmtKg(lista.reduce((s, x) => s + (x.kg || 0), 0), { decimales: 2 })} total</span>
               </div>
               {lista.map(pz => {
                 const sel = piezaIndividualSeleccionada?.id === pz.id
@@ -906,8 +906,8 @@ async function confirmarDesposteCerdo() {
                       </div>
                     </div>
                     <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{(pz.kg || 0).toFixed(1)} kg</div>
-                      {pz.precio_costo_kg > 0 && <div style={{ fontSize: 10, color: 'var(--amber)' }}>${Math.round(pz.precio_costo_kg).toLocaleString('es-AR')}/kg costo</div>}
+                      <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{fmtKg(pz.kg || 0, { decimales: 2 })}</div>
+                      {pz.precio_costo_kg > 0 && <div style={{ fontSize: 10, color: 'var(--amber)' }}>{fmtPrecio(pz.precio_costo_kg)}/kg costo</div>}
                     </div>
                   </div>
                 )
@@ -938,9 +938,9 @@ async function confirmarDesposteCerdo() {
       {kgPiezaConvertir > 0 && (
         <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, marginBottom: 14 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
-            <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg pieza</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{parseFloat(kgPiezaConvertir).toFixed(1)} kg</div></div>
-            <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Merma {mermaPieza}%</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--red-light)' }}>-{(parseFloat(kgPiezaConvertir) * mermaPieza / 100).toFixed(1)} kg</div></div>
-            <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg a cortes</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--green)' }}>{(parseFloat(kgPiezaConvertir) * (1 - mermaPieza / 100)).toFixed(1)} kg</div></div>
+            <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg pieza</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{fmtKg(parseFloat(kgPiezaConvertir), { decimales: 2 })}</div></div>
+            <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Merma {mermaPieza}%</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--red-light)' }}>-{fmtKg(parseFloat(kgPiezaConvertir) * mermaPieza / 100, { decimales: 2 })}</div></div>
+            <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg a cortes</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--green)' }}>{fmtKg(parseFloat(kgPiezaConvertir) * (1 - mermaPieza / 100), { decimales: 2 })}</div></div>
           </div>
         </div>
       )}
@@ -980,7 +980,7 @@ async function confirmarDesposteCerdo() {
           <div key={p.tipo} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: 'var(--surface2)', borderRadius: 8, border: '1px solid var(--border)' }}>
             <span style={{ fontSize: 12, fontWeight: 600 }}>{p.label}</span>
             <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: (piezasStock[p.tipo] || 0) > 0 ? 'var(--amber)' : 'var(--muted)' }}>
-              {(piezasStock[p.tipo] || 0).toFixed(1)} kg
+              {fmtKg(piezasStock[p.tipo] || 0, { decimales: 2 })}
             </span>
           </div>
         ))}
@@ -995,7 +995,7 @@ async function confirmarDesposteCerdo() {
             <div>
               <div style={{ fontWeight: 700, fontSize: 13 }}>🐷 {e.descripcion || 'Capón'}</div>
               <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.fecha} · {e.proveedor_nombre}</div>
-              {e.precio_kg > 0 && <div style={{ fontSize: 11, color: 'var(--amber)' }}>${Math.round(e.precio_kg).toLocaleString('es-AR')}/kg</div>}
+              {e.precio_kg > 0 && <div style={{ fontSize: 11, color: 'var(--amber)' }}>{fmtPrecio(e.precio_kg)}/kg</div>}
             </div>
             <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--amber)' }}>{(e.kg_real || e.kg || 0).toFixed(1)} kg</div>
           </div>
@@ -1113,7 +1113,7 @@ async function confirmarDesposteCerdo() {
           <div key={p.tipo} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
             <span style={{ fontSize: 12, fontWeight: 600 }}>{p.label}</span>
             <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: (piezasStock[p.tipo] || 0) > 0 ? 'var(--amber)' : 'var(--muted)' }}>
-              {(piezasStock[p.tipo] || 0).toFixed(1)} kg
+              {fmtKg(piezasStock[p.tipo] || 0, { decimales: 2 })}
             </span>
           </div>
         ))}

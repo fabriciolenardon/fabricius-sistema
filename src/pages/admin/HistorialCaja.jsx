@@ -145,7 +145,7 @@ export default function HistorialCaja() {
     if (!confirm(
       `⚠️ ANULAR VENTA — ACCIÓN IRREVERSIBLE\n\n` +
       `Venta #${venta.id} del ${venta.fecha}\n` +
-      `Total: $${Math.round(total).toLocaleString('es-AR')}\n` +
+      `Total: ${fmt$(total)}\n` +
       `Items: ${cantItems}\n\n` +
       `Se va a:\n` +
       `  1. Devolver al stock cada item vendido\n` +

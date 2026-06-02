@@ -12,8 +12,9 @@
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import Paginador, { usePaginacion } from '../../components/Paginador'
+import { fmtPrecio, fmtKg } from '../../lib/formatos'
 
-const fmt$ = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
+const fmt$ = n => fmtPrecio(Math.abs(Number(n) || 0))
 
 export default function CajasTab() {
   const [cajas, setCajas] = useState([])
@@ -106,12 +107,12 @@ export default function CajasTab() {
         <div className="stat" style={{ borderColor: '#7db5ff' }}>
           <div className="stat-label">📦 Cajas CB disponibles</div>
           <div className="stat-value" style={{ color: '#7db5ff' }}>{stats.cantCB}</div>
-          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{stats.kgCB.toFixed(1)} kg</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{fmtKg(stats.kgCB)}</div>
         </div>
         <div className="stat" style={{ borderColor: '#ffd17a' }}>
           <div className="stat-label">📦 Cajas PT disponibles</div>
           <div className="stat-value" style={{ color: '#ffd17a' }}>{stats.cantPT}</div>
-          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{stats.kgPT.toFixed(1)} kg</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{fmtKg(stats.kgPT)}</div>
         </div>
         {stats.sinAsignar > 0 && (
           <div className="stat" style={{ borderColor: '#ff8b8b' }}>
@@ -197,7 +198,7 @@ export default function CajasTab() {
                         <span style={{ background: c.tipo_caja === 'CB' ? '#1a2a3a' : '#2a2010', color: c.tipo_caja === 'CB' ? '#7db5ff' : '#ffd17a', padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 700 }}>{c.tipo_caja}</span>
                       </td>
                       <td style={{ textAlign: 'right', padding: '8px 12px', fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: 'var(--gold)' }}>
-                        {Number(c.kg || 0).toFixed(1)} kg
+                        {fmtKg(Number(c.kg || 0))}
                       </td>
                       <td style={{ padding: '8px 12px' }}>
                         {editandoProducto === c.id ? (

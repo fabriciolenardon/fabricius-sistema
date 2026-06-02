@@ -4,7 +4,7 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import DashboardCajaWidget from './DashboardCajaWidget'
 import AlertasAnomalias from './AlertasAnomalias'
-import { fmtPrecio } from '../../lib/formatos'
+import { fmtPrecio, fmtKg } from '../../lib/formatos'
 
 // fmt compacto para KPIs grandes: "$22,7M" o "$345K" o "$12.345"
 // Reemplaza el "." de los decimales por coma para formato AR.
@@ -90,11 +90,11 @@ export default function Dashboard() {
         .order('fecha', { ascending: false }).order('created_at', { ascending: false })
       const despostesComoSalidas = (despCerdo || []).map(d => {
         const piezas = Array.isArray(d.piezas) ? d.piezas : []
-        const detalle = piezas.map(p => `${p.nombre} ${Number(p.kg || 0).toFixed(1)}kg`).join(' · ')
+        const detalle = piezas.map(p => `${p.nombre} ${fmtKg(p.kg)}`).join(' · ')
         return {
           id: 'desp-' + d.id,
           fecha: d.fecha,
-          descripcion: `🔪 Capón despostado (${Number(d.kg_media_res || 0).toFixed(1)} kg)` + (detalle ? ` → ${detalle}` : ''),
+          descripcion: `🔪 Capón despostado (${fmtKg(d.kg_media_res)})` + (detalle ? ` → ${detalle}` : ''),
           cliente_nombre: 'Desposte interno',
           kg: d.kg_media_res || d.kg_neto || 0,
           total: 0,
@@ -371,20 +371,20 @@ export default function Dashboard() {
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
           {[
-            { label: '🐄 Bovino Media Res', valor: stockBovino.toFixed(1) + ' kg', color: 'var(--gold)', aprox: (mediasMR.count > 0 ? mediasMR.count : Math.round(stockBovino / 105)) + ' medias', bajo: stockBovino < 100, stockKg: stockBovino, tiposEntradas: ['bovino_mr'], tiposSalidas: ['bovino_mr'] },
-            { label: '🍖 Piezas Bovinas', valor: stockPiezas.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockPiezas < 30, stockKg: stockPiezas, tiposEntradas: ['bovino_pieza','pieza_pierna','pieza_cuarto_pistola','pieza_costillar','pieza_cortito','pieza_carre','pieza_paleta','pieza_parrillero'], tiposSalidas: ['bovino_pieza','pieza_entera','pieza_pierna','pieza_cuarto_pistola','pieza_costillar','pieza_cortito','pieza_carre','pieza_paleta','pieza_parrillero'] },
-            { label: '📦 Cajas Bovinas', valor: stockCajas.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockCajas < 20, stockKg: stockCajas, tiposEntradas: ['caja_cb','caja_pt'], tiposSalidas: ['bovino_caja_cb','bovino_caja_pt','caja_cb','caja_pt'] },
-            { label: '🥩 Bovino Cortes', valor: stockCortes.toFixed(1) + ' kg', color: 'var(--gold)', aprox: 'al peso', bajo: stockCortes < 50, stockKg: stockCortes, tiposEntradas: ['bovino_corte'], tiposSalidas: ['bovino_corte'] },
+            { label: '🐄 Bovino Media Res', valor: fmtKg(stockBovino), color: 'var(--gold)', aprox: (mediasMR.count > 0 ? mediasMR.count : Math.round(stockBovino / 105)) + ' medias', bajo: stockBovino < 100, stockKg: stockBovino, tiposEntradas: ['bovino_mr'], tiposSalidas: ['bovino_mr'] },
+            { label: '🍖 Piezas Bovinas', valor: fmtKg(stockPiezas), color: 'var(--gold)', aprox: 'al peso', bajo: stockPiezas < 30, stockKg: stockPiezas, tiposEntradas: ['bovino_pieza','pieza_pierna','pieza_cuarto_pistola','pieza_costillar','pieza_cortito','pieza_carre','pieza_paleta','pieza_parrillero'], tiposSalidas: ['bovino_pieza','pieza_entera','pieza_pierna','pieza_cuarto_pistola','pieza_costillar','pieza_cortito','pieza_carre','pieza_paleta','pieza_parrillero'] },
+            { label: '📦 Cajas Bovinas', valor: fmtKg(stockCajas), color: 'var(--gold)', aprox: 'al peso', bajo: stockCajas < 20, stockKg: stockCajas, tiposEntradas: ['caja_cb','caja_pt'], tiposSalidas: ['bovino_caja_cb','bovino_caja_pt','caja_cb','caja_pt'] },
+            { label: '🥩 Bovino Cortes', valor: fmtKg(stockCortes), color: 'var(--gold)', aprox: 'al peso', bajo: stockCortes < 50, stockKg: stockCortes, tiposEntradas: ['bovino_corte'], tiposSalidas: ['bovino_corte'] },
             // Capones: ingresan ENTEROS y "salen" del stock de capones al despostarse
             // (capón entero → piezas). Por eso sus salidas son los despostes de cerdo
             // (despostesCerdo), NO las ventas de piezas. Las ventas/elaborados de piezas
             // (matambre, pulpa, etc. = cerdo_corte/cerdo_pieza) se descuentan de Cerdo Piezas.
-            { label: '🐷 Cerdo Capones', valor: stockCerdo.toFixed(1) + ' kg', color: 'var(--amber)', aprox: Math.round(stockCerdo / 107) + ' capones', bajo: stockCerdo < 50, stockKg: stockCerdo, tiposEntradas: ['cerdo'], tiposSalidas: ['cerdo'], despostesCerdo: true },
-            { label: '🐷 Cerdo Piezas', valor: stockCerdoPiezas.toFixed(1) + ' kg', color: 'var(--amber)', aprox: 'al peso', bajo: stockCerdoPiezas < 20, stockKg: stockCerdoPiezas, tiposEntradas: ['cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza'], tiposSalidas: ['cerdo_pieza','cerdo_corte','cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza'] },
-            { label: '🍗 Pollo', valor: stockPollo.toFixed(1) + ' kg', color: 'var(--blue)', aprox: Math.round(stockPollo / 20) + ' cajones', bajo: stockPollo < 50, stockKg: stockPollo, tiposEntradas: ['pollo'], tiposSalidas: ['pollo'] },
-            { label: '🫀 Brosas', valor: stockBrosas.toFixed(1) + ' kg', color: 'var(--amber)', aprox: 'al peso', bajo: stockBrosas < 20, stockKg: stockBrosas, tiposEntradas: ['bovino_brosa'], tiposSalidas: ['bovino_brosa'] },
-            { label: '🌭 Embutidos', valor: stockEmbutido.toFixed(1) + ' kg', color: 'var(--purple)', aprox: 'al peso', bajo: stockEmbutido < 20, stockKg: stockEmbutido, tiposEntradas: ['embutido'], tiposSalidas: ['embutido'] },
-            { label: '🧊 Rebozados/Congelados', valor: stockRebozado.toFixed(1) + ' kg', color: 'var(--blue)', aprox: 'al peso', bajo: stockRebozado < 20, stockKg: stockRebozado, tiposEntradas: ['rebozado'], tiposSalidas: ['rebozado'] },
+            { label: '🐷 Cerdo Capones', valor: fmtKg(stockCerdo), color: 'var(--amber)', aprox: Math.round(stockCerdo / 107) + ' capones', bajo: stockCerdo < 50, stockKg: stockCerdo, tiposEntradas: ['cerdo'], tiposSalidas: ['cerdo'], despostesCerdo: true },
+            { label: '🐷 Cerdo Piezas', valor: fmtKg(stockCerdoPiezas), color: 'var(--amber)', aprox: 'al peso', bajo: stockCerdoPiezas < 20, stockKg: stockCerdoPiezas, tiposEntradas: ['cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza'], tiposSalidas: ['cerdo_pieza','cerdo_corte','cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza'] },
+            { label: '🍗 Pollo', valor: fmtKg(stockPollo), color: 'var(--blue)', aprox: Math.round(stockPollo / 20) + ' cajones', bajo: stockPollo < 50, stockKg: stockPollo, tiposEntradas: ['pollo'], tiposSalidas: ['pollo'] },
+            { label: '🫀 Brosas', valor: fmtKg(stockBrosas), color: 'var(--amber)', aprox: 'al peso', bajo: stockBrosas < 20, stockKg: stockBrosas, tiposEntradas: ['bovino_brosa'], tiposSalidas: ['bovino_brosa'] },
+            { label: '🌭 Embutidos', valor: fmtKg(stockEmbutido), color: 'var(--purple)', aprox: 'al peso', bajo: stockEmbutido < 20, stockKg: stockEmbutido, tiposEntradas: ['embutido'], tiposSalidas: ['embutido'] },
+            { label: '🧊 Rebozados/Congelados', valor: fmtKg(stockRebozado), color: 'var(--blue)', aprox: 'al peso', bajo: stockRebozado < 20, stockKg: stockRebozado, tiposEntradas: ['rebozado'], tiposSalidas: ['rebozado'] },
             { label: '🛒 Almacén', valor: Math.round(stockAlmacen) + ' u', color: 'var(--gold)', aprox: cantAlmacen + ' productos cargados', bajo: stockAlmacen < 10, stockKg: stockAlmacen, tiposEntradas: ['almacen'], tiposSalidas: ['almacen'] },
             { label: '🥤 Bebidas', valor: Math.round(stockBebidas) + ' u', color: 'var(--blue)', aprox: cantBebidas + ' productos cargados', bajo: stockBebidas < 10, stockKg: stockBebidas, tiposEntradas: ['bebidas'], tiposSalidas: ['bebidas'] },
           ].map(s => (
@@ -551,7 +551,7 @@ export default function Dashboard() {
               <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 48, color: detalleAbierto.bajo ? 'var(--red-light)' : 'var(--gold)' }}>
                 {(detalleAbierto.tiposEntradas && (detalleAbierto.tiposEntradas[0] === 'almacen' || detalleAbierto.tiposEntradas[0] === 'bebidas'))
                   ? Math.round(detalleAbierto.stockKg || 0) + ' u'
-                  : (detalleAbierto.stockKg || 0).toFixed(1) + ' kg'}
+                  : fmtKg(detalleAbierto.stockKg)}
               </div>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{detalleAbierto.aprox}</div>
               {detalleAbierto.bajo && <div style={{ fontSize: 12, color: 'var(--red-light)', fontWeight: 700, marginTop: 6 }}>⚠️ Stock bajo</div>}
@@ -579,7 +579,7 @@ export default function Dashboard() {
                                 <td style={{ whiteSpace: 'nowrap' }}>{e.fecha}</td>
                                 <td>{e.descripcion}</td>
                                 <td style={{ color: 'var(--muted)' }}>{e.proveedor_nombre || '—'}</td>
-                                <td style={{ textAlign: 'right', color: 'var(--green)', fontWeight: 600 }}>{esUnid ? Math.round(val) + ' u' : val.toFixed(1)}</td>
+                                <td style={{ textAlign: 'right', color: 'var(--green)', fontWeight: 600 }}>{esUnid ? Math.round(val) + ' u' : fmtKg(val)}</td>
                               </tr>
                             )
                           })}
@@ -607,8 +607,8 @@ export default function Dashboard() {
                                 <td style={{ whiteSpace: 'nowrap' }}>{s.fecha}</td>
                                 <td>{s.descripcion}</td>
                                 <td style={{ color: 'var(--muted)' }}>{s.cliente_nombre || '—'}</td>
-                                <td style={{ textAlign: 'right', color: 'var(--red-light)', fontWeight: 600 }}>{esUnid ? Math.round(val) + ' u' : val.toFixed(1)}</td>
-                                <td style={{ textAlign: 'right', color: 'var(--gold)' }}>{s.esDesposte ? '—' : '$' + Math.round(s.total || 0).toLocaleString('es-AR')}</td>
+                                <td style={{ textAlign: 'right', color: 'var(--red-light)', fontWeight: 600 }}>{esUnid ? Math.round(val) + ' u' : fmtKg(val)}</td>
+                                <td style={{ textAlign: 'right', color: 'var(--gold)' }}>{s.esDesposte ? '—' : fmtPrecio(s.total || 0)}</td>
                               </tr>
                             )
                           })}

@@ -86,15 +86,15 @@ export default function DesposteCapones() {
       // Pieza individual no puede pesar más que el capón
       const piezaInflada = PIEZAS_CERDO.find(p => (parseNumero(piezas[p.key])) > kgCapon)
       if (piezaInflada) {
-        return aviso(`⚠️ "${piezaInflada.nombre}" tiene ${piezas[piezaInflada.key]} kg pero el capón es de ${fmt(kgCapon)} kg. Imposible.`, 'error')
+        return aviso(`⚠️ "${piezaInflada.nombre}" tiene ${piezas[piezaInflada.key]} kg pero el capón es de ${fmtKg(kgCapon)}. Imposible.`, 'error')
       }
       // Suma de piezas no debe superar 1.1x el capón
       if (kgPiezas > kgCapon * 1.1) {
-        return aviso(`⚠️ La suma de piezas (${fmt(kgPiezas)} kg) supera al capón (${fmt(kgCapon)} kg). Revisá los kg cargados — probablemente sobra un dígito.`, 'error')
+        return aviso(`⚠️ La suma de piezas (${fmtKg(kgPiezas)}) supera al capón (${fmtKg(kgCapon)}). Revisá los kg cargados — probablemente sobra un dígito.`, 'error')
       }
     }
     if (merma < 0) {
-      if (!confirm(`⚠️ Las piezas suman MÁS que el capón.\nKg capón: ${fmt(kgCapon)} · Piezas: ${fmt(kgPiezas)}\n¿Guardar igual?`)) return
+      if (!confirm(`⚠️ Las piezas suman MÁS que el capón.\nKg capón: ${fmtKg(kgCapon)} · Piezas: ${fmtKg(kgPiezas)}\n¿Guardar igual?`)) return
     }
     if (mermaPct > 15 && merma > 0) {
       if (!confirm(`⚠️ La merma es ${mermaPct.toFixed(1)}% — eso es bastante alto.\n¿Estás seguro?`)) return
@@ -183,7 +183,7 @@ export default function DesposteCapones() {
                   onMouseOut={e => { e.currentTarget.style.borderColor = 'var(--border)' }}>
                   <div style={{ fontSize: 13, color: 'var(--muted)' }}>Entrada del {c.fecha}</div>
                   <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 32, color: 'var(--gold)' }}>
-                    {fmt(c.kg_real || c.kg)} kg
+                    {fmtKg(c.kg_real || c.kg)}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--muted)' }}>{c.proveedor || c.descripcion || '— sin proveedor —'}</div>
                 </button>
@@ -206,11 +206,11 @@ export default function DesposteCapones() {
 
           {/* Resumen */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 20 }}>
-            <KPI label="🐷 KG CAPÓN" valor={fmt(kgCapon)} color="var(--gold)" />
-            <KPI label="✂️ KG PIEZAS" valor={fmt(kgPiezas)} color={kgPiezas > 0 ? '#7dff7d' : 'var(--muted)'} />
+            <KPI label="🐷 KG CAPÓN" valor={fmtKg(kgCapon)} color="var(--gold)" />
+            <KPI label="✂️ KG PIEZAS" valor={fmtKg(kgPiezas)} color={kgPiezas > 0 ? '#7dff7d' : 'var(--muted)'} />
             <KPI
               label={merma >= 0 ? '📉 MERMA' : '⚠️ EXCESO'}
-              valor={`${fmt(Math.abs(merma))} (${Math.abs(mermaPct).toFixed(1)}%)`}
+              valor={`${fmtKg(Math.abs(merma))} (${Math.abs(mermaPct).toFixed(1)}%)`}
               color={merma < 0 ? '#ff8b8b' : mermaPct > 15 ? '#ffd17a' : '#7dff7d'}
             />
           </div>

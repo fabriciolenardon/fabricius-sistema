@@ -24,8 +24,9 @@ import {
   proyectarFacturacionAnual, distribuirEntreCuentas, calcularAvisos,
 } from '../../lib/facturacionHelpers'
 import { fechaHoyARG } from '../../lib/fechas'
+import { fmtPrecio } from '../../lib/formatos'
 
-const fmt$ = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
+const fmt$ = n => fmtPrecio(Math.abs(Number(n) || 0))
 const fmtPct = n => (n || 0).toFixed(1) + '%'
 const fmtFecha = d => d ? new Date(d).toLocaleDateString('es-AR') : '—'
 // Hora local ARG (no UTC) — antes después de las 21hs el filtro "hoy"
