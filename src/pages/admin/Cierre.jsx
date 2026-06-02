@@ -154,7 +154,7 @@ function InputNum({ value, color, onCommit, ancho = 130 }) {
 // gastos.{fijos,variables,socios}, sueldos.total.
 function recomputeDerived(c) {
   if (!c) return c
-  const ventasTotal = (c.ventas.caja || 0) + (c.ventas.mayorista || 0) + (c.ventas.pedidos || 0)
+  const ventasTotal = (c.ventas.caja || 0) + (c.ventas.mayorista || 0)
   const cobradoTotal = (c.cobrado.efectivo || 0) + (c.cobrado.debito || 0) +
     (c.cobrado.transferencia || 0) + (c.cobrado.mayorista || 0) + (c.cobrado.cobranzasCta || 0)
   const gastosTotal = (c.gastos.fijos || 0) + (c.gastos.variables || 0) + (c.gastos.socios || 0)
@@ -468,7 +468,7 @@ export default function Cierre() {
               {/* KPIs PRINCIPALES */}
               <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 16 }}>
                 <MetricCard label="💵 Ventas (facturado)" value={fmt(view.ventas.total)} color="var(--green)" big
-                  sub={`${view.compras.cantEntradas} entradas · ${view.sueldos.cantLiquidaciones} liquidaciones`} />
+                  sub={`${view.ventas.cantRemitos || 0} remitos · caja minorista`} />
                 <MetricCard label="💰 Cobrado en el período" value={fmt(view.cobrado.total)} color="var(--teal)" big />
                 <MetricCard label="📤 Por cobrar al cierre" value={fmt(view.porCobrar.total)} color="var(--amber)"
                   editable={editableNow} rawValue={view.porCobrar.total} onCommit={v => commitLeaf('porCobrar.total', v)}
@@ -510,8 +510,7 @@ export default function Cierre() {
                 <div className="card">
                   <div className="card-title">💵 Ventas — desglose</div>
                   <FilaDesglose label="Caja minorista" value={view.ventas.caja} color="var(--green)" editable={editableNow} onCommit={v => commitLeaf('ventas.caja', v)} />
-                  <FilaDesglose label="Despachos mayorista" value={view.ventas.mayorista} color="var(--green)" editable={editableNow} onCommit={v => commitLeaf('ventas.mayorista', v)} />
-                  <FilaDesglose label="Pedidos confirmados" value={view.ventas.pedidos} color="var(--green)" editable={editableNow} onCommit={v => commitLeaf('ventas.pedidos', v)} />
+                  <FilaDesglose label="Remitos mayoristas" value={view.ventas.mayorista} color="var(--green)" editable={editableNow} onCommit={v => commitLeaf('ventas.mayorista', v)} />
                   <FilaDesglose label="TOTAL FACTURADO" value={view.ventas.total} color="var(--gold)" />
                 </div>
 

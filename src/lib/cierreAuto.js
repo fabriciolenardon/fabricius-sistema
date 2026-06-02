@@ -66,8 +66,7 @@ export async function calcularCierreAuto(desde, hasta) {
   // Lanzamos todas las queries en paralelo
   const [
     ventasCajaR,
-    salidasR,
-    pedidosR,
+    remitosR,
     movCtaCteR,
     entradasR,
     pagosProvR,
@@ -85,20 +84,15 @@ export async function calcularCierreAuto(desde, hasta) {
       .gte('fecha', desde)
       .lte('fecha', hasta),
 
-    // Salidas / despachos depósito (mayorista) — excluye 'interno' (movimiento entre depósito y carnicería)
+    // Remitos emitidos en el período (mayorista). El cierre usa los REMITOS como
+    // fuente de las ventas mayoristas: 1 remito = 1 venta a un cliente, con su
+    // fecha de emisión (editable). Es lo que valida en qué semana cae la venta.
+    // Excluye anulados y MITRE (casa central, no cliente).
     supabase
-      .from('salidas_deposito')
-      .select('id, fecha, total, cobro, cliente_nombre')
+      .from('remitos')
+      .select('id, numero, fecha, total, cobro, cliente_nombre, eliminado')
       .gte('fecha', desde)
       .lte('fecha', hasta),
-
-    // Pedidos confirmados con entrega en el período
-    supabase
-      .from('pedidos')
-      .select('id, dia_entrega, total_estimado, estado, cliente_nombre')
-      .eq('estado', 'confirmado')
-      .gte('dia_entrega', desde)
-      .lte('dia_entrega', hasta),
 
     // Movimientos cta cte clientes — cobranzas (pago / cheque)
     supabase
@@ -154,15 +148,15 @@ export async function calcularCierreAuto(desde, hasta) {
   ])
 
   const ventasCaja = ventasCajaR.data || []
-  // Excluimos:
+  // Remitos del período = ventas mayoristas. Excluimos:
+  //  - anulados (eliminado): no son ventas reales
   //  - cobro 'interno' (movimiento entre depósito y carnicería)
-  //  - "MITRE": es nuestra propia casa central, NO un cliente. Los despachos a
-  //    Mitre no son ventas mayoristas, así que no cuentan en el cierre.
-  const salidas = (salidasR.data || []).filter(s =>
-    s.cobro !== 'interno' &&
-    (s.cliente_nombre || '').toUpperCase().trim() !== 'MITRE'
+  //  - "MITRE": es nuestra propia casa central, NO un cliente.
+  const remitos = (remitosR.data || []).filter(r =>
+    !r.eliminado &&
+    r.cobro !== 'interno' &&
+    (r.cliente_nombre || '').toUpperCase().trim() !== 'MITRE'
   )
-  const pedidos = pedidosR.data || []
   const movCtaCte = movCtaCteR.data || []
   const entradas = entradasR.data || []
   const pagosProv = pagosProvR.data || []
@@ -172,10 +166,11 @@ export async function calcularCierreAuto(desde, hasta) {
   const clientes = clientesR.data || []
 
   // ====== VENTAS (facturado en el período) ======
+  // Total = caja minorista + suma de remitos mayoristas. (Sin pedidos: lo que
+  // se entregó ya está como remito; contar pedidos además duplicaría.)
   const ventasCajaTotal = sum(ventasCaja, 'total')
-  const ventasMayoristaTotal = sum(salidas, 'total')
-  const ventasPedidosTotal = sum(pedidos, 'total_estimado')
-  const ventasTotal = ventasCajaTotal + ventasMayoristaTotal + ventasPedidosTotal
+  const ventasMayoristaTotal = sum(remitos, 'total')
+  const ventasTotal = ventasCajaTotal + ventasMayoristaTotal
 
   // ====== COBRADO (caja real en el período) ======
   const cobradoEfectivo = sum(ventasCaja, 'efectivo')
@@ -185,9 +180,9 @@ export async function calcularCierreAuto(desde, hasta) {
   const cobranzasCta = movCtaCte
     .filter(m => m.tipo === 'pago' || m.tipo === 'cheque')
     .reduce((s, m) => s + (Number(m.haber) || 0), 0)
-  // Mayorista cobrada al despachar (cobro != 'cta_cte' y != 'interno')
-  const cobradoMayorista = salidas
-    .filter(s => s.cobro && s.cobro !== 'cta_cte')
+  // Mayorista cobrada al despachar (remitos con cobro != 'cta_cte')
+  const cobradoMayorista = remitos
+    .filter(r => r.cobro && r.cobro !== 'cta_cte')
     .reduce((s, r) => s + (Number(r.total) || 0), 0)
   const cobradoTotal = cobradoEfectivo + cobradoDebito + cobradoTransferencia + cobranzasCta + cobradoMayorista
 
@@ -250,13 +245,13 @@ export async function calcularCierreAuto(desde, hasta) {
   const kgEmbutidos = sumarKgPorTipo(['embutido', 'chorizo', 'morcilla'])
 
   // ====== VENTAS POR CLIENTE (en el período) ======
-  // Lo despachado a cada cliente mayorista dentro de [desde, hasta]. La suma
-  // coincide con ventas.mayorista. Sirve para cobrar la semana cliente por
-  // cliente. (No es el saldo histórico — eso es porCobrar/al cierre.)
+  // Suma de los remitos emitidos a cada cliente dentro de [desde, hasta]. La
+  // suma coincide con ventas.mayorista. Es cuánto nos compró cada cliente esa
+  // semana. (No es el saldo histórico — eso es porCobrar/al cierre.)
   const ventasClienteMap = new Map()
-  for (const s of salidas) {
-    const nombre = s.cliente_nombre || '(sin nombre)'
-    ventasClienteMap.set(nombre, (ventasClienteMap.get(nombre) || 0) + (Number(s.total) || 0))
+  for (const r of remitos) {
+    const nombre = (r.cliente_nombre || '(sin nombre)').trim()
+    ventasClienteMap.set(nombre, (ventasClienteMap.get(nombre) || 0) + (Number(r.total) || 0))
   }
   const ventasPorCliente = [...ventasClienteMap.entries()]
     .map(([nombre, total]) => ({ nombre, total }))
@@ -291,7 +286,7 @@ export async function calcularCierreAuto(desde, hasta) {
     ventas: {
       caja: ventasCajaTotal,
       mayorista: ventasMayoristaTotal,
-      pedidos: ventasPedidosTotal,
+      cantRemitos: remitos.length,
       total: ventasTotal,
     },
     cobrado: {
@@ -360,7 +355,6 @@ export function cierreAutoAFila(cierre, mes) {
     ingresos: {
       ventas_caja: cierre.ventas.caja,
       ventas_mayorista: cierre.ventas.mayorista,
-      ventas_pedidos: cierre.ventas.pedidos,
       cobrado_efectivo: cierre.cobrado.efectivo,
       cobrado_debito: cierre.cobrado.debito,
       cobrado_transferencia: cierre.cobrado.transferencia,
