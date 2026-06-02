@@ -154,7 +154,14 @@ export async function calcularCierreAuto(desde, hasta) {
   ])
 
   const ventasCaja = ventasCajaR.data || []
-  const salidas = (salidasR.data || []).filter(s => s.cobro !== 'interno')
+  // Excluimos:
+  //  - cobro 'interno' (movimiento entre depósito y carnicería)
+  //  - "MITRE": es nuestra propia casa central, NO un cliente. Los despachos a
+  //    Mitre no son ventas mayoristas, así que no cuentan en el cierre.
+  const salidas = (salidasR.data || []).filter(s =>
+    s.cobro !== 'interno' &&
+    (s.cliente_nombre || '').toUpperCase().trim() !== 'MITRE'
+  )
   const pedidos = pedidosR.data || []
   const movCtaCte = movCtaCteR.data || []
   const entradas = entradasR.data || []
