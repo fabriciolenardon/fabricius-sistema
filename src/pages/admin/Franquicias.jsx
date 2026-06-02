@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
-import { parseNumero, fmtPrecio } from '../../lib/formatos'
+import { parseNumero, fmtPrecio, fmtKg } from '../../lib/formatos'
 const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
 
 const FRANQUICIAS = [
@@ -106,15 +106,15 @@ export default function Franquicias() {
           <tbody>
             ${items.map(item => `<tr>
               <td class="desc">${item.descripcion}</td>
-              <td>${item.kg}</td>
-              <td>$${Math.round(item.precio).toLocaleString('es-AR')}</td>
-              <td>$${Math.round(item.importe).toLocaleString('es-AR')}</td>
+              <td>${fmtKg(item.kg)}</td>
+              <td>${fmtPrecio(item.precio)}</td>
+              <td>${fmtPrecio(item.importe)}</td>
             </tr>`).join('')}
             ${Array(Math.max(0, 10 - items.length)).fill('<tr><td>&nbsp;</td><td></td><td></td><td></td></tr>').join('')}
           </tbody>
         </table>
         <div style="display:flex;justify-content:flex-end;margin-top:8px">
-          <div class="total-box">TOTAL: $${Math.round(remito.total).toLocaleString('es-AR')}</div>
+          <div class="total-box">TOTAL: ${fmtPrecio(remito.total)}</div>
         </div>
         <div class="firma">Firma y aclaración: ________________________________</div>
         <script>window.onload = () => { window.print(); }</script>
@@ -229,7 +229,7 @@ export default function Franquicias() {
                     <tr key={r.id}>
                       <td><strong>N° {String(r.numero).padStart(5, '0')}</strong></td>
                       <td>{r.fecha}</td>
-                      <td style={{ color: 'var(--gold)' }}>${Math.round(r.total).toLocaleString('es-AR')}</td>
+                      <td style={{ color: 'var(--gold)' }}>{fmtPrecio(r.total)}</td>
                       <td><button onClick={() => imprimirRemito(r)} style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>🖨️</button></td>
                     </tr>
                   ))}

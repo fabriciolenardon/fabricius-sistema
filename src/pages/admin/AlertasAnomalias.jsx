@@ -20,6 +20,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
+import { fmtKg } from '../../lib/formatos'
 
 const fmt$ = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
 // Wrappers cortos sobre fechaHoyARG/fechaRelativaARG para mantener legibilidad
@@ -91,7 +92,7 @@ export default function AlertasAnomalias() {
       list.push({
         nivel: 'alta',
         icono: '⚠️',
-        titulo: `Stock NEGATIVO en "${s.tipo}": ${Number(s.kg_disponible).toFixed(1)}`,
+        titulo: `Stock NEGATIVO en "${s.tipo}": ${fmtKg(s.kg_disponible)}`,
         detalle: 'Significa que se vendió más mercadería de la que figura como ingresada. Revisar entradas/salidas.',
       })
     }

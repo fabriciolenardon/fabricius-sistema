@@ -14,7 +14,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import { MODELOS_DESPOSTE } from '../../lib/modelosDesposte'
-import { parseNumero } from '../../lib/formatos'
+import { parseNumero, fmtKg } from '../../lib/formatos'
 
 // fmt sin signo $ — numero generico formato AR con 2 decimales (uso kg)
 const fmt = n => (Number(n) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -105,10 +105,10 @@ export default function DesposteMediaRes() {
     // Sanity check: las medias res de Fabricius van de 70 a 140 kg.
     // > 150 kg es prácticamente seguro un typo (típico bug ×1000 o dígito extra).
     if (kg > 150) {
-      return aviso(`⚠️ ${kg} kg es demasiado para una media res (rango real: 70-140 kg). Revisá el valor — ¿no sobra un dígito?`, 'error')
+      return aviso(`⚠️ ${fmtKg(kg)} es demasiado para una media res (rango real: 70-140 kg). Revisá el valor — ¿no sobra un dígito?`, 'error')
     }
     if (kg < 50) {
-      return aviso(`⚠️ ${kg} kg es muy bajo para una media res (rango real: 70-140 kg). Verificá el valor.`, 'error')
+      return aviso(`⚠️ ${fmtKg(kg)} es muy bajo para una media res (rango real: 70-140 kg). Verificá el valor.`, 'error')
     }
 
     // Validaciones anti-error humano para modo piezas:
@@ -119,13 +119,13 @@ export default function DesposteMediaRes() {
       for (const pieza of MODELOS_DESPOSTE[modelo].piezas) {
         const pesoP = parseNumero(piezasKg[pieza.nombre])
         if (pesoP > kg) {
-          return aviso(`⚠️ "${pieza.nombre}" tiene ${pesoP} kg pero la media res es de ${kg} kg. Una pieza no puede pesar más que la media res entera.`, 'error')
+          return aviso(`⚠️ "${pieza.nombre}" tiene ${fmtKg(pesoP)} pero la media res es de ${fmtKg(kg)}. Una pieza no puede pesar más que la media res entera.`, 'error')
         }
       }
       // (b) Suma de piezas
       const sumaPiezas = MODELOS_DESPOSTE[modelo].piezas.reduce((s, p) => s + (parseNumero(piezasKg[p.nombre])), 0)
       if (sumaPiezas > kg * 1.1) {
-        return aviso(`⚠️ La suma de piezas (${sumaPiezas.toFixed(1)} kg) supera el peso de la media res (${kg} kg). Revisá los valores — probablemente sobra un dígito.`, 'error')
+        return aviso(`⚠️ La suma de piezas (${fmtKg(sumaPiezas)}) supera el peso de la media res (${fmtKg(kg)}). Revisá los valores — probablemente sobra un dígito.`, 'error')
       }
     }
 
@@ -217,7 +217,7 @@ export default function DesposteMediaRes() {
                       {e.modelo && ` · Modelo ${e.modelo}`}
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                      {e.fecha} {e.hora} · {fmt(e.kg_media_res)} kg
+                      {e.fecha} {e.hora} · {fmtKg(e.kg_media_res)}
                       {e.empleado_nombre && ` · por ${e.empleado_nombre}`}
                     </div>
                   </div>
@@ -272,7 +272,7 @@ export default function DesposteMediaRes() {
                     {mr.codigo_media && <span style={{ background: 'var(--gold)', color: '#000', padding: '2px 7px', borderRadius: 6, fontSize: 11, fontWeight: 800, letterSpacing: 0.5 }}>{mr.codigo_media}</span>}
                     <span style={{ fontSize: 11, color: 'var(--muted)' }}>{mr.fecha}</span>
                   </div>
-                  <div style={{ fontSize: 20, fontWeight: 700 }}>{fmt(mr.kg_real || mr.kg)} kg</div>
+                  <div style={{ fontSize: 20, fontWeight: 700 }}>{fmtKg(mr.kg_real || mr.kg)}</div>
                   <div style={{ fontSize: 10, color: 'var(--muted)' }}>{mr.proveedor_nombre || mr.proveedor || '—'}</div>
                   {flujoActivo && (
                     <div style={{ marginTop: 6, fontSize: 10, fontWeight: 700, color: aprobada ? '#7dff7d' : '#ffd17a' }}>
@@ -342,13 +342,13 @@ export default function DesposteMediaRes() {
                 <div style={{ marginTop: 10, padding: 10, background: 'var(--surface2)', borderRadius: 8, fontSize: 13 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span>Suma de piezas:</span>
-                    <strong style={{ color: '#7dff7d' }}>{fmt(sumaPiezas)} kg</strong>
+                    <strong style={{ color: '#7dff7d' }}>{fmtKg(sumaPiezas)}</strong>
                   </div>
                   {kgMR > 0 && (
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
-                      <span>Merma vs media res ({fmt(kgMR)} kg):</span>
+                      <span>Merma vs media res ({fmtKg(kgMR)}):</span>
                       <strong style={{ color: merma < 0 ? '#ff8b8b' : mermaPct > 8 ? '#ffd17a' : '#7dff7d' }}>
-                        {fmt(Math.abs(merma))} kg ({Math.abs(mermaPct).toFixed(1)}%)
+                        {fmtKg(Math.abs(merma))} ({Math.abs(mermaPct).toFixed(1)}%)
                       </strong>
                     </div>
                   )}

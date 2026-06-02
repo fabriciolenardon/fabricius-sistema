@@ -15,6 +15,7 @@
 // No bloquea la operación: si falla el log, igual continúa.
 // ============================================================
 import { supabase } from './supabase'
+import { fmtPrecio } from './formatos'
 
 export async function logAuditoria({
   accion,            // 'insert' | 'update' | 'delete' | 'login' | 'logout' | 'custom'
@@ -68,7 +69,7 @@ export const auditoria = {
     modulo: 'caja',
     entidad: 'venta_minorista',
     entidad_id: venta.id,
-    descripcion: `Anuló venta #${venta.id} del ${venta.fecha} · Total: $${Math.round(venta.total).toLocaleString('es-AR')}`,
+    descripcion: `Anuló venta #${venta.id} del ${venta.fecha} · Total: ${fmtPrecio(venta.total)}`,
     valoresAntes: venta,
   }),
   cambiarPrecio: (precio, antes, despues) => logAuditoria({
@@ -117,7 +118,7 @@ export const auditoria = {
     modulo: 'arqueo',
     entidad: 'arqueo_caja',
     entidad_id: arqueo.id,
-    descripcion: `Guardó arqueo del ${arqueo.fecha} · Contado: $${Math.round(arqueo.total_contado).toLocaleString('es-AR')}`,
+    descripcion: `Guardó arqueo del ${arqueo.fecha} · Contado: ${fmtPrecio(arqueo.total_contado)}`,
     valoresDespues: arqueo,
   }),
   crearFactura: (factura) => logAuditoria({
@@ -125,7 +126,7 @@ export const auditoria = {
     modulo: 'facturacion',
     entidad: 'factura',
     entidad_id: factura.id,
-    descripcion: `Registró factura ${factura.tipo} ${factura.tipo_comprobante || ''} ${factura.numero || ''} · $${Math.round(factura.monto_total).toLocaleString('es-AR')}`,
+    descripcion: `Registró factura ${factura.tipo} ${factura.tipo_comprobante || ''} ${factura.numero || ''} · ${fmtPrecio(factura.monto_total)}`,
     valoresDespues: factura,
   }),
   borrarFactura: (factura) => logAuditoria({

@@ -1020,7 +1020,7 @@ export default function Caja() {
                 <button onClick={() => setSelectorCaja(null)} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 18 }}>✕</button>
               </div>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
-                {selectorCaja.producto.nombre} · ${Math.round(resolverPrecio(selectorCaja.producto).precio).toLocaleString('es-AR')}/kg
+                {selectorCaja.producto.nombre} · {fmtPrecio(resolverPrecio(selectorCaja.producto).precio)}/kg
                 {' · '}{cajasVisibles.length} caja{cajasVisibles.length === 1 ? '' : 's'} disponible{cajasVisibles.length === 1 ? '' : 's'}
               </div>
               <div style={{ overflowY: 'auto', flex: 1 }}>
@@ -1074,7 +1074,7 @@ export default function Caja() {
                 <button onClick={() => setSelectorPieza(null)} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 18 }}>✕</button>
               </div>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
-                {selectorPieza.producto.nombre} · ${Math.round(precioKg).toLocaleString('es-AR')}/kg
+                {selectorPieza.producto.nombre} · {fmtPrecio(precioKg)}/kg
                 {' · '}{piezasVisibles.length} pieza{piezasVisibles.length === 1 ? '' : 's'} disponible{piezasVisibles.length === 1 ? '' : 's'}
               </div>
               <div style={{ overflowY: 'auto', flex: 1 }}>

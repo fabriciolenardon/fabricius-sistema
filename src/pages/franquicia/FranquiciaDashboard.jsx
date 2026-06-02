@@ -4,7 +4,7 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
-import { fmtPrecio } from '../../lib/formatos'
+import { fmtPrecio, fmtKg } from '../../lib/formatos'
 function fmt(n) { return fmtPrecio(Math.abs(Number(n) || 0)) }
 
 function useClienteFranquicia() {
@@ -113,7 +113,7 @@ export function FranquiciaDashboard() {
               </div>
               {(r.items || []).map((item, i) => (
                 <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--muted)', padding: '2px 8px' }}>
-                  <span>• {item.descripcion} — {item.kg} kg</span>
+                  <span>• {item.descripcion} — {fmtKg(item.kg)}</span>
                   <span style={{ color: 'var(--text2)' }}>{fmt(item.importe)}</span>
                 </div>
               ))}
@@ -258,15 +258,15 @@ export function FranquiciaRemitos() {
           <tbody>
             ${items.map(item => `<tr>
               <td class="desc">${item.descripcion}</td>
-              <td>${item.kg}</td>
-              <td>$${Math.round(item.precio).toLocaleString('es-AR')}</td>
-              <td>$${Math.round(item.importe).toLocaleString('es-AR')}</td>
+              <td>${fmtKg(item.kg)}</td>
+              <td>${fmtPrecio(item.precio)}</td>
+              <td>${fmtPrecio(item.importe)}</td>
             </tr>`).join('')}
             ${Array(Math.max(0, 10 - items.length)).fill('<tr><td>&nbsp;</td><td></td><td></td><td></td></tr>').join('')}
           </tbody>
         </table>
         <div style="display:flex;justify-content:flex-end;margin-top:8px">
-          <div class="total-box">TOTAL: $${Math.round(remito.total).toLocaleString('es-AR')}</div>
+          <div class="total-box">TOTAL: ${fmtPrecio(remito.total)}</div>
         </div>
         <div class="firma">Firma y aclaración: ________________________________</div>
         <script>window.onload = () => { window.print(); }</script>
@@ -292,7 +292,7 @@ export function FranquiciaRemitos() {
                 <tr key={r.id}>
                   <td><strong>N° {String(r.numero).padStart(5, '0')}</strong></td>
                   <td>{r.fecha}</td>
-                  <td style={{ color: 'var(--gold)', fontWeight: 700 }}>${Math.round(r.total || 0).toLocaleString('es-AR')}</td>
+                  <td style={{ color: 'var(--gold)', fontWeight: 700 }}>{fmtPrecio(r.total || 0)}</td>
                   <td>
                     <button onClick={() => setRemitoAbierto(remitoAbierto === r.id ? null : r.id)}
                       style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12, color: 'var(--text)' }}>
@@ -320,16 +320,16 @@ export function FranquiciaRemitos() {
                             {(r.items || []).map((item, i) => (
                               <tr key={i}>
                                 <td style={{ padding: '6px 8px', fontSize: 13, fontWeight: 500 }}>{item.descripcion}</td>
-                                <td style={{ padding: '6px 8px', fontSize: 13, textAlign: 'center' }}>{item.kg} kg</td>
-                                <td style={{ padding: '6px 8px', fontSize: 13, textAlign: 'center', color: 'var(--muted)' }}>${Math.round(item.precio).toLocaleString('es-AR')}</td>
-                                <td style={{ padding: '6px 8px', fontSize: 13, textAlign: 'right', color: 'var(--gold)', fontWeight: 700 }}>${Math.round(item.importe).toLocaleString('es-AR')}</td>
+                                <td style={{ padding: '6px 8px', fontSize: 13, textAlign: 'center' }}>{fmtKg(item.kg)}</td>
+                                <td style={{ padding: '6px 8px', fontSize: 13, textAlign: 'center', color: 'var(--muted)' }}>{fmtPrecio(item.precio)}</td>
+                                <td style={{ padding: '6px 8px', fontSize: 13, textAlign: 'right', color: 'var(--gold)', fontWeight: 700 }}>{fmtPrecio(item.importe)}</td>
                               </tr>
                             ))}
                           </tbody>
                           <tfoot>
                             <tr style={{ borderTop: '1px solid var(--border)' }}>
                               <td colSpan={3} style={{ padding: '8px', fontSize: 13, fontWeight: 700, textAlign: 'right' }}>TOTAL</td>
-                              <td style={{ padding: '8px', fontSize: 20, fontWeight: 700, textAlign: 'right', color: 'var(--gold)', fontFamily: "'Bebas Neue',cursive" }}>${Math.round(r.total).toLocaleString('es-AR')}</td>
+                              <td style={{ padding: '8px', fontSize: 20, fontWeight: 700, textAlign: 'right', color: 'var(--gold)', fontFamily: "'Bebas Neue',cursive" }}>{fmtPrecio(r.total)}</td>
                             </tr>
                           </tfoot>
                         </table>

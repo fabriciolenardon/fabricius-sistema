@@ -79,40 +79,40 @@ function imprimirCierreMensual(semanasMes, totMes, mesLabel) {
         <tbody>
           ${semanasMes.map(c => `<tr>
             <td>${new Date(c.semana_inicio + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })} → ${new Date(c.semana_fin + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })}</td>
-            <td class="verde">$${Math.round(c.ventas).toLocaleString('es-AR')}</td>
-            <td>$${Math.round(c.ventas_ctacte || 0).toLocaleString('es-AR')}</td>
-            <td class="rojo">$${Math.round(c.compras).toLocaleString('es-AR')}</td>
-            <td>$${Math.round(c.gastos).toLocaleString('es-AR')}</td>
-            <td>$${Math.round(c.sueldos).toLocaleString('es-AR')}</td>
-            <td class="${c.ganancia >= 0 ? 'oro' : 'rojo'}">$${Math.round(c.ganancia).toLocaleString('es-AR')}</td>
-            <td>${(c.kg_carne || 0).toFixed(1)} kg</td>
-            <td>${(c.kg_pollo || 0).toFixed(1)} kg</td>
-            <td>${(c.kg_cerdo || 0).toFixed(1)} kg</td>
+            <td class="verde">${fmtPrecio(c.ventas)}</td>
+            <td>${fmtPrecio(c.ventas_ctacte || 0)}</td>
+            <td class="rojo">${fmtPrecio(c.compras)}</td>
+            <td>${fmtPrecio(c.gastos)}</td>
+            <td>${fmtPrecio(c.sueldos)}</td>
+            <td class="${c.ganancia >= 0 ? 'oro' : 'rojo'}">${fmtPrecio(c.ganancia)}</td>
+            <td>${fmtKgAR(c.kg_carne || 0)}</td>
+            <td>${fmtKgAR(c.kg_pollo || 0)}</td>
+            <td>${fmtKgAR(c.kg_cerdo || 0)}</td>
           </tr>`).join('')}
         </tbody>
         <tfoot>
           <tr class="total-row">
             <td>TOTAL</td>
-            <td class="verde">$${Math.round(totMes.ventas).toLocaleString('es-AR')}</td>
-            <td>$${Math.round(totMes.ventasCtacte).toLocaleString('es-AR')}</td>
-            <td class="rojo">$${Math.round(totMes.compras).toLocaleString('es-AR')}</td>
-            <td>$${Math.round(totMes.gastos).toLocaleString('es-AR')}</td>
-            <td>$${Math.round(totMes.sueldos).toLocaleString('es-AR')}</td>
-            <td class="${totMes.ganancia >= 0 ? 'oro' : 'rojo'}">$${Math.round(totMes.ganancia).toLocaleString('es-AR')}</td>
-            <td>${(totMes.kgCarne || 0).toFixed(1)} kg</td>
-            <td>${(totMes.kgPollo || 0).toFixed(1)} kg</td>
-            <td>${(totMes.kgCerdo || 0).toFixed(1)} kg</td>
+            <td class="verde">${fmtPrecio(totMes.ventas)}</td>
+            <td>${fmtPrecio(totMes.ventasCtacte)}</td>
+            <td class="rojo">${fmtPrecio(totMes.compras)}</td>
+            <td>${fmtPrecio(totMes.gastos)}</td>
+            <td>${fmtPrecio(totMes.sueldos)}</td>
+            <td class="${totMes.ganancia >= 0 ? 'oro' : 'rojo'}">${fmtPrecio(totMes.ganancia)}</td>
+            <td>${fmtKgAR(totMes.kgCarne || 0)}</td>
+            <td>${fmtKgAR(totMes.kgPollo || 0)}</td>
+            <td>${fmtKgAR(totMes.kgCerdo || 0)}</td>
           </tr>
         </tfoot>
       </table>
       <div class="socios">
         <div class="socio">
           <div class="socio-nombre">👑 Fabricio Lenardon (85%)</div>
-          <div class="socio-valor oro">$${Math.round(totMes.ganancia * 0.85).toLocaleString('es-AR')}</div>
+          <div class="socio-valor oro">${fmtPrecio(totMes.ganancia * 0.85)}</div>
         </div>
         <div class="socio">
           <div class="socio-nombre">🤝 Ariel Garrone (15%)</div>
-          <div class="socio-valor" style="color:#1a3a7a">$${Math.round(totMes.ganancia * 0.15).toLocaleString('es-AR')}</div>
+          <div class="socio-valor" style="color:#1a3a7a">${fmtPrecio(totMes.ganancia * 0.15)}</div>
         </div>
       </div>
       <script>window.onload = () => { window.print(); }</script>

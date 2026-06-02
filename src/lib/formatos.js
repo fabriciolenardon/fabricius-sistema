@@ -61,15 +61,16 @@ export function parseNumero(input) {
 
 // ───────────────────────────────────────────────────────────
 // fmtPrecio(n) — Devuelve un precio formateado en pesos argentinos.
-//   fmtPrecio(35600)      → "$35.600"
+//   fmtPrecio(35600)      → "$35.600,00"
 //   fmtPrecio(35600.5)    → "$35.600,50"
-//   fmtPrecio(0)          → "$0"
-//   fmtPrecio(null)       → "$0"
-// Si querés siempre 2 decimales, pasá { decimales: 2 }.
+//   fmtPrecio(0)          → "$0,00"
+//   fmtPrecio(null)       → "$0,00"
+// Siempre muestra centavos (2 decimales). Para otra cantidad pasá
+// { decimales: N } (ej: { decimales: 0 } para redondear sin centavos).
 // ───────────────────────────────────────────────────────────
 export function fmtPrecio(n, opts = {}) {
   const num = Number(n) || 0
-  const decimales = opts.decimales != null ? opts.decimales : (Number.isInteger(num) ? 0 : 2)
+  const decimales = opts.decimales != null ? opts.decimales : 2
   return '$' + num.toLocaleString('es-AR', {
     minimumFractionDigits: decimales,
     maximumFractionDigits: decimales,
@@ -78,14 +79,15 @@ export function fmtPrecio(n, opts = {}) {
 
 // ───────────────────────────────────────────────────────────
 // fmtKg(n) — Peso en kg con coma decimal.
-//   fmtKg(67.9)   → "67,9 kg"
-//   fmtKg(20)     → "20,0 kg"
-//   fmtKg(1.234)  → "1,2 kg"
-// Default 1 decimal — pasá { decimales: 2 } para más precisión.
+//   fmtKg(67.9)   → "67,90 kg"
+//   fmtKg(20)     → "20,00 kg"
+//   fmtKg(1.234)  → "1,23 kg"
+// Siempre muestra gramos (2 decimales). Para otra cantidad pasá
+// { decimales: N }.
 // ───────────────────────────────────────────────────────────
 export function fmtKg(n, opts = {}) {
   const num = Number(n) || 0
-  const decimales = opts.decimales != null ? opts.decimales : 1
+  const decimales = opts.decimales != null ? opts.decimales : 2
   return num.toLocaleString('es-AR', {
     minimumFractionDigits: decimales,
     maximumFractionDigits: decimales,

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useFlujoNotificaciones } from '../../lib/useFlujoNotificaciones'
 import { fechaHoyARG } from '../../lib/fechas'
+import { fmtPrecio, fmtKg } from '../../lib/formatos'
 import BuscadorGlobal from '../../components/BuscadorGlobal'
 import LogoFabricius from '../../components/LogoFabricius'
 import UserDropdown from '../../components/UserDropdown'
@@ -55,13 +56,13 @@ function useNotificaciones() {
       if (cheques?.length > 0) {
         cheques.forEach(ch => {
           const dias = Math.ceil((new Date(ch.fecha_pago + 'T12:00') - hoy) / (1000 * 60 * 60 * 24))
-          nuevas.push({ tipo: 'warning', icono: '📄', titulo: `Cheque #${ch.numero} vence en ${dias} día${dias !== 1 ? 's' : ''}`, sub: `${ch.cliente_nombre} — $${Math.round(ch.monto).toLocaleString('es-AR')}`, link: '/admin/cheques' })
+          nuevas.push({ tipo: 'warning', icono: '📄', titulo: `Cheque #${ch.numero} vence en ${dias} día${dias !== 1 ? 's' : ''}`, sub: `${ch.cliente_nombre} — ${fmtPrecio(ch.monto)}`, link: '/admin/cheques' })
         })
       }
 
       if (clientes?.length > 0) {
         clientes.slice(0, 3).forEach(c => {
-          if (c.saldo > 100000) nuevas.push({ tipo: 'danger', icono: '💳', titulo: `${c.nombre} debe $${Math.round(c.saldo).toLocaleString('es-AR')}`, sub: 'Saldo pendiente', link: '/admin/clientes' })
+          if (c.saldo > 100000) nuevas.push({ tipo: 'danger', icono: '💳', titulo: `${c.nombre} debe ${fmtPrecio(c.saldo)}`, sub: 'Saldo pendiente', link: '/admin/clientes' })
         })
       }
 
@@ -101,9 +102,9 @@ function useNotificaciones() {
       if (stockData) {
         const s = {}
         stockData.forEach(r => s[r.tipo] = r.kg_disponible)
-        if ((s.bovino_mr || 0) < 100) nuevas.push({ tipo: 'danger', icono: '📦', titulo: `Stock bovino bajo: ${(s.bovino_mr || 0).toFixed(0)} kg`, sub: 'Pedí más mercadería', link: '/admin/deposito' })
-        if ((s.pollo || 0) < 100) nuevas.push({ tipo: 'warning', icono: '📦', titulo: `Stock pollo bajo: ${(s.pollo || 0).toFixed(0)} kg`, sub: 'Pedí más mercadería', link: '/admin/deposito' })
-        if ((s.cerdo || 0) < 50) nuevas.push({ tipo: 'warning', icono: '📦', titulo: `Stock cerdo bajo: ${(s.cerdo || 0).toFixed(0)} kg`, sub: 'Pedí más mercadería', link: '/admin/deposito' })
+        if ((s.bovino_mr || 0) < 100) nuevas.push({ tipo: 'danger', icono: '📦', titulo: `Stock bovino bajo: ${fmtKg(s.bovino_mr || 0)}`, sub: 'Pedí más mercadería', link: '/admin/deposito' })
+        if ((s.pollo || 0) < 100) nuevas.push({ tipo: 'warning', icono: '📦', titulo: `Stock pollo bajo: ${fmtKg(s.pollo || 0)}`, sub: 'Pedí más mercadería', link: '/admin/deposito' })
+        if ((s.cerdo || 0) < 50) nuevas.push({ tipo: 'warning', icono: '📦', titulo: `Stock cerdo bajo: ${fmtKg(s.cerdo || 0)}`, sub: 'Pedí más mercadería', link: '/admin/deposito' })
       }
 
       setNotifs(nuevas)

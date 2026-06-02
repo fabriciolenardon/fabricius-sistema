@@ -10,8 +10,9 @@ import { useEffect, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
+import { fmtPrecio, fmtKg } from '../../lib/formatos'
 
-const fmt$ = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
+const fmt$ = n => fmtPrecio(Math.abs(n || 0))
 
 function grupoDeCategoria(cat) {
   if (!cat) return 'Otros'
@@ -70,7 +71,7 @@ export default function DashboardCajaWidget() {
           const v = payload.new
           if (v?.origen === 'caja') {
             const total = Number(v.total) || 0
-            setToast({ texto: `🛎️ Nueva venta: $${Math.round(total).toLocaleString('es-AR')}`, id: Date.now() })
+            setToast({ texto: `🛎️ Nueva venta: ${fmtPrecio(total)}`, id: Date.now() })
             setTimeout(() => setToast(null), 4500)
           }
           cargar()
@@ -164,7 +165,7 @@ export default function DashboardCajaWidget() {
               'var(--gold)')}
             {mini('Ventas', String(agHoy.ventas), `Ayer: ${agAyer.ventas}`, '#7dff7d')}
             {mini('Ticket promedio', fmt$(agHoy.ticketPromedio))}
-            {mini('Kg vendidos', agHoy.totalKg.toFixed(1) + ' kg', `${agHoy.items} items`)}
+            {mini('Kg vendidos', fmtKg(agHoy.totalKg), `${agHoy.items} items`)}
           </div>
 
           {/* Desglose forma de pago */}

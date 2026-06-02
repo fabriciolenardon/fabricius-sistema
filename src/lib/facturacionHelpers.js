@@ -6,6 +6,7 @@
 // ============================================================
 import { TOPE_MAX_ABSOLUTO, topeAnual, proximaRecategorizacion } from './monotributo2026'
 import { fechaHoyARG } from './fechas'
+import { fmtPrecio } from './formatos'
 
 // ─────────────────────────────────────────────────────────────
 // PROYECCIÓN: estima cuánto va a facturar la cuenta en los
@@ -51,7 +52,7 @@ export function distribuirEntreCuentas(monto, cuentasConFacturacion) {
       ...c,
       asignar: c.libre,
       pctFinal: 100,
-      alerta: 'No alcanza el espacio total — exceso $' + Math.round(monto - espacioTotal).toLocaleString('es-AR'),
+      alerta: 'No alcanza el espacio total — exceso ' + fmtPrecio(monto - espacioTotal),
     }))
   }
 

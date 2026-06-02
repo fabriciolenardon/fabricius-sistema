@@ -150,7 +150,7 @@ export default function FlujoDeposito() {
       const ok = window.confirm(
         `⚠️ ATENCIÓN — Valores sospechosos\n\n` +
         `Media res: ${f.kg_media_res} kg\n` +
-        `Suma de piezas: ${kgPiezasTotal.toFixed(1)} kg\n\n` +
+        `Suma de piezas: ${fmtKg(kgPiezasTotal, { decimales: 2 })}\n\n` +
         `La suma de piezas supera al peso de la media res por mucho.\n` +
         `Probablemente el operario tipeó un kg con un dígito de más.\n\n` +
         `¿Aprobar igual? (No recomendado)`
@@ -275,7 +275,7 @@ export default function FlujoDeposito() {
                         <BadgeEstado estado={f.estado} />
                       </div>
                       <div style={{ fontSize: 13 }}>
-                        <strong style={{ color: 'var(--gold)', fontFamily: "'Bebas Neue', cursive", fontSize: 22 }}>{fmt(f.kg_media_res)} kg</strong>
+                        <strong style={{ color: 'var(--gold)', fontFamily: "'Bebas Neue', cursive", fontSize: 22 }}>{fmtKg(f.kg_media_res, { decimales: 2 })}</strong>
                         <span style={{ color: 'var(--muted)', marginLeft: 12 }}>
                           {f.fecha} {f.hora?.slice(0, 5)} · por {f.empleado_nombre || '—'}
                         </span>
@@ -291,12 +291,12 @@ export default function FlujoDeposito() {
                           {f.payload.piezas.map((p, i) => (
                             <div key={i} style={{ fontSize: 12, display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
                               <span>{p.nombre}</span>
-                              <strong style={{ color: 'var(--gold)' }}>{fmt(p.kg)} kg</strong>
+                              <strong style={{ color: 'var(--gold)' }}>{fmtKg(p.kg, { decimales: 2 })}</strong>
                             </div>
                           ))}
                           <div style={{ fontSize: 11, color: '#7dff7d', marginTop: 4, borderTop: '1px solid var(--border)', paddingTop: 4, display: 'flex', justifyContent: 'space-between' }}>
                             <strong>Total piezas:</strong>
-                            <strong>{fmt(f.payload.kg_piezas_total || f.payload.piezas.reduce((s, p) => s + (Number(p.kg) || 0), 0))} kg</strong>
+                            <strong>{fmtKg(f.payload.kg_piezas_total || f.payload.piezas.reduce((s, p) => s + (Number(p.kg) || 0), 0), { decimales: 2 })}</strong>
                           </div>
                         </div>
                       )}
@@ -382,7 +382,7 @@ function ModalConfirmarDesposte({ flujo, procesando, onConfirmar, onCancelar }) 
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
             <span style={{ color: 'var(--muted)' }}>Media res:</span>
-            <strong style={{ color: 'var(--gold)', fontFamily: "'Bebas Neue', cursive", fontSize: 22 }}>{fmt(flujo.kg_media_res)} kg</strong>
+            <strong style={{ color: 'var(--gold)', fontFamily: "'Bebas Neue', cursive", fontSize: 22 }}>{fmtKg(flujo.kg_media_res, { decimales: 2 })}</strong>
           </div>
           {flujo.modelo && (
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -419,14 +419,14 @@ function ModalConfirmarDesposte({ flujo, procesando, onConfirmar, onCancelar }) 
                       {labelStock[p.tipo_stock] || p.tipo_stock || '—'}
                     </td>
                     <td style={{ textAlign: 'right', padding: '8px 8px', color: 'var(--gold)', fontWeight: 700 }}>
-                      +{fmt(p.kg)} kg
+                      +{fmtKg(p.kg, { decimales: 2 })}
                     </td>
                   </tr>
                 ))}
                 <tr style={{ borderTop: '2px solid var(--gold)' }}>
                   <td colSpan={2} style={{ padding: '8px 8px', fontWeight: 700, color: '#7dff7d' }}>TOTAL al stock</td>
                   <td style={{ textAlign: 'right', padding: '8px 8px', color: '#7dff7d', fontWeight: 800, fontFamily: "'Bebas Neue', cursive", fontSize: 20 }}>
-                    +{fmt(kgPiezas)} kg
+                    +{fmtKg(kgPiezas, { decimales: 2 })}
                   </td>
                 </tr>
               </tbody>
@@ -442,7 +442,7 @@ function ModalConfirmarDesposte({ flujo, procesando, onConfirmar, onCancelar }) 
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span>Merma del desposte:</span>
                 <strong style={{ color: merma < 0 ? '#ff8b8b' : mermaPct > 10 ? '#ffd17a' : '#7dff7d' }}>
-                  {fmt(Math.abs(merma))} kg ({Math.abs(mermaPct).toFixed(1)}%)
+                  {fmtKg(Math.abs(merma), { decimales: 2 })} ({Math.abs(mermaPct).toFixed(1)}%)
                 </strong>
               </div>
               {merma < 0 && (
@@ -472,7 +472,7 @@ function ModalConfirmarDesposte({ flujo, procesando, onConfirmar, onCancelar }) 
           </button>
           <button onClick={onConfirmar} disabled={procesando}
             style={{ flex: 2, padding: 14, background: 'var(--green)', color: '#000', border: 'none', borderRadius: 10, cursor: procesando ? 'wait' : 'pointer', fontWeight: 800, fontFamily: "'Bebas Neue', cursive", fontSize: 18, letterSpacing: 2 }}>
-            {procesando ? '⏳ PROCESANDO...' : (sinPiezas ? '✅ APROBAR (sin tocar stock)' : `✅ CONFIRMAR Y SUMAR ${fmt(kgPiezas)} KG AL STOCK`)}
+            {procesando ? '⏳ PROCESANDO...' : (sinPiezas ? '✅ APROBAR (sin tocar stock)' : `✅ CONFIRMAR Y SUMAR ${fmtKg(kgPiezas, { decimales: 2 })} AL STOCK`)}
           </button>
         </div>
       </div>

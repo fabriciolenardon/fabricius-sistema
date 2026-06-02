@@ -177,10 +177,10 @@ export default function ArqueoCaja() {
     const difTotal = diferencia + debitoDif + transferenciaDif
     if (!confirm(
       `📋 GUARDAR ARQUEO\n\n` +
-      `💵 Efectivo  esperado: $${Math.round(efectivoEsperado).toLocaleString('es-AR')}  |  contado: $${Math.round(totalContado).toLocaleString('es-AR')}  |  dif: ${diferencia >= 0 ? '+' : ''}$${Math.round(diferencia).toLocaleString('es-AR')}\n` +
-      `💳 Débito/QR esperado: $${Math.round(debitoEsperado).toLocaleString('es-AR')}  |  real: $${Math.round(debitoRealNum).toLocaleString('es-AR')}  |  dif: ${debitoDif >= 0 ? '+' : ''}$${Math.round(debitoDif).toLocaleString('es-AR')}\n` +
-      `🔄 Transfer. esperada: $${Math.round(transferenciaEsperada).toLocaleString('es-AR')}  |  real: $${Math.round(transferenciaRealNum).toLocaleString('es-AR')}  |  dif: ${transferenciaDif >= 0 ? '+' : ''}$${Math.round(transferenciaDif).toLocaleString('es-AR')}\n\n` +
-      `DIFERENCIA TOTAL: ${difTotal >= 0 ? '+' : ''}$${Math.round(difTotal).toLocaleString('es-AR')}\n\n` +
+      `💵 Efectivo  esperado: ${fmt$(efectivoEsperado)}  |  contado: ${fmt$(totalContado)}  |  dif: ${diferencia >= 0 ? '+' : ''}${fmt$(diferencia)}\n` +
+      `💳 Débito/QR esperado: ${fmt$(debitoEsperado)}  |  real: ${fmt$(debitoRealNum)}  |  dif: ${debitoDif >= 0 ? '+' : ''}${fmt$(debitoDif)}\n` +
+      `🔄 Transfer. esperada: ${fmt$(transferenciaEsperada)}  |  real: ${fmt$(transferenciaRealNum)}  |  dif: ${transferenciaDif >= 0 ? '+' : ''}${fmt$(transferenciaDif)}\n\n` +
+      `DIFERENCIA TOTAL: ${difTotal >= 0 ? '+' : ''}${fmt$(difTotal)}\n\n` +
       `¿Guardar?`
     )) return
 
