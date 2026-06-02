@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
-import { fechaHoyARG } from '../../lib/fechas'
+import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
+import { lunesDeLaSemana, domingoDeLaSemana } from '../../lib/cierreAuto'
 import { resolverDescuentoStock } from '../../lib/stockHelpers'
 import { cargarCajasDisponibles, crearCajasIngreso, venderCaja, revertirVentaCaja, CATEGORIA_A_TIPO_CAJA } from '../../lib/cajasStock'
 import { fmtPrecio, fmtKg, parseNumero } from '../../lib/formatos'
@@ -2820,8 +2821,47 @@ export function RemitosTab({ remitoActual }) {
   const [nuevoProductoId, setNuevoProductoId] = useState('')
   const [nuevoKg, setNuevoKg] = useState('')
   const [nuevoPrecio, setNuevoPrecio] = useState('')
-  // Paginación del historial de remitos — antes estaba cortado a 30
-  const pagRemitos = usePaginacion(remitos, 20)
+
+  // ── Filtros del historial: rango de fechas + cliente ──────────────────
+  // Sirve para responder "¿cuánto vendí esta semana a mayoristas?": muestra
+  // todos los remitos emitidos dentro del período (o los de un cliente puntual)
+  // y la suma total.
+  const [fDesde, setFDesde] = useState('')
+  const [fHasta, setFHasta] = useState('')
+  const [fCliente, setFCliente] = useState('todos')
+
+  // Clientes presentes en los remitos (para el selector)
+  const clientesRemito = useMemo(() => {
+    const nombres = new Set()
+    remitos.forEach(r => { if (r.cliente_nombre) nombres.add(r.cliente_nombre) })
+    return [...nombres].sort((a, b) => a.localeCompare(b))
+  }, [remitos])
+
+  // Remitos que pasan los filtros (r.fecha es 'YYYY-MM-DD', comparable como string)
+  const remitosFiltrados = useMemo(() => remitos.filter(r => {
+    if (fDesde && (r.fecha || '') < fDesde) return false
+    if (fHasta && (r.fecha || '') > fHasta) return false
+    if (fCliente !== 'todos' && r.cliente_nombre !== fCliente) return false
+    return true
+  }), [remitos, fDesde, fHasta, fCliente])
+
+  // El total vendido excluye los anulados (no son ventas reales); igual se
+  // listan tachados para trazabilidad.
+  const remitosValidos = remitosFiltrados.filter(r => !r.eliminado)
+  const totalFiltrado = remitosValidos.reduce((s, r) => s + (Number(r.total) || 0), 0)
+  const anuladosEnFiltro = remitosFiltrados.length - remitosValidos.length
+  const hayFiltro = !!(fDesde || fHasta || fCliente !== 'todos')
+
+  function setSemanaActual() { setFDesde(lunesDeLaSemana()); setFHasta(domingoDeLaSemana()) }
+  function setSemanaAnterior() {
+    setFDesde(fechaRelativaARG(-7, new Date(lunesDeLaSemana() + 'T12:00')))
+    setFHasta(fechaRelativaARG(-7, new Date(domingoDeLaSemana() + 'T12:00')))
+  }
+  function setMesActual() { const h = fechaHoyARG(); setFDesde(h.substring(0, 7) + '-01'); setFHasta(h) }
+  function limpiarFiltros() { setFDesde(''); setFHasta(''); setFCliente('todos') }
+
+  // Paginación del historial de remitos (ya filtrado)
+  const pagRemitos = usePaginacion(remitosFiltrados, 20)
  const CATEGORIAS = {
     bovino_mr: '🐄 Media Reses', bovino_corte: '🥩 Bovinos — Cortes',
     bovino_brosa: '🫀 Brosas', bovino_pieza: '🍖 Piezas',
@@ -3093,8 +3133,57 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
           </div>
         </div>
       )}
+      {/* FILTRO POR FECHA / CLIENTE + RESUMEN DE VENTAS */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-title">🔎 Buscar remitos por fecha / cliente</div>
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
+          Filtrá por período (y opcionalmente un cliente) para ver cuánto se vendió. La suma excluye remitos anulados.
+        </div>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div>
+            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Desde</label>
+            <input type="date" value={fDesde} onChange={e => setFDesde(e.target.value)} style={inp} />
+          </div>
+          <div>
+            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Hasta</label>
+            <input type="date" value={fHasta} onChange={e => setFHasta(e.target.value)} style={inp} />
+          </div>
+          <div style={{ minWidth: 220 }}>
+            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Cliente</label>
+            <select value={fCliente} onChange={e => setFCliente(e.target.value)} style={{ ...inp, width: '100%' }}>
+              <option value="todos">Todos los clientes</option>
+              {clientesRemito.map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <button className="btn btn-ghost btn-sm" onClick={setSemanaActual}>Semana actual</button>
+            <button className="btn btn-ghost btn-sm" onClick={setSemanaAnterior}>Semana anterior</button>
+            <button className="btn btn-ghost btn-sm" onClick={setMesActual}>Mes en curso</button>
+            {hayFiltro && <button className="btn btn-ghost btn-sm" onClick={limpiarFiltros}>✕ Limpiar</button>}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 14 }}>
+          <div style={{ flex: '1 1 220px', background: 'var(--surface2)', border: '1px solid var(--gold)', borderRadius: 10, padding: '12px 16px' }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 600 }}>
+              {fCliente === 'todos' ? '💰 Total vendido' : `💰 Total — ${fCliente}`}
+            </div>
+            <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 30, color: 'var(--gold)' }}>{fmt(totalFiltrado)}</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+              {remitosValidos.length} remito(s){anuladosEnFiltro > 0 ? ` · ${anuladosEnFiltro} anulado(s) excluido(s)` : ''}
+            </div>
+          </div>
+          <div style={{ flex: '1 1 220px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 16px' }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 600 }}>📅 Período</div>
+            <div style={{ fontSize: 15, fontWeight: 700, marginTop: 6 }}>
+              {(fDesde || fHasta) ? `${fDesde || '…'} → ${fHasta || '…'}` : 'Todos los remitos'}
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div className="card">
-        <div className="card-title">Historial de remitos ({remitos.length})</div>
+        <div className="card-title">Historial de remitos ({remitosFiltrados.length}{hayFiltro ? ` de ${remitos.length}` : ''})</div>
         <table>
           <thead><tr><th>N° Remito</th><th>Fecha</th><th>Cliente</th><th>Total</th><th>Acciones</th></tr></thead>
           <tbody>
@@ -3117,7 +3206,7 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
                 </td>
               </tr>
             ))}          
-{remitos.length === 0 && <tr><td colSpan={5} className="empty">Sin remitos</td></tr>}
+{remitosFiltrados.length === 0 && <tr><td colSpan={5} className="empty">{hayFiltro ? 'Sin remitos para este filtro' : 'Sin remitos'}</td></tr>}
           </tbody>
         </table>
         <Paginador {...pagRemitos.controles} label="remitos" />
