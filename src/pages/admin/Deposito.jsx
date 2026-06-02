@@ -2816,6 +2816,7 @@ export function RemitosTab({ remitoActual }) {
   const [anulando, setAnulando] = useState(false)
   const [editando, setEditando] = useState(null)
   const [itemsEdit, setItemsEdit] = useState([])
+  const [fechaEdit, setFechaEdit] = useState('')   // fecha de emisión editable
   const [alert, setAlert] = useState(null)
   const [todosPrecios, setTodosPrecios] = useState([])
   const [nuevaCategoria, setNuevaCategoria] = useState('')
@@ -2881,7 +2882,12 @@ export function RemitosTab({ remitoActual }) {
 
   async function cargarRemitos() {
     // Sin .limit — paginamos en cliente para mostrar todos los remitos históricos
-    const { data } = await supabase.from('remitos').select('*').order('created_at', { ascending: false })
+    // Orden por FECHA DE EMISIÓN (no por created_at): así un remito cargado hoy
+    // pero con fecha de la semana pasada cae en su lugar cronológico, que es lo
+    // que valida el cierre semanal. Más nuevo arriba; created_at desempata.
+    const { data } = await supabase.from('remitos').select('*')
+      .order('fecha', { ascending: false })
+      .order('created_at', { ascending: false })
     setRemitos(data || [])
   }
   async function eliminarRemito(remito) {
@@ -2973,6 +2979,7 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
   function abrirEdicion(remito) {
     setEditando(remito)
     setItemsEdit(JSON.parse(JSON.stringify(remito.items || [])))
+    setFechaEdit(remito.fecha || '')
     setSeleccionado(null)
   }
 
@@ -3005,26 +3012,53 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
 
   async function guardarEdicion() {
     if (itemsEdit.length === 0) { showAlert('Debe tener al menos un producto', 'error'); return }
+    if (!fechaEdit) { showAlert('La fecha de emisión no puede estar vacía', 'error'); return }
     const nuevoTotal = itemsEdit.reduce((s, i) => s + (parseFloat(i.importe) || 0), 0)
     const diferencia = nuevoTotal - (editando.total || 0)
+    const fechaAnterior = editando.fecha
+    const fechaCambio = fechaEdit !== fechaAnterior
 
-    await supabase.from('remitos').update({ items: itemsEdit, total: nuevoTotal }).eq('id', editando.id)
+    await supabase.from('remitos').update({ items: itemsEdit, total: nuevoTotal, fecha: fechaEdit }).eq('id', editando.id)
 
-    if (editando.cliente_id && diferencia !== 0) {
-      const { data: movs } = await supabase.from('movimientos_ctacte').select('*').eq('remito_id', editando.id).maybeSingle()
-      if (movs) {
-        await supabase.from('movimientos_ctacte').update({
-          debe: (movs.debe || 0) + diferencia,
-          saldo: (movs.saldo || 0) + diferencia,
-          descripcion: `Remito N° ${String(editando.numero || '').padStart(5, '0')} — ${itemsEdit.map(i => i.descripcion).join(', ')} ✏️ Editado`
-        }).eq('id', movs.id)
-      }
-      const { data: clienteActual } = await supabase.from('clientes').select('saldo').eq('id', editando.cliente_id).single()
-      await supabase.from('clientes').update({ saldo: (clienteActual?.saldo || 0) + diferencia }).eq('id', editando.cliente_id)
+    // Si cambió la fecha de emisión, mover también las salidas_deposito que se
+    // crearon JUNTO con este remito (no hay FK: las emparejamos por cliente +
+    // misma fecha vieja + ventana de created_at alrededor del remito). Esto es
+    // lo que hace que el CIERRE de la semana refleje la fecha corregida.
+    if (fechaCambio && editando.created_at) {
+      const t = new Date(editando.created_at).getTime()
+      const lo = new Date(t - 120000).toISOString()
+      const hi = new Date(t + 120000).toISOString()
+      const { data: sals } = await supabase.from('salidas_deposito')
+        .select('id')
+        .eq('cliente_nombre', editando.cliente_nombre)
+        .eq('fecha', fechaAnterior)
+        .gte('created_at', lo).lte('created_at', hi)
+      const ids = (sals || []).map(s => s.id)
+      if (ids.length) await supabase.from('salidas_deposito').update({ fecha: fechaEdit }).in('id', ids)
     }
 
-    showAlert(`✅ Remito N° ${String(editando.numero).padStart(5, '0')} actualizado`)
-    setEditando(null); setItemsEdit([])
+    // Movimiento de cuenta corriente del remito: ajustar importe (si cambió) y
+    // fecha (si cambió), para que el extracto del cliente quede consistente.
+    if (editando.cliente_id && (diferencia !== 0 || fechaCambio)) {
+      const { data: movs } = await supabase.from('movimientos_ctacte').select('*').eq('remito_id', editando.id).maybeSingle()
+      if (movs) {
+        const upd = {}
+        if (diferencia !== 0) {
+          upd.debe = (movs.debe || 0) + diferencia
+          upd.saldo = (movs.saldo || 0) + diferencia
+          upd.descripcion = `Remito N° ${String(editando.numero || '').padStart(5, '0')} — ${itemsEdit.map(i => i.descripcion).join(', ')} ✏️ Editado`
+        }
+        if (fechaCambio) upd.fecha = fechaEdit
+        await supabase.from('movimientos_ctacte').update(upd).eq('id', movs.id)
+      }
+      if (diferencia !== 0) {
+        const { data: clienteActual } = await supabase.from('clientes').select('saldo').eq('id', editando.cliente_id).single()
+        await supabase.from('clientes').update({ saldo: (clienteActual?.saldo || 0) + diferencia }).eq('id', editando.cliente_id)
+      }
+    }
+
+    showAlert(`✅ Remito N° ${String(editando.numero).padStart(5, '0')} actualizado${fechaCambio ? ' (fecha y cierre reubicados)' : ''}`)
+    setEditando(null); setItemsEdit([]); setFechaEdit('')
     cargarRemitos()
   }
 
@@ -3066,6 +3100,26 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
             <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--muted)', textDecoration: 'line-through' }}>${Math.round(editando.total).toLocaleString('es-AR')}</div>
           </div>
         </div>
+
+        {/* EDITAR FECHA DE EMISIÓN */}
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card-title">📅 Fecha de emisión</div>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div className="form-group">
+              <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Fecha del remito</label>
+              <input type="date" value={fechaEdit} onChange={e => setFechaEdit(e.target.value)} style={inp} />
+            </div>
+            {fechaEdit !== editando.fecha && (
+              <div style={{ fontSize: 12, color: 'var(--amber)', paddingBottom: 8 }}>
+                ⚠️ Cambia del {editando.fecha} al {fechaEdit} — se reubica en el historial y en el cierre de esa semana.
+              </div>
+            )}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
+            La hora no importa; lo que valida el cierre semanal es la fecha. Al guardar, también se mueven las salidas y el movimiento de cuenta corriente de este remito.
+          </div>
+        </div>
+
         <div className="card">
           <div className="card-title">Items del remito</div>
           <table>
