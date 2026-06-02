@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import { useAuth } from '../../context/AuthContext'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
-import { fmtPrecio, fmtKg as fmtKgAR } from '../../lib/formatos'
+import { fmtPrecio, fmtKg as fmtKgAR, parseNumero } from '../../lib/formatos'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 import { calcularCierreAuto, cierreAutoAFila, lunesDeLaSemana, domingoDeLaSemana } from '../../lib/cierreAuto'
 
@@ -124,34 +125,91 @@ function imprimirCierreMensual(semanasMes, totMes, mesLabel) {
 // Componentes auxiliares
 // ============================================================
 
-function MetricCard({ label, value, color, sub, big }) {
+// Input numérico inline para el modo edición manual. Es NO controlado
+// (defaultValue) y commitea en onBlur usando parseNumero, así acepta coma o
+// punto sin pelear con el tipeo. El `key` lo fuerza a refrescar cuando el valor
+// de fondo cambia (recálculo / restaurar automáticos).
+function InputNum({ value, color, onCommit, ancho = 130 }) {
+  return (
+    <input
+      key={value}
+      type="text"
+      inputMode="decimal"
+      defaultValue={Number(value) || 0}
+      onFocus={e => e.target.select()}
+      onBlur={e => onCommit(e.target.value)}
+      style={{
+        width: ancho, textAlign: 'right', fontWeight: 700,
+        color: color || 'var(--text)', background: 'var(--surface)',
+        border: '1px solid var(--gold)', borderRadius: 6, padding: '4px 8px',
+        fontFamily: 'inherit', fontSize: 13
+      }}
+    />
+  )
+}
+
+// Recalcula los valores DERIVADOS a partir de las hojas editables.
+// Hojas: ventas.{caja,mayorista,pedidos}, cobrado.{efectivo,debito,
+// transferencia,mayorista,cobranzasCta}, compras.total, pagadoProv.total,
+// gastos.{fijos,variables,socios}, sueldos.total.
+function recomputeDerived(c) {
+  if (!c) return c
+  const ventasTotal = (c.ventas.caja || 0) + (c.ventas.mayorista || 0) + (c.ventas.pedidos || 0)
+  const cobradoTotal = (c.cobrado.efectivo || 0) + (c.cobrado.debito || 0) +
+    (c.cobrado.transferencia || 0) + (c.cobrado.mayorista || 0) + (c.cobrado.cobranzasCta || 0)
+  const gastosTotal = (c.gastos.fijos || 0) + (c.gastos.variables || 0) + (c.gastos.socios || 0)
+  const sueldosTotal = c.sueldos.total || 0
+  const comprasTotal = c.compras.total || 0
+  const pagadoTotal = c.pagadoProv.total || 0
+  return {
+    ...c,
+    ventas: { ...c.ventas, total: ventasTotal },
+    cobrado: { ...c.cobrado, total: cobradoTotal },
+    gastos: { ...c.gastos, total: gastosTotal },
+    ganancia: {
+      devengada: ventasTotal - comprasTotal - gastosTotal - sueldosTotal,
+      cajaReal: cobradoTotal - pagadoTotal - gastosTotal - sueldosTotal,
+    },
+  }
+}
+
+function MetricCard({ label, value, color, sub, big, editable, rawValue, onCommit }) {
   return (
     <div style={{
-      background: 'var(--surface2)', border: `1px solid ${color || 'var(--border)'}`,
+      background: 'var(--surface2)', border: `1px solid ${editable ? 'var(--gold)' : (color || 'var(--border)')}`,
       borderRadius: 10, padding: '14px 18px', minWidth: 200, flex: '1 1 200px'
     }}>
       <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 600, letterSpacing: 0.5 }}>{label}</div>
-      <div style={{
-        fontFamily: "'Bebas Neue', cursive",
-        fontSize: big ? 28 : 22,
-        color: color || 'var(--text)',
-        marginTop: 4,
-        lineHeight: 1.1
-      }}>{value}</div>
+      {editable ? (
+        <div style={{ marginTop: 6 }}>
+          <InputNum value={rawValue} color={color} onCommit={onCommit} ancho={160} />
+        </div>
+      ) : (
+        <div style={{
+          fontFamily: "'Bebas Neue', cursive",
+          fontSize: big ? 28 : 22,
+          color: color || 'var(--text)',
+          marginTop: 4,
+          lineHeight: 1.1
+        }}>{value}</div>
+      )}
       {sub && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>{sub}</div>}
     </div>
   )
 }
 
-function FilaDesglose({ label, value, color, indent }) {
+function FilaDesglose({ label, value, color, indent, editable, onCommit, esKg }) {
+  const fmtFn = esKg ? fmtKg : fmt
   return (
     <div style={{
-      display: 'flex', justifyContent: 'space-between', padding: '6px 0',
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0',
       borderBottom: '1px dashed var(--border)', fontSize: 13,
       paddingLeft: indent ? 16 : 0
     }}>
       <span style={{ color: indent ? 'var(--muted)' : 'var(--text)' }}>{indent && '↳ '}{label}</span>
-      <span style={{ color: color || 'var(--text)', fontWeight: 600 }}>{fmt(value)}</span>
+      {editable
+        ? <InputNum value={value} color={color} onCommit={onCommit} />
+        : <span style={{ color: color || 'var(--text)', fontWeight: 600 }}>{fmtFn(value)}</span>}
     </div>
   )
 }
@@ -161,6 +219,12 @@ function FilaDesglose({ label, value, color, indent }) {
 // ============================================================
 
 export default function Cierre() {
+  const { profile } = useAuth()
+  // Edición manual TEMPORAL (período de integración): habilitada sólo para
+  // el perfil de Fabricio. Permite ajustar cada valor del cierre a mano
+  // mientras los cálculos automáticos terminan de cuadrar.
+  const puedeEditar = (profile?.nombre || '').toLowerCase().includes('fabricio')
+
   const [tab, setTab] = useState('semanal')
   const [cierres, setCierres] = useState([])
   const [loading, setLoading] = useState(false)
@@ -171,9 +235,37 @@ export default function Cierre() {
   // Estado del cierre auto en curso
   const [desde, setDesde] = useState(lunesDeLaSemana())
   const [hasta, setHasta] = useState(domingoDeLaSemana())
-  const [cierreAuto, setCierreAuto] = useState(null)
+  const [cierreAuto, setCierreAuto] = useState(null)   // valores calculados (originales)
+  const [cierreEdit, setCierreEdit] = useState(null)   // copia editable (lo que se muestra/guarda)
+  const [editMode, setEditMode] = useState(false)
+
+  // Lo que se renderiza y se guarda: la copia editable si existe, si no la auto.
+  const view = cierreEdit || cierreAuto
+  const editableNow = editMode && puedeEditar && !!cierreEdit
+  // ¿Hay valores tocados a mano? (las listas no se editan, así que el JSON es comparable)
+  const editado = !!cierreEdit && !!cierreAuto && JSON.stringify(cierreEdit) !== JSON.stringify(cierreAuto)
 
   const pagCierres = usePaginacion(cierres, 20)
+
+  // Commitea una hoja editable (ej: 'ventas.caja') y recalcula derivados.
+  function commitLeaf(path, raw) {
+    const valor = parseNumero(raw)
+    setCierreEdit(prev => {
+      if (!prev) return prev
+      const next = JSON.parse(JSON.stringify(prev))
+      const parts = path.split('.')
+      let o = next
+      for (let i = 0; i < parts.length - 1; i++) o = o[parts[i]]
+      o[parts[parts.length - 1]] = valor
+      return recomputeDerived(next)
+    })
+  }
+
+  function restaurarAuto() {
+    if (!cierreAuto) return
+    setCierreEdit(JSON.parse(JSON.stringify(cierreAuto)))
+    showAlert({ type: 'info', msg: '↩️ Valores automáticos restaurados' })
+  }
 
   useEffect(() => { fetchCierres() }, [])
   // Recalcular cuando cambia el período
@@ -196,6 +288,7 @@ export default function Cierre() {
     try {
       const result = await calcularCierreAuto(desde, hasta)
       setCierreAuto(result)
+      setCierreEdit(JSON.parse(JSON.stringify(result)))  // copia editable fresca
     } catch (e) {
       showAlert({ type: 'error', msg: 'Error calculando: ' + e.message })
     } finally {
@@ -206,10 +299,12 @@ export default function Cierre() {
   function showAlert(a) { setAlert(a); setTimeout(() => setAlert(null), 5000) }
 
   async function guardarCierre() {
-    if (!cierreAuto) return
-    if (!confirm(`¿Confirmar y guardar cierre del ${fmtFecha(desde)} al ${fmtFecha(hasta)}?\n\nVentas: ${fmt(cierreAuto.ventas.total)}\nCompras: ${fmt(cierreAuto.compras.total)}\nGanancia devengada: ${fmt(cierreAuto.ganancia.devengada)}`)) return
+    if (!view) return
+    if (!confirm(`¿Confirmar y guardar cierre del ${fmtFecha(desde)} al ${fmtFecha(hasta)}?${editado ? '\n\n⚠️ Tiene valores EDITADOS A MANO.' : ''}\n\nVentas: ${fmt(view.ventas.total)}\nCompras: ${fmt(view.compras.total)}\nGanancia devengada: ${fmt(view.ganancia.devengada)}`)) return
     setLoading(true)
-    const fila = cierreAutoAFila(cierreAuto)
+    const fila = cierreAutoAFila(view)
+    // Trazabilidad: dejar registrado si el snapshot fue ajustado manualmente.
+    fila.ingresos = { ...fila.ingresos, editado_manual: editado, editado_por: editado ? (profile?.nombre || null) : null }
     // Verificar si ya existe un cierre con esa misma semana
     const { data: ya } = await supabase
       .from('cierres_semanales')
@@ -346,34 +441,62 @@ export default function Cierre() {
 
           {cierreAuto && !calculando && (
             <>
+              {/* BANNER EDICIÓN MANUAL (solo perfil Fabricio, período integración) */}
+              {puedeEditar && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
+                  background: editMode ? 'rgba(201,168,76,0.12)' : 'var(--surface2)',
+                  border: `1px solid ${editMode ? 'var(--gold)' : 'var(--border)'}`,
+                  borderRadius: 10, padding: '10px 16px', marginBottom: 14
+                }}>
+                  <div style={{ fontSize: 12.5 }}>
+                    🔧 <strong>Edición manual</strong> <span style={{ color: 'var(--muted)' }}>(solo tu perfil · período de integración)</span>
+                    {editado && <span style={{ marginLeft: 8, color: 'var(--gold)', fontWeight: 700 }}>✏️ valores editados</span>}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {editMode && editado && (
+                      <button className="btn btn-ghost btn-sm" onClick={restaurarAuto}>↩️ Restaurar automáticos</button>
+                    )}
+                    <button className="btn btn-sm" onClick={() => setEditMode(m => !m)}
+                      style={{ background: editMode ? 'var(--gold)' : 'transparent', color: editMode ? '#1a1a1a' : 'var(--text)', border: '1px solid var(--gold)', fontWeight: 700 }}>
+                      {editMode ? '✅ Terminar edición' : '✏️ Editar valores'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* KPIs PRINCIPALES */}
               <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 16 }}>
-                <MetricCard label="💵 Ventas (facturado)" value={fmt(cierreAuto.ventas.total)} color="var(--green)" big
-                  sub={`${cierreAuto.compras.cantEntradas} entradas · ${cierreAuto.sueldos.cantLiquidaciones} liquidaciones`} />
-                <MetricCard label="💰 Cobrado en el período" value={fmt(cierreAuto.cobrado.total)} color="var(--teal)" big />
-                <MetricCard label="📤 Por cobrar al cierre" value={fmt(cierreAuto.porCobrar.total)} color="var(--amber)"
-                  sub={`${cierreAuto.porCobrar.clientes.length} clientes con deuda`} />
-                <MetricCard label="🛒 Compras" value={fmt(cierreAuto.compras.total)} color="var(--red-light)" big />
-                <MetricCard label="💳 Pagado a proveedores" value={fmt(cierreAuto.pagadoProv.total)} color="#c084fc" />
-                <MetricCard label="📥 Por pagar al cierre" value={fmt(cierreAuto.porPagarProv.total)} color="var(--amber)"
-                  sub={`${cierreAuto.porPagarProv.proveedores.length} proveedores con saldo`} />
+                <MetricCard label="💵 Ventas (facturado)" value={fmt(view.ventas.total)} color="var(--green)" big
+                  sub={`${view.compras.cantEntradas} entradas · ${view.sueldos.cantLiquidaciones} liquidaciones`} />
+                <MetricCard label="💰 Cobrado en el período" value={fmt(view.cobrado.total)} color="var(--teal)" big />
+                <MetricCard label="📤 Por cobrar al cierre" value={fmt(view.porCobrar.total)} color="var(--amber)"
+                  editable={editableNow} rawValue={view.porCobrar.total} onCommit={v => commitLeaf('porCobrar.total', v)}
+                  sub={`${view.porCobrar.clientes.length} clientes con deuda`} />
+                <MetricCard label="🛒 Compras" value={fmt(view.compras.total)} color="var(--red-light)" big
+                  editable={editableNow} rawValue={view.compras.total} onCommit={v => commitLeaf('compras.total', v)} />
+                <MetricCard label="💳 Pagado a proveedores" value={fmt(view.pagadoProv.total)} color="#c084fc"
+                  editable={editableNow} rawValue={view.pagadoProv.total} onCommit={v => commitLeaf('pagadoProv.total', v)} />
+                <MetricCard label="📥 Por pagar al cierre" value={fmt(view.porPagarProv.total)} color="var(--amber)"
+                  editable={editableNow} rawValue={view.porPagarProv.total} onCommit={v => commitLeaf('porPagarProv.total', v)}
+                  sub={`${view.porPagarProv.proveedores.length} proveedores con saldo`} />
               </div>
 
-              {/* GANANCIA */}
+              {/* GANANCIA (siempre derivada de los valores de arriba) */}
               <div className="card" style={{ background: 'linear-gradient(135deg, #1a2a1a 0%, #1a1a2a 100%)' }}>
-                <div className="card-title">📊 Ganancia del período</div>
+                <div className="card-title">📊 Ganancia del período {editableNow && <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 400 }}>(se recalcula sola al editar)</span>}</div>
                 <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-                  <div style={{ flex: 1, minWidth: 280, background: 'var(--surface2)', border: `2px solid ${cierreAuto.ganancia.devengada >= 0 ? 'var(--gold)' : 'var(--red-light)'}`, borderRadius: 10, padding: 18 }}>
+                  <div style={{ flex: 1, minWidth: 280, background: 'var(--surface2)', border: `2px solid ${view.ganancia.devengada >= 0 ? 'var(--gold)' : 'var(--red-light)'}`, borderRadius: 10, padding: 18 }}>
                     <div style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 600 }}>📈 Ganancia DEVENGADA</div>
-                    <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 36, color: cierreAuto.ganancia.devengada >= 0 ? 'var(--gold)' : 'var(--red-light)' }}>
-                      {fmt(cierreAuto.ganancia.devengada)}
+                    <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 36, color: view.ganancia.devengada >= 0 ? 'var(--gold)' : 'var(--red-light)' }}>
+                      {fmt(view.ganancia.devengada)}
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--muted)' }}>Facturado − Compras − Gastos − Sueldos</div>
                   </div>
-                  <div style={{ flex: 1, minWidth: 280, background: 'var(--surface2)', border: `2px solid ${cierreAuto.ganancia.cajaReal >= 0 ? 'var(--teal)' : 'var(--red-light)'}`, borderRadius: 10, padding: 18 }}>
+                  <div style={{ flex: 1, minWidth: 280, background: 'var(--surface2)', border: `2px solid ${view.ganancia.cajaReal >= 0 ? 'var(--teal)' : 'var(--red-light)'}`, borderRadius: 10, padding: 18 }}>
                     <div style={{ fontSize: 12, color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 600 }}>💵 Flujo de CAJA REAL</div>
-                    <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 36, color: cierreAuto.ganancia.cajaReal >= 0 ? 'var(--teal)' : 'var(--red-light)' }}>
-                      {fmt(cierreAuto.ganancia.cajaReal)}
+                    <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 36, color: view.ganancia.cajaReal >= 0 ? 'var(--teal)' : 'var(--red-light)' }}>
+                      {fmt(view.ganancia.cajaReal)}
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--muted)' }}>Cobrado − Pagado prov. − Gastos − Sueldos</div>
                   </div>
@@ -386,56 +509,48 @@ export default function Cierre() {
                 {/* VENTAS DETALLADAS */}
                 <div className="card">
                   <div className="card-title">💵 Ventas — desglose</div>
-                  <FilaDesglose label="Caja minorista" value={cierreAuto.ventas.caja} color="var(--green)" />
-                  <FilaDesglose label="Despachos mayorista" value={cierreAuto.ventas.mayorista} color="var(--green)" />
-                  <FilaDesglose label="Pedidos confirmados" value={cierreAuto.ventas.pedidos} color="var(--green)" />
-                  <FilaDesglose label="TOTAL FACTURADO" value={cierreAuto.ventas.total} color="var(--gold)" />
+                  <FilaDesglose label="Caja minorista" value={view.ventas.caja} color="var(--green)" editable={editableNow} onCommit={v => commitLeaf('ventas.caja', v)} />
+                  <FilaDesglose label="Despachos mayorista" value={view.ventas.mayorista} color="var(--green)" editable={editableNow} onCommit={v => commitLeaf('ventas.mayorista', v)} />
+                  <FilaDesglose label="Pedidos confirmados" value={view.ventas.pedidos} color="var(--green)" editable={editableNow} onCommit={v => commitLeaf('ventas.pedidos', v)} />
+                  <FilaDesglose label="TOTAL FACTURADO" value={view.ventas.total} color="var(--gold)" />
                 </div>
 
                 {/* COBRADO DETALLADO */}
                 <div className="card">
                   <div className="card-title">💰 Cobrado — desglose</div>
-                  <FilaDesglose label="Efectivo caja" value={cierreAuto.cobrado.efectivo} color="var(--teal)" />
-                  <FilaDesglose label="Débito / QR" value={cierreAuto.cobrado.debito} color="var(--teal)" />
-                  <FilaDesglose label="Transferencias caja" value={cierreAuto.cobrado.transferencia} color="var(--teal)" />
-                  <FilaDesglose label="Despachos cobrados al entregar" value={cierreAuto.cobrado.mayorista} color="var(--teal)" />
-                  <FilaDesglose label="Cobranzas cta. cte." value={cierreAuto.cobrado.cobranzasCta} color="var(--teal)" />
-                  <FilaDesglose label="TOTAL COBRADO" value={cierreAuto.cobrado.total} color="var(--gold)" />
+                  <FilaDesglose label="Efectivo caja" value={view.cobrado.efectivo} color="var(--teal)" editable={editableNow} onCommit={v => commitLeaf('cobrado.efectivo', v)} />
+                  <FilaDesglose label="Débito / QR" value={view.cobrado.debito} color="var(--teal)" editable={editableNow} onCommit={v => commitLeaf('cobrado.debito', v)} />
+                  <FilaDesglose label="Transferencias caja" value={view.cobrado.transferencia} color="var(--teal)" editable={editableNow} onCommit={v => commitLeaf('cobrado.transferencia', v)} />
+                  <FilaDesglose label="Despachos cobrados al entregar" value={view.cobrado.mayorista} color="var(--teal)" editable={editableNow} onCommit={v => commitLeaf('cobrado.mayorista', v)} />
+                  <FilaDesglose label="Cobranzas cta. cte." value={view.cobrado.cobranzasCta} color="var(--teal)" editable={editableNow} onCommit={v => commitLeaf('cobrado.cobranzasCta', v)} />
+                  <FilaDesglose label="TOTAL COBRADO" value={view.cobrado.total} color="var(--gold)" />
                 </div>
 
                 {/* GASTOS DETALLADOS */}
                 <div className="card">
                   <div className="card-title">💸 Gastos y sueldos</div>
-                  <FilaDesglose label="Gastos fijos" value={cierreAuto.gastos.fijos} color="var(--red-light)" />
-                  <FilaDesglose label="Gastos variables" value={cierreAuto.gastos.variables} color="var(--red-light)" />
-                  <FilaDesglose label="Retiros socios" value={cierreAuto.gastos.socios} color="var(--red-light)" />
-                  <FilaDesglose label="Sueldos liquidados" value={cierreAuto.sueldos.total} color="var(--red-light)" />
-                  <FilaDesglose label="TOTAL GASTOS + SUELDOS" value={cierreAuto.gastos.total + cierreAuto.sueldos.total} color="var(--amber)" />
+                  <FilaDesglose label="Gastos fijos" value={view.gastos.fijos} color="var(--red-light)" editable={editableNow} onCommit={v => commitLeaf('gastos.fijos', v)} />
+                  <FilaDesglose label="Gastos variables" value={view.gastos.variables} color="var(--red-light)" editable={editableNow} onCommit={v => commitLeaf('gastos.variables', v)} />
+                  <FilaDesglose label="Retiros socios" value={view.gastos.socios} color="var(--red-light)" editable={editableNow} onCommit={v => commitLeaf('gastos.socios', v)} />
+                  <FilaDesglose label="Sueldos liquidados" value={view.sueldos.total} color="var(--red-light)" editable={editableNow} onCommit={v => commitLeaf('sueldos.total', v)} />
+                  <FilaDesglose label="TOTAL GASTOS + SUELDOS" value={view.gastos.total + view.sueldos.total} color="var(--amber)" />
                 </div>
 
                 {/* KG MOVIDOS */}
                 <div className="card">
                   <div className="card-title">⚖️ Kg comprados (entradas)</div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px dashed var(--border)' }}>
-                    <span>🥩 Carne</span><span style={{ fontWeight: 600 }}>{fmtKg(cierreAuto.kg.carne)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px dashed var(--border)' }}>
-                    <span>🍗 Pollo</span><span style={{ fontWeight: 600 }}>{fmtKg(cierreAuto.kg.pollo)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px dashed var(--border)' }}>
-                    <span>🐷 Cerdo</span><span style={{ fontWeight: 600 }}>{fmtKg(cierreAuto.kg.cerdo)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0' }}>
-                    <span>🌭 Embutidos</span><span style={{ fontWeight: 600 }}>{fmtKg(cierreAuto.kg.embutidos)}</span>
-                  </div>
+                  <FilaDesglose label="🥩 Carne" value={view.kg.carne} esKg editable={editableNow} onCommit={v => commitLeaf('kg.carne', v)} />
+                  <FilaDesglose label="🍗 Pollo" value={view.kg.pollo} esKg editable={editableNow} onCommit={v => commitLeaf('kg.pollo', v)} />
+                  <FilaDesglose label="🐷 Cerdo" value={view.kg.cerdo} esKg editable={editableNow} onCommit={v => commitLeaf('kg.cerdo', v)} />
+                  <FilaDesglose label="🌭 Embutidos" value={view.kg.embutidos} esKg editable={editableNow} onCommit={v => commitLeaf('kg.embutidos', v)} />
                 </div>
 
                 {/* TOP DEUDORES */}
-                {cierreAuto.porCobrar.clientes.length > 0 && (
+                {view.porCobrar.clientes.length > 0 && (
                   <div className="card">
                     <div className="card-title">📤 Top clientes por cobrar</div>
                     <div style={{ fontSize: 12 }}>
-                      {cierreAuto.porCobrar.clientes.slice(0, 8).map(c => (
+                      {view.porCobrar.clientes.slice(0, 8).map(c => (
                         <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px dashed var(--border)' }}>
                           <span>{c.nombre}</span>
                           <span style={{ color: 'var(--amber)', fontWeight: 600 }}>{fmt(c.saldo)}</span>
@@ -446,11 +561,11 @@ export default function Cierre() {
                 )}
 
                 {/* TOP PROVEEDORES A PAGAR */}
-                {cierreAuto.porPagarProv.proveedores.length > 0 && (
+                {view.porPagarProv.proveedores.length > 0 && (
                   <div className="card">
                     <div className="card-title">📥 Top proveedores a pagar</div>
                     <div style={{ fontSize: 12 }}>
-                      {cierreAuto.porPagarProv.proveedores.slice(0, 8).map((p, i) => (
+                      {view.porPagarProv.proveedores.slice(0, 8).map((p, i) => (
                         <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px dashed var(--border)' }}>
                           <span>{p.nombre || '—'}</span>
                           <span style={{ color: 'var(--amber)', fontWeight: 600 }}>{fmt(p.saldo)}</span>
@@ -469,6 +584,7 @@ export default function Cierre() {
                 </button>
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>
                   Guarda un snapshot inmutable en el historial. Si ya existe un cierre con la misma fecha, se actualiza.
+                  {editado && <span style={{ color: 'var(--gold)', fontWeight: 600 }}> · Se guardará con los valores editados a mano.</span>}
                 </div>
               </div>
             </>
