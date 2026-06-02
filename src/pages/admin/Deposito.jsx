@@ -2125,7 +2125,7 @@ async function eliminar(entrada) {
 }
 
 export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
-  const [form, setForm] = useState({ destino: 'MITRE', clienteId: '', clienteNombre: '', domicilio: '', fecha: fechaHoyARG(), categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
+  const [form, setForm] = useState({ destino: '', clienteId: '', clienteNombre: '', domicilio: '', fecha: fechaHoyARG(), categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
   const [items, setItems] = useState([])
   // Anti-doble-emisión: el ref bloquea de forma SÍNCRONA (un segundo click
   // entra antes de que React re-renderice con guardando=true), y el state
@@ -2370,6 +2370,7 @@ const item = {
     // Bloqueo síncrono contra doble emisión (doble click / doble envío).
     if (guardandoRef.current) return
     if (items.length === 0) { showAlert({ type: 'error', msg: 'Agregá al menos un producto' }); return }
+    if (!form.destino) { showAlert({ type: 'error', msg: 'Elegí un destino antes de despachar' }); return }
     guardandoRef.current = true
     setGuardando(true)
     try {
@@ -2521,7 +2522,7 @@ for (const item of items) {
         <div className="form-row">
           <div className="form-group"><label>Destino</label>
             <select value={form.destino} onChange={e => setForm(f => ({ ...f, destino: e.target.value, clienteId: '', clienteNombre: '' }))}>
-              <option value="MITRE">Local Mitre</option>
+              <option value="">— Seleccioná destino —</option>
               <option value="CENTRO">🏪 Centro — Alvear (Roxana)</option>
               <option value="MONTE CRISTO">🏪 Monte Cristo (Agustín)</option>
               <option value="carniceria">Carnicería cliente</option>

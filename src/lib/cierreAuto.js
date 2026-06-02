@@ -154,7 +154,14 @@ export async function calcularCierreAuto(desde, hasta) {
   ])
 
   const ventasCaja = ventasCajaR.data || []
-  const salidas = (salidasR.data || []).filter(s => s.cobro !== 'interno')
+  // Excluimos:
+  //  - cobro 'interno' (movimiento entre depósito y carnicería)
+  //  - "MITRE": es nuestra propia casa central, NO un cliente. Los despachos a
+  //    Mitre no son ventas mayoristas, así que no cuentan en el cierre.
+  const salidas = (salidasR.data || []).filter(s =>
+    s.cobro !== 'interno' &&
+    (s.cliente_nombre || '').toUpperCase().trim() !== 'MITRE'
+  )
   const pedidos = pedidosR.data || []
   const movCtaCte = movCtaCteR.data || []
   const entradas = entradasR.data || []
@@ -242,6 +249,37 @@ export async function calcularCierreAuto(desde, hasta) {
   const kgCerdo = sumarKgPorTipo(['cerdo', 'capon'])
   const kgEmbutidos = sumarKgPorTipo(['embutido', 'chorizo', 'morcilla'])
 
+  // ====== VENTAS POR CLIENTE (en el período) ======
+  // Lo despachado a cada cliente mayorista dentro de [desde, hasta]. La suma
+  // coincide con ventas.mayorista. Sirve para cobrar la semana cliente por
+  // cliente. (No es el saldo histórico — eso es porCobrar/al cierre.)
+  const ventasClienteMap = new Map()
+  for (const s of salidas) {
+    const nombre = s.cliente_nombre || '(sin nombre)'
+    ventasClienteMap.set(nombre, (ventasClienteMap.get(nombre) || 0) + (Number(s.total) || 0))
+  }
+  const ventasPorCliente = [...ventasClienteMap.entries()]
+    .map(([nombre, total]) => ({ nombre, total }))
+    .filter(c => c.total > 0)
+    .sort((a, b) => b.total - a.total)
+
+  // ====== COMPRAS POR PROVEEDOR (en el período) ======
+  // Lo comprado a cada proveedor dentro del período (mismo criterio de importe
+  // que comprasTotal). La suma coincide con compras.total.
+  const comprasProvMap = new Map()
+  for (const e of entradas) {
+    const imp = Number(e.importe) > 0
+      ? Number(e.importe)
+      : (Number(e.kg_real || e.kg) || 0) * (Number(e.precio_kg) || 0)
+    if (!imp) continue
+    const nombre = e.proveedor_nombre || '(sin proveedor)'
+    comprasProvMap.set(nombre, (comprasProvMap.get(nombre) || 0) + imp)
+  }
+  const comprasPorProveedor = [...comprasProvMap.entries()]
+    .map(([nombre, total]) => ({ nombre, total }))
+    .filter(p => p.total > 0)
+    .sort((a, b) => b.total - a.total)
+
   // ====== GANANCIAS ======
   // Devengada: facturado - todos los costos del período (a precio de compra)
   const gananciaDevengada = ventasTotal - comprasTotal - gastosTotal - sueldosTotal
@@ -280,6 +318,10 @@ export async function calcularCierreAuto(desde, hasta) {
       total: totalPorPagar,
       proveedores: proveedoresConDeuda.slice(0, 10),
     },
+    // Desgloses POR PERÍODO (no históricos): vendido a cada cliente y comprado
+    // a cada proveedor dentro de [desde, hasta].
+    ventasPorCliente,
+    comprasPorProveedor,
     gastos: {
       fijos: gastosFijos,
       variables: gastosVariables,

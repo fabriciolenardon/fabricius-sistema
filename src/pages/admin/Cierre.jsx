@@ -545,32 +545,46 @@ export default function Cierre() {
                   <FilaDesglose label="🌭 Embutidos" value={view.kg.embutidos} esKg editable={editableNow} onCommit={v => commitLeaf('kg.embutidos', v)} />
                 </div>
 
-                {/* TOP DEUDORES */}
-                {view.porCobrar.clientes.length > 0 && (
+                {/* CLIENTES — VENDIDO EN EL PERÍODO */}
+                {(view.ventasPorCliente?.length > 0) && (
                   <div className="card">
-                    <div className="card-title">📤 Top clientes por cobrar</div>
-                    <div style={{ fontSize: 12 }}>
-                      {view.porCobrar.clientes.slice(0, 8).map(c => (
-                        <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px dashed var(--border)' }}>
+                    <div className="card-title">📤 Clientes — vendido en el período</div>
+                    <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 6 }}>
+                      Lo despachado a cada cliente entre {fmtFecha(view.periodo.desde)} y {fmtFecha(view.periodo.hasta)}.
+                    </div>
+                    <div style={{ fontSize: 12, maxHeight: 320, overflowY: 'auto' }}>
+                      {view.ventasPorCliente.map((c, i) => (
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px dashed var(--border)' }}>
                           <span>{c.nombre}</span>
-                          <span style={{ color: 'var(--amber)', fontWeight: 600 }}>{fmt(c.saldo)}</span>
+                          <span style={{ color: 'var(--green)', fontWeight: 600 }}>{fmt(c.total)}</span>
                         </div>
                       ))}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0 0', fontWeight: 700 }}>
+                        <span>TOTAL ({view.ventasPorCliente.length})</span>
+                        <span style={{ color: 'var(--gold)' }}>{fmt(view.ventasPorCliente.reduce((s, c) => s + c.total, 0))}</span>
+                      </div>
                     </div>
                   </div>
                 )}
 
-                {/* TOP PROVEEDORES A PAGAR */}
-                {view.porPagarProv.proveedores.length > 0 && (
+                {/* PROVEEDORES — COMPRADO EN EL PERÍODO */}
+                {(view.comprasPorProveedor?.length > 0) && (
                   <div className="card">
-                    <div className="card-title">📥 Top proveedores a pagar</div>
-                    <div style={{ fontSize: 12 }}>
-                      {view.porPagarProv.proveedores.slice(0, 8).map((p, i) => (
+                    <div className="card-title">📥 Proveedores — comprado en el período</div>
+                    <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 6 }}>
+                      Lo comprado a cada proveedor entre {fmtFecha(view.periodo.desde)} y {fmtFecha(view.periodo.hasta)}.
+                    </div>
+                    <div style={{ fontSize: 12, maxHeight: 320, overflowY: 'auto' }}>
+                      {view.comprasPorProveedor.map((p, i) => (
                         <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px dashed var(--border)' }}>
                           <span>{p.nombre || '—'}</span>
-                          <span style={{ color: 'var(--amber)', fontWeight: 600 }}>{fmt(p.saldo)}</span>
+                          <span style={{ color: 'var(--red-light)', fontWeight: 600 }}>{fmt(p.total)}</span>
                         </div>
                       ))}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0 0', fontWeight: 700 }}>
+                        <span>TOTAL ({view.comprasPorProveedor.length})</span>
+                        <span style={{ color: 'var(--gold)' }}>{fmt(view.comprasPorProveedor.reduce((s, p) => s + p.total, 0))}</span>
+                      </div>
                     </div>
                   </div>
                 )}
