@@ -104,7 +104,8 @@ serve(async (req) => {
         return jsonError('Faltan el certificado y/o la clave. Cargalos primero.')
       }
       const environment = cfg.ambiente === 'produccion' ? 'prod' : 'dev'
-      const taxId = String(cuenta.cuit).replace(/[-\s.]/g, '')
+      // Autenticar con el CUIT del titular del certificado (apoderado si difiere)
+      const taxId = String(cfg.cert_cuit || cuenta.cuit).replace(/[-\s.]/g, '')
 
       const r = await afipAuth({
         environment, wsid: 'wsfe', tax_id: taxId,
@@ -125,23 +126,46 @@ serve(async (req) => {
     }
 
     if (accion === 'crear_cert_dev') {
-      // Genera el certificado de homologación vía la automation de AfipSDK
-      // (se loguea a ARCA con la clave fiscal del CUIT). La clave fiscal NO se guarda.
-      const username = String(body.arca_username || '').trim() || String(cuenta.cuit).replace(/[-\s.]/g, '')
+      // Genera el certificado de homologación Y autoriza el web service wsfe.
+      // Soporta APODERADO: el TITULAR del cert (arca_username) puede ser un CUIT
+      // distinto del EMISOR (cuenta.cuit). En ese caso se crea el cert del titular
+      // y se autoriza el wsfe del emisor desde la sesión del titular (delegación).
+      // La clave fiscal NO se guarda.
       const password = String(body.arca_password || '')
-      const alias = (String(body.alias || 'fabricius').trim() || 'fabricius').replace(/[^a-zA-Z0-9]/g, '')
-      if (!password) return jsonError('Ingresá la clave fiscal de ARCA del CUIT')
-      const taxId = String(cuenta.cuit).replace(/[-\s.]/g, '')
+      // Alias ÚNICO por cuenta: evita que al regenerar choque con un alias ya
+      // existente en ARCA (lo que cuelga la automation create-cert-dev).
+      const aliasDefault = 'fab' + cuenta_id
+      const alias = (String(body.alias || aliasDefault).trim() || aliasDefault).replace(/[^a-zA-Z0-9]/g, '')
+      if (!password) return jsonError('Ingresá la clave fiscal de ARCA')
+      const emisorCuit = String(cuenta.cuit).replace(/[-\s.]/g, '')
+      const certCuit = String(body.arca_username || '').replace(/[-\s.]/g, '') || emisorCuit
+      const esApoderado = certCuit !== emisorCuit
       const accessToken = body.afipsdk_access_token || Deno.env.get('AFIPSDK_ACCESS_TOKEN') || null
 
-      const cert = await crearCertDev({ cuit: taxId, username, password, alias, accessToken })
-      if (!cert.ok) return jsonError('No se pudo crear el certificado: ' + cert.error)
+      // 1) Crear certificado del TITULAR (si ya hay uno guardado y la automation falla, se reusa)
+      const { data: existente } = await supabaseAdmin
+        .from('arca_config').select('cert, key').eq('cuenta_id', cuenta_id).single()
+      const certRes = await runAutomation('create-cert-dev',
+        { cuit: certCuit, username: certCuit, password, alias }, accessToken)
+      let cert = certRes.data?.cert ?? certRes.data?.data?.cert
+      let key = certRes.data?.key ?? certRes.data?.data?.key
+      if (!(cert && key)) {
+        if (existente?.cert && existente?.key) { cert = existente.cert; key = existente.key }
+        else return jsonError('No se pudo crear el certificado: ' + (certRes.error || 'sin cert/key'))
+      }
 
-      // Guardar cert+key en homologación y habilitar
+      // 2) Autorizar el web service wsfe del EMISOR, logueado como el TITULAR
+      const authRes = await runAutomation('auth-web-service-dev',
+        { cuit: emisorCuit, username: certCuit, password, alias, service: 'wsfe' }, accessToken)
+      if (!authRes.ok) {
+        return jsonError('Certificado OK, pero no se pudo autorizar el web service wsfe: ' + authRes.error)
+      }
+
+      // 3) Guardar y habilitar (cert_cuit solo si el titular difiere del emisor)
       const punto_venta = Number(body.punto_venta) || 1
       await supabaseAdmin.from('arca_config').upsert({
-        cuenta_id, ambiente: 'homologacion', punto_venta,
-        cert: cert.cert, key: cert.key,
+        cuenta_id, ambiente: 'homologacion', punto_venta, cert, key,
+        cert_cuit: esApoderado ? certCuit : null,
         afipsdk_access_token: body.afipsdk_access_token ? String(body.afipsdk_access_token).trim() : null,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'cuenta_id' })
@@ -149,7 +173,12 @@ serve(async (req) => {
         arca_habilitado: true, arca_ambiente: 'homologacion', arca_punto_venta: punto_venta,
       }).eq('id', cuenta_id)
 
-      return jsonOk({ creado: true, mensaje: 'Certificado de testing generado y guardado. Probá la conexión.' })
+      return jsonOk({
+        creado: true,
+        mensaje: esApoderado
+          ? `Certificado del apoderado (${certCuit}) generado y wsfe del emisor (${emisorCuit}) autorizado. Probá la conexión.`
+          : 'Certificado generado y web service wsfe autorizado. Probá la conexión.',
+      })
     }
 
     if (accion === 'estado') {
@@ -205,40 +234,50 @@ async function afipAuth(opts: {
   }
 }
 
-// AfipSDK automation 'create-cert-dev' → crea cert + key de homologación.
-// Es asíncrona: si no vuelve 'complete', se reintenta el mismo POST hasta que termina.
-async function crearCertDev(opts: {
-  cuit: string; username: string; password: string; alias: string; accessToken?: string | null
-}): Promise<{ ok: boolean; cert?: string; key?: string; error?: string }> {
-  const url = 'https://app.afipsdk.com/api/v1/automations'
+// Ejecuta una automation de AfipSDK: 1 POST para crear el job, luego GET a
+// /automations/{id} para consultar el estado (re-POSTear dispara el anti-duplicado
+// de 10s). Devuelve el objeto `data` final de la automation.
+async function runAutomation(
+  automation: string,
+  params: Record<string, unknown>,
+  accessToken?: string | null,
+): Promise<{ ok: boolean; data?: any; error?: string }> {
+  const base = 'https://app.afipsdk.com/api/v1/automations'
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (opts.accessToken) headers['Authorization'] = `Bearer ${opts.accessToken}`
-  const payload: Record<string, unknown> = {
-    automation: 'create-cert-dev',
-    params: { cuit: opts.cuit, username: opts.username, password: opts.password, alias: opts.alias },
-  }
-  try {
-    let longJobId: string | null = null
-    for (let intento = 0; intento < 25; intento++) {
-      const body = longJobId ? { ...payload, long_job_id: longJobId } : payload
-      const resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) })
-      const text = await resp.text()
-      let data: any = null; try { data = JSON.parse(text) } catch { /* */ }
-      if (!resp.ok) return { ok: false, error: (data?.message || data?.error || text || `HTTP ${resp.status}`).slice(0, 600) }
+  if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`
 
-      const status = String(data?.status || '').toLowerCase()
-      const cert = data?.data?.cert
-      const key = data?.data?.key
-      if ((status === 'complete' || status === 'completed' || status === 'success') && cert && key) {
-        return { ok: true, cert, key }
-      }
-      if (cert && key) return { ok: true, cert, key }
+  // ¿La automation ya terminó? (create-cert devuelve cert/key; auth-ws devuelve status)
+  const terminada = (d: any) => {
+    if (!d) return false
+    if (d?.data?.cert && d?.data?.key) return true
+    const st = String(d?.status || d?.data?.status || '').toLowerCase()
+    return st === 'complete' || st === 'completed' || st === 'success' || st === 'created'
+  }
+
+  try {
+    const resp = await fetch(base, {
+      method: 'POST', headers,
+      body: JSON.stringify({ automation, params }),
+    })
+    const text = await resp.text()
+    let data: any = null; try { data = JSON.parse(text) } catch { /* */ }
+    if (!resp.ok) return { ok: false, error: (data?.message || data?.error || text || `HTTP ${resp.status}`).slice(0, 600) }
+    if (terminada(data)) return { ok: true, data: data?.data ?? data }
+
+    const id = data?.id || data?.automation_id || data?.long_job_id
+    if (!id) return { ok: false, error: 'AfipSDK no devolvió un id de automatización para consultar.' }
+
+    for (let intento = 0; intento < 22; intento++) {
+      await new Promise(res => setTimeout(res, 5000))
+      const sresp = await fetch(`${base}/${id}`, { method: 'GET', headers })
+      const stext = await sresp.text()
+      let sdata: any = null; try { sdata = JSON.parse(stext) } catch { /* */ }
+      if (!sresp.ok) continue
+      const status = String(sdata?.status || '').toLowerCase()
+      if (terminada(sdata)) return { ok: true, data: sdata?.data ?? sdata }
       if (status === 'error' || status === 'failed') {
-        return { ok: false, error: data?.error || data?.message || 'la automatización falló en ARCA' }
+        return { ok: false, error: sdata?.error || sdata?.message || 'la automatización falló en ARCA (¿clave fiscal incorrecta?)' }
       }
-      longJobId = data?.long_job_id || data?.id || longJobId
-      // Esperar antes de reintentar (la automation tarda unos segundos)
-      await new Promise(r => setTimeout(r, 3000))
     }
     return { ok: false, error: 'tardó demasiado (timeout). Reintentá en un momento.' }
   } catch (e) {

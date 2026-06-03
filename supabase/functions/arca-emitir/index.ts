@@ -10,9 +10,9 @@
 //   4) Guarda la fila en `facturas` (tipo 'emitida', emitida_por_arca = true)
 //      → sigue alimentando topes de monotributo y Libro IVA.
 //
-// Soporta en esta entrega: Factura C (monotributo, sin IVA discriminado) y
-// Factura B (RI → consumidor final, IVA 21%). Factura A / NC / ND quedan para
-// una iteración posterior.
+// Soporta: Factura C (monotributo, sin IVA), Factura B (RI → consumidor final)
+// y Factura A (RI → RI), ambas con IVA discriminado por alícuota (carne = 10,5%).
+// Soporta apoderado (cert de un CUIT distinto del emisor). NC/ND quedan pendientes.
 //
 // Seguridad: solo admin; cert/key se leen con service_role y nunca vuelven al
 // frontend. Si ARCA rechaza, se guarda el motivo y se devuelve error claro;
@@ -37,7 +37,9 @@ const WSFE = {
 }
 
 // Comprobantes soportados ahora
-const COMPROBANTES_OK = new Set([6, 11]) // 6=Factura B, 11=Factura C
+const COMPROBANTES_OK = new Set([1, 6, 11]) // 1=Factura A, 6=Factura B, 11=Factura C
+// Alícuotas de IVA válidas (código AFIP → solo para validar)
+const IVA_IDS_OK = new Set([3, 4, 5, 6, 8, 9]) // 3=0% 4=10.5% 5=21% 6=27% 8=5% 9=2.5%
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -65,8 +67,10 @@ serve(async (req) => {
 
     const comprobante_codigo = Number(body.comprobante_codigo)
     if (!COMPROBANTES_OK.has(comprobante_codigo)) {
-      return jsonError('Comprobante no soportado todavía (por ahora: Factura B=6, Factura C=11)')
+      return jsonError('Comprobante no soportado todavía (por ahora: Factura A=1, B=6, C=11)')
     }
+    // Alícuota de IVA (solo aplica a A/B). Default 4 = 10,5% (carne).
+    const iva_id = IVA_IDS_OK.has(Number(body.iva_id)) ? Number(body.iva_id) : 4
 
     // Importes
     const impTotal = round2(Number(body.importe_total))
@@ -101,17 +105,21 @@ serve(async (req) => {
     const environment = cfg.ambiente === 'produccion' ? 'prod' : 'dev'
     const ws = environment === 'prod' ? WSFE.prod : WSFE.dev
     const punto_venta = Number(cfg.punto_venta) || 1
+    // Emisor del comprobante = CUIT de la cuenta. Titular del certificado puede
+    // ser un apoderado (cfg.cert_cuit) que entra a ARCA en nombre del emisor.
     const cuitNum = Number(String(cuenta.cuit).replace(/[-\s.]/g, ''))
+    const certCuitNum = Number(String(cfg.cert_cuit || cuenta.cuit).replace(/[-\s.]/g, ''))
     const accessToken = cfg.afipsdk_access_token || Deno.env.get('AFIPSDK_ACCESS_TOKEN') || null
 
-    // 1) Auth
+    // 1) Auth — se autentica con el titular del certificado (apoderado si difiere)
     const auth = await afipAuth({
-      environment, wsid: 'wsfe', tax_id: String(cuitNum),
+      environment, wsid: 'wsfe', tax_id: String(certCuitNum),
       cert: cfg.cert, key: cfg.key, accessToken,
     })
     if (!auth.ok || !auth.data?.token || !auth.data?.sign) {
       return jsonError('No se pudo autenticar con ARCA: ' + (auth.error || 'sin token'))
     }
+    // El comprobante se emite a nombre del emisor (la cuenta), no del apoderado
     const Auth = { Token: auth.data.token, Sign: auth.data.sign, Cuit: cuitNum }
 
     // 2) Último autorizado → siguiente número
@@ -126,6 +134,7 @@ serve(async (req) => {
       ultimo.data?.CbteNro ?? 0
     )
     const numero = ultimoNro + 1
+    const letraComp = comprobante_codigo === 11 ? 'C' : comprobante_codigo === 1 ? 'A' : 'B'
 
     // 3) FECAESolicitar
     const det: Record<string, unknown> = {
@@ -151,9 +160,9 @@ serve(async (req) => {
       det.FchServHasta = fecha.replace(/-/g, '')
       det.FchVtoPago = fecha.replace(/-/g, '')
     }
-    // Factura B (y A): IVA discriminado. 21% = código 5.
-    if (comprobante_codigo === 6 && impIva > 0) {
-      det.Iva = { AlicIva: [{ Id: 5, BaseImp: impNeto, Importe: impIva }] }
+    // Factura A y B: IVA discriminado con la alícuota elegida (carne = 10,5% = id 4).
+    if ((comprobante_codigo === 1 || comprobante_codigo === 6) && impIva > 0) {
+      det.Iva = { AlicIva: [{ Id: iva_id, BaseImp: impNeto, Importe: impIva }] }
     }
 
     const solicitud = await afipRequest({
@@ -180,7 +189,7 @@ serve(async (req) => {
         cuenta_id, tipo: 'emitida', fecha,
         punto_venta: String(punto_venta).padStart(5, '0'),
         numero: String(numero).padStart(8, '0'),
-        tipo_comprobante: comprobante_codigo === 11 ? 'C' : 'B',
+        tipo_comprobante: letraComp,
         comprobante_codigo, doc_tipo, doc_nro,
         cond_iva_receptor,
         monto_neto: impNeto, monto_iva: comprobante_codigo === 11 ? 0 : impIva,
@@ -211,7 +220,7 @@ serve(async (req) => {
       cuenta_id, tipo: 'emitida', fecha,
       punto_venta: String(punto_venta).padStart(5, '0'),
       numero: String(numero).padStart(8, '0'),
-      tipo_comprobante: comprobante_codigo === 11 ? 'C' : 'B',
+      tipo_comprobante: letraComp,
       comprobante_codigo, doc_tipo, doc_nro,
       cond_iva_receptor,
       monto_neto: impNeto, monto_iva: comprobante_codigo === 11 ? 0 : impIva,

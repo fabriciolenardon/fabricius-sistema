@@ -26,7 +26,7 @@ import {
 import { fechaHoyARG } from '../../lib/fechas'
 import { fmtPrecio } from '../../lib/formatos'
 import {
-  COMPROBANTES, DOC_TIPOS, COND_IVA_RECEPTOR,
+  COMPROBANTES, DOC_TIPOS, COND_IVA_RECEPTOR, IVA_ALICUOTAS,
   comprobantesDeCuenta, guardarConfigArca, probarConexionArca, emitirComprobante,
   crearCertTestingArca, buildQrUrl, qrImgUrl,
 } from '../../lib/arca'
@@ -764,6 +764,7 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
     doc_tipo: 99,
     doc_nro: '',
     cond_iva_receptor: 5,
+    iva_id: 4, // 10,5% (carne) por defecto
   }
   const [form, setForm] = useState(VACIO)
   const [guardando, setGuardando] = useState(false)
@@ -779,10 +780,10 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
     [cuentas, form.cuenta_id]
   )
   const puedeArca = !!cuentaSel?.arca_habilitado
-  // Comprobantes que esta cuenta puede emitir y que la edge function soporta hoy (C=11, B=6)
+  // Comprobantes que esta cuenta puede emitir y que la edge function soporta hoy (A=1, B=6, C=11)
   const compsArca = useMemo(() => {
     if (!cuentaSel) return []
-    return comprobantesDeCuenta(cuentaSel).filter(c => c === 11 || c === 6)
+    return comprobantesDeCuenta(cuentaSel).filter(c => c === 11 || c === 6 || c === 1)
   }, [cuentaSel])
   const esFacturaC = Number(form.comprobante_codigo) === 11
 
@@ -820,6 +821,14 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
     const i = Number(form.monto_iva) || 0
     const o = Number(form.monto_otros) || 0
     set('monto_total', String(Math.round((n + i + o) * 100) / 100))
+  }
+
+  // ARCA Factura A/B: recalcula IVA = neto × alícuota y total = neto + IVA
+  function recalcIvaArca(netoVal, ivaIdVal) {
+    const neto = Number(netoVal ?? form.monto_neto) || 0
+    const alic = IVA_ALICUOTAS.find(a => a.id === Number(ivaIdVal ?? form.iva_id))
+    const iva = Math.round(neto * (alic?.pct || 0)) / 100
+    setForm(f => ({ ...f, monto_iva: String(iva), monto_total: String(Math.round((neto + iva) * 100) / 100) }))
   }
 
   async function guardar() {
@@ -865,6 +874,7 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
       importe_total: total,
       importe_neto: esFacturaC ? total : (Number(form.monto_neto) || 0),
       importe_iva: esFacturaC ? 0 : (Number(form.monto_iva) || 0),
+      iva_id: Number(form.iva_id) || 4,
       descripcion: form.concepto || null,
       condicion_pago: form.condicion_pago,
       contraparte_id: form.contraparte_id || null,
@@ -1077,20 +1087,36 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
                 Factura C (monotributo): no discrimina IVA. Se informa solo el total.
               </div>
             </>
-          ) : (
+          ) : modoArca ? (
             <>
-              <div style={{ display: 'grid', gridTemplateColumns: modoArca ? '1fr 1fr 1fr' : '1fr 1fr 1fr 1fr', gap: 10 }}>
-                <Campo label="Neto"><input type="number" step="0.01" value={form.monto_neto} onChange={e => set('monto_neto', e.target.value)} onBlur={calcularTotal} style={inp} /></Campo>
-                <Campo label={modoArca ? 'IVA (21%)' : 'IVA'}><input type="number" step="0.01" value={form.monto_iva} onChange={e => set('monto_iva', e.target.value)} onBlur={calcularTotal} style={inp} /></Campo>
-                {!modoArca && (
-                  <Campo label="Otros"><input type="number" step="0.01" value={form.monto_otros} onChange={e => set('monto_otros', e.target.value)} onBlur={calcularTotal} style={inp} /></Campo>
-                )}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10 }}>
+                <Campo label="Neto">
+                  <input type="number" step="0.01" value={form.monto_neto}
+                    onChange={e => { set('monto_neto', e.target.value); recalcIvaArca(e.target.value, form.iva_id) }}
+                    style={inp} />
+                </Campo>
+                <Campo label="Alícuota IVA">
+                  <select value={form.iva_id} onChange={e => { set('iva_id', Number(e.target.value)); recalcIvaArca(form.monto_neto, Number(e.target.value)) }} style={inp}>
+                    {IVA_ALICUOTAS.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
+                  </select>
+                </Campo>
+                <Campo label="IVA"><input type="number" step="0.01" value={form.monto_iva} onChange={e => set('monto_iva', e.target.value)} style={inp} /></Campo>
                 <Campo label="Total *"><input type="number" step="0.01" value={form.monto_total} onChange={e => set('monto_total', e.target.value)} style={{ ...inp, borderColor: 'var(--gold)', fontWeight: 700 }} /></Campo>
               </div>
               <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
-                {modoArca
-                  ? 'Factura B: cargá Neto + IVA. El total se calcula solo (Neto + IVA).'
-                  : 'Al salir del campo "Otros" se autocalcula Total = Neto + IVA + Otros. Podés editarlo manualmente si querés.'}
+                Cargá el <strong>Neto</strong> y elegí la <strong>alícuota</strong> — el IVA y el total se calculan solos (podés ajustarlos a mano). La carne es 10,5%.
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10 }}>
+                <Campo label="Neto"><input type="number" step="0.01" value={form.monto_neto} onChange={e => set('monto_neto', e.target.value)} onBlur={calcularTotal} style={inp} /></Campo>
+                <Campo label="IVA"><input type="number" step="0.01" value={form.monto_iva} onChange={e => set('monto_iva', e.target.value)} onBlur={calcularTotal} style={inp} /></Campo>
+                <Campo label="Otros"><input type="number" step="0.01" value={form.monto_otros} onChange={e => set('monto_otros', e.target.value)} onBlur={calcularTotal} style={inp} /></Campo>
+                <Campo label="Total *"><input type="number" step="0.01" value={form.monto_total} onChange={e => set('monto_total', e.target.value)} style={{ ...inp, borderColor: 'var(--gold)', fontWeight: 700 }} /></Campo>
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
+                Al salir del campo "Otros" se autocalcula Total = Neto + IVA + Otros. Podés editarlo manualmente si querés.
               </div>
             </>
           )}
@@ -1919,7 +1945,10 @@ function ModalConfigArca({ cuenta, onCerrar, onGuardado }) {
   const [genUser, setGenUser] = useState(String(cuenta.cuit || '').replace(/\D/g, ''))
   const [genPass, setGenPass] = useState('')
   const [generando, setGenerando] = useState(false)
-  const yaConfig = cuenta.arca_habilitado
+  // Marca local: arranca con el estado de la cuenta, pero se prende apenas
+  // generamos/guardamos credenciales (así Probar/Guardar no las vuelven a pedir).
+  const [tieneCredsLocal, setTieneCredsLocal] = useState(!!cuenta.arca_habilitado)
+  const yaConfig = cuenta.arca_habilitado || tieneCredsLocal
 
   function leerArchivo(file, setter) {
     if (!file) return
@@ -1944,6 +1973,7 @@ function ModalConfigArca({ cuenta, onCerrar, onGuardado }) {
     })
     setGuardando(false)
     if (!r.ok) { setMsg({ ok: false, texto: r.error }); return false }
+    if (r.data?.tiene_credenciales) setTieneCredsLocal(true)
     if (!luegoProbar) {
       setMsg({ ok: true, texto: '✅ Configuración guardada.' })
       onGuardado()
@@ -1965,6 +1995,7 @@ function ModalConfigArca({ cuenta, onCerrar, onGuardado }) {
     setGenerando(false)
     setGenPass('')
     if (r.ok) {
+      setTieneCredsLocal(true) // ya hay cert/key en el server → no volver a pedirlos
       setMsg({ ok: true, texto: '✅ ' + (r.data?.mensaje || 'Certificado de testing generado y guardado.') + ' Ahora probá la conexión.' })
     } else {
       setMsg({ ok: false, texto: '❌ ' + r.error })
@@ -2007,9 +2038,12 @@ function ModalConfigArca({ cuenta, onCerrar, onGuardado }) {
             <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
               AfipSDK entra a ARCA con tu clave fiscal, crea el certificado de homologación y autoriza el servicio.
               La clave fiscal se usa solo para esto y <strong>no se guarda</strong>. Si preferís, pegá el cert/key a mano abajo.
+              <br /><strong>Apoderado:</strong> si esta cuenta factura a través de otro CUIT (ej. una SAS a la que se entra
+              con el CUIT de un apoderado), poné en <em>Usuario ARCA</em> el CUIT y clave del apoderado. La factura igual
+              se emite con el CUIT de esta cuenta.
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <Campo label="Usuario ARCA (CUIT)">
+              <Campo label="Usuario ARCA (CUIT del titular / apoderado)">
                 <input value={genUser} onChange={e => setGenUser(e.target.value)} style={inp} />
               </Campo>
               <Campo label="Clave fiscal de ARCA">
