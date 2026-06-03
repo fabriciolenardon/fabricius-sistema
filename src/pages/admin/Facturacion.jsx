@@ -25,6 +25,11 @@ import {
 } from '../../lib/facturacionHelpers'
 import { fechaHoyARG } from '../../lib/fechas'
 import { fmtPrecio } from '../../lib/formatos'
+import {
+  COMPROBANTES, DOC_TIPOS, COND_IVA_RECEPTOR,
+  comprobantesDeCuenta, guardarConfigArca, probarConexionArca, emitirComprobante,
+  crearCertTestingArca, buildQrUrl, qrImgUrl,
+} from '../../lib/arca'
 
 const fmt$ = n => fmtPrecio(Math.abs(Number(n) || 0))
 const fmtPct = n => (n || 0).toFixed(1) + '%'
@@ -171,6 +176,7 @@ function TabCuentas({ cuentas, facturas, impuestos, facturacionPorCuenta, onChan
   const [editando, setEditando] = useState(null)
   const [mostrarForm, setMostrarForm] = useState(false)
   const [mostrarSimulador, setMostrarSimulador] = useState(false)
+  const [configArca, setConfigArca] = useState(null)
   const avisos = useMemo(() => calcularAvisos(cuentas, impuestos), [cuentas, impuestos])
 
   function nueva() {
@@ -231,6 +237,7 @@ function TabCuentas({ cuentas, facturas, impuestos, facturacionPorCuenta, onChan
               facturasCuenta={facturas.filter(f => f.cuenta_id === c.id && f.tipo === 'emitida')}
               onEditar={() => editar(c)}
               onEliminar={() => eliminar(c)}
+              onConfigArca={() => setConfigArca(c)}
             />
           ))}
         </div>
@@ -249,6 +256,14 @@ function TabCuentas({ cuentas, facturas, impuestos, facturacionPorCuenta, onChan
           cuentas={cuentas}
           facturacionPorCuenta={facturacionPorCuenta}
           onCerrar={() => setMostrarSimulador(false)}
+        />
+      )}
+
+      {configArca && (
+        <ModalConfigArca
+          cuenta={configArca}
+          onCerrar={() => setConfigArca(null)}
+          onGuardado={() => { setConfigArca(null); onChange() }}
         />
       )}
     </div>
@@ -289,7 +304,7 @@ function AlertasGlobales({ cuentas, facturacionPorCuenta }) {
   )
 }
 
-function CuentaCard({ cuenta, datos, facturasCuenta, onEditar, onEliminar }) {
+function CuentaCard({ cuenta, datos, facturasCuenta, onEditar, onEliminar, onConfigArca }) {
   const esMono = cuenta.tipo === 'monotributo'
   const tope = esMono ? TOPE_MAX_ABSOLUTO : null
   const pct = esMono && tope ? (datos.emitido / tope) * 100 : 0
@@ -311,8 +326,23 @@ function CuentaCard({ cuenta, datos, facturasCuenta, onEditar, onEliminar }) {
             CUIT {cuenta.cuit} ·  {TIPOS_CUENTA.find(t => t.v === cuenta.tipo)?.l || cuenta.tipo}
             {esMono && cuenta.categoria_monotributo && ` · Cat ${cuenta.categoria_monotributo}`}
           </div>
+          <div style={{ marginTop: 4 }}>
+            {cuenta.arca_habilitado ? (
+              <span style={{ fontSize: 10, fontWeight: 700, background: '#1a2a1a', color: '#7dff7d', borderRadius: 4, padding: '2px 8px' }}>
+                ⚡ ARCA {cuenta.arca_ambiente === 'produccion' ? 'PRODUCCIÓN' : 'homologación'} · PV {String(cuenta.arca_punto_venta || 1).padStart(4, '0')}
+              </span>
+            ) : (
+              <span style={{ fontSize: 10, fontWeight: 700, background: 'var(--surface2)', color: 'var(--muted)', borderRadius: 4, padding: '2px 8px' }}>
+                ⚡ ARCA sin configurar
+              </span>
+            )}
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
+          <button onClick={onConfigArca} title="Configurar ARCA (facturación electrónica)"
+            style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--gold)', borderRadius: 4, padding: '4px 8px', fontSize: 11, cursor: 'pointer' }}>
+            ⚡
+          </button>
           <button onClick={onEditar}
             style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 4, padding: '4px 8px', fontSize: 11, cursor: 'pointer' }}>
             ✏️
@@ -671,6 +701,12 @@ function TabFacturas({ cuentas, facturas, contrapartes, onChange }) {
                     {f.archivo_url && (
                       <span title="Tiene PDF adjunto" style={{ marginLeft: 4, color: 'var(--gold)' }}>📎</span>
                     )}
+                    {f.emitida_por_arca && (
+                      <span title={f.cae ? `CAE ${f.cae}${f.cae_vto ? ` · vto ${fmtFecha(f.cae_vto)}` : ''}` : `ARCA: ${f.arca_estado || ''}`}
+                        style={{ marginLeft: 4, color: f.arca_estado === 'autorizada' ? '#7dff7d' : '#ff8b8b' }}>
+                        {f.arca_estado === 'autorizada' ? '⚡' : '⚠️'}
+                      </span>
+                    )}
                   </td>
                   <td style={{ padding: '6px 6px' }}>{f.contraparte_nombre || '—'}</td>
                   <td style={{ textAlign: 'right', padding: '6px 6px' }}>{fmt$(f.monto_neto)}</td>
@@ -723,11 +759,41 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
     concepto: '',
     condicion_pago: 'contado',
     notas: '',
+    // --- ARCA (facturación electrónica) ---
+    comprobante_codigo: 11,
+    doc_tipo: 99,
+    doc_nro: '',
+    cond_iva_receptor: 5,
   }
   const [form, setForm] = useState(VACIO)
   const [guardando, setGuardando] = useState(false)
   const [archivoSubido, setArchivoSubido] = useState(null)
+  const [modoArca, setModoArca] = useState(false)
+  const [emitiendo, setEmitiendo] = useState(false)
+  const [resultadoCae, setResultadoCae] = useState(null)
+  const [errorArca, setErrorArca] = useState(null)
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  const cuentaSel = useMemo(
+    () => cuentas.find(c => String(c.id) === String(form.cuenta_id)),
+    [cuentas, form.cuenta_id]
+  )
+  const puedeArca = !!cuentaSel?.arca_habilitado
+  // Comprobantes que esta cuenta puede emitir y que la edge function soporta hoy (C=11, B=6)
+  const compsArca = useMemo(() => {
+    if (!cuentaSel) return []
+    return comprobantesDeCuenta(cuentaSel).filter(c => c === 11 || c === 6)
+  }, [cuentaSel])
+  const esFacturaC = Number(form.comprobante_codigo) === 11
+
+  // Si la cuenta no puede emitir, apagar el modo ARCA
+  useEffect(() => { if (!puedeArca && modoArca) setModoArca(false) }, [puedeArca, modoArca])
+  // Mantener un comprobante válido para la cuenta elegida
+  useEffect(() => {
+    if (modoArca && compsArca.length && !compsArca.includes(Number(form.comprobante_codigo))) {
+      set('comprobante_codigo', compsArca[0])
+    }
+  }, [modoArca, compsArca]) // eslint-disable-line
 
   function elegirContraparte(c) {
     if (!c) return
@@ -778,14 +844,115 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
     onGuardado()
   }
 
+  // Emitir electrónicamente: pide el CAE a ARCA vía edge function
+  async function emitir() {
+    if (!form.cuenta_id) return alert('Elegí una cuenta')
+    const total = Number(form.monto_total) || 0
+    if (total <= 0) return alert('El total debe ser mayor a 0')
+    const docTipo = Number(form.doc_tipo)
+    if (docTipo !== 99 && !String(form.doc_nro).trim()) {
+      return alert('Ingresá el número de documento del receptor (o elegí Consumidor Final sin identificar)')
+    }
+    setEmitiendo(true); setErrorArca(null)
+    const r = await emitirComprobante({
+      cuenta_id: Number(form.cuenta_id),
+      comprobante_codigo: Number(form.comprobante_codigo),
+      doc_tipo: docTipo,
+      doc_nro: String(form.doc_nro || '0'),
+      cond_iva_receptor: Number(form.cond_iva_receptor),
+      concepto: 1,
+      fecha: form.fecha,
+      importe_total: total,
+      importe_neto: esFacturaC ? total : (Number(form.monto_neto) || 0),
+      importe_iva: esFacturaC ? 0 : (Number(form.monto_iva) || 0),
+      descripcion: form.concepto || null,
+      condicion_pago: form.condicion_pago,
+      contraparte_id: form.contraparte_id || null,
+      contraparte_nombre: form.contraparte_nombre || null,
+      contraparte_cuit: form.contraparte_cuit || null,
+      contraparte_iva: form.contraparte_iva || null,
+    })
+    setEmitiendo(false)
+    if (!r.ok) { setErrorArca(r.error); return }
+    // Éxito: armar QR y mostrar panel
+    const qrUrl = buildQrUrl({
+      fecha: form.fecha,
+      cuit: r.data.cuit_emisor,
+      ptoVta: r.data.punto_venta,
+      tipoCmp: r.data.comprobante_codigo,
+      nroCmp: r.data.numero,
+      importe: r.data.importe_total,
+      tipoDocRec: docTipo,
+      nroDocRec: Number(String(form.doc_nro || '0').replace(/\D/g, '')) || 0,
+      codAut: r.data.cae,
+    })
+    setResultadoCae({ ...r.data, qrUrl, cuentaNombre: cuentaSel?.nombre })
+  }
+
+  // ---- Panel de éxito: comprobante emitido con CAE ----
+  if (resultadoCae) {
+    const comp = COMPROBANTES[resultadoCae.comprobante_codigo]
+    return (
+      <div onClick={() => { onGuardado() }}
+        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, overflow: 'auto' }}>
+        <div onClick={e => e.stopPropagation()}
+          style={{ background: 'var(--surface)', border: '1px solid var(--green)', borderRadius: 12, padding: 24, maxWidth: 480, width: '100%', textAlign: 'center' }}>
+          <div style={{ fontSize: 40 }}>✅</div>
+          <div style={{ fontSize: 20, fontWeight: 800, marginTop: 4 }}>Comprobante autorizado</div>
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
+            {comp?.label || 'Factura'} · {resultadoCae.cuentaNombre}
+          </div>
+
+          <div style={{ background: '#fff', borderRadius: 8, padding: 10, display: 'inline-block' }}>
+            <img src={qrImgUrl(resultadoCae.qrUrl, 180)} alt="QR ARCA" width={180} height={180}
+              style={{ display: 'block' }} />
+          </div>
+
+          <div style={{ marginTop: 16, textAlign: 'left', background: 'var(--surface2)', borderRadius: 8, padding: 14, fontSize: 14 }}>
+            <Linea k="Comprobante" v={`${comp?.letra || ''} ${String(resultadoCae.punto_venta).padStart(4, '0')}-${String(resultadoCae.numero).padStart(8, '0')}`} />
+            <Linea k="CAE" v={resultadoCae.cae} mono />
+            <Linea k="Vto CAE" v={fmtFecha(resultadoCae.cae_vto)} />
+            <Linea k="Total" v={fmt$(resultadoCae.importe_total)} />
+            {resultadoCae.observaciones && (
+              <div style={{ marginTop: 8, fontSize: 11, color: '#ffd17a' }}>⚠️ {resultadoCae.observaciones}</div>
+            )}
+          </div>
+
+          <button onClick={() => onGuardado()}
+            style={{ marginTop: 18, width: '100%', padding: 12, background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 800, letterSpacing: 1 }}>
+            Listo
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div onClick={onCerrar}
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, overflow: 'auto' }}>
       <div onClick={e => e.stopPropagation()}
         style={{ background: 'var(--surface)', border: '1px solid var(--gold)', borderRadius: 12, padding: 20, maxWidth: 720, width: '100%', maxHeight: '90vh', overflow: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-          <div style={{ fontSize: 18, fontWeight: 700 }}>+ Nueva factura</div>
+          <div style={{ fontSize: 18, fontWeight: 700 }}>{modoArca ? '⚡ Emitir factura electrónica' : '+ Nueva factura'}</div>
           <button onClick={onCerrar} style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: 20, cursor: 'pointer' }}>✕</button>
+        </div>
+
+        {/* Toggle modo emisión electrónica (solo si la cuenta tiene ARCA configurado) */}
+        <div style={{ marginBottom: 14, padding: 12, borderRadius: 8,
+          background: modoArca ? '#1a2a14' : 'var(--surface2)',
+          border: `1px solid ${modoArca ? 'var(--gold)' : 'var(--border)'}` }}>
+          <label style={{ display: 'flex', gap: 10, alignItems: 'center', cursor: puedeArca ? 'pointer' : 'not-allowed', opacity: puedeArca ? 1 : 0.6 }}>
+            <input type="checkbox" checked={modoArca} disabled={!puedeArca}
+              onChange={e => { setModoArca(e.target.checked); if (e.target.checked) set('tipo', 'emitida') }} />
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>⚡ Emitir electrónicamente en ARCA (obtener CAE)</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                {puedeArca
+                  ? `Cuenta lista (${cuentaSel?.arca_ambiente === 'produccion' ? 'PRODUCCIÓN' : 'homologación'}). ARCA asigna el número y devuelve el CAE.`
+                  : 'Esta cuenta no tiene ARCA configurado. Configurala en la pestaña Cuentas → ⚡, o registrá la factura manualmente.'}
+              </div>
+            </div>
+          </label>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
@@ -795,7 +962,7 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
             </select>
           </Campo>
           <Campo label="Tipo *">
-            <select value={form.tipo} onChange={e => set('tipo', e.target.value)} style={inp}>
+            <select value={form.tipo} onChange={e => set('tipo', e.target.value)} style={inp} disabled={modoArca}>
               <option value="emitida">↗ Emitida (venta)</option>
               <option value="recibida">↙ Recibida (compra)</option>
             </select>
@@ -803,18 +970,60 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
           <Campo label="Fecha *">
             <input type="date" value={form.fecha} onChange={e => set('fecha', e.target.value)} style={inp} />
           </Campo>
-          <Campo label="Comprobante">
-            <select value={form.tipo_comprobante} onChange={e => set('tipo_comprobante', e.target.value)} style={inp}>
-              {TIPOS_COMPROBANTE.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </Campo>
-          <Campo label="Punto venta">
-            <input value={form.punto_venta} onChange={e => set('punto_venta', e.target.value)} placeholder="0001" style={inp} />
-          </Campo>
-          <Campo label="Número">
-            <input value={form.numero} onChange={e => set('numero', e.target.value)} placeholder="00012345" style={inp} />
-          </Campo>
+          {modoArca ? (
+            <>
+              <Campo label="Comprobante *">
+                <select value={form.comprobante_codigo} onChange={e => set('comprobante_codigo', Number(e.target.value))} style={inp}>
+                  {compsArca.map(c => <option key={c} value={c}>{COMPROBANTES[c]?.label || c}</option>)}
+                </select>
+              </Campo>
+              <Campo label="Punto venta">
+                <input value={String(cuentaSel?.arca_punto_venta || 1).padStart(4, '0')} disabled style={{ ...inp, opacity: 0.7 }} />
+              </Campo>
+              <Campo label="Número">
+                <input value="(automático)" disabled style={{ ...inp, opacity: 0.7, fontStyle: 'italic' }} />
+              </Campo>
+            </>
+          ) : (
+            <>
+              <Campo label="Comprobante">
+                <select value={form.tipo_comprobante} onChange={e => set('tipo_comprobante', e.target.value)} style={inp}>
+                  {TIPOS_COMPROBANTE.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </Campo>
+              <Campo label="Punto venta">
+                <input value={form.punto_venta} onChange={e => set('punto_venta', e.target.value)} placeholder="0001" style={inp} />
+              </Campo>
+              <Campo label="Número">
+                <input value={form.numero} onChange={e => set('numero', e.target.value)} placeholder="00012345" style={inp} />
+              </Campo>
+            </>
+          )}
         </div>
+
+        {/* Datos del receptor exigidos por ARCA */}
+        {modoArca && (
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8, letterSpacing: 1 }}>🧾 RECEPTOR (ARCA)</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.4fr', gap: 10 }}>
+              <Campo label="Tipo doc.">
+                <select value={form.doc_tipo} onChange={e => set('doc_tipo', Number(e.target.value))} style={inp}>
+                  {DOC_TIPOS.map(d => <option key={d.v} value={d.v}>{d.l}</option>)}
+                </select>
+              </Campo>
+              <Campo label="Nº documento">
+                <input value={form.doc_nro} onChange={e => set('doc_nro', e.target.value)}
+                  placeholder={Number(form.doc_tipo) === 99 ? '0' : 'sin guiones'}
+                  disabled={Number(form.doc_tipo) === 99} style={inp} />
+              </Campo>
+              <Campo label="Condición IVA receptor">
+                <select value={form.cond_iva_receptor} onChange={e => set('cond_iva_receptor', Number(e.target.value))} style={inp}>
+                  {COND_IVA_RECEPTOR.map(c => <option key={c.v} value={c.v}>{c.l}</option>)}
+                </select>
+              </Campo>
+            </div>
+          </div>
+        )}
 
         <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
           <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8, letterSpacing: 1 }}>👤 CONTRAPARTE</div>
@@ -858,15 +1067,33 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
 
         <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
           <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8, letterSpacing: 1 }}>💰 IMPORTES</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10 }}>
-            <Campo label="Neto"><input type="number" step="0.01" value={form.monto_neto} onChange={e => set('monto_neto', e.target.value)} onBlur={calcularTotal} style={inp} /></Campo>
-            <Campo label="IVA"><input type="number" step="0.01" value={form.monto_iva} onChange={e => set('monto_iva', e.target.value)} onBlur={calcularTotal} style={inp} /></Campo>
-            <Campo label="Otros"><input type="number" step="0.01" value={form.monto_otros} onChange={e => set('monto_otros', e.target.value)} onBlur={calcularTotal} style={inp} /></Campo>
-            <Campo label="Total *"><input type="number" step="0.01" value={form.monto_total} onChange={e => set('monto_total', e.target.value)} style={{ ...inp, borderColor: 'var(--gold)', fontWeight: 700 }} /></Campo>
-          </div>
-          <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
-            Al salir del campo "Otros" se autocalcula Total = Neto + IVA + Otros. Podés editarlo manualmente si querés.
-          </div>
+          {modoArca && esFacturaC ? (
+            <>
+              <Campo label="Total *">
+                <input type="number" step="0.01" value={form.monto_total} onChange={e => set('monto_total', e.target.value)}
+                  style={{ ...inp, borderColor: 'var(--gold)', fontWeight: 700 }} />
+              </Campo>
+              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
+                Factura C (monotributo): no discrimina IVA. Se informa solo el total.
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: modoArca ? '1fr 1fr 1fr' : '1fr 1fr 1fr 1fr', gap: 10 }}>
+                <Campo label="Neto"><input type="number" step="0.01" value={form.monto_neto} onChange={e => set('monto_neto', e.target.value)} onBlur={calcularTotal} style={inp} /></Campo>
+                <Campo label={modoArca ? 'IVA (21%)' : 'IVA'}><input type="number" step="0.01" value={form.monto_iva} onChange={e => set('monto_iva', e.target.value)} onBlur={calcularTotal} style={inp} /></Campo>
+                {!modoArca && (
+                  <Campo label="Otros"><input type="number" step="0.01" value={form.monto_otros} onChange={e => set('monto_otros', e.target.value)} onBlur={calcularTotal} style={inp} /></Campo>
+                )}
+                <Campo label="Total *"><input type="number" step="0.01" value={form.monto_total} onChange={e => set('monto_total', e.target.value)} style={{ ...inp, borderColor: 'var(--gold)', fontWeight: 700 }} /></Campo>
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
+                {modoArca
+                  ? 'Factura B: cargá Neto + IVA. El total se calcula solo (Neto + IVA).'
+                  : 'Al salir del campo "Otros" se autocalcula Total = Neto + IVA + Otros. Podés editarlo manualmente si querés.'}
+              </div>
+            </>
+          )}
         </div>
 
         <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
@@ -890,16 +1117,39 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
           </Campo>
         </div>
 
+        {errorArca && (
+          <div style={{ marginTop: 14, padding: 12, borderRadius: 8, background: '#3a1a1a', color: '#ff8b8b', fontSize: 13 }}>
+            ❌ {errorArca}
+          </div>
+        )}
+
         <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
           <button onClick={onCerrar} style={{ flex: 1, padding: 12, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>
             Cancelar
           </button>
-          <button onClick={guardar} disabled={guardando}
-            style={{ flex: 2, padding: 12, background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 800, letterSpacing: 1 }}>
-            {guardando ? '⏳ Guardando...' : '✅ Registrar factura'}
-          </button>
+          {modoArca ? (
+            <button onClick={emitir} disabled={emitiendo}
+              style={{ flex: 2, padding: 12, background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 800, letterSpacing: 1 }}>
+              {emitiendo ? '⏳ Emitiendo en ARCA...' : '⚡ Emitir y obtener CAE'}
+            </button>
+          ) : (
+            <button onClick={guardar} disabled={guardando}
+              style={{ flex: 2, padding: 12, background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 800, letterSpacing: 1 }}>
+              {guardando ? '⏳ Guardando...' : '✅ Registrar factura'}
+            </button>
+          )}
         </div>
       </div>
+    </div>
+  )
+}
+
+// Fila clave/valor para el panel de CAE
+function Linea({ k, v, mono }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '3px 0' }}>
+      <span style={{ color: 'var(--muted)' }}>{k}</span>
+      <span style={{ fontWeight: 700, fontFamily: mono ? 'monospace' : 'inherit', textAlign: 'right' }}>{v}</span>
     </div>
   )
 }
@@ -1642,6 +1892,193 @@ function FormContraparte({ contraparte, onCerrar, onGuardado }) {
             Cancelar
           </button>
           <button onClick={guardar} disabled={guardando}
+            style={{ flex: 2, padding: 12, background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 800, letterSpacing: 1 }}>
+            {guardando ? '⏳ Guardando...' : '✅ Guardar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================
+// MODAL CONFIGURAR ARCA — credenciales de facturación electrónica
+// ============================================================
+// Carga cert + clave privada por cuenta (se mandan a la edge function
+// `arca-config`, que las guarda con service_role; nunca vuelven al front),
+// elige ambiente y punto de venta, y prueba la conexión contra ARCA.
+function ModalConfigArca({ cuenta, onCerrar, onGuardado }) {
+  const [ambiente, setAmbiente] = useState(cuenta.arca_ambiente || 'homologacion')
+  const [puntoVenta, setPuntoVenta] = useState(cuenta.arca_punto_venta || 1)
+  const [cert, setCert] = useState('')
+  const [key, setKey] = useState('')
+  const [accessToken, setAccessToken] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [probando, setProbando] = useState(false)
+  const [msg, setMsg] = useState(null) // { ok, texto }
+  const [genUser, setGenUser] = useState(String(cuenta.cuit || '').replace(/\D/g, ''))
+  const [genPass, setGenPass] = useState('')
+  const [generando, setGenerando] = useState(false)
+  const yaConfig = cuenta.arca_habilitado
+
+  function leerArchivo(file, setter) {
+    if (!file) return
+    const r = new FileReader()
+    r.onload = () => setter(String(r.result || '').trim())
+    r.readAsText(file)
+  }
+
+  async function guardar({ luegoProbar } = {}) {
+    if (!yaConfig && (!cert || !key)) {
+      setMsg({ ok: false, texto: 'Pegá o subí el certificado y la clave privada.' })
+      return false
+    }
+    setGuardando(true); setMsg(null)
+    const r = await guardarConfigArca({
+      cuenta_id: cuenta.id,
+      ambiente,
+      punto_venta: Number(puntoVenta) || 1,
+      cert: cert || undefined,            // si va vacío, la function conserva el anterior
+      key: key || undefined,
+      afipsdk_access_token: accessToken || undefined,
+    })
+    setGuardando(false)
+    if (!r.ok) { setMsg({ ok: false, texto: r.error }); return false }
+    if (!luegoProbar) {
+      setMsg({ ok: true, texto: '✅ Configuración guardada.' })
+      onGuardado()
+    }
+    return true
+  }
+
+  async function generarCert() {
+    if (!genPass) { setMsg({ ok: false, texto: 'Ingresá la clave fiscal de ARCA del CUIT para generar el certificado.' }); return }
+    setGenerando(true)
+    setMsg({ ok: true, texto: '⏳ Generando certificado de testing en ARCA... puede tardar hasta ~1 minuto, no cierres la ventana.' })
+    const r = await crearCertTestingArca({
+      cuenta_id: cuenta.id,
+      arca_username: genUser,
+      arca_password: genPass,
+      punto_venta: Number(puntoVenta) || 1,
+      afipsdk_access_token: accessToken || undefined,
+    })
+    setGenerando(false)
+    setGenPass('')
+    if (r.ok) {
+      setMsg({ ok: true, texto: '✅ ' + (r.data?.mensaje || 'Certificado de testing generado y guardado.') + ' Ahora probá la conexión.' })
+    } else {
+      setMsg({ ok: false, texto: '❌ ' + r.error })
+    }
+  }
+
+  async function probar() {
+    // Guardar primero (por si cambiaron cert/key/ambiente/PV) y después probar
+    const okGuardado = await guardar({ luegoProbar: true })
+    if (!okGuardado) return
+    setProbando(true); setMsg({ ok: true, texto: '⏳ Probando conexión con ARCA...' })
+    const r = await probarConexionArca(cuenta.id)
+    setProbando(false)
+    if (r.ok) {
+      setMsg({ ok: true, texto: '✅ ' + (r.data?.mensaje || 'Conexión OK con ARCA.') })
+      onGuardado()
+    } else {
+      setMsg({ ok: false, texto: '❌ ' + r.error })
+    }
+  }
+
+  return (
+    <div onClick={onCerrar}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, overflow: 'auto' }}>
+      <div onClick={e => e.stopPropagation()}
+        style={{ background: 'var(--surface)', border: '1px solid var(--gold)', borderRadius: 12, padding: 20, maxWidth: 640, width: '100%', maxHeight: '90vh', overflow: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+          <div style={{ fontSize: 18, fontWeight: 700 }}>⚡ Configurar ARCA — {cuenta.nombre}</div>
+          <button onClick={onCerrar} style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: 20, cursor: 'pointer' }}>✕</button>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
+          CUIT {cuenta.cuit}. El certificado y la clave privada se guardan cifrados en el servidor y nunca se muestran de vuelta.
+          {yaConfig && <span style={{ color: '#7dff7d' }}> · Esta cuenta ya tiene credenciales cargadas (dejá los campos vacíos para conservarlas).</span>}
+        </div>
+
+        {/* Generador automático de certificado de testing (homologación) */}
+        {ambiente === 'homologacion' && (
+          <div style={{ marginBottom: 16, padding: 14, borderRadius: 10, background: 'var(--surface2)', border: '1px dashed var(--gold)' }}>
+            <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4 }}>✨ Generar certificado de testing automáticamente</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
+              AfipSDK entra a ARCA con tu clave fiscal, crea el certificado de homologación y autoriza el servicio.
+              La clave fiscal se usa solo para esto y <strong>no se guarda</strong>. Si preferís, pegá el cert/key a mano abajo.
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <Campo label="Usuario ARCA (CUIT)">
+                <input value={genUser} onChange={e => setGenUser(e.target.value)} style={inp} />
+              </Campo>
+              <Campo label="Clave fiscal de ARCA">
+                <input type="password" value={genPass} onChange={e => setGenPass(e.target.value)}
+                  placeholder="tu clave fiscal" autoComplete="new-password" style={inp} />
+              </Campo>
+            </div>
+            <button onClick={generarCert} disabled={generando || guardando || probando}
+              style={{ marginTop: 10, width: '100%', padding: 11, background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 800 }}>
+              {generando ? '⏳ Generando en ARCA...' : '✨ Generar certificado de testing'}
+            </button>
+          </div>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <Campo label="Ambiente">
+            <select value={ambiente} onChange={e => setAmbiente(e.target.value)} style={inp}>
+              <option value="homologacion">🧪 Homologación (testing)</option>
+              <option value="produccion">🏛️ Producción (real)</option>
+            </select>
+          </Campo>
+          <Campo label="Punto de venta">
+            <input type="number" min="1" value={puntoVenta} onChange={e => setPuntoVenta(e.target.value)} style={inp} />
+          </Campo>
+        </div>
+
+        <div style={{ marginTop: 14 }}>
+          <Campo label={`Certificado (.crt / .pem)${yaConfig ? ' — opcional, reemplaza el actual' : ' *'}`}>
+            <input type="file" accept=".crt,.pem,.cer,.txt" onChange={e => leerArchivo(e.target.files?.[0], setCert)}
+              style={{ ...inp, padding: '6px 8px' }} />
+            <textarea value={cert} onChange={e => setCert(e.target.value)} rows={3}
+              placeholder="-----BEGIN CERTIFICATE-----"
+              style={{ ...inp, marginTop: 6, fontFamily: 'monospace', fontSize: 11, resize: 'vertical' }} />
+          </Campo>
+        </div>
+
+        <div style={{ marginTop: 10 }}>
+          <Campo label={`Clave privada (.key)${yaConfig ? ' — opcional, reemplaza la actual' : ' *'}`}>
+            <input type="file" accept=".key,.pem,.txt" onChange={e => leerArchivo(e.target.files?.[0], setKey)}
+              style={{ ...inp, padding: '6px 8px' }} />
+            <textarea value={key} onChange={e => setKey(e.target.value)} rows={3}
+              placeholder="-----BEGIN RSA PRIVATE KEY-----"
+              style={{ ...inp, marginTop: 6, fontFamily: 'monospace', fontSize: 11, resize: 'vertical' }} />
+          </Campo>
+        </div>
+
+        <div style={{ marginTop: 10 }}>
+          <Campo label="Access token de AfipSDK (opcional — sube los límites de uso)">
+            <input value={accessToken} onChange={e => setAccessToken(e.target.value)} placeholder="Dejar vacío si no tenés cuenta paga"
+              style={{ ...inp, fontFamily: 'monospace', fontSize: 11 }} />
+          </Campo>
+        </div>
+
+        {msg && (
+          <div style={{ marginTop: 12, padding: 10, borderRadius: 6, fontSize: 13,
+            background: msg.ok ? '#1a2a1a' : '#3a1a1a', color: msg.ok ? '#7dff7d' : '#ff8b8b' }}>
+            {msg.texto}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
+          <button onClick={onCerrar} style={{ flex: 1, padding: 12, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>
+            Cerrar
+          </button>
+          <button onClick={probar} disabled={guardando || probando}
+            style={{ flex: 1, padding: 12, background: 'var(--surface2)', border: '1px solid var(--gold)', color: 'var(--gold)', borderRadius: 8, cursor: 'pointer', fontWeight: 700 }}>
+            {probando ? '⏳ Probando...' : '🔌 Probar conexión'}
+          </button>
+          <button onClick={() => guardar()} disabled={guardando || probando}
             style={{ flex: 2, padding: 12, background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 800, letterSpacing: 1 }}>
             {guardando ? '⏳ Guardando...' : '✅ Guardar'}
           </button>
