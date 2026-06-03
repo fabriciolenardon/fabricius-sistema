@@ -91,6 +91,10 @@ export function probarConexionArca(cuenta_id) {
 export function crearCertTestingArca(payload) {
   return invokeFn('arca-config', { accion: 'crear_cert_dev', ...payload })
 }
+// Genera clave + CSR (autónomo) para subir a ARCA y obtener el certificado.
+export function generarCsrArca(payload) {
+  return invokeFn('arca-config', { accion: 'generar_csr', ...payload })
+}
 export function emitirComprobante(payload) {
   return invokeFn('arca-emitir', payload)
 }
