@@ -29,6 +29,8 @@ export function Clientes() {
   const [showCobranzas, setShowCobranzas] = useState(false)
   const [cobDesde, setCobDesde] = useState('')
   const [cobHasta, setCobHasta] = useState('')
+  const [cobPagDesde, setCobPagDesde] = useState('') // rango de PAGOS (independiente: te pagan después)
+  const [cobPagHasta, setCobPagHasta] = useState('')
   const [cobData, setCobData] = useState(null)
   const [cobLoading, setCobLoading] = useState(false)
 
@@ -52,11 +54,14 @@ async function seleccionar(cliente) {
   // los pagos de un rango de fechas — aislado del saldo acumulado. Sirve para ver
   // qué te compraron una semana y quién ya pagó esa compra.
   async function calcularCobranzas() {
-    if (!cobDesde || !cobHasta) { alert('Elegí el rango de fechas (Desde y Hasta)'); return }
+    if (!cobDesde || !cobHasta) { alert('Elegí el rango de COMPRAS (Desde y Hasta)'); return }
+    // Rango de pagos: si no se completa, usa el mismo que compras.
+    const pagDesde = cobPagDesde || cobDesde
+    const pagHasta = cobPagHasta || cobHasta
     setCobLoading(true)
     const [{ data: rems }, { data: movs }] = await Promise.all([
       supabase.from('remitos').select('cliente_id, total, fecha').gte('fecha', cobDesde).lte('fecha', cobHasta),
-      supabase.from('movimientos_ctacte').select('cliente_id, haber, fecha').gte('fecha', cobDesde).lte('fecha', cobHasta).gt('haber', 0),
+      supabase.from('movimientos_ctacte').select('cliente_id, haber, fecha').gte('fecha', pagDesde).lte('fecha', pagHasta).gt('haber', 0),
     ])
     const map = {}
     ;(rems || []).forEach(r => {
@@ -389,11 +394,23 @@ async function eliminarMovimiento(mov) {
         <div className="card" style={{ borderColor: 'var(--amber)', marginBottom: 20 }}>
           <div className="card-title">📅 Cobranzas por período — qué te compraron y quién pagó</div>
           <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
-            Elegí un rango (ej. la semana pasada, 25/05 → 31/05). Suma por cliente los <strong>remitos</strong> (compras) y los <strong>pagos</strong> de ese período, aislado del saldo acumulado — así ves qué te compraron esa semana y quién ya pagó esa compra.
+            Las <strong>compras</strong> y los <strong>pagos</strong> tienen rango propio: das fiado a una semana y te pagan después. Ej: compras <strong>25/05 → 31/05</strong> (lo de la semana pasada) y pagos <strong>25/05 → hoy</strong> (para captar el pago que te hicieron hoy por esa compra).
           </div>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
-            <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>📅 Desde</label><input type="date" value={cobDesde} onChange={e => setCobDesde(e.target.value)} style={{ ...inp, width: 170 }} /></div>
-            <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>📅 Hasta</label><input type="date" value={cobHasta} onChange={e => setCobHasta(e.target.value)} style={{ ...inp, width: 170 }} /></div>
+          <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--amber)', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>🧾 Compras (remitos)</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <div><label style={{ fontSize: 10, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Desde</label><input type="date" value={cobDesde} onChange={e => setCobDesde(e.target.value)} style={{ ...inp, width: 160 }} /></div>
+                <div><label style={{ fontSize: 10, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Hasta</label><input type="date" value={cobHasta} onChange={e => setCobHasta(e.target.value)} style={{ ...inp, width: 160 }} /></div>
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--green)', fontWeight: 700, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>💵 Pagos <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(opcional — si lo dejás vacío usa el de compras)</span></div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <div><label style={{ fontSize: 10, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Desde</label><input type="date" value={cobPagDesde} onChange={e => setCobPagDesde(e.target.value)} style={{ ...inp, width: 160 }} /></div>
+                <div><label style={{ fontSize: 10, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Hasta</label><input type="date" value={cobPagHasta} onChange={e => setCobPagHasta(e.target.value)} style={{ ...inp, width: 160 }} /></div>
+              </div>
+            </div>
             <button className="btn btn-gold" onClick={calcularCobranzas} disabled={cobLoading}>{cobLoading ? '⏳ Calculando...' : '🔍 Calcular'}</button>
           </div>
 
@@ -449,7 +466,7 @@ async function eliminarMovimiento(mov) {
                   </table>
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 8 }}>
-                  "Pendiente período" = comprado − pagado dentro del rango (aproximado, los pagos de otra semana no se mezclan). "Saldo actual" es la deuda total de hoy del cliente.
+                  "Pendiente período" = comprado (rango de compras) − pagado (rango de pagos). Poné el rango de pagos más amplio (ej. hasta hoy) para captar los pagos tardíos de esa compra. "Saldo actual" es la deuda total de hoy del cliente.
                 </div>
               </>
             )
