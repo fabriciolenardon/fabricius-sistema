@@ -512,9 +512,10 @@ async function confirmarElaboracionEmbutido() {
         if (error) throw new Error(`No se descontó ${tipo}: ${error.message}`)
       }
     }
+    // Retazos cerdo: se descuentan del stock de capones/cabezas enteros ('cerdo').
     if (parseNumero(kgCarneBovinaEmbutido) > 0) {
-      const { error } = await actualizarStock('bovino_corte', -parseNumero(kgCarneBovinaEmbutido))
-      if (error) throw new Error(`No se descontó bovino_corte: ${error.message}`)
+      const { error } = await actualizarStock('cerdo', -parseNumero(kgCarneBovinaEmbutido))
+      if (error) throw new Error(`No se descontó retazos cerdo (capones): ${error.message}`)
     }
     // Suma al stock 'embutido' — paso crítico que antes fallaba en silencio.
     // Verificamos con un re-read que efectivamente subió, así si algo se
@@ -1211,7 +1212,7 @@ async function confirmarDesposteCerdo() {
         ))}
       </div>
       <div className="form-group" style={{ marginBottom: 10 }}>
-        <label>🥩 Carne bovina (kg)</label>
+        <label>{tipoElaboracion === 'embutido' ? '🐷 Retazos cerdo (kg) — se descuentan de capones/cabezas' : '🥩 Carne bovina (kg)'}</label>
         <input type="number" step="0.1" placeholder="0" value={kgCarneBovinaEmbutido} onChange={e => setKgCarneBovinaEmbutido(e.target.value)} style={{ ...inp, borderColor: 'var(--gold)' }} />
       </div>
 
