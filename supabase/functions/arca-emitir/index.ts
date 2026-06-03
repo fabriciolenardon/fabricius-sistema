@@ -40,6 +40,7 @@ const WSFE = {
 const COMPROBANTES_OK = new Set([1, 6, 11]) // 1=Factura A, 6=Factura B, 11=Factura C
 // Alícuotas de IVA válidas (código AFIP → solo para validar)
 const IVA_IDS_OK = new Set([3, 4, 5, 6, 8, 9]) // 3=0% 4=10.5% 5=21% 6=27% 8=5% 9=2.5%
+const IVA_PCT: Record<number, number> = { 3: 0, 4: 10.5, 5: 21, 6: 27, 8: 5, 9: 2.5 }
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -69,18 +70,58 @@ serve(async (req) => {
     if (!COMPROBANTES_OK.has(comprobante_codigo)) {
       return jsonError('Comprobante no soportado todavía (por ahora: Factura A=1, B=6, C=11)')
     }
-    // Alícuota de IVA (solo aplica a A/B). Default 4 = 10,5% (carne).
+    // Alícuota de IVA por defecto (solo aplica a A/B). 4 = 10,5% (carne).
     const iva_id = IVA_IDS_OK.has(Number(body.iva_id)) ? Number(body.iva_id) : 4
+    const esC = comprobante_codigo === 11
 
-    // Importes
-    const impTotal = round2(Number(body.importe_total))
+    // Importes: si vienen ítems (detalle de productos), se calculan a partir de
+    // ellos; si no, se usa el modo simple (un solo importe). ARCA recibe solo
+    // los totales; el detalle se guarda para el PDF.
+    let items = Array.isArray(body.items)
+      ? body.items.filter((it: any) => it && Number(it.cantidad) > 0)
+      : null
+    if (items && items.length === 0) items = null
+
+    let impNeto = 0, impIva = 0, impTotal = 0
+    let ivaArray: Array<{ Id: number; BaseImp: number; Importe: number }> = []
+    let itemsCalc: any[] = []
+
+    if (items) {
+      for (const it of items) {
+        const cant = Number(it.cantidad) || 0
+        const pu = Number(it.precio_unit) || 0
+        const neto = round2(cant * pu)
+        const ivaId = esC ? 0 : (IVA_IDS_OK.has(Number(it.iva_id)) ? Number(it.iva_id) : 4)
+        const pct = esC ? 0 : (IVA_PCT[ivaId] ?? 0)
+        const iva = round2(neto * pct / 100)
+        itemsCalc.push({
+          descripcion: String(it.descripcion || '').slice(0, 200),
+          cantidad: cant, precio_unit: pu, iva_id: esC ? null : ivaId,
+          neto, iva, total: round2(neto + iva),
+        })
+      }
+      impNeto = round2(itemsCalc.reduce((s, i) => s + i.neto, 0))
+      impIva = esC ? 0 : round2(itemsCalc.reduce((s, i) => s + i.iva, 0))
+      impTotal = round2(impNeto + impIva)
+      if (!esC) {
+        const groups: Record<number, { base: number; imp: number }> = {}
+        for (const i of itemsCalc) {
+          if (!groups[i.iva_id]) groups[i.iva_id] = { base: 0, imp: 0 }
+          groups[i.iva_id].base = round2(groups[i.iva_id].base + i.neto)
+          groups[i.iva_id].imp = round2(groups[i.iva_id].imp + i.iva)
+        }
+        ivaArray = Object.entries(groups).map(([id, g]) => ({ Id: Number(id), BaseImp: g.base, Importe: g.imp }))
+      }
+    } else {
+      impTotal = round2(Number(body.importe_total))
+      const impIvaIn = round2(Number(body.importe_iva) || 0)
+      let neto = round2(Number(body.importe_neto) || 0)
+      if (esC) { neto = impTotal; impIva = 0 }
+      else { if (!(neto > 0)) neto = round2(impTotal - impIvaIn); impIva = impIvaIn }
+      impNeto = neto
+      if (!esC && impIva > 0) ivaArray = [{ Id: iva_id, BaseImp: impNeto, Importe: impIva }]
+    }
     if (!(impTotal > 0)) return jsonError('El total debe ser mayor a 0')
-    const impIva = round2(Number(body.importe_iva) || 0)
-    let impNeto = round2(Number(body.importe_neto) || 0)
-    // Factura C: sin IVA discriminado → neto = total
-    if (comprobante_codigo === 11) impNeto = impTotal
-    // Factura B: si no mandan neto, derivarlo de total - iva
-    else if (!(impNeto > 0)) impNeto = round2(impTotal - impIva)
 
     // Receptor
     const doc_tipo = Number(body.doc_tipo) || 99 // 99 = consumidor final sin identificar
@@ -160,9 +201,9 @@ serve(async (req) => {
       det.FchServHasta = fecha.replace(/-/g, '')
       det.FchVtoPago = fecha.replace(/-/g, '')
     }
-    // Factura A y B: IVA discriminado con la alícuota elegida (carne = 10,5% = id 4).
-    if ((comprobante_codigo === 1 || comprobante_codigo === 6) && impIva > 0) {
-      det.Iva = { AlicIva: [{ Id: iva_id, BaseImp: impNeto, Importe: impIva }] }
+    // Factura A y B: IVA discriminado, una entrada por alícuota (agrupado desde ítems).
+    if (!esC && ivaArray.length > 0) {
+      det.Iva = { AlicIva: ivaArray }
     }
 
     const solicitud = await afipRequest({
@@ -197,6 +238,7 @@ serve(async (req) => {
         contraparte_nombre: body.contraparte_nombre || null,
         contraparte_cuit: body.contraparte_cuit || null,
         concepto: body.descripcion || null,
+        items: itemsCalc.length ? itemsCalc : null,
         emitida_por_arca: true,
         arca_estado: resultado === 'R' ? 'rechazada' : 'error',
         arca_resultado: { resultado, errores, raw: res },
@@ -231,6 +273,7 @@ serve(async (req) => {
       contraparte_iva: body.contraparte_iva || null,
       concepto: body.descripcion || null,
       condicion_pago: body.condicion_pago || 'contado',
+      items: itemsCalc.length ? itemsCalc : null,
       cae, cae_vto,
       emitida_por_arca: true,
       arca_estado: 'autorizada',
