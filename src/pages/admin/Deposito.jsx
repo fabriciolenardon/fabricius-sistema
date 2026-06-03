@@ -13,6 +13,37 @@ import FlujoDeposito from './FlujoDeposito'
 import AjusteStock from './AjusteStock'
 import CajasTab from './CajasTab'
 
+// ============================================================
+// Sinónimos de búsqueda de productos (buscador de remitos)
+// ------------------------------------------------------------
+// Permite que buscar un término general (ej. "media res") traiga
+// todas las categorías que cuentan como tal, aunque en los remitos
+// estén cargadas con códigos distintos (NT, VQ, NOVILLITO, etc.).
+//   - claves:    términos que el usuario puede tipear para el grupo
+//   - productos: valores de `producto` (normalizados: minúscula + trim)
+//                que pertenecen al grupo (match EXACTO para no traer cortes)
+// Para sumar más grupos en el futuro, agregá otra entrada acá.
+// ============================================================
+const SINONIMOS_PRODUCTO = [
+  {
+    claves: ['media res', 'mediares', 'media-res', 'medias res', 'res', 'mr', 'bovino', 'novillito', 'novillo', 'vaquillona', 'vaca', 'nt', 'vq'],
+    productos: ['nt', 'nto', 'vq', 'novillito', 'novillo', 'vaquillona', 'vaca', 'bovino_mr', 'media res', 'bovino media res'],
+  },
+]
+
+// ¿La compra `c` coincide con el texto `q` (ya en minúscula)?
+// Hace match por substring normal + expansión por sinónimos.
+function coincideTextoProducto(c, q) {
+  const prod = (c.producto || '').toLowerCase().trim()
+  const prov = (c.proveedor_nombre || '').toLowerCase()
+  if ((prov + ' ' + prod).includes(q)) return true
+  for (const g of SINONIMOS_PRODUCTO) {
+    const queryEnGrupo = g.claves.some(k => k === q || k.includes(q) || q.includes(k))
+    if (queryEnGrupo && g.productos.includes(prod)) return true
+  }
+  return false
+}
+
 async function actualizarStock(tipo, kg) {
   // Devuelve { error } para que el caller pueda chequear si la operación
   // falló. Antes los errores se tragaban silenciosamente — eso causó que
@@ -3350,12 +3381,8 @@ function ProveedoresTab() {
       if (filtroHasta && c.fecha > filtroHasta) return false
       if (filtroProvSel !== 'todos' && c.proveedor_nombre !== filtroProvSel) return false
       if (filtroTexto) {
-        const q = filtroTexto.toLowerCase()
-        const hay = (
-          (c.proveedor_nombre || '').toLowerCase() + ' ' +
-          (c.producto || '').toLowerCase()
-        ).includes(q)
-        if (!hay) return false
+        // Match por texto + sinónimos: "media res" trae NT, VQ, NOVILLITO, etc.
+        if (!coincideTextoProducto(c, filtroTexto.toLowerCase().trim())) return false
       }
       return true
     })
