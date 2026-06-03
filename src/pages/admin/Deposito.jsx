@@ -645,7 +645,14 @@ async function confirmarDesposteCerdo() {
   const kg = parseFloat(kgPiezaConvertir)
   const merma = mermaPieza / 100
   const kgNeto = parseFloat((kg * (1 - merma)).toFixed(2))
-  
+  // COSTO REAL: el costo bruto de la pieza (kg × precio/kg) se reparte sobre los
+  // kg NETOS (con merma), así el corte resultante refleja su costo real por kg.
+  // Ej: 39,8 kg × $10.500 = $417.900 ÷ 29,05 kg (con merma) = $14.385/kg.
+  const costoBasePieza = parseFloat(precioCostoPieza) || piezaIndividualSeleccionada?.precio_costo_kg || 0
+  const costoRealKg = (kgNeto > 0 && costoBasePieza > 0)
+    ? parseFloat(((kg * costoBasePieza) / kgNeto).toFixed(2))
+    : costoBasePieza
+
   const PIEZA_A_STOCK = {
     '🦵 Pierna con hueso': 'pieza_pierna',
     '🥩 Cuarto pistola': 'pieza_cuarto_pistola',
@@ -665,7 +672,7 @@ async function confirmarDesposteCerdo() {
       fecha, entrada_id: piezaIndividualSeleccionada?.entrada_id || null, modelo: 'PIEZA_KILO',
       tipo_desposte: 'pieza_kilo', tipo_animal: tipoAnimalPieza,
       kg_media_res: kg, merma_pct: merma * 100, kg_neto: kgNeto,
-      piezas: [{ nombre: nombrePieza, kg: kgNeto, precio_costo_kg: parseFloat(precioCostoPieza) || 0, pieza_origen_id: piezaIndividualSeleccionada?.id || null }],
+      piezas: [{ nombre: nombrePieza, kg: kgNeto, precio_costo_kg: costoRealKg, pieza_origen_id: piezaIndividualSeleccionada?.id || null }],
       notas
     })
     await actualizarStock(tipoStock, -kg)
@@ -674,15 +681,14 @@ async function confirmarDesposteCerdo() {
     const descripcionSalida = piezaIndividualSeleccionada
       ? `${piezaIndividualSeleccionada.tipo_pieza} #${piezaIndividualSeleccionada.id} (${piezaIndividualSeleccionada.proveedor_origen || 's/proveedor'}) → Bovino Cortes — ${kgNeto.toFixed(2)} kg netos (merma ${(merma * 100).toFixed(1)}%)`
       : `${nombrePieza} → Bovino Cortes — ${kgNeto.toFixed(2)} kg netos (merma ${(merma * 100).toFixed(1)}%)`
-    const costoKg = piezaIndividualSeleccionada?.precio_costo_kg || parseFloat(precioCostoPieza) || 0
     const { error: errSalida } = await supabase.from('salidas_deposito').insert({
       fecha,
       cliente_nombre: 'CONVERSIÓN A CORTES',
       tipo: tipoStock,
       descripcion: descripcionSalida,
       kg,
-      precio_kg: costoKg,
-      total: kg * costoKg,
+      precio_kg: costoRealKg,
+      total: parseFloat((kg * costoBasePieza).toFixed(2)),
       lista: 'desposte',
       cobro: 'interno',
       notas: 'Conversión de pieza a cortes por kilo'
@@ -976,8 +982,26 @@ async function confirmarDesposteCerdo() {
         </div>
       )}
       <div className="form-group" style={{ marginBottom: 12 }}>
-        <label>Precio costo/kg (opcional)</label>
-        <input type="number" value={precioCostoPieza} onChange={e => setPrecioCostoPieza(e.target.value)} placeholder="Para referencia" style={inp} />
+        <label>Precio costo/kg de la pieza</label>
+        <input type="number" value={precioCostoPieza} onChange={e => setPrecioCostoPieza(e.target.value)} placeholder="Ej: 10500" style={inp} />
+        {(() => {
+          const base = parseFloat(precioCostoPieza) || 0
+          const kgN = parseFloat(kgPiezaConvertir) * (1 - mermaPieza / 100)
+          const costoReal = (base > 0 && kgN > 0) ? (parseFloat(kgPiezaConvertir) * base) / kgN : 0
+          if (!(costoReal > 0)) return null
+          const bruto = parseFloat(kgPiezaConvertir) * base
+          return (
+            <div style={{ marginTop: 8, padding: '10px 12px', background: 'rgba(201,168,76,0.1)', border: '1px solid var(--amber)', borderRadius: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>💰 Costo real <span style={{ fontSize: 10 }}>(bruto ÷ kg con merma)</span></span>
+                <span style={{ fontSize: 22, fontWeight: 700, color: 'var(--amber)', fontFamily: "'Bebas Neue',cursive" }}>{fmtPrecio(costoReal)}/kg</span>
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
+                {fmtKg(parseFloat(kgPiezaConvertir), { decimales: 2 })} × {fmtPrecio(base)} = {fmtPrecio(bruto)} ÷ {fmtKg(kgN, { decimales: 2 })} kg
+              </div>
+            </div>
+          )
+        })()}
       </div>
       <div className="form-group" style={{ marginBottom: 14 }}>
         <label>Fecha</label>
