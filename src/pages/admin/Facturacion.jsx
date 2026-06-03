@@ -1919,7 +1919,10 @@ function ModalConfigArca({ cuenta, onCerrar, onGuardado }) {
   const [genUser, setGenUser] = useState(String(cuenta.cuit || '').replace(/\D/g, ''))
   const [genPass, setGenPass] = useState('')
   const [generando, setGenerando] = useState(false)
-  const yaConfig = cuenta.arca_habilitado
+  // Marca local: arranca con el estado de la cuenta, pero se prende apenas
+  // generamos/guardamos credenciales (así Probar/Guardar no las vuelven a pedir).
+  const [tieneCredsLocal, setTieneCredsLocal] = useState(!!cuenta.arca_habilitado)
+  const yaConfig = cuenta.arca_habilitado || tieneCredsLocal
 
   function leerArchivo(file, setter) {
     if (!file) return
@@ -1944,6 +1947,7 @@ function ModalConfigArca({ cuenta, onCerrar, onGuardado }) {
     })
     setGuardando(false)
     if (!r.ok) { setMsg({ ok: false, texto: r.error }); return false }
+    if (r.data?.tiene_credenciales) setTieneCredsLocal(true)
     if (!luegoProbar) {
       setMsg({ ok: true, texto: '✅ Configuración guardada.' })
       onGuardado()
@@ -1965,6 +1969,7 @@ function ModalConfigArca({ cuenta, onCerrar, onGuardado }) {
     setGenerando(false)
     setGenPass('')
     if (r.ok) {
+      setTieneCredsLocal(true) // ya hay cert/key en el server → no volver a pedirlos
       setMsg({ ok: true, texto: '✅ ' + (r.data?.mensaje || 'Certificado de testing generado y guardado.') + ' Ahora probá la conexión.' })
     } else {
       setMsg({ ok: false, texto: '❌ ' + r.error })

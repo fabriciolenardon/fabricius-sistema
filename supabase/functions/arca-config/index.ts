@@ -206,41 +206,55 @@ async function afipAuth(opts: {
 }
 
 // AfipSDK automation 'create-cert-dev' → crea cert + key de homologación.
-// Es asíncrona: si no vuelve 'complete', se reintenta el mismo POST hasta que termina.
+// Patrón correcto: 1 POST para crear el job, luego GET a /automations/{id}
+// para consultar el estado (re-POSTear dispara el anti-duplicado de 10s).
 async function crearCertDev(opts: {
   cuit: string; username: string; password: string; alias: string; accessToken?: string | null
 }): Promise<{ ok: boolean; cert?: string; key?: string; error?: string }> {
-  const url = 'https://app.afipsdk.com/api/v1/automations'
+  const base = 'https://app.afipsdk.com/api/v1/automations'
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (opts.accessToken) headers['Authorization'] = `Bearer ${opts.accessToken}`
-  const payload: Record<string, unknown> = {
-    automation: 'create-cert-dev',
-    params: { cuit: opts.cuit, username: opts.username, password: opts.password, alias: opts.alias },
-  }
-  try {
-    let longJobId: string | null = null
-    for (let intento = 0; intento < 25; intento++) {
-      const body = longJobId ? { ...payload, long_job_id: longJobId } : payload
-      const resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) })
-      const text = await resp.text()
-      let data: any = null; try { data = JSON.parse(text) } catch { /* */ }
-      if (!resp.ok) return { ok: false, error: (data?.message || data?.error || text || `HTTP ${resp.status}`).slice(0, 600) }
 
-      const status = String(data?.status || '').toLowerCase()
-      const cert = data?.data?.cert
-      const key = data?.data?.key
-      if ((status === 'complete' || status === 'completed' || status === 'success') && cert && key) {
-        return { ok: true, cert, key }
-      }
-      if (cert && key) return { ok: true, cert, key }
+  const extraer = (data: any) => {
+    const cert = data?.data?.cert ?? data?.cert
+    const key = data?.data?.key ?? data?.key
+    return { cert, key }
+  }
+
+  try {
+    // 1) Crear el job (una sola vez)
+    const resp = await fetch(base, {
+      method: 'POST', headers,
+      body: JSON.stringify({
+        automation: 'create-cert-dev',
+        params: { cuit: opts.cuit, username: opts.username, password: opts.password, alias: opts.alias },
+      }),
+    })
+    const text = await resp.text()
+    let data: any = null; try { data = JSON.parse(text) } catch { /* */ }
+    if (!resp.ok) return { ok: false, error: (data?.message || data?.error || text || `HTTP ${resp.status}`).slice(0, 600) }
+
+    // ¿Vino completo de una?
+    let r = extraer(data)
+    if (r.cert && r.key) return { ok: true, cert: r.cert, key: r.key }
+    const id = data?.id || data?.automation_id || data?.long_job_id
+    if (!id) return { ok: false, error: 'AfipSDK no devolvió un id de automatización para consultar.' }
+
+    // 2) Poll por GET hasta que termine (máx ~100s)
+    for (let intento = 0; intento < 20; intento++) {
+      await new Promise(res => setTimeout(res, 5000))
+      const sresp = await fetch(`${base}/${id}`, { method: 'GET', headers })
+      const stext = await sresp.text()
+      let sdata: any = null; try { sdata = JSON.parse(stext) } catch { /* */ }
+      if (!sresp.ok) continue // reintentar
+      const status = String(sdata?.status || '').toLowerCase()
+      r = extraer(sdata)
+      if (r.cert && r.key) return { ok: true, cert: r.cert, key: r.key }
       if (status === 'error' || status === 'failed') {
-        return { ok: false, error: data?.error || data?.message || 'la automatización falló en ARCA' }
+        return { ok: false, error: sdata?.error || sdata?.message || 'la automatización falló en ARCA (¿clave fiscal incorrecta?)' }
       }
-      longJobId = data?.long_job_id || data?.id || longJobId
-      // Esperar antes de reintentar (la automation tarda unos segundos)
-      await new Promise(r => setTimeout(r, 3000))
     }
-    return { ok: false, error: 'tardó demasiado (timeout). Reintentá en un momento.' }
+    return { ok: false, error: 'tardó demasiado. El certificado puede haberse creado igual: esperá un minuto y probá "Probar conexión".' }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
