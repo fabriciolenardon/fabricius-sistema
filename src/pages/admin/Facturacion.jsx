@@ -30,6 +30,7 @@ import {
   comprobantesDeCuenta, guardarConfigArca, probarConexionArca, emitirComprobante,
   crearCertTestingArca, buildQrUrl, qrImgUrl,
 } from '../../lib/arca'
+import { imprimirComprobante } from '../../lib/comprobantePdf'
 
 const fmt$ = n => fmtPrecio(Math.abs(Number(n) || 0))
 const fmtPct = n => (n || 0).toFixed(1) + '%'
@@ -712,7 +713,14 @@ function TabFacturas({ cuentas, facturas, contrapartes, onChange }) {
                   <td style={{ textAlign: 'right', padding: '6px 6px' }}>{fmt$(f.monto_neto)}</td>
                   <td style={{ textAlign: 'right', padding: '6px 6px', color: 'var(--muted)' }}>{fmt$(f.monto_iva)}</td>
                   <td style={{ textAlign: 'right', padding: '6px 6px', fontWeight: 700, color: 'var(--gold)' }}>{fmt$(f.monto_total)}</td>
-                  <td style={{ textAlign: 'center', padding: '6px 6px' }}>
+                  <td style={{ textAlign: 'center', padding: '6px 6px', whiteSpace: 'nowrap' }}>
+                    {f.emitida_por_arca && f.cae && (
+                      <button onClick={() => imprimirComprobante(f, cuentas.find(c => c.id === f.cuenta_id) || {})}
+                        title="Imprimir / PDF"
+                        style={{ background: 'transparent', border: 'none', color: 'var(--gold)', cursor: 'pointer', fontSize: 12, marginRight: 4 }}>
+                        🖨️
+                      </button>
+                    )}
                     <button onClick={() => borrar(f)}
                       style={{ background: 'transparent', border: 'none', color: '#ff8b8b', cursor: 'pointer', fontSize: 12 }}>
                       🗑️
@@ -960,10 +968,34 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
             )}
           </div>
 
-          <button onClick={() => onGuardado()}
-            style={{ marginTop: 18, width: '100%', padding: 12, background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 800, letterSpacing: 1 }}>
-            Listo
-          </button>
+          <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
+            <button onClick={() => {
+              imprimirComprobante({
+                comprobante_codigo: resultadoCae.comprobante_codigo,
+                punto_venta: resultadoCae.punto_venta,
+                numero: resultadoCae.numero,
+                fecha: form.fecha,
+                cae: resultadoCae.cae,
+                cae_vto: resultadoCae.cae_vto,
+                doc_tipo: Number(form.doc_tipo),
+                doc_nro: form.doc_nro,
+                cond_iva_receptor: Number(form.cond_iva_receptor),
+                contraparte_nombre: form.contraparte_nombre,
+                monto_neto: totalesItems.neto,
+                monto_iva: esFacturaC ? 0 : totalesItems.iva,
+                monto_total: resultadoCae.importe_total,
+                items: (form.items || []).filter(it => Number(it.cantidad) > 0 && Number(it.precio_unit) > 0)
+                  .map(it => ({ descripcion: it.descripcion, cantidad: Number(it.cantidad), precio_unit: Number(it.precio_unit), iva_id: esFacturaC ? null : Number(it.iva_id) })),
+              }, cuentaSel || {})
+            }}
+              style={{ flex: 1, padding: 12, background: 'var(--surface2)', border: '1px solid var(--gold)', color: 'var(--gold)', borderRadius: 8, cursor: 'pointer', fontWeight: 700 }}>
+              🖨️ Imprimir / PDF
+            </button>
+            <button onClick={() => onGuardado()}
+              style={{ flex: 1, padding: 12, background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 800, letterSpacing: 1 }}>
+              Listo
+            </button>
+          </div>
         </div>
       </div>
     )
