@@ -132,7 +132,10 @@ serve(async (req) => {
       // y se autoriza el wsfe del emisor desde la sesión del titular (delegación).
       // La clave fiscal NO se guarda.
       const password = String(body.arca_password || '')
-      const alias = (String(body.alias || 'fabricius').trim() || 'fabricius').replace(/[^a-zA-Z0-9]/g, '')
+      // Alias ÚNICO por cuenta: evita que al regenerar choque con un alias ya
+      // existente en ARCA (lo que cuelga la automation create-cert-dev).
+      const aliasDefault = 'fab' + cuenta_id
+      const alias = (String(body.alias || aliasDefault).trim() || aliasDefault).replace(/[^a-zA-Z0-9]/g, '')
       if (!password) return jsonError('Ingresá la clave fiscal de ARCA')
       const emisorCuit = String(cuenta.cuit).replace(/[-\s.]/g, '')
       const certCuit = String(body.arca_username || '').replace(/[-\s.]/g, '') || emisorCuit
@@ -264,7 +267,7 @@ async function runAutomation(
     const id = data?.id || data?.automation_id || data?.long_job_id
     if (!id) return { ok: false, error: 'AfipSDK no devolvió un id de automatización para consultar.' }
 
-    for (let intento = 0; intento < 20; intento++) {
+    for (let intento = 0; intento < 22; intento++) {
       await new Promise(res => setTimeout(res, 5000))
       const sresp = await fetch(`${base}/${id}`, { method: 'GET', headers })
       const stext = await sresp.text()
