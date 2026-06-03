@@ -29,6 +29,28 @@ function buildTRA(): string {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<loginTicketRequest version="1.0">\n<header>\n<uniqueId>${uid}</uniqueId>\n<generationTime>${gen}</generationTime>\n<expirationTime>${exp}</expirationTime>\n</header>\n<service>wsfe</service>\n</loginTicketRequest>`
 }
 
+// Genera una clave privada RSA 2048 + un CSR para subir a ARCA
+// ("Administración de Certificados Digitales"). El DN cumple lo que pide ARCA:
+// C=AR, O=<razón social>, CN=<alias>, serialNumber="CUIT <cuit>".
+export function generarCSR(opts: { cuit: string; razonSocial: string; alias: string }): { csr: string; key: string } {
+  const keys = forge.pki.rsa.generateKeyPair(2048)
+  const csr = forge.pki.createCertificationRequest()
+  csr.publicKey = keys.publicKey
+  const org = (opts.razonSocial || 'EMPRESA').replace(/[^\w .,&-]/g, '').slice(0, 100) || 'EMPRESA'
+  const alias = (opts.alias || 'fabricius').replace(/[^a-zA-Z0-9]/g, '') || 'fabricius'
+  csr.setSubject([
+    { name: 'countryName', value: 'AR' },
+    { name: 'organizationName', value: org },
+    { name: 'commonName', value: alias },
+    { name: 'serialNumber', value: 'CUIT ' + String(opts.cuit).replace(/\D/g, '') },
+  ])
+  csr.sign(keys.privateKey, forge.md.sha256.create())
+  return {
+    csr: forge.pki.certificationRequestToPem(csr),
+    key: forge.pki.privateKeyToPem(keys.privateKey),
+  }
+}
+
 // Firma el TRA en CMS (PKCS#7) y lo devuelve en base64 (DER).
 export function signTRA(tra: string, certPem: string, keyPem: string): string {
   const p7 = forge.pkcs7.createSignedData()

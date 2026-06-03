@@ -14,7 +14,7 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { getTA } from './wsaa.ts'
+import { getTA, generarCSR } from './wsaa.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -44,7 +44,7 @@ serve(async (req) => {
 
     const supabaseAdmin = createClient(supabaseUrl, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } })
     const { data: cuenta, error: cuentaErr } = await supabaseAdmin
-      .from('cuentas_fiscales').select('id, nombre, cuit').eq('id', cuenta_id).single()
+      .from('cuentas_fiscales').select('id, nombre, razon_social, cuit').eq('id', cuenta_id).single()
     if (cuentaErr || !cuenta) return jsonError('Cuenta no encontrada')
 
     if (accion === 'guardar') {
@@ -121,6 +121,30 @@ serve(async (req) => {
       return jsonOk({ creado: true, mensaje: esApoderado
         ? `Certificado de ${ambLabel} del apoderado (${certCuit}) generado y wsfe del emisor (${emisorCuit}) autorizado. Probá la conexión.`
         : `Certificado de ${ambLabel} generado y web service wsfe autorizado. Probá la conexión.` })
+    }
+
+    if (accion === 'generar_csr') {
+      // Genera clave privada + CSR (autónomo, sin AfipSDK). Guarda la clave;
+      // el usuario sube el CSR a ARCA y luego pega el certificado (.crt).
+      const ambiente = body.ambiente === 'produccion' ? 'produccion' : 'homologacion'
+      const punto_venta = Number(body.punto_venta) || 1
+      const emisorCuit = String(cuenta.cuit).replace(/[-\s.]/g, '')
+      const certCuit = String(body.arca_username || '').replace(/[-\s.]/g, '') || emisorCuit
+      const esApoderado = certCuit !== emisorCuit
+      const alias = 'fabricius' + cuenta_id + (ambiente === 'produccion' ? 'p' : '')
+
+      const { csr, key } = generarCSR({ cuit: certCuit, razonSocial: cuenta.razon_social || cuenta.nombre || '', alias })
+
+      // Guardar la clave privada (el cert se pega después). Mantener cert previo si lo había.
+      const { data: prev } = await supabaseAdmin.from('arca_config').select('cert').eq('cuenta_id', cuenta_id).single()
+      await supabaseAdmin.from('arca_config').upsert({
+        cuenta_id, ambiente, punto_venta, key, cert: prev?.cert || null,
+        cert_cuit: esApoderado ? certCuit : null, updated_at: new Date().toISOString(),
+      }, { onConflict: 'cuenta_id' })
+      await supabaseAdmin.from('cuentas_fiscales').update({ arca_ambiente: ambiente, arca_punto_venta: punto_venta }).eq('id', cuenta_id)
+      await supabaseAdmin.from('arca_ta').delete().eq('cert_cuit', certCuit).eq('ambiente', ambiente)
+
+      return jsonOk({ csr, alias, cert_cuit: certCuit, mensaje: 'CSR generado. Subilo a ARCA y pegá el certificado que te devuelve.' })
     }
 
     if (accion === 'estado') {

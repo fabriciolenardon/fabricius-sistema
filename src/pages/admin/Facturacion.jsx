@@ -28,7 +28,7 @@ import { fmtPrecio } from '../../lib/formatos'
 import {
   COMPROBANTES, DOC_TIPOS, COND_IVA_RECEPTOR, IVA_ALICUOTAS,
   comprobantesDeCuenta, guardarConfigArca, probarConexionArca, emitirComprobante,
-  crearCertTestingArca, buildQrUrl, qrImgUrl,
+  crearCertTestingArca, generarCsrArca, buildQrUrl, qrImgUrl,
 } from '../../lib/arca'
 import { imprimirComprobante } from '../../lib/comprobantePdf'
 
@@ -2044,6 +2044,8 @@ function ModalConfigArca({ cuenta, onCerrar, onGuardado }) {
   const [genUser, setGenUser] = useState(String(cuenta.cuit || '').replace(/\D/g, ''))
   const [genPass, setGenPass] = useState('')
   const [generando, setGenerando] = useState(false)
+  const [csrResult, setCsrResult] = useState(null)
+  const [generandoCsr, setGenerandoCsr] = useState(false)
   // Marca local: arranca con el estado de la cuenta, pero se prende apenas
   // generamos/guardamos credenciales (así Probar/Guardar no las vuelven a pedir).
   const [tieneCredsLocal, setTieneCredsLocal] = useState(!!cuenta.arca_habilitado)
@@ -2078,6 +2080,23 @@ function ModalConfigArca({ cuenta, onCerrar, onGuardado }) {
       onGuardado()
     }
     return true
+  }
+
+  async function generarCsr() {
+    setGenerandoCsr(true)
+    setMsg({ ok: true, texto: '⏳ Generando clave privada + CSR (puede tardar unos segundos)...' })
+    const r = await generarCsrArca({
+      cuenta_id: cuenta.id, ambiente,
+      punto_venta: Number(puntoVenta) || 1,
+      arca_username: genUser,
+    })
+    setGenerandoCsr(false)
+    if (r.ok) {
+      setCsrResult(r.data?.csr || '')
+      setMsg({ ok: true, texto: '✅ CSR generado. Seguí los 3 pasos de abajo para obtener el certificado.' })
+    } else {
+      setMsg({ ok: false, texto: '❌ ' + r.error })
+    }
   }
 
   async function generarCert() {
@@ -2164,6 +2183,38 @@ function ModalConfigArca({ cuenta, onCerrar, onGuardado }) {
             </button>
           </div>
         ) })()}
+
+        {/* Opción AUTÓNOMA: generar CSR (sin AfipSDK, sin límites) */}
+        <div style={{ marginBottom: 16, padding: 14, borderRadius: 10, background: 'var(--surface2)', border: '1px solid var(--border)' }}>
+          <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4 }}>📄 Opción autónoma: generar mi propio certificado (sin AfipSDK)</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
+            La app genera la <strong>clave privada + un CSR</strong>. Subís el CSR a ARCA, ARCA te da el certificado, lo pegás abajo y listo.
+            Sin terceros ni límites. Para <strong>apoderado</strong>, poné en "Usuario ARCA" el CUIT del apoderado (campo de arriba).
+          </div>
+          <button onClick={generarCsr} disabled={generandoCsr || guardando || probando}
+            style={{ width: '100%', padding: 11, background: 'var(--text)', color: 'var(--surface)', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 800 }}>
+            {generandoCsr ? '⏳ Generando CSR...' : '📄 Generar clave + CSR'}
+          </button>
+
+          {csrResult && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Tu CSR (copialo entero):</div>
+              <textarea readOnly value={csrResult} rows={6}
+                onFocus={e => e.target.select()}
+                style={{ ...inp, fontFamily: 'monospace', fontSize: 10, resize: 'vertical' }} />
+              <button onClick={() => { navigator.clipboard?.writeText(csrResult); setMsg({ ok: true, texto: '📋 CSR copiado al portapapeles.' }) }}
+                style={{ marginTop: 6, padding: '6px 12px', background: 'var(--surface)', border: '1px solid var(--gold)', color: 'var(--gold)', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
+                📋 Copiar CSR
+              </button>
+              <ol style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10, paddingLeft: 18, lineHeight: 1.6 }}>
+                <li>Entrá a ARCA → <strong>Administración de Certificados Digitales</strong> (con la clave fiscal del titular).</li>
+                <li>Creá un alias y <strong>subí/pegá este CSR</strong>. ARCA te devuelve un <strong>certificado (.crt / .pem)</strong>.</li>
+                <li>Pegá ese certificado en el campo <strong>"Certificado"</strong> de abajo y apretá <strong>Guardar</strong>. (La clave ya quedó guardada.)</li>
+                <li>Después: <strong>Administrador de Relaciones</strong> → autorizá el servicio <strong>wsfe</strong> para ese certificado. Y <strong>Probar conexión</strong>.</li>
+              </ol>
+            </div>
+          )}
+        </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <Campo label="Ambiente">
