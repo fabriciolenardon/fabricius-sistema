@@ -765,6 +765,7 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
     doc_nro: '',
     cond_iva_receptor: 5,
     iva_id: 4, // 10,5% (carne) por defecto
+    items: [{ descripcion: '', cantidad: 1, precio_unit: '', iva_id: 4 }],
   }
   const [form, setForm] = useState(VACIO)
   const [guardando, setGuardando] = useState(false)
@@ -831,6 +832,29 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
     setForm(f => ({ ...f, monto_iva: String(iva), monto_total: String(Math.round((neto + iva) * 100) / 100) }))
   }
 
+  // --- Ítems (detalle de productos) ---
+  const round2 = n => Math.round((Number(n) || 0) * 100) / 100
+  function setItem(idx, k, v) {
+    setForm(f => { const items = [...(f.items || [])]; items[idx] = { ...items[idx], [k]: v }; return { ...f, items } })
+  }
+  function addItem() {
+    setForm(f => ({ ...f, items: [...(f.items || []), { descripcion: '', cantidad: 1, precio_unit: '', iva_id: Number(f.iva_id) || 4 }] }))
+  }
+  function delItem(idx) {
+    setForm(f => ({ ...f, items: (f.items || []).filter((_, i) => i !== idx) }))
+  }
+  // Totales calculados desde los ítems (para Factura C no hay IVA)
+  const totalesItems = useMemo(() => {
+    let neto = 0, iva = 0
+    ;(form.items || []).forEach(it => {
+      const n = (Number(it.cantidad) || 0) * (Number(it.precio_unit) || 0)
+      neto += n
+      if (!esFacturaC) iva += n * ((IVA_ALICUOTAS.find(a => a.id === Number(it.iva_id))?.pct) || 0) / 100
+    })
+    neto = round2(neto); iva = round2(iva)
+    return { neto, iva, total: round2(neto + iva) }
+  }, [form.items, esFacturaC])
+
   async function guardar() {
     if (!form.cuenta_id) return alert('Elegí una cuenta')
     if (!form.fecha) return alert('Fecha obligatoria')
@@ -856,7 +880,9 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
   // Emitir electrónicamente: pide el CAE a ARCA vía edge function
   async function emitir() {
     if (!form.cuenta_id) return alert('Elegí una cuenta')
-    const total = Number(form.monto_total) || 0
+    const itemsValidos = (form.items || []).filter(it => Number(it.cantidad) > 0 && Number(it.precio_unit) > 0)
+    if (itemsValidos.length === 0) return alert('Cargá al menos un ítem con cantidad y precio')
+    const total = totalesItems.total
     if (total <= 0) return alert('El total debe ser mayor a 0')
     const docTipo = Number(form.doc_tipo)
     if (docTipo !== 99 && !String(form.doc_nro).trim()) {
@@ -872,9 +898,15 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
       concepto: 1,
       fecha: form.fecha,
       importe_total: total,
-      importe_neto: esFacturaC ? total : (Number(form.monto_neto) || 0),
-      importe_iva: esFacturaC ? 0 : (Number(form.monto_iva) || 0),
+      importe_neto: totalesItems.neto,
+      importe_iva: esFacturaC ? 0 : totalesItems.iva,
       iva_id: Number(form.iva_id) || 4,
+      items: itemsValidos.map(it => ({
+        descripcion: it.descripcion || '',
+        cantidad: Number(it.cantidad) || 0,
+        precio_unit: Number(it.precio_unit) || 0,
+        iva_id: esFacturaC ? null : (Number(it.iva_id) || 4),
+      })),
       descripcion: form.concepto || null,
       condicion_pago: form.condicion_pago,
       contraparte_id: form.contraparte_id || null,
@@ -1077,34 +1109,69 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
 
         <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
           <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8, letterSpacing: 1 }}>💰 IMPORTES</div>
-          {modoArca && esFacturaC ? (
+          {modoArca ? (
             <>
-              <Campo label="Total *">
-                <input type="number" step="0.01" value={form.monto_total} onChange={e => set('monto_total', e.target.value)}
-                  style={{ ...inp, borderColor: 'var(--gold)', fontWeight: 700 }} />
-              </Campo>
-              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
-                Factura C (monotributo): no discrimina IVA. Se informa solo el total.
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', fontSize: 12, minWidth: 520 }}>
+                  <thead>
+                    <tr style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase' }}>
+                      <th style={{ textAlign: 'left', padding: '4px 6px' }}>Producto / descripción</th>
+                      <th style={{ textAlign: 'right', padding: '4px 6px', width: 70 }}>Cant.</th>
+                      <th style={{ textAlign: 'right', padding: '4px 6px', width: 100 }}>P. unit</th>
+                      {!esFacturaC && <th style={{ textAlign: 'center', padding: '4px 6px', width: 90 }}>IVA</th>}
+                      <th style={{ textAlign: 'right', padding: '4px 6px', width: 100 }}>Subtotal</th>
+                      <th style={{ width: 28 }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(form.items || []).map((it, idx) => {
+                      const sub = round2((Number(it.cantidad) || 0) * (Number(it.precio_unit) || 0))
+                      return (
+                        <tr key={idx} style={{ borderTop: '1px solid var(--border)' }}>
+                          <td style={{ padding: '4px 6px' }}>
+                            <input value={it.descripcion} onChange={e => setItem(idx, 'descripcion', e.target.value)}
+                              placeholder="Ej: Asado x kg" style={{ ...inp, padding: '6px 8px' }} />
+                          </td>
+                          <td style={{ padding: '4px 6px' }}>
+                            <input type="number" step="0.001" value={it.cantidad} onChange={e => setItem(idx, 'cantidad', e.target.value)}
+                              style={{ ...inp, padding: '6px 8px', textAlign: 'right' }} />
+                          </td>
+                          <td style={{ padding: '4px 6px' }}>
+                            <input type="number" step="0.01" value={it.precio_unit} onChange={e => setItem(idx, 'precio_unit', e.target.value)}
+                              style={{ ...inp, padding: '6px 8px', textAlign: 'right' }} />
+                          </td>
+                          {!esFacturaC && (
+                            <td style={{ padding: '4px 6px' }}>
+                              <select value={it.iva_id} onChange={e => setItem(idx, 'iva_id', Number(e.target.value))} style={{ ...inp, padding: '6px 4px' }}>
+                                {IVA_ALICUOTAS.map(a => <option key={a.id} value={a.id}>{a.pct}%</option>)}
+                              </select>
+                            </td>
+                          )}
+                          <td style={{ textAlign: 'right', padding: '4px 6px', fontWeight: 600 }}>{fmt$(sub)}</td>
+                          <td style={{ textAlign: 'center', padding: '4px 6px' }}>
+                            {(form.items || []).length > 1 && (
+                              <button onClick={() => delItem(idx)} style={{ background: 'transparent', border: 'none', color: '#ff8b8b', cursor: 'pointer' }}>🗑️</button>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
               </div>
-            </>
-          ) : modoArca ? (
-            <>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10 }}>
-                <Campo label="Neto">
-                  <input type="number" step="0.01" value={form.monto_neto}
-                    onChange={e => { set('monto_neto', e.target.value); recalcIvaArca(e.target.value, form.iva_id) }}
-                    style={inp} />
-                </Campo>
-                <Campo label="Alícuota IVA">
-                  <select value={form.iva_id} onChange={e => { set('iva_id', Number(e.target.value)); recalcIvaArca(form.monto_neto, Number(e.target.value)) }} style={inp}>
-                    {IVA_ALICUOTAS.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
-                  </select>
-                </Campo>
-                <Campo label="IVA"><input type="number" step="0.01" value={form.monto_iva} onChange={e => set('monto_iva', e.target.value)} style={inp} /></Campo>
-                <Campo label="Total *"><input type="number" step="0.01" value={form.monto_total} onChange={e => set('monto_total', e.target.value)} style={{ ...inp, borderColor: 'var(--gold)', fontWeight: 700 }} /></Campo>
+              <button onClick={addItem}
+                style={{ marginTop: 8, padding: '6px 14px', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
+                + Agregar ítem
+              </button>
+              <div style={{ marginTop: 10, display: 'flex', justifyContent: 'flex-end', gap: 18, fontSize: 13 }}>
+                {!esFacturaC && <span style={{ color: 'var(--muted)' }}>Neto: <strong style={{ color: 'var(--text)' }}>{fmt$(totalesItems.neto)}</strong></span>}
+                {!esFacturaC && <span style={{ color: 'var(--muted)' }}>IVA: <strong style={{ color: 'var(--text)' }}>{fmt$(totalesItems.iva)}</strong></span>}
+                <span style={{ color: 'var(--muted)' }}>Total: <strong style={{ color: 'var(--gold)', fontSize: 16 }}>{fmt$(totalesItems.total)}</strong></span>
               </div>
-              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
-                Cargá el <strong>Neto</strong> y elegí la <strong>alícuota</strong> — el IVA y el total se calculan solos (podés ajustarlos a mano). La carne es 10,5%.
+              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 6 }}>
+                {esFacturaC
+                  ? 'Factura C (monotributo): no discrimina IVA. ARCA recibe solo el total; el detalle va en la impresión.'
+                  : 'Cada ítem lleva su alícuota (carne 10,5%). ARCA recibe los totales; el detalle de productos va en la factura impresa.'}
               </div>
             </>
           ) : (
