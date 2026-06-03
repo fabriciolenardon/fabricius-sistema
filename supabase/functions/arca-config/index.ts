@@ -104,7 +104,8 @@ serve(async (req) => {
         return jsonError('Faltan el certificado y/o la clave. Cargalos primero.')
       }
       const environment = cfg.ambiente === 'produccion' ? 'prod' : 'dev'
-      const taxId = String(cuenta.cuit).replace(/[-\s.]/g, '')
+      // Autenticar con el CUIT del titular del certificado (apoderado si difiere)
+      const taxId = String(cfg.cert_cuit || cuenta.cuit).replace(/[-\s.]/g, '')
 
       const r = await afipAuth({
         environment, wsid: 'wsfe', tax_id: taxId,
@@ -125,21 +126,24 @@ serve(async (req) => {
     }
 
     if (accion === 'crear_cert_dev') {
-      // Genera el certificado de homologación Y autoriza el web service wsfe,
-      // ambos vía automations de AfipSDK (login a ARCA con la clave fiscal del CUIT).
+      // Genera el certificado de homologación Y autoriza el web service wsfe.
+      // Soporta APODERADO: el TITULAR del cert (arca_username) puede ser un CUIT
+      // distinto del EMISOR (cuenta.cuit). En ese caso se crea el cert del titular
+      // y se autoriza el wsfe del emisor desde la sesión del titular (delegación).
       // La clave fiscal NO se guarda.
-      const username = String(body.arca_username || '').trim() || String(cuenta.cuit).replace(/[-\s.]/g, '')
       const password = String(body.arca_password || '')
       const alias = (String(body.alias || 'fabricius').trim() || 'fabricius').replace(/[^a-zA-Z0-9]/g, '')
-      if (!password) return jsonError('Ingresá la clave fiscal de ARCA del CUIT')
-      const taxId = String(cuenta.cuit).replace(/[-\s.]/g, '')
+      if (!password) return jsonError('Ingresá la clave fiscal de ARCA')
+      const emisorCuit = String(cuenta.cuit).replace(/[-\s.]/g, '')
+      const certCuit = String(body.arca_username || '').replace(/[-\s.]/g, '') || emisorCuit
+      const esApoderado = certCuit !== emisorCuit
       const accessToken = body.afipsdk_access_token || Deno.env.get('AFIPSDK_ACCESS_TOKEN') || null
 
-      // 1) Crear certificado (si ya existe uno guardado y la automation falla, lo reusamos)
+      // 1) Crear certificado del TITULAR (si ya hay uno guardado y la automation falla, se reusa)
       const { data: existente } = await supabaseAdmin
         .from('arca_config').select('cert, key').eq('cuenta_id', cuenta_id).single()
       const certRes = await runAutomation('create-cert-dev',
-        { cuit: taxId, username, password, alias }, accessToken)
+        { cuit: certCuit, username: certCuit, password, alias }, accessToken)
       let cert = certRes.data?.cert ?? certRes.data?.data?.cert
       let key = certRes.data?.key ?? certRes.data?.data?.key
       if (!(cert && key)) {
@@ -147,17 +151,18 @@ serve(async (req) => {
         else return jsonError('No se pudo crear el certificado: ' + (certRes.error || 'sin cert/key'))
       }
 
-      // 2) Autorizar el web service wsfe para ese certificado
+      // 2) Autorizar el web service wsfe del EMISOR, logueado como el TITULAR
       const authRes = await runAutomation('auth-web-service-dev',
-        { cuit: taxId, username, password, alias, service: 'wsfe' }, accessToken)
+        { cuit: emisorCuit, username: certCuit, password, alias, service: 'wsfe' }, accessToken)
       if (!authRes.ok) {
         return jsonError('Certificado OK, pero no se pudo autorizar el web service wsfe: ' + authRes.error)
       }
 
-      // 3) Guardar y habilitar
+      // 3) Guardar y habilitar (cert_cuit solo si el titular difiere del emisor)
       const punto_venta = Number(body.punto_venta) || 1
       await supabaseAdmin.from('arca_config').upsert({
         cuenta_id, ambiente: 'homologacion', punto_venta, cert, key,
+        cert_cuit: esApoderado ? certCuit : null,
         afipsdk_access_token: body.afipsdk_access_token ? String(body.afipsdk_access_token).trim() : null,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'cuenta_id' })
@@ -165,7 +170,12 @@ serve(async (req) => {
         arca_habilitado: true, arca_ambiente: 'homologacion', arca_punto_venta: punto_venta,
       }).eq('id', cuenta_id)
 
-      return jsonOk({ creado: true, mensaje: 'Certificado generado y web service wsfe autorizado. Probá la conexión.' })
+      return jsonOk({
+        creado: true,
+        mensaje: esApoderado
+          ? `Certificado del apoderado (${certCuit}) generado y wsfe del emisor (${emisorCuit}) autorizado. Probá la conexión.`
+          : 'Certificado generado y web service wsfe autorizado. Probá la conexión.',
+      })
     }
 
     if (accion === 'estado') {

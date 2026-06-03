@@ -2012,9 +2012,12 @@ function ModalConfigArca({ cuenta, onCerrar, onGuardado }) {
             <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
               AfipSDK entra a ARCA con tu clave fiscal, crea el certificado de homologación y autoriza el servicio.
               La clave fiscal se usa solo para esto y <strong>no se guarda</strong>. Si preferís, pegá el cert/key a mano abajo.
+              <br /><strong>Apoderado:</strong> si esta cuenta factura a través de otro CUIT (ej. una SAS a la que se entra
+              con el CUIT de un apoderado), poné en <em>Usuario ARCA</em> el CUIT y clave del apoderado. La factura igual
+              se emite con el CUIT de esta cuenta.
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <Campo label="Usuario ARCA (CUIT)">
+              <Campo label="Usuario ARCA (CUIT del titular / apoderado)">
                 <input value={genUser} onChange={e => setGenUser(e.target.value)} style={inp} />
               </Campo>
               <Campo label="Clave fiscal de ARCA">

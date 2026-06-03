@@ -101,17 +101,21 @@ serve(async (req) => {
     const environment = cfg.ambiente === 'produccion' ? 'prod' : 'dev'
     const ws = environment === 'prod' ? WSFE.prod : WSFE.dev
     const punto_venta = Number(cfg.punto_venta) || 1
+    // Emisor del comprobante = CUIT de la cuenta. Titular del certificado puede
+    // ser un apoderado (cfg.cert_cuit) que entra a ARCA en nombre del emisor.
     const cuitNum = Number(String(cuenta.cuit).replace(/[-\s.]/g, ''))
+    const certCuitNum = Number(String(cfg.cert_cuit || cuenta.cuit).replace(/[-\s.]/g, ''))
     const accessToken = cfg.afipsdk_access_token || Deno.env.get('AFIPSDK_ACCESS_TOKEN') || null
 
-    // 1) Auth
+    // 1) Auth — se autentica con el titular del certificado (apoderado si difiere)
     const auth = await afipAuth({
-      environment, wsid: 'wsfe', tax_id: String(cuitNum),
+      environment, wsid: 'wsfe', tax_id: String(certCuitNum),
       cert: cfg.cert, key: cfg.key, accessToken,
     })
     if (!auth.ok || !auth.data?.token || !auth.data?.sign) {
       return jsonError('No se pudo autenticar con ARCA: ' + (auth.error || 'sin token'))
     }
+    // El comprobante se emite a nombre del emisor (la cuenta), no del apoderado
     const Auth = { Token: auth.data.token, Sign: auth.data.sign, Cuit: cuitNum }
 
     // 2) Último autorizado → siguiente número
