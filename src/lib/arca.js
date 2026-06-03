@@ -43,8 +43,16 @@ export const CONCEPTOS = [
   { v: 3, l: 'Productos y Servicios' },
 ]
 
+// Alícuotas de IVA (código AFIP). Carne = 10,5%.
+export const IVA_ALICUOTAS = [
+  { id: 4, label: '10,5% (carne)', pct: 10.5 },
+  { id: 5, label: '21%', pct: 21 },
+  { id: 3, label: '0% / Exento', pct: 0 },
+  { id: 6, label: '27%', pct: 27 },
+]
+
 // Comprobantes que la edge function `arca-emitir` ya soporta.
-export const COMPROBANTES_SOPORTADOS = [11, 6]
+export const COMPROBANTES_SOPORTADOS = [11, 6, 1]
 
 // Sugiere qué comprobantes puede emitir una cuenta según su condición IVA.
 // Monotributo → Factura C. Responsable Inscripto / SAS → A (a RI) o B (a CF).
