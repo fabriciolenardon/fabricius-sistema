@@ -241,6 +241,9 @@ const [piezasEmbutido, setPiezasEmbutido] = useState({
 const [kgCarneBovinaEmbutido, setKgCarneBovinaEmbutido] = useState('')
 const [kgQuesoEmbutido, setKgQuesoEmbutido] = useState('')
 const [pctAumentoEmbutido, setPctAumentoEmbutido] = useState(10)
+// Peso real embutido por variedad (parrilleros). Si se carga, la merma sale sola.
+const [kgComunes, setKgComunes] = useState('')
+const [kgSaborizados, setKgSaborizados] = useState('')
 const [elaboraciones, setElaboraciones] = useState([])
 const [piezasIndividuales, setPiezasIndividuales] = useState([])
 // Historial completo de medias_stock (todos los estados) para la pestana
@@ -482,7 +485,14 @@ async function confirmarElaboracionEmbutido() {
   setLoading(true)
   try {
     const kgTotal = kgCerdo + (parseNumero(kgCarneBovinaEmbutido))
-    const kgFinal = parseFloat((kgTotal * (1 + pctAumentoEmbutido / 100)).toFixed(2))
+    const comunes = parseNumero(kgComunes)
+    const saborizados = parseNumero(kgSaborizados)
+    const totalElab = comunes + saborizados
+    // Si se cargó el peso real embutido (comunes + saborizados), ese es el kg final
+    // y la merma sale de ahí; si no, se usa el % manual.
+    const usaReal = totalElab > 0
+    const kgFinal = parseFloat((usaReal ? totalElab : kgTotal * (1 + pctAumentoEmbutido / 100)).toFixed(2))
+    const pctFinal = kgTotal > 0 ? parseFloat(((kgFinal / kgTotal - 1) * 100).toFixed(2)) : pctAumentoEmbutido
     const piezasUsadas = Object.entries(piezasEmbutido)
       .filter(([, v]) => parseFloat(v) > 0)
       .map(([tipo, v]) => ({ tipo, kg: parseFloat(v) }))
@@ -491,7 +501,9 @@ async function confirmarElaboracionEmbutido() {
       piezas_usadas: piezasUsadas,
       kg_carne_cerdo: kgCerdo,
       kg_carne_bovina: parseNumero(kgCarneBovinaEmbutido),
-      kg_elaborado: kgTotal, pct_aumento: pctAumentoEmbutido,
+      kg_elaborado: kgTotal, pct_aumento: pctFinal,
+      kg_comunes: usaReal ? comunes : null,
+      kg_saborizados: usaReal ? saborizados : null,
       kg_final: kgFinal, maduracion_completa: true, notas
     })
     for (const [tipo, v] of Object.entries(piezasEmbutido)) {
@@ -519,6 +531,7 @@ async function confirmarElaboracionEmbutido() {
     showAlert(`✅ ${kgFinal.toFixed(1)} kg de embutidos elaborados al stock`)
     setPiezasEmbutido({ cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '', cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: '' })
     setKgCarneBovinaEmbutido(''); setKgQuesoEmbutido(''); setNotas('')
+    setKgComunes(''); setKgSaborizados('')
     await cargarDatos(); onSaved()
   } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
   setLoading(false)
@@ -1201,6 +1214,41 @@ async function confirmarDesposteCerdo() {
         <label>🥩 Carne bovina (kg)</label>
         <input type="number" step="0.1" placeholder="0" value={kgCarneBovinaEmbutido} onChange={e => setKgCarneBovinaEmbutido(e.target.value)} style={{ ...inp, borderColor: 'var(--gold)' }} />
       </div>
+
+      {tipoElaboracion === 'embutido' && (() => {
+        const kgCerdoB = Object.values(piezasEmbutido).reduce((s, v) => s + (parseFloat(v) || 0), 0)
+        const kgTotB = kgCerdoB + parseNumero(kgCarneBovinaEmbutido)
+        const totalElab = parseNumero(kgComunes) + parseNumero(kgSaborizados)
+        const mermaCalc = (kgTotB > 0 && totalElab > 0) ? ((totalElab / kgTotB - 1) * 100) : null
+        return (
+          <div style={{ background: '#1a1a2a', border: '1px solid #2a2a5a', borderRadius: 10, padding: '12px 14px', marginBottom: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#7db5ff', marginBottom: 8 }}>🌭 Peso real embutido (chorizos terminados)</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+              <div>
+                <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Parrilleros Comunes (kg)</label>
+                <input type="number" step="0.1" placeholder="0" value={kgComunes} onChange={e => setKgComunes(e.target.value)} style={{ ...inp, borderColor: kgComunes ? 'var(--gold)' : 'var(--border)' }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Parrilleros Saborizados (kg)</label>
+                <input type="number" step="0.1" placeholder="0" value={kgSaborizados} onChange={e => setKgSaborizados(e.target.value)} style={{ ...inp, borderColor: kgSaborizados ? 'var(--gold)' : 'var(--border)' }} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px dashed var(--border)', paddingTop: 8 }}>
+              <div>
+                <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Total elaborado</div>
+                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: 'var(--gold)' }}>{totalElab.toFixed(1)} kg</div>
+              </div>
+              {mermaCalc !== null && (
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Merma calculada</div>
+                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: mermaCalc < 0 ? 'var(--red-light)' : 'var(--green)' }}>{mermaCalc >= 0 ? '+' : ''}{mermaCalc.toFixed(1)}%</div>
+                </div>
+              )}
+            </div>
+            {totalElab > 0 && <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 6 }}>Al cargar el peso real, la merma se calcula sola y reemplaza al % de arriba.</div>}
+          </div>
+        )
+      })()}
       {tipoElaboracion === 'salame' && tipoEmbutido === 'salame_holanda' && (
         <div className="form-group" style={{ marginBottom: 10 }}>
           <label>🧀 Queso Holanda (kg)</label>
@@ -1213,11 +1261,18 @@ async function confirmarDesposteCerdo() {
           const kgBovino = parseNumero(kgCarneBovinaEmbutido)
           const kgQueso = parseNumero(kgQuesoEmbutido)
           const kgTotal = kgCerdo + kgBovino + kgQueso
-          const kgFinal = tipoElaboracion === 'embutido' ? kgTotal * (1 + pctAumentoEmbutido / 100) : kgTotal * 0.5
+          // Si se cargó el peso real embutido (comunes + saborizados), ese es el final
+          // y la merma sale de ahí; si no, se usa el % manual.
+          const totalElabBox = tipoElaboracion === 'embutido' ? (parseNumero(kgComunes) + parseNumero(kgSaborizados)) : 0
+          const usaReal = totalElabBox > 0
+          const kgFinal = tipoElaboracion === 'embutido'
+            ? (usaReal ? totalElabBox : kgTotal * (1 + pctAumentoEmbutido / 100))
+            : kgTotal * 0.5
+          const pctMostrar = kgTotal > 0 ? ((kgFinal / kgTotal - 1) * 100) : 0
           return (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
               <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg carne total</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{kgTotal.toFixed(1)} kg</div></div>
-              <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>{tipoElaboracion === 'embutido' ? `${pctAumentoEmbutido >= 0 ? '+' : ''}${pctAumentoEmbutido}% ${pctAumentoEmbutido >= 0 ? 'agregados' : 'merma'}` : '-50% maduración'}</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: (kgFinal - kgTotal) >= 0 ? 'var(--green)' : 'var(--red-light)' }}>{(kgFinal - kgTotal) >= 0 ? '+' : ''}{(kgFinal - kgTotal).toFixed(1)} kg</div></div>
+              <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>{tipoElaboracion === 'embutido' ? `${pctMostrar >= 0 ? '+' : ''}${pctMostrar.toFixed(1)}% ${usaReal ? '(real)' : pctMostrar >= 0 ? 'agregados' : 'merma'}` : '-50% maduración'}</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: (kgFinal - kgTotal) >= 0 ? 'var(--green)' : 'var(--red-light)' }}>{(kgFinal - kgTotal) >= 0 ? '+' : ''}{(kgFinal - kgTotal).toFixed(1)} kg</div></div>
               <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg finales</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{kgFinal.toFixed(1)} kg</div></div>
             </div>
           )
