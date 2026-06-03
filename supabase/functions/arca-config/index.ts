@@ -126,15 +126,14 @@ serve(async (req) => {
     }
 
     if (accion === 'crear_cert_dev') {
-      // Genera el certificado de homologación Y autoriza el web service wsfe.
-      // Soporta APODERADO: el TITULAR del cert (arca_username) puede ser un CUIT
-      // distinto del EMISOR (cuenta.cuit). En ese caso se crea el cert del titular
-      // y se autoriza el wsfe del emisor desde la sesión del titular (delegación).
-      // La clave fiscal NO se guarda.
+      // Genera el certificado (homologación o PRODUCCIÓN) y autoriza el web service
+      // wsfe. Soporta APODERADO: el TITULAR del cert (arca_username) puede ser un
+      // CUIT distinto del EMISOR (cuenta.cuit). La clave fiscal NO se guarda.
+      const ambiente = body.ambiente === 'produccion' ? 'produccion' : 'homologacion'
+      const sufijo = ambiente === 'produccion' ? 'prod' : 'dev' // create-cert-prod / auth-web-service-prod
       const password = String(body.arca_password || '')
-      // Alias ÚNICO por cuenta: evita que al regenerar choque con un alias ya
-      // existente en ARCA (lo que cuelga la automation create-cert-dev).
-      const aliasDefault = 'fab' + cuenta_id
+      // Alias ÚNICO por cuenta+ambiente: evita chocar con un alias ya existente en ARCA.
+      const aliasDefault = 'fab' + cuenta_id + (ambiente === 'produccion' ? 'p' : '')
       const alias = (String(body.alias || aliasDefault).trim() || aliasDefault).replace(/[^a-zA-Z0-9]/g, '')
       if (!password) return jsonError('Ingresá la clave fiscal de ARCA')
       const emisorCuit = String(cuenta.cuit).replace(/[-\s.]/g, '')
@@ -145,7 +144,7 @@ serve(async (req) => {
       // 1) Crear certificado del TITULAR (si ya hay uno guardado y la automation falla, se reusa)
       const { data: existente } = await supabaseAdmin
         .from('arca_config').select('cert, key').eq('cuenta_id', cuenta_id).single()
-      const certRes = await runAutomation('create-cert-dev',
+      const certRes = await runAutomation(`create-cert-${sufijo}`,
         { cuit: certCuit, username: certCuit, password, alias }, accessToken)
       let cert = certRes.data?.cert ?? certRes.data?.data?.cert
       let key = certRes.data?.key ?? certRes.data?.data?.key
@@ -155,7 +154,7 @@ serve(async (req) => {
       }
 
       // 2) Autorizar el web service wsfe del EMISOR, logueado como el TITULAR
-      const authRes = await runAutomation('auth-web-service-dev',
+      const authRes = await runAutomation(`auth-web-service-${sufijo}`,
         { cuit: emisorCuit, username: certCuit, password, alias, service: 'wsfe' }, accessToken)
       if (!authRes.ok) {
         return jsonError('Certificado OK, pero no se pudo autorizar el web service wsfe: ' + authRes.error)
@@ -164,20 +163,21 @@ serve(async (req) => {
       // 3) Guardar y habilitar (cert_cuit solo si el titular difiere del emisor)
       const punto_venta = Number(body.punto_venta) || 1
       await supabaseAdmin.from('arca_config').upsert({
-        cuenta_id, ambiente: 'homologacion', punto_venta, cert, key,
+        cuenta_id, ambiente, punto_venta, cert, key,
         cert_cuit: esApoderado ? certCuit : null,
         afipsdk_access_token: body.afipsdk_access_token ? String(body.afipsdk_access_token).trim() : null,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'cuenta_id' })
       await supabaseAdmin.from('cuentas_fiscales').update({
-        arca_habilitado: true, arca_ambiente: 'homologacion', arca_punto_venta: punto_venta,
+        arca_habilitado: true, arca_ambiente: ambiente, arca_punto_venta: punto_venta,
       }).eq('id', cuenta_id)
 
+      const ambLabel = ambiente === 'produccion' ? 'PRODUCCIÓN' : 'homologación'
       return jsonOk({
         creado: true,
         mensaje: esApoderado
-          ? `Certificado del apoderado (${certCuit}) generado y wsfe del emisor (${emisorCuit}) autorizado. Probá la conexión.`
-          : 'Certificado generado y web service wsfe autorizado. Probá la conexión.',
+          ? `Certificado de ${ambLabel} del apoderado (${certCuit}) generado y wsfe del emisor (${emisorCuit}) autorizado. Probá la conexión.`
+          : `Certificado de ${ambLabel} generado y web service wsfe autorizado. Probá la conexión.`,
       })
     }
 
