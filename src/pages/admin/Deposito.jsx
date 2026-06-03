@@ -1650,6 +1650,11 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
       const productoCaja = productosCajas.find(p => p.id === form.cajaProductoId)
       const kgTotalCajas = pesosValidos.reduce((s, kg) => s + kg, 0)
       const importeCajas = parseNumero(form.importe)
+      // BLOQUEO: las cajas tampoco entran sin precio.
+      if (!(importeCajas > 0)) {
+        showAlert({ type: 'error', msg: '⛔ Cargá el importe (precio) de las cajas — no se puede ingresar sin precio.' })
+        return
+      }
       const precioPromedioKg = kgTotalCajas > 0 ? importeCajas / kgTotalCajas : 0
       const descripcionCajas = `${productoCaja?.nombre || form.descripcion || (form.tipo === 'caja_cb' ? 'Caja CB' : 'Caja PT')} ×${cantPesperada}`
       // 1) Registrar la entrada contable (suma de las cajas)
@@ -1712,6 +1717,14 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     const importe = form.tipo === 'bovino_mr'
       ? kgTotal * parseNumero(form.precioKg)
       : parseNumero(form.importe)
+    // BLOQUEO: nada entra al depósito sin precio. Para media res se exige el
+    // precio/kg; para el resto, el importe (total). Así no quedan ingresos en $0.
+    if (!(importe > 0)) {
+      showAlert({ type: 'error', msg: form.tipo === 'bovino_mr'
+        ? '⛔ Cargá el precio por kg — no se puede ingresar una media res sin precio.'
+        : '⛔ Cargá el importe (precio total) — no se puede ingresar al depósito sin precio.' })
+      return
+    }
     // Si se seleccionó un producto pollo/rebozado, usar su nombre en la descripción.
     const productoSelec = productosFiltradosTipo.find(p => p.id === form.polloProductoId)
     const descripcionBase = productoSelec?.nombre || form.descripcion || form.tipo
@@ -3494,7 +3507,8 @@ function ProveedoresTab() {
   }
 
   async function guardarCompra() {
-    if (!formCompra.proveedor_nombre || !formCompra.importe) { showMsg('Completá proveedor e importe', 'error'); return }
+    if (!formCompra.proveedor_nombre) { showMsg('Seleccioná un proveedor', 'error'); return }
+    if (!(parseNumero(formCompra.importe) > 0)) { showMsg('⛔ Cargá el importe (precio) — debe ser mayor a 0', 'error'); return }
     await supabase.from('compras_proveedores').insert({ fecha: formCompra.fecha, semana_inicio: formCompra.semana_inicio || null, semana_fin: formCompra.semana_fin || null, proveedor_nombre: formCompra.proveedor_nombre, producto: formCompra.producto, kg: parseNumero(formCompra.kg), importe: parseNumero(formCompra.importe) })
     showMsg('✅ Compra registrada')
     setFormCompra(f => ({ ...f, producto: '', kg: '', importe: '', proveedor_nombre: '' })); fetchAll()
