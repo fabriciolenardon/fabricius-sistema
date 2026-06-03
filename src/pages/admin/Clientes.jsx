@@ -25,6 +25,12 @@ export function Clientes() {
   const [form, setForm] = useState({ nombre: '', nombre_fantasia: '', tipo: 'carniceria', telefono: '', localidad: '', domicilio: '', cuit: '', lista_precios: 'carn', notas: '' })
   // Modal de gestion del portal: { tipo: 'habilitar'|'credenciales'|'revocar', cliente, email, credenciales, loading }
   const [modalPortal, setModalPortal] = useState(null)
+  // Reporte "Cobranzas por período": aísla las compras/pagos de un rango de fechas
+  const [showCobranzas, setShowCobranzas] = useState(false)
+  const [cobDesde, setCobDesde] = useState('')
+  const [cobHasta, setCobHasta] = useState('')
+  const [cobData, setCobData] = useState(null)
+  const [cobLoading, setCobLoading] = useState(false)
 
   useEffect(() => { fetchClientes() }, [])
 
@@ -42,6 +48,45 @@ async function seleccionar(cliente) {
     const { data: rems } = await supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false })
     setRemitos(rems || [])
   }
+  // Reporte de cobranzas por período: suma, por cliente, los remitos (compras) y
+  // los pagos de un rango de fechas — aislado del saldo acumulado. Sirve para ver
+  // qué te compraron una semana y quién ya pagó esa compra.
+  async function calcularCobranzas() {
+    if (!cobDesde || !cobHasta) { alert('Elegí el rango de fechas (Desde y Hasta)'); return }
+    setCobLoading(true)
+    const [{ data: rems }, { data: movs }] = await Promise.all([
+      supabase.from('remitos').select('cliente_id, total, fecha').gte('fecha', cobDesde).lte('fecha', cobHasta),
+      supabase.from('movimientos_ctacte').select('cliente_id, haber, fecha').gte('fecha', cobDesde).lte('fecha', cobHasta).gt('haber', 0),
+    ])
+    const map = {}
+    ;(rems || []).forEach(r => {
+      if (!r.cliente_id) return
+      const m = (map[r.cliente_id] = map[r.cliente_id] || { comprado: 0, pagado: 0 })
+      m.comprado += Number(r.total) || 0
+    })
+    ;(movs || []).forEach(p => {
+      if (!p.cliente_id) return
+      const m = (map[p.cliente_id] = map[p.cliente_id] || { comprado: 0, pagado: 0 })
+      m.pagado += Number(p.haber) || 0
+    })
+    const filas = Object.entries(map).map(([cid, v]) => {
+      const cli = clientes.find(c => String(c.id) === String(cid))
+      return {
+        id: cid,
+        nombre: cli?.nombre || '(cliente eliminado)',
+        fantasia: cli?.nombre_fantasia || '',
+        localidad: cli?.localidad || '',
+        comprado: v.comprado,
+        pagado: v.pagado,
+        pendiente: Math.round((v.comprado - v.pagado) * 100) / 100,
+        saldoActual: Number(cli?.saldo) || 0,
+      }
+    }).filter(f => f.comprado > 0 || f.pagado > 0)
+    filas.sort((a, b) => b.pendiente - a.pendiente)
+    setCobData(filas)
+    setCobLoading(false)
+  }
+
  async function anularRemitoCliente(remito) {
   if (!confirm(`¿Anular Remito N° ${String(remito.numero).padStart(5,'0')} por $${Math.round(remito.total).toLocaleString('es-AR')}?`)) return
   const { data: { user } } = await supabase.auth.getUser()
@@ -334,8 +379,83 @@ async function eliminarMovimiento(mov) {
           <div className="page-title">CLIENTES & CTA. CTE.</div>
           <div className="page-sub">Carnicerías, gastronómicos, sucursales</div>
         </div>
-        <button className="btn btn-gold" onClick={abrirFormNuevo}>+ Nuevo cliente</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-ghost" onClick={() => setShowCobranzas(s => !s)}>📅 Cobranzas por período</button>
+          <button className="btn btn-gold" onClick={abrirFormNuevo}>+ Nuevo cliente</button>
+        </div>
       </div>
+
+      {showCobranzas && (
+        <div className="card" style={{ borderColor: 'var(--amber)', marginBottom: 20 }}>
+          <div className="card-title">📅 Cobranzas por período — qué te compraron y quién pagó</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
+            Elegí un rango (ej. la semana pasada, 25/05 → 31/05). Suma por cliente los <strong>remitos</strong> (compras) y los <strong>pagos</strong> de ese período, aislado del saldo acumulado — así ves qué te compraron esa semana y quién ya pagó esa compra.
+          </div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
+            <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>📅 Desde</label><input type="date" value={cobDesde} onChange={e => setCobDesde(e.target.value)} style={{ ...inp, width: 170 }} /></div>
+            <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>📅 Hasta</label><input type="date" value={cobHasta} onChange={e => setCobHasta(e.target.value)} style={{ ...inp, width: 170 }} /></div>
+            <button className="btn btn-gold" onClick={calcularCobranzas} disabled={cobLoading}>{cobLoading ? '⏳ Calculando...' : '🔍 Calcular'}</button>
+          </div>
+
+          {cobData && (() => {
+            const tComprado = cobData.reduce((s, f) => s + f.comprado, 0)
+            const tPagado = cobData.reduce((s, f) => s + f.pagado, 0)
+            const tPendiente = cobData.reduce((s, f) => s + f.pendiente, 0)
+            return (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
+                  <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, textAlign: 'center' }}>
+                    <div style={{ fontSize: 10, color: 'var(--muted)' }}>COMPRARON EN EL PERÍODO</div>
+                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 26, color: 'var(--amber)' }}>{fmt(tComprado)}</div>
+                  </div>
+                  <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, textAlign: 'center' }}>
+                    <div style={{ fontSize: 10, color: 'var(--muted)' }}>PAGARON EN EL PERÍODO</div>
+                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 26, color: 'var(--green)' }}>{fmt(tPagado)}</div>
+                  </div>
+                  <div style={{ background: 'rgba(255,107,107,0.08)', border: '1px solid var(--red-light)', borderRadius: 8, padding: 12, textAlign: 'center' }}>
+                    <div style={{ fontSize: 10, color: 'var(--muted)' }}>POR COBRAR DEL PERÍODO</div>
+                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 30, color: 'var(--red-light)' }}>{fmt(tPendiente)}</div>
+                  </div>
+                </div>
+
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', fontSize: 13, minWidth: 640 }}>
+                    <thead>
+                      <tr style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase' }}>
+                        <th style={{ textAlign: 'left', padding: '8px 6px' }}>Cliente</th>
+                        <th style={{ textAlign: 'right', padding: '8px 6px' }}>Comprado</th>
+                        <th style={{ textAlign: 'right', padding: '8px 6px' }}>Pagado</th>
+                        <th style={{ textAlign: 'right', padding: '8px 6px' }}>Pendiente período</th>
+                        <th style={{ textAlign: 'right', padding: '8px 6px' }}>Saldo actual</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cobData.map(f => (
+                        <tr key={f.id} style={{ borderTop: '1px solid var(--border)' }}>
+                          <td style={{ padding: '7px 6px' }}>
+                            <div style={{ fontWeight: 600 }}>{f.nombre}</div>
+                            <div style={{ fontSize: 10, color: 'var(--muted)' }}>{[f.fantasia, f.localidad].filter(Boolean).join(' · ')}</div>
+                          </td>
+                          <td style={{ textAlign: 'right', padding: '7px 6px', color: 'var(--amber)' }}>{fmt(f.comprado)}</td>
+                          <td style={{ textAlign: 'right', padding: '7px 6px', color: 'var(--green)' }}>{f.pagado > 0 ? fmt(f.pagado) : '—'}</td>
+                          <td style={{ textAlign: 'right', padding: '7px 6px', fontWeight: 700, color: f.pendiente > 0.5 ? 'var(--red-light)' : 'var(--green)' }}>
+                            {f.pendiente > 0.5 ? fmt(f.pendiente) : '✅ pagó'}
+                          </td>
+                          <td style={{ textAlign: 'right', padding: '7px 6px', color: f.saldoActual > 0 ? 'var(--red-light)' : 'var(--muted)' }}>{fmt(f.saldoActual)}</td>
+                        </tr>
+                      ))}
+                      {cobData.length === 0 && <tr><td colSpan={5} style={{ textAlign: 'center', padding: 24, color: 'var(--muted)' }}>Sin movimientos en ese período.</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 8 }}>
+                  "Pendiente período" = comprado − pagado dentro del rango (aproximado, los pagos de otra semana no se mezclan). "Saldo actual" es la deuda total de hoy del cliente.
+                </div>
+              </>
+            )
+          })()}
+        </div>
+      )}
 
       {showForm && (
         <div className="card" style={{ borderColor: 'var(--gold)', marginBottom: 20 }}>
