@@ -40,14 +40,12 @@ async function soapCall(ambiente: string, action: string, inner: string): Promis
 
 function asArray(x: any): any[] { return x == null ? [] : (Array.isArray(x) ? x : [x]) }
 
+// Solo ERRORES reales (Errors.Err). Los Events son avisos informativos de ARCA
+// (ej. el [39] de la RG 5616) y NO deben bloquear la emisión.
 export function extraerErrores(res: any): string {
   const out: string[] = []
   for (const e of asArray(res?.Errors?.Err)) {
     const msg = e?.Msg ?? e?.Mensaje
-    if (msg) out.push(e?.Code ? `[${e.Code}] ${msg}` : String(msg))
-  }
-  for (const e of asArray(res?.Events?.Evt)) {
-    const msg = e?.Msg
     if (msg) out.push(e?.Code ? `[${e.Code}] ${msg}` : String(msg))
   }
   return out.join(' · ')
@@ -68,9 +66,10 @@ export async function ultimoAutorizado(ambiente: string, auth: Auth, ptoVta: num
   const r = await soapCall(ambiente, 'FECompUltimoAutorizado', inner)
   if (!r.ok) return { ok: false, error: r.error }
   const res = r.body?.FECompUltimoAutorizadoResponse?.FECompUltimoAutorizadoResult
+  // Si vino un número (incluye 0 para PV nuevo), lo usamos aunque haya avisos.
+  if (res && res.CbteNro != null && res.CbteNro !== '') return { ok: true, nro: Number(res.CbteNro) }
   const err = extraerErrores(res)
-  if (err) return { ok: false, error: err }
-  return { ok: true, nro: Number(res?.CbteNro || 0) }
+  return { ok: false, error: err || 'no se obtuvo el número del último comprobante' }
 }
 
 // Pide el CAE. `det` es el FECAEDetRequest (objeto plano) y `ivaArray` las alícuotas.
