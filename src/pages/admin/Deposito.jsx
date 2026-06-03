@@ -1133,11 +1133,11 @@ async function confirmarDesposteCerdo() {
               <option value="chorizo_saborizado">🌭 Chorizo Saborizado</option>
               <option value="salchicha_parrillera">🌭 Salchicha Parrillera</option>
             </select>
-            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>% de aumento por agregados</label>
+            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>% de merma (−) o aumento (+)</label>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-              <input type="number" step="0.5" min="0" max="30" value={pctAumentoEmbutido} onChange={e => setPctAumentoEmbutido(parseFloat(e.target.value) || 0)}
-                style={{ ...inp, width: 80, borderColor: 'var(--gold)', textAlign: 'center', fontSize: 18, fontWeight: 700 }} />
-              <span style={{ fontSize: 12, color: 'var(--muted)' }}>% — vino, tripas, especias</span>
+              <input type="number" step="0.5" min="-50" max="30" value={pctAumentoEmbutido} onChange={e => setPctAumentoEmbutido(parseFloat(e.target.value) || 0)}
+                style={{ ...inp, width: 90, borderColor: 'var(--gold)', textAlign: 'center', fontSize: 18, fontWeight: 700 }} />
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>% — <strong style={{ color: '#ff8b8b' }}>negativo = merma</strong> · positivo = agregados (vino, tripas, especias)</span>
             </div>
           </div>
         )}
@@ -1217,7 +1217,7 @@ async function confirmarDesposteCerdo() {
           return (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
               <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg carne total</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{kgTotal.toFixed(1)} kg</div></div>
-              <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>{tipoElaboracion === 'embutido' ? `+${pctAumentoEmbutido}% agregados` : '-50% maduración'}</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: tipoElaboracion === 'embutido' ? 'var(--green)' : 'var(--red-light)' }}>{tipoElaboracion === 'embutido' ? '+' : ''}{(kgFinal - kgTotal).toFixed(1)} kg</div></div>
+              <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>{tipoElaboracion === 'embutido' ? `${pctAumentoEmbutido >= 0 ? '+' : ''}${pctAumentoEmbutido}% ${pctAumentoEmbutido >= 0 ? 'agregados' : 'merma'}` : '-50% maduración'}</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: (kgFinal - kgTotal) >= 0 ? 'var(--green)' : 'var(--red-light)' }}>{(kgFinal - kgTotal) >= 0 ? '+' : ''}{(kgFinal - kgTotal).toFixed(1)} kg</div></div>
               <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg finales</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{kgFinal.toFixed(1)} kg</div></div>
             </div>
           )
