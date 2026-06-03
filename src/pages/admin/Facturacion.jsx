@@ -2083,9 +2083,10 @@ function ModalConfigArca({ cuenta, onCerrar, onGuardado }) {
   async function generarCert() {
     if (!genPass) { setMsg({ ok: false, texto: 'Ingresá la clave fiscal de ARCA del CUIT para generar el certificado.' }); return }
     setGenerando(true)
-    setMsg({ ok: true, texto: '⏳ Generando certificado de testing en ARCA... puede tardar hasta ~1 minuto, no cierres la ventana.' })
+    setMsg({ ok: true, texto: `⏳ Generando certificado de ${ambiente === 'produccion' ? 'producción' : 'testing'} en ARCA... puede tardar hasta ~1 minuto, no cierres la ventana.` })
     const r = await crearCertTestingArca({
       cuenta_id: cuenta.id,
+      ambiente,
       arca_username: genUser,
       arca_password: genPass,
       punto_venta: Number(puntoVenta) || 1,
@@ -2130,12 +2131,19 @@ function ModalConfigArca({ cuenta, onCerrar, onGuardado }) {
           {yaConfig && <span style={{ color: '#7dff7d' }}> · Esta cuenta ya tiene credenciales cargadas (dejá los campos vacíos para conservarlas).</span>}
         </div>
 
-        {/* Generador automático de certificado de testing (homologación) */}
-        {ambiente === 'homologacion' && (
-          <div style={{ marginBottom: 16, padding: 14, borderRadius: 10, background: 'var(--surface2)', border: '1px dashed var(--gold)' }}>
-            <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4 }}>✨ Generar certificado de testing automáticamente</div>
+        {/* Generador automático de certificado (homologación o producción) */}
+        {(() => { const esProd = ambiente === 'produccion'; return (
+          <div style={{ marginBottom: 16, padding: 14, borderRadius: 10, background: 'var(--surface2)', border: `1px dashed ${esProd ? '#ff8b8b' : 'var(--gold)'}` }}>
+            <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4 }}>
+              ✨ Generar certificado de {esProd ? 'PRODUCCIÓN' : 'testing'} automáticamente
+            </div>
+            {esProd && (
+              <div style={{ marginBottom: 8, padding: 8, background: '#3a1a1a', color: '#ff8b8b', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>
+                ⚠️ PRODUCCIÓN: el certificado y las facturas son REALES, con validez fiscal. Asegurate del CUIT, el punto de venta y la clave fiscal.
+              </div>
+            )}
             <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
-              AfipSDK entra a ARCA con tu clave fiscal, crea el certificado de homologación y autoriza el servicio.
+              AfipSDK entra a ARCA con tu clave fiscal, crea el certificado de {esProd ? 'producción' : 'homologación'} y autoriza el servicio.
               La clave fiscal se usa solo para esto y <strong>no se guarda</strong>. Si preferís, pegá el cert/key a mano abajo.
               <br /><strong>Apoderado:</strong> si esta cuenta factura a través de otro CUIT (ej. una SAS a la que se entra
               con el CUIT de un apoderado), poné en <em>Usuario ARCA</em> el CUIT y clave del apoderado. La factura igual
@@ -2151,11 +2159,11 @@ function ModalConfigArca({ cuenta, onCerrar, onGuardado }) {
               </Campo>
             </div>
             <button onClick={generarCert} disabled={generando || guardando || probando}
-              style={{ marginTop: 10, width: '100%', padding: 11, background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 800 }}>
-              {generando ? '⏳ Generando en ARCA...' : '✨ Generar certificado de testing'}
+              style={{ marginTop: 10, width: '100%', padding: 11, background: esProd ? '#ff8b8b' : 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 800 }}>
+              {generando ? '⏳ Generando en ARCA...' : `✨ Generar certificado de ${esProd ? 'producción' : 'testing'}`}
             </button>
           </div>
-        )}
+        ) })()}
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <Campo label="Ambiente">
