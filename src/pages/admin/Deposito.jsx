@@ -292,7 +292,9 @@ const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(n
   // y no debe sacar medias de circulación; toda media no despostada está
   // disponible para despostar/vender. (Ver DesposteMediaRes — ya no reserva.)
   supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false }).order('created_at', { ascending: false }),
-  supabase.from('despostes').select('*').order('fecha', { ascending: false }),
+  // Orden por fecha + created_at (timestamp real de emisión) para que los del
+  // mismo día queden de más nuevo a más viejo, no desordenados.
+  supabase.from('despostes').select('*').order('fecha', { ascending: false }).order('created_at', { ascending: false }).order('id', { ascending: false }),
   supabase.from('precios').select('*').eq('categoria', 'bovino_pieza'),
   supabase.from('stock_actual').select('*'),
   supabase.from('entradas_deposito').select('*').eq('tipo', 'cerdo').eq('despostada', false).order('fecha', { ascending: false }).order('created_at', { ascending: false }),
