@@ -48,8 +48,8 @@ function mapearStockTipo(cat, stockOrigen) {
   if (cat === 'bovino_pieza')     return 'bovino_pieza'
   if (cat === 'bovino_brosa')     return 'bovino_brosa'
   if (cat === 'cerdo')            return 'cerdo'        // capón
-  if (cat === 'cerdo_corte')      return 'cerdo_pieza'  // bucket genérico de piezas
-  if (cat === 'cerdo_pieza')      return 'cerdo_pieza'
+  if (cat === 'cerdo_corte')      return null           // sin origen → no revertir (cerdo_pieza eliminado)
+  if (cat === 'cerdo_pieza')      return null
   if (cat === 'pollo')            return 'pollo'
   if (cat === 'pollo_cajon')      return 'pollo'      // se revierte kg×cajón
   if (cat === 'rebozado')         return 'rebozado'
@@ -174,7 +174,8 @@ export default function HistorialCaja() {
         if (error) errores.push(`Caja #${item.caja_id}: ${error}`)
         continue
       }
-      // Pieza entera — volver a 'disponible' en piezas_stock
+      // Pieza entera — volver a 'disponible' en piezas_stock Y reponer su kg
+      // en el agregado stock_actual.bovino_pieza (la venta lo había descontado).
       if (item.pieza_id) {
         const { error } = await supabase.from('piezas_stock').update({
           estado: 'disponible',
@@ -187,6 +188,12 @@ export default function HistorialCaja() {
           notas_salida: null,
         }).eq('id', item.pieza_id)
         if (error) errores.push(`Pieza #${item.pieza_id}: ${error.message}`)
+        const { data: stkPz } = await supabase.from('stock_actual').select('*').eq('tipo', 'bovino_pieza').maybeSingle()
+        if (stkPz) {
+          await supabase.from('stock_actual')
+            .update({ kg_disponible: (Number(stkPz.kg_disponible) || 0) + (Number(item.kg) || 0) })
+            .eq('tipo', 'bovino_pieza')
+        }
         continue
       }
       const tipoStock = mapearStockTipo(item.categoria, item.stock_origen)

@@ -143,12 +143,13 @@ const CATEGORIA_A_STOCK = {
   caja_pt: 'caja_pt',
   // ── CERDO ──────────────────────────────────────────────
   // cerdo (capón entero) → stock_actual.tipo='cerdo' (capones)
-  // cerdo_corte / cerdo_pieza → usar stock_origen del producto si está
-  //   configurado (ej. 'cerdo_bondiola', 'cerdo_pierna'), sino caer en
-  //   el bucket genérico 'cerdo_pieza' que se SUMA al display de
-  //   "Cerdo Piezas" del dashboard. NUNCA descontar de 'cerdo' (capones).
-  cerdo_corte: 'cerdo_pieza',
-  cerdo_pieza: 'cerdo_pieza',
+  // cerdo_corte / cerdo_pieza → SIEMPRE se descuenta del stock_origen del
+  //   producto (ej. 'cerdo_bondiola', 'cerdo_pierna'). Todos los cortes de
+  //   cerdo tienen stock_origen configurado. El bucket genérico 'cerdo_pieza'
+  //   fue ELIMINADO (acumulaba negativos). Por eso NO se mapea acá: si un
+  //   producto de cerdo no tuviera stock_origen, resolverDescuentoStock cae al
+  //   nombre crudo de la categoría (queda visible como tipo sin mapear) en vez
+  //   de resucitar el bucket buggy. NUNCA descontar de 'cerdo' (capones).
   cerdo: 'cerdo',
   embutido: 'embutido',
   pollo: 'pollo',
@@ -2339,6 +2340,19 @@ const CATEGORIAS = {
   // también pueda usarlo al revertir el stock de un remito anulado.
   const DESTINOS_FRANQUICIA = { 'CENTRO': 'ALVEAR', 'MONTE CRISTO': 'MONTE CRISTO' }
   const categorias = [...new Set(todosPrecios.map(p => p.categoria))]
+  // 'pieza_entera' es una categoría VIRTUAL: no existe en `precios` porque no se
+  // vende de una lista de precios sino del stock individual de piezas despostadas
+  // (piezas_stock), igual que las cajas CB/PT. Como el dropdown se arma desde las
+  // categorías de `precios`, hay que inyectarla a mano para que el usuario pueda
+  // elegir una pieza (ej. un costillar de 21,7 kg) para vender en un remito.
+  const categoriasDropdown = (() => {
+    if (categorias.includes('pieza_entera')) return categorias
+    const lista = [...categorias]
+    const iRef = lista.indexOf('bovino_pieza')
+    const pos = iRef >= 0 ? iRef : (lista.indexOf('bovino_mr') >= 0 ? lista.indexOf('bovino_mr') + 1 : lista.length)
+    lista.splice(pos, 0, 'pieza_entera')
+    return lista
+  })()
   const productosFiltrados = todosPrecios.filter(p => p.categoria === form.categoria)
   const clientesFiltrados = clientes.filter(c => c.nombre.toLowerCase().includes(busqueda.toLowerCase()))
   const esClienteExterno = ['carniceria', 'mayorista'].includes(form.destino)
@@ -2757,13 +2771,17 @@ for (const item of items) {
           <div className="form-group"><label>Categoría</label>
             <select value={form.categoria} onChange={e => setForm(f => ({ ...f, categoria: e.target.value, productoId: '', precio: '' }))}>
               <option value="">— Seleccioná —</option>
-              {categorias.map(c => <option key={c} value={c}>{CATEGORIAS[c] || c}</option>)}
+              {categoriasDropdown.map(c => <option key={c} value={c}>{CATEGORIAS[c] || c}</option>)}
             </select>
           </div>
           <div className="form-group"><label>Producto</label>
             {esCaja ? (
               <div style={{ padding: '8px 12px', background: 'var(--surface2)', border: '1px dashed var(--border)', borderRadius: 8, fontSize: 12, color: 'var(--muted)' }}>
                 ↓ Elegí una caja del stock individual abajo
+              </div>
+            ) : form.categoria === 'pieza_entera' ? (
+              <div style={{ padding: '8px 12px', background: 'var(--surface2)', border: '1px dashed var(--border)', borderRadius: 8, fontSize: 12, color: 'var(--muted)' }}>
+                ↓ Elegí una pieza del stock individual abajo
               </div>
             ) : (
               <select value={form.productoId} onChange={e => onProductoChange(e.target.value)} disabled={!form.categoria}>
