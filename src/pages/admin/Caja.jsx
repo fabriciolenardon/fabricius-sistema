@@ -506,10 +506,12 @@ export default function Caja() {
     //      multiplicando unidades × kg_por_cajón (parseado del nombre,
     //      ej. "X20KG" → 20 kg por cada cajón vendido).
     // Función que decide a qué tipo de stock_actual va una venta.
-    // Para cerdo_corte/cerdo_pieza usa el stock_origen del producto si está
-    // configurado (ej. cerdo_bondiola); sino cae en cerdo_pieza (bucket
-    // genérico que ya se suma al display "Cerdo Piezas" del dashboard).
-    // NUNCA descuenta de 'cerdo' (capones) — esos sólo bajan al despostar.
+    // Para cerdo_corte/cerdo_pieza SIEMPRE se usa el stock_origen del producto
+    // (ej. cerdo_bondiola, cerdo_pierna). Ya no existe el bucket genérico
+    // 'cerdo_pieza' (eliminado): si un producto de cerdo no tiene stock_origen
+    // configurado, NO se descuenta de ningún stock (return null) para no
+    // resucitar el bucket buggy. NUNCA descuenta de 'cerdo' (capones) — esos
+    // sólo bajan al despostar.
     function mapearStock(cat, stockOrigen) {
       if (!cat) return null
       if (stockOrigen) return stockOrigen
@@ -518,8 +520,8 @@ export default function Caja() {
       if (cat === 'bovino_pieza')     return 'bovino_pieza'
       if (cat === 'bovino_brosa')     return 'bovino_brosa'
       if (cat === 'cerdo')            return 'cerdo'         // capón entero
-      if (cat === 'cerdo_corte')      return 'cerdo_pieza'   // bucket genérico de piezas
-      if (cat === 'cerdo_pieza')      return 'cerdo_pieza'
+      if (cat === 'cerdo_corte')      return null            // sin origen → no descontar (no recrear cerdo_pieza)
+      if (cat === 'cerdo_pieza')      return null
       if (cat === 'pollo')            return 'pollo'
       if (cat === 'pollo_cajon')      return 'pollo'         // unidad × kg_por_cajón
       if (cat === 'rebozado')         return 'rebozado'
@@ -535,10 +537,20 @@ export default function Caja() {
       // Caja individual: la maneja venderCaja() abajo, que ya decrementa
       // stock_actual.caja_cb / caja_pt por su peso individual.
       if (item.caja_id) continue
-      // Pieza entera: la marcamos abajo en piezas_stock. NO decrementamos
-      // bovino_pieza para no duplicar (la pieza ya estaba contabilizada en
-      // ese stock al despostarse). El stock_actual lo mantenemos via piezas_stock.
-      if (item.pieza_id) continue
+      // Pieza entera: además de marcarla 'vendida' en piezas_stock (abajo),
+      // descontamos su kg del agregado stock_actual.bovino_pieza — que es lo
+      // que el Dashboard muestra como "Piezas Bovinas". El desposte sumó ese
+      // kg al agregado al despostar; la venta lo resta (igual que el remito de
+      // Depósito). Sin esto el Dashboard quedaría inflado por las piezas vendidas.
+      if (item.pieza_id) {
+        const { data: stkPz } = await supabase.from('stock_actual').select('*').eq('tipo', 'bovino_pieza').maybeSingle()
+        if (stkPz) {
+          await supabase.from('stock_actual')
+            .update({ kg_disponible: (stkPz.kg_disponible || 0) - (item.kg || 0) })
+            .eq('tipo', 'bovino_pieza')
+        }
+        continue
+      }
       const tipoStock = mapearStock(item.categoria, item.stock_origen)
       if (!tipoStock) continue  // categoría sin tracking de stock → saltar
       // Para cajones de pollo/rebozado: multiplicar unidades × kg_por_cajón.

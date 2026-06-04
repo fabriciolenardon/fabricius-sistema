@@ -193,10 +193,7 @@ export default function Dashboard() {
     (stock.cerdo_tocino || 0) +
     (stock.cerdo_cuero || 0) +
     (stock.cerdo_cabeza || 0) +
-    // Bucket genérico — se usa cuando un producto cerdo_corte/cerdo_pieza
-    // no tiene stock_origen configurado a un cut específico. Antes estas
-    // ventas iban a 'cerdo' (capones) y dejaban capones en negativo.
-    (stock.cerdo_pieza || 0)
+    (stock.cerdo_huesos || 0)
   )
   const stockPollo = Math.max(0, stock.pollo || 0)
   const stockBrosas = Math.max(0, stock.bovino_brosa || 0)
@@ -380,7 +377,7 @@ export default function Dashboard() {
             // (despostesCerdo), NO las ventas de piezas. Las ventas/elaborados de piezas
             // (matambre, pulpa, etc. = cerdo_corte/cerdo_pieza) se descuentan de Cerdo Piezas.
             { label: '🐷 Cerdo Capones', valor: fmtKg(stockCerdo), color: 'var(--amber)', aprox: Math.round(stockCerdo / 107) + ' capones', bajo: stockCerdo < 50, stockKg: stockCerdo, tiposEntradas: ['cerdo'], tiposSalidas: ['cerdo'], despostesCerdo: true },
-            { label: '🐷 Cerdo Piezas', valor: fmtKg(stockCerdoPiezas), color: 'var(--amber)', aprox: 'al peso', bajo: stockCerdoPiezas < 20, stockKg: stockCerdoPiezas, tiposEntradas: ['cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza'], tiposSalidas: ['cerdo_pieza','cerdo_corte','cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza'] },
+            { label: '🐷 Cerdo Piezas', valor: fmtKg(stockCerdoPiezas), color: 'var(--amber)', aprox: 'al peso', bajo: stockCerdoPiezas < 20, stockKg: stockCerdoPiezas, tiposEntradas: ['cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza','cerdo_huesos'], tiposSalidas: ['cerdo_pieza','cerdo_corte','cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza','cerdo_huesos'] },
             { label: '🍗 Pollo', valor: fmtKg(stockPollo), color: 'var(--blue)', aprox: Math.round(stockPollo / 20) + ' cajones', bajo: stockPollo < 50, stockKg: stockPollo, tiposEntradas: ['pollo'], tiposSalidas: ['pollo'] },
             { label: '🫀 Brosas', valor: fmtKg(stockBrosas), color: 'var(--amber)', aprox: 'al peso', bajo: stockBrosas < 20, stockKg: stockBrosas, tiposEntradas: ['bovino_brosa'], tiposSalidas: ['bovino_brosa'] },
             { label: '🌭 Embutidos', valor: fmtKg(stockEmbutido), color: 'var(--purple)', aprox: 'al peso', bajo: stockEmbutido < 20, stockKg: stockEmbutido, tiposEntradas: ['embutido'], tiposSalidas: ['embutido'] },

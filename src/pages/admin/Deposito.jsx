@@ -143,12 +143,13 @@ const CATEGORIA_A_STOCK = {
   caja_pt: 'caja_pt',
   // ── CERDO ──────────────────────────────────────────────
   // cerdo (capón entero) → stock_actual.tipo='cerdo' (capones)
-  // cerdo_corte / cerdo_pieza → usar stock_origen del producto si está
-  //   configurado (ej. 'cerdo_bondiola', 'cerdo_pierna'), sino caer en
-  //   el bucket genérico 'cerdo_pieza' que se SUMA al display de
-  //   "Cerdo Piezas" del dashboard. NUNCA descontar de 'cerdo' (capones).
-  cerdo_corte: 'cerdo_pieza',
-  cerdo_pieza: 'cerdo_pieza',
+  // cerdo_corte / cerdo_pieza → SIEMPRE se descuenta del stock_origen del
+  //   producto (ej. 'cerdo_bondiola', 'cerdo_pierna'). Todos los cortes de
+  //   cerdo tienen stock_origen configurado. El bucket genérico 'cerdo_pieza'
+  //   fue ELIMINADO (acumulaba negativos). Por eso NO se mapea acá: si un
+  //   producto de cerdo no tuviera stock_origen, resolverDescuentoStock cae al
+  //   nombre crudo de la categoría (queda visible como tipo sin mapear) en vez
+  //   de resucitar el bucket buggy. NUNCA descontar de 'cerdo' (capones).
   cerdo: 'cerdo',
   embutido: 'embutido',
   pollo: 'pollo',
@@ -2323,7 +2324,7 @@ export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
 
 const CATEGORIAS = {
     bovino_mr: '🐄 Media Reses',
-    pieza_entera: '🥩 Pieza entera (del stock individual)',
+    pieza_entera: '🍖 Pieza Entera (Piezas Bovinas)',
     bovino_corte: '🥩 Bovinos — Cortes',
     bovino_brosa: '🫀 Brosas',
     bovino_pieza: '🍖 Piezas',
@@ -2339,7 +2340,22 @@ const CATEGORIAS = {
   // también pueda usarlo al revertir el stock de un remito anulado.
   const DESTINOS_FRANQUICIA = { 'CENTRO': 'ALVEAR', 'MONTE CRISTO': 'MONTE CRISTO' }
   const categorias = [...new Set(todosPrecios.map(p => p.categoria))]
-  const productosFiltrados = todosPrecios.filter(p => p.categoria === form.categoria)
+  // Una pieza SIEMPRE se vende entera del stock de piezas despostadas
+  // (piezas_stock), eligiendo el precio de la lista PIEZAS BOVINAS. Por eso el
+  // despacho usa la categoría virtual 'pieza_entera' y SE ELIMINA la categoría
+  // por kg 'bovino_pieza' del dropdown (sus productos siguen existiendo, pero
+  // solo como lista de precios para la pieza entera, no para vender kg sueltos).
+  const categoriasDropdown = (() => {
+    const lista = categorias.filter(c => c !== 'bovino_pieza' && c !== 'pieza_entera')
+    const insertAt = lista.indexOf('bovino_mr') >= 0 ? lista.indexOf('bovino_mr') + 1 : 0
+    lista.splice(insertAt, 0, 'pieza_entera')
+    return lista
+  })()
+  // Para 'pieza_entera' el precio sale de la lista PIEZAS BOVINAS (categoría
+  // bovino_pieza); para el resto, los productos de su propia categoría.
+  const productosFiltrados = form.categoria === 'pieza_entera'
+    ? todosPrecios.filter(p => p.categoria === 'bovino_pieza')
+    : todosPrecios.filter(p => p.categoria === form.categoria)
   const clientesFiltrados = clientes.filter(c => c.nombre.toLowerCase().includes(busqueda.toLowerCase()))
   const esClienteExterno = ['carniceria', 'mayorista'].includes(form.destino)
   const esFranquicia = ['CENTRO', 'MONTE CRISTO'].includes(form.destino)
@@ -2413,6 +2429,10 @@ async function agregarItem() {
     const esUnidadLocal = CATEGORIAS_POR_UNIDAD.has(form.categoria)
     const unidadLabel = esUnidadLocal ? 'cantidad' : 'kg'
     const esCajaLocal = form.categoria === 'bovino_caja_cb' || form.categoria === 'bovino_caja_pt'
+    // Pieza entera: primero exigimos elegir la pieza física del stock (de ahí
+    // sale el kg) y el tipo de pieza de la lista PIEZAS BOVINAS (de ahí el precio).
+    if (form.categoria === 'pieza_entera' && !piezaEnteraSeleccionada) { showAlert({ type: 'error', msg: 'Seleccioná la pieza del stock (abajo)' }); return }
+    if (esCajaLocal && !cajaSeleccionada) { showAlert({ type: 'error', msg: 'Seleccioná una caja del stock' }); return }
     // Para cajas CB/PT: si hay una caja seleccionada del stock individual,
     // el kg viene de la caja (no del input del form). El precio sí del form.
     if (esCajaLocal && cajaSeleccionada) {
@@ -2420,9 +2440,8 @@ async function agregarItem() {
     } else {
       if (!form.kg || !form.precio) { showAlert({ type: 'error', msg: `Completá ${unidadLabel} y precio` }); return }
     }
-    if (form.categoria === 'pieza_entera' && !piezaEnteraSeleccionada) { showAlert({ type: 'error', msg: 'Seleccioná una pieza del stock' }); return }
-    if (esCajaLocal && !cajaSeleccionada) { showAlert({ type: 'error', msg: 'Seleccioná una caja del stock' }); return }
-    if (form.categoria !== 'bovino_mr' && form.categoria !== 'pieza_entera' && !esCajaLocal && !form.productoId) {
+    // pieza_entera ahora SÍ requiere producto (el tipo de pieza define el precio).
+    if (form.categoria !== 'bovino_mr' && !esCajaLocal && !form.productoId) {
       showAlert({ type: 'error', msg: 'Seleccioná un producto' }); return
     }
 
@@ -2757,17 +2776,17 @@ for (const item of items) {
           <div className="form-group"><label>Categoría</label>
             <select value={form.categoria} onChange={e => setForm(f => ({ ...f, categoria: e.target.value, productoId: '', precio: '' }))}>
               <option value="">— Seleccioná —</option>
-              {categorias.map(c => <option key={c} value={c}>{CATEGORIAS[c] || c}</option>)}
+              {categoriasDropdown.map(c => <option key={c} value={c}>{CATEGORIAS[c] || c}</option>)}
             </select>
           </div>
-          <div className="form-group"><label>Producto</label>
+          <div className="form-group"><label>{form.categoria === 'pieza_entera' ? 'Tipo de pieza (precio)' : 'Producto'}</label>
             {esCaja ? (
               <div style={{ padding: '8px 12px', background: 'var(--surface2)', border: '1px dashed var(--border)', borderRadius: 8, fontSize: 12, color: 'var(--muted)' }}>
                 ↓ Elegí una caja del stock individual abajo
               </div>
             ) : (
               <select value={form.productoId} onChange={e => onProductoChange(e.target.value)} disabled={!form.categoria}>
-                <option value="">— Seleccioná producto —</option>
+                <option value="">{form.categoria === 'pieza_entera' ? '— Tipo de pieza (precio PIEZAS BOVINAS) —' : '— Seleccioná producto —'}</option>
                 {productosFiltrados.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
               </select>
             )}
