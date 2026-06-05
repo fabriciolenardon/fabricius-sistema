@@ -682,9 +682,18 @@ function parseMisComprobantes(texto) {
   const iNombre = colIdx(headers, ['denominacion'], ['razon social'], ['receptor'], ['emisor'])
   const iCuit = colIdx(headers, ['nro doc'], ['nro', 'doc'], ['cuit'], ['documento'])
   const iCae = colIdx(headers, ['cod', 'autoriz'], ['cae'])
-  const iNeto = colIdx(headers, ['neto', 'gravado'], ['imp neto'])
-  const iIva = colIdx(headers, ['iva'])
-  const iTotal = colIdx(headers, ['imp', 'total'], ['total'])
+  // OJO: el CSV de ARCA tiene MUCHAS columnas por alícuota ("Imp. Neto Gravado IVA
+  // 0%", "IVA 2,5%", … "Imp. Neto Gravado Total", "Total IVA", "Imp. Total"). Hay
+  // que elegir las columnas TOTALES, no la primera que matchea.
+  let iNeto = headers.indexOf('imp neto gravado total')
+  if (iNeto < 0) iNeto = headers.findIndex(h => h.includes('neto') && h.includes('gravado') && h.includes('total'))
+  if (iNeto < 0) iNeto = colIdx(headers, ['imp neto'], ['neto', 'gravado'])
+  let iIva = headers.indexOf('total iva')
+  if (iIva < 0) iIva = headers.findIndex(h => h.includes('total iva'))
+  if (iIva < 0) iIva = headers.findIndex(h => h === 'iva')
+  let iTotal = headers.indexOf('imp total')
+  if (iTotal < 0) iTotal = headers.indexOf('importe total')
+  if (iTotal < 0) iTotal = headers.findIndex(h => h.includes('total') && !h.includes('neto') && !h.includes('gravado') && !h.includes('iva'))
   if (iFecha < 0 || iTotal < 0) return { error: 'No reconozco las columnas (esperaba al menos Fecha e Imp. Total). ¿Es el CSV de Mis Comprobantes de ARCA?', filas: [] }
   const filas = []
   for (const r of rows.slice(1)) {
