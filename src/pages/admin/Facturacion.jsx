@@ -681,8 +681,11 @@ function parseMisComprobantes(texto) {
   const iTipo = colIdx(headers, ['tipo', 'comprob'])
   const iPv = colIdx(headers, ['punto', 'venta'])
   const iNro = colIdx(headers, ['numero', 'desde'], ['numero'], ['nro comprob'])
-  const iNombre = colIdx(headers, ['denominacion', 'emisor'], ['denominacion'], ['razon'])
-  const iCuit = colIdx(headers, ['nro', 'doc', 'emisor'], ['cuit'])
+  // Contraparte: en Recibidos es el EMISOR, en Emitidos el RECEPTOR. "denominacion"
+  // y "nro doc" cubren ambos casos sin importar la dirección del CSV.
+  const iNombre = colIdx(headers, ['denominacion'], ['razon social'], ['receptor'], ['emisor'])
+  const iCuit = colIdx(headers, ['nro doc'], ['nro', 'doc'], ['cuit'], ['documento'])
+  const iCae = colIdx(headers, ['cod', 'autoriz'], ['cae'])
   const iNeto = colIdx(headers, ['neto', 'gravado'], ['imp neto'])
   const iIva = colIdx(headers, ['iva'])
   const iTotal = colIdx(headers, ['imp', 'total'], ['total'])
@@ -697,6 +700,7 @@ function parseMisComprobantes(texto) {
       tipo_comprobante: iTipo >= 0 ? tipoCortoDelCsv(r[iTipo]) : 'Otro',
       punto_venta: iPv >= 0 ? String(r[iPv] || '').replace(/\D/g, '') : '',
       numero: iNro >= 0 ? String(r[iNro] || '').replace(/\D/g, '') : '',
+      cae: iCae >= 0 ? String(r[iCae] || '').replace(/\D/g, '') : '',
       contraparte_nombre: iNombre >= 0 ? String(r[iNombre] || '').trim() : '',
       contraparte_cuit: iCuit >= 0 ? String(r[iCuit] || '').replace(/\D/g, '') : '',
       monto_neto: iNeto >= 0 ? parseNumero(r[iNeto]) : 0,
@@ -706,8 +710,12 @@ function parseMisComprobantes(texto) {
   }
   return { error: null, filas }
 }
+// Normaliza punto de venta / número quitando ceros a la izquierda (para deduplicar).
+const nrmNum = x => String(parseInt(String(x ?? '').replace(/\D/g, ''), 10) || 0)
+const claveComprobante = f => `${f.tipo_comprobante || ''}|${nrmNum(f.punto_venta)}|${nrmNum(f.numero)}`
 
-function ModalImportarRecibidos({ cuenta, facturas, onCerrar, onImportado }) {
+function ModalImportarComprobantes({ cuenta, facturas, onCerrar, onImportado }) {
+  const [dir, setDir] = useState('recibida') // 'recibida' (compras) | 'emitida' (ventas)
   const [filas, setFilas] = useState(null)
   const [error, setError] = useState(null)
   const [nombreArch, setNombreArch] = useState('')
@@ -715,44 +723,51 @@ function ModalImportarRecibidos({ cuenta, facturas, onCerrar, onImportado }) {
 
   const yaCargadas = useMemo(() => {
     const set = new Set()
-    facturas.filter(f => f.cuenta_id === cuenta.id && f.tipo === 'recibida').forEach(f => {
-      set.add(`${String(f.tipo_comprobante || '')}|${String(f.punto_venta || '').replace(/\D/g, '')}|${String(f.numero || '').replace(/\D/g, '')}|${String(f.contraparte_cuit || '').replace(/\D/g, '')}`)
-    })
+    facturas.filter(f => f.cuenta_id === cuenta.id && f.tipo === dir).forEach(f => set.add(claveComprobante(f)))
     return set
-  }, [facturas, cuenta])
+  }, [facturas, cuenta, dir])
 
+  function procesar(texto) {
+    const res = parseMisComprobantes(String(texto || ''))
+    if (res.error) { setError(res.error); setFilas(null); return }
+    setError(null)
+    setFilas(res.filas.map(f => ({ ...f, dup: yaCargadas.has(claveComprobante(f)) })))
+  }
   function onFile(file) {
     if (!file) return
     setNombreArch(file.name); setError(null); setFilas(null)
     const reader = new FileReader()
-    reader.onload = () => {
-      const res = parseMisComprobantes(String(reader.result || ''))
-      if (res.error) { setError(res.error); return }
-      const marcadas = res.filas.map(f => ({ ...f, dup: yaCargadas.has(`${f.tipo_comprobante}|${f.punto_venta}|${f.numero}|${f.contraparte_cuit}`) }))
-      setFilas(marcadas)
-    }
+    reader.onload = () => procesar(String(reader.result || ''))
     reader.readAsText(file)
   }
+  function cambiarDir(d) { setDir(d); setFilas(null); setError(null); setNombreArch('') }
 
   const nuevas = (filas || []).filter(f => !f.dup)
   const dups = (filas || []).filter(f => f.dup).length
   const totalNuevas = nuevas.reduce((s, f) => s + (f.monto_total || 0), 0)
+  const esEmitida = dir === 'emitida'
 
   async function importar() {
     if (!nuevas.length) return
     setImportando(true)
     const datos = nuevas.map(f => ({
-      cuenta_id: cuenta.id, tipo: 'recibida', clasificacion: 'compra',
+      cuenta_id: cuenta.id, tipo: dir,
+      clasificacion: esEmitida ? 'venta' : 'compra',
       fecha: f.fecha, tipo_comprobante: f.tipo_comprobante,
       punto_venta: f.punto_venta || null, numero: f.numero || null,
       contraparte_nombre: f.contraparte_nombre || null, contraparte_cuit: f.contraparte_cuit || null,
       monto_neto: f.monto_neto || 0, monto_iva: f.monto_iva || 0, monto_otros: 0, monto_total: f.monto_total || 0,
+      ...(esEmitida && f.cae ? { cae: f.cae, arca_estado: 'autorizada' } : {}),
     }))
     const { error: e } = await supabase.from('facturas').insert(datos)
     setImportando(false)
     if (e) { alert('❌ ' + e.message); return }
-    onImportado(nuevas.length)
+    onImportado(nuevas.length, dir)
   }
+
+  const tabBtn = (d, label) => (
+    <button onClick={() => cambiarDir(d)} style={{ flex: 1, padding: '10px', borderRadius: 8, border: '1px solid ' + (dir === d ? 'var(--gold)' : 'var(--border)'), background: dir === d ? 'rgba(201,168,76,0.15)' : 'var(--surface2)', color: dir === d ? 'var(--gold)' : 'var(--muted)', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>{label}</button>
+  )
 
   return (
     <div onClick={onCerrar} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, overflow: 'auto' }}>
@@ -762,8 +777,13 @@ function ModalImportarRecibidos({ cuenta, facturas, onCerrar, onImportado }) {
           <button onClick={onCerrar} style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: 20, cursor: 'pointer' }}>✕</button>
         </div>
 
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          {tabBtn('recibida', '📥 Recibidos (compras)')}
+          {tabBtn('emitida', '📤 Emitidos (ventas)')}
+        </div>
+
         <div style={{ fontSize: 12, color: 'var(--muted)', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px', marginBottom: 14, lineHeight: 1.6 }}>
-          <strong>Cómo obtener el archivo:</strong> en ARCA → <strong>Mis Comprobantes</strong> → pestaña <strong>Recibidos</strong> → elegí el rango de fechas → <strong>Consultar</strong> → botón <strong>Exportar / Descargar CSV</strong>. Después subilo acá. Se cargan como <strong>Compra</strong> (en RI reclasificás los Gastos después).
+          <strong>Cómo obtener el archivo:</strong> ARCA → <strong>Mis Comprobantes</strong> → pestaña <strong>{esEmitida ? 'Emitidos' : 'Recibidos'}</strong> → elegí el rango de fechas → <strong>Consultar</strong> → <strong>Exportar / Descargar CSV</strong>. Subilo acá. {esEmitida ? 'Se cargan como Ventas (con su CAE).' : 'Se cargan como Compra (en RI reclasificás los Gastos después).'}
         </div>
 
         <input type="file" accept=".csv,text/csv,text/plain" onChange={e => onFile(e.target.files?.[0])}
@@ -781,7 +801,7 @@ function ModalImportarRecibidos({ cuenta, facturas, onCerrar, onImportado }) {
             <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
               <table style={{ width: '100%', fontSize: 11 }}>
                 <thead><tr style={{ color: 'var(--muted)', fontSize: 9, textTransform: 'uppercase' }}>
-                  <th style={{ textAlign: 'left', padding: 5 }}>Fecha</th><th style={{ textAlign: 'left', padding: 5 }}>Comp.</th><th style={{ textAlign: 'left', padding: 5 }}>Emisor</th><th style={{ textAlign: 'right', padding: 5 }}>Total</th>
+                  <th style={{ textAlign: 'left', padding: 5 }}>Fecha</th><th style={{ textAlign: 'left', padding: 5 }}>Comp.</th><th style={{ textAlign: 'left', padding: 5 }}>{esEmitida ? 'Receptor' : 'Emisor'}</th><th style={{ textAlign: 'right', padding: 5 }}>Total</th>
                 </tr></thead>
                 <tbody>
                   {filas.slice(0, 100).map((f, i) => (
@@ -803,7 +823,7 @@ function ModalImportarRecibidos({ cuenta, facturas, onCerrar, onImportado }) {
           <button onClick={onCerrar} style={{ flex: 1, padding: 12, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>Cancelar</button>
           <button onClick={importar} disabled={!nuevas.length || importando}
             style={{ flex: 2, padding: 12, background: nuevas.length ? 'var(--gold)' : 'var(--surface2)', color: nuevas.length ? '#000' : 'var(--muted)', border: 'none', borderRadius: 8, cursor: nuevas.length ? 'pointer' : 'not-allowed', fontWeight: 800, letterSpacing: 1 }}>
-            {importando ? '⏳ Importando...' : `⬇️ Importar ${nuevas.length} comprobantes`}
+            {importando ? '⏳ Importando...' : `⬇️ Importar ${nuevas.length} ${esEmitida ? 'ventas' : 'comprobantes'}`}
           </button>
         </div>
       </div>
@@ -990,9 +1010,9 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
           onCerrar={() => setCargar(null)} onGuardado={() => { setCargar(null); onChange() }} />
       )}
       {importar && cuenta && (
-        <ModalImportarRecibidos cuenta={cuenta} facturas={facturas}
+        <ModalImportarComprobantes cuenta={cuenta} facturas={facturas}
           onCerrar={() => setImportar(false)}
-          onImportado={(n) => { setImportar(false); onChange(); alert(`✅ ${n} comprobantes importados a ${cuenta.nombre}.`) }} />
+          onImportado={(n, d) => { setImportar(false); onChange(); alert(`✅ ${n} ${d === 'emitida' ? 'ventas' : 'comprobantes'} importados a ${cuenta.nombre}.`) }} />
       )}
     </div>
   )
