@@ -162,6 +162,7 @@ export default function Facturacion() {
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, marginTop: 8, flexWrap: 'wrap' }}>
         {tabBtn('cuentas', '🏛️ Cuentas')}
+        {tabBtn('historial', '📒 Historial')}
         {tabBtn('facturas', '🧾 Facturas')}
         {tabBtn('impuestos', '💸 Impuestos pagados')}
         {tabBtn('contrapartes', '👥 Contrapartes')}
@@ -178,6 +179,9 @@ export default function Facturacion() {
           facturacionPorCuenta={facturacionPorCuenta}
           onChange={cargarTodo}
         />
+      )}
+      {!loading && tab === 'historial' && (
+        <TabHistorial cuentas={cuentas} facturas={facturas} contrapartes={contrapartes} onChange={cargarTodo} />
       )}
       {!loading && tab === 'facturas' && (
         <TabFacturas cuentas={cuentas} facturas={facturas} contrapartes={contrapartes} onChange={cargarTodo} />
@@ -615,6 +619,186 @@ function Campo({ label, children }) {
 }
 
 // ============================================================
+// TAB HISTORIAL — control mensual por cuenta (ventas/compras/gastos)
+// RI: IVA débito (ventas) − IVA crédito (SOLO Factura A) = saldo IVA del mes.
+// Monotributo: sin IVA; muestra el acumulado 12 meses (control de recategorización).
+// ============================================================
+const MESES_NOMBRE = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
+// Clasificación de un comprobante: venta / compra / gasto (con fallback por tipo).
+function clasifFactura(f) { return f.clasificacion || (f.tipo === 'emitida' ? 'venta' : 'compra') }
+// Las Notas de Crédito restan; el resto suma.
+function esNotaCredito(f) { return NOTAS_CREDITO.has(Number(f.comprobante_codigo)) || String(f.tipo_comprobante || '').toUpperCase().startsWith('NC') }
+function signoFactura(f) { return esNotaCredito(f) ? -1 : 1 }
+// Letra del comprobante (para saber si el IVA es computable: solo letra A).
+function letraFactura(f) {
+  if (f.comprobante_codigo && COMPROBANTES[f.comprobante_codigo]) return COMPROBANTES[f.comprobante_codigo].letra
+  const t = String(f.tipo_comprobante || '').toUpperCase()
+  if (t.endsWith('A')) return 'A'
+  if (t.endsWith('B')) return 'B'
+  return 'C'
+}
+
+function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
+  const [cuentaId, setCuentaId] = useState(cuentas[0]?.id || '')
+  const [mes, setMes] = useState(() => String(fechaHoyARG() || '2026-01-01').slice(0, 7))
+  const [filtro, setFiltro] = useState('todos')
+  const [cargar, setCargar] = useState(null) // { tipo } | null
+
+  const cuenta = cuentas.find(c => c.id === Number(cuentaId))
+  const esRI = esCuentaRI(cuenta)
+
+  function cambiarMes(delta) {
+    const [y, m] = mes.split('-').map(Number)
+    const d = new Date(y, (m - 1) + delta, 1)
+    setMes(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+  }
+
+  const delCuenta = useMemo(() => facturas.filter(f => f.cuenta_id === Number(cuentaId)), [facturas, cuentaId])
+  const delMes = useMemo(() => delCuenta.filter(f => String(f.fecha || '').slice(0, 7) === mes), [delCuenta, mes])
+
+  const ventas = delMes.filter(f => clasifFactura(f) === 'venta')
+  const compras = delMes.filter(f => clasifFactura(f) === 'compra')
+  const gastos = delMes.filter(f => clasifFactura(f) === 'gasto')
+
+  const sumaT = arr => arr.reduce((s, f) => s + signoFactura(f) * (Number(f.monto_total) || 0), 0)
+  const sumaIva = arr => arr.reduce((s, f) => s + signoFactura(f) * (Number(f.monto_iva) || 0), 0)
+  // IVA crédito computable: SOLO de Facturas A (B/C recibidas → IVA no computable).
+  const sumaIvaA = arr => arr.reduce((s, f) => s + (letraFactura(f) === 'A' ? signoFactura(f) * (Number(f.monto_iva) || 0) : 0), 0)
+
+  const totVentas = sumaT(ventas), totCompras = sumaT(compras), totGastos = sumaT(gastos)
+  const ivaDebito = sumaIva(ventas)
+  const ivaCredito = sumaIvaA([...compras, ...gastos])
+  const saldoIva = ivaDebito - ivaCredito
+
+  const acum12 = useMemo(() => {
+    const d = new Date(); d.setMonth(d.getMonth() - 12)
+    const desde = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+    return delCuenta.filter(f => clasifFactura(f) === 'venta' && String(f.fecha || '') >= desde)
+      .reduce((s, f) => s + signoFactura(f) * (Number(f.monto_total) || 0), 0)
+  }, [delCuenta])
+
+  const detalle = useMemo(() => {
+    const arr = filtro === 'todos' ? delMes : delMes.filter(f => clasifFactura(f) === filtro)
+    return [...arr].sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)) || ((b.id || 0) - (a.id || 0)))
+  }, [delMes, filtro])
+  const pag = usePaginacion(detalle, 15)
+
+  const [y, m] = mes.split('-').map(Number)
+  const nombreMes = `${MESES_NOMBRE[(m || 1) - 1]} ${y}`
+
+  async function abrirPdf(f) {
+    if (f.cae) { imprimirComprobante(f, cuenta || {}); return }
+    if (f.archivo_url) {
+      const { data } = await supabase.storage.from('facturas').createSignedUrl(f.archivo_url, 120)
+      if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+      else alert('No se pudo abrir el PDF')
+    }
+  }
+
+  const navBtn = { padding: '6px 11px', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, cursor: 'pointer', fontWeight: 700 }
+  const chip = activo => ({ padding: '6px 14px', borderRadius: 20, border: '1px solid ' + (activo ? 'var(--gold)' : 'var(--border)'), background: activo ? 'rgba(201,168,76,0.15)' : 'var(--surface)', color: activo ? 'var(--gold)' : 'var(--muted)', cursor: 'pointer', fontWeight: 700, fontSize: 12 })
+  const badge = clasif => {
+    const map = { venta: ['📤 Venta', 'var(--gold)'], compra: ['📥 Compra', '#7a9dff'], gasto: ['🧾 Gasto', 'var(--purple)'] }
+    const [txt, col] = map[clasif] || ['—', 'var(--muted)']
+    return <span style={{ fontSize: 10, fontWeight: 700, color: col, border: `1px solid ${col}`, borderRadius: 6, padding: '1px 6px', whiteSpace: 'nowrap' }}>{txt}</span>
+  }
+
+  if (cuentas.length === 0) {
+    return <div className="card" style={{ textAlign: 'center', padding: 30, color: 'var(--muted)' }}>Primero cargá una cuenta en <strong>🏛️ Cuentas</strong>.</div>
+  }
+
+  return (
+    <div>
+      {/* Cuenta + mes + cargar */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+        <select value={cuentaId} onChange={e => setCuentaId(e.target.value)} style={{ ...inp, width: 250 }}>
+          {cuentas.map(c => <option key={c.id} value={c.id}>{c.nombre} · {esCuentaRI(c) ? 'Resp. Inscripto' : 'Monotributo'}</option>)}
+        </select>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button onClick={() => cambiarMes(-1)} style={navBtn}>◀</button>
+          <input type="month" value={mes} onChange={e => setMes(e.target.value)} style={{ ...inp, width: 160 }} />
+          <button onClick={() => cambiarMes(1)} style={navBtn}>▶</button>
+        </div>
+        <button onClick={() => setCargar({ tipo: 'recibida' })} style={{ marginLeft: 'auto', padding: '8px 16px', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>📥 Cargar compra/gasto</button>
+        <button onClick={() => setCargar({ tipo: 'emitida' })} style={{ padding: '8px 16px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>🧾 Cargar venta</button>
+      </div>
+
+      {/* Totales del mes */}
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6, letterSpacing: 1 }}>📅 {nombreMes.toUpperCase()}</div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+        <KPI label="📤 Ventas" value={fmt$(totVentas)} sub={`${ventas.length} comprob.`} color="var(--gold)" />
+        <KPI label="📥 Compras" value={fmt$(totCompras)} sub={`${compras.length} comprob.`} color="#7a9dff" />
+        <KPI label="🧾 Gastos" value={fmt$(totGastos)} sub={`${gastos.length} comprob.`} color="var(--purple)" />
+        {esRI ? (
+          <>
+            <KPI label="IVA Débito" value={fmt$(ivaDebito)} sub="de las ventas" color="#ff8b8b" />
+            <KPI label="IVA Crédito" value={fmt$(ivaCredito)} sub="solo Factura A" color="#7dff7d" />
+            <KPI label="Saldo IVA del mes" value={fmt$(Math.abs(saldoIva))} sub={saldoIva >= 0 ? 'a pagar' : 'a favor'} color={saldoIva >= 0 ? '#ff8b8b' : '#7dff7d'} />
+          </>
+        ) : (
+          <KPI label="📈 Facturado 12 meses" value={fmt$(acum12)} sub="ARCA lo usa p/ recategorizar" color="#7dff7d" />
+        )}
+      </div>
+
+      {/* Filtros */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+        {[['todos', 'Todos'], ['venta', 'Ventas'], ['compra', 'Compras'], ['gasto', 'Gastos']].map(([v, l]) => (
+          <button key={v} onClick={() => setFiltro(v)} style={chip(filtro === v)}>{l}</button>
+        ))}
+      </div>
+
+      {/* Detalle paginado */}
+      <div className="card" style={{ padding: 0 }}>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', fontSize: 12, minWidth: 880 }}>
+            <thead>
+              <tr style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase' }}>
+                <th style={{ textAlign: 'left', padding: '8px 6px' }}>Fecha</th>
+                <th style={{ textAlign: 'left', padding: '8px 6px' }}>Comprobante</th>
+                <th style={{ textAlign: 'left', padding: '8px 6px' }}>Contraparte</th>
+                <th style={{ textAlign: 'center', padding: '8px 6px' }}>Clasif.</th>
+                {esRI && <th style={{ textAlign: 'right', padding: '8px 6px' }}>Neto</th>}
+                {esRI && <th style={{ textAlign: 'right', padding: '8px 6px' }}>IVA</th>}
+                <th style={{ textAlign: 'right', padding: '8px 6px' }}>Total</th>
+                <th style={{ textAlign: 'center', padding: '8px 6px' }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {pag.pagina.length === 0 ? (
+                <tr><td colSpan={esRI ? 8 : 6} style={{ textAlign: 'center', padding: 24, color: 'var(--muted)' }}>Sin movimientos en {nombreMes}.</td></tr>
+              ) : pag.pagina.map(f => {
+                const sg = signoFactura(f)
+                return (
+                  <tr key={f.id} style={{ borderTop: '1px solid var(--border)' }}>
+                    <td style={{ padding: '6px 6px', whiteSpace: 'nowrap' }}>{fmtFecha(f.fecha)}</td>
+                    <td style={{ padding: '6px 6px', whiteSpace: 'nowrap' }}>{nombreComprobante(f)}{f.punto_venta && f.numero ? <span style={{ color: 'var(--muted)' }}> {String(f.punto_venta).padStart(4, '0')}-{String(f.numero).padStart(8, '0')}</span> : ''}</td>
+                    <td style={{ padding: '6px 6px' }}>{f.contraparte_nombre || '—'}</td>
+                    <td style={{ padding: '6px 6px', textAlign: 'center' }}>{badge(clasifFactura(f))}</td>
+                    {esRI && <td style={{ padding: '6px 6px', textAlign: 'right', color: 'var(--muted)' }}>{fmt$(sg * (Number(f.monto_neto) || 0))}</td>}
+                    {esRI && <td style={{ padding: '6px 6px', textAlign: 'right', color: letraFactura(f) === 'A' ? 'var(--text)' : 'var(--muted)' }}>{fmt$(sg * (Number(f.monto_iva) || 0))}</td>}
+                    <td style={{ padding: '6px 6px', textAlign: 'right', fontWeight: 700, color: sg < 0 ? '#ff8b8b' : 'var(--text)' }}>{sg < 0 ? '−' : ''}{fmt$(Number(f.monto_total) || 0)}</td>
+                    <td style={{ padding: '6px 6px', textAlign: 'center' }}>
+                      {(f.cae || f.archivo_url) && <button onClick={() => abrirPdf(f)} style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--gold)', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', fontSize: 11 }}>{f.cae ? '🖨️' : '📎'}</button>}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+        <Paginador {...pag.controles} label="comprobantes" />
+      </div>
+
+      {cargar && (
+        <FormFactura cuentas={cuentas} contrapartes={contrapartes} facturas={facturas}
+          cuentaInicial={Number(cuentaId)} tipoInicial={cargar.tipo}
+          onCerrar={() => setCargar(null)} onGuardado={() => { setCargar(null); onChange() }} />
+      )}
+    </div>
+  )
+}
+
+// ============================================================
 // TAB FACTURAS — listado paginado + form de alta
 // ============================================================
 function TabFacturas({ cuentas, facturas, contrapartes, onChange }) {
@@ -791,10 +975,11 @@ function receptorArcaDesde(condIvaTexto, cuit) {
   }
 }
 
-function FormFactura({ cuentas, contrapartes, facturas, onCerrar, onGuardado }) {
+function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInicial, onCerrar, onGuardado }) {
   const VACIO = {
-    cuenta_id: cuentas[0]?.id || '',
-    tipo: 'emitida',
+    cuenta_id: cuentaInicial || cuentas[0]?.id || '',
+    tipo: tipoInicial || 'emitida',
+    clasificacion: 'compra', // para recibidas en RI: 'compra' | 'gasto'
     fecha: hoyISO(),
     punto_venta: '0001',
     numero: '',
@@ -960,13 +1145,25 @@ function FormFactura({ cuentas, contrapartes, facturas, onCerrar, onGuardado }) 
     if (total <= 0) return alert('El total debe ser mayor a 0')
     setGuardando(true)
     const datos = {
-      ...form,
       cuenta_id: Number(form.cuenta_id),
-      contraparte_id: form.contraparte_id || null,
+      tipo: form.tipo,
+      // Emitidas = venta. Recibidas = compra/gasto (gasto solo se elige en RI).
+      clasificacion: form.tipo === 'emitida' ? 'venta' : (form.clasificacion || 'compra'),
+      fecha: form.fecha,
+      punto_venta: form.punto_venta || null,
+      numero: form.numero || null,
+      tipo_comprobante: form.tipo_comprobante || null,
       monto_neto: Number(form.monto_neto) || 0,
       monto_iva: Number(form.monto_iva) || 0,
       monto_otros: Number(form.monto_otros) || 0,
       monto_total: total,
+      contraparte_id: form.contraparte_id || null,
+      contraparte_nombre: form.contraparte_nombre || null,
+      contraparte_cuit: form.contraparte_cuit || null,
+      contraparte_iva: form.contraparte_iva || null,
+      concepto: form.concepto || null,
+      condicion_pago: form.condicion_pago || null,
+      notas: form.notas || null,
       archivo_url: archivoSubido?.ruta || null,
     }
     const { error } = await supabase.from('facturas').insert(datos)
@@ -1137,7 +1334,7 @@ function FormFactura({ cuentas, contrapartes, facturas, onCerrar, onGuardado }) 
           <Campo label="Tipo *">
             <select value={form.tipo} onChange={e => set('tipo', e.target.value)} style={inp} disabled={modoArca}>
               <option value="emitida">↗ Emitida (venta)</option>
-              <option value="recibida">↙ Recibida (compra)</option>
+              <option value="recibida">↙ Recibida (compra/gasto)</option>
             </select>
           </Campo>
           <Campo label="Fecha *">
@@ -1173,6 +1370,27 @@ function FormFactura({ cuentas, contrapartes, facturas, onCerrar, onGuardado }) 
             </>
           )}
         </div>
+
+        {/* Clasificación de la factura recibida: Compra o Gasto (gasto solo en RI) */}
+        {form.tipo === 'recibida' && (
+          <div style={{ marginTop: 12 }}>
+            {esCuentaRI(cuentaSel) ? (
+              <Campo label="¿Compra o Gasto?">
+                <select value={form.clasificacion} onChange={e => set('clasificacion', e.target.value)} style={inp}>
+                  <option value="compra">📥 Compra (mercadería / reventa)</option>
+                  <option value="gasto">🧾 Gasto (servicios, alquiler, etc.)</option>
+                </select>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                  En Responsable Inscripto el IVA crédito solo se computa de <strong>Facturas A</strong>.
+                </div>
+              </Campo>
+            ) : (
+              <div style={{ fontSize: 12, color: 'var(--muted)', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px' }}>
+                🐷 Monotributo: se registra como <strong>Compra</strong> (sin IVA computable).
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Comprobante asociado — obligatorio para Notas de Crédito/Débito */}
         {modoArca && esNotaCD && (
