@@ -145,7 +145,7 @@ serve(async (req) => {
     const errores = [extraerErrores(res), extraerObservaciones(dResp)].filter(Boolean).join(' · ')
 
     const filaBase = {
-      cuenta_id, tipo: 'emitida', fecha,
+      cuenta_id, tipo: 'emitida', clasificacion: 'venta', fecha,
       punto_venta: String(punto_venta).padStart(5, '0'), numero: String(numero).padStart(8, '0'),
       tipo_comprobante: letraComp, comprobante_codigo, doc_tipo, doc_nro, cond_iva_receptor,
       monto_neto: impNeto, monto_iva: esC ? 0 : impIva, monto_otros: 0, monto_total: impTotal,
