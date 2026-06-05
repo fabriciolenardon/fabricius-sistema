@@ -2914,8 +2914,13 @@ function ModalConfigArca({ cuenta, onCerrar, onGuardado }) {
   }
 
   async function guardar({ luegoProbar } = {}) {
-    if (!yaConfig && (!cert || !key)) {
-      setMsg({ ok: false, texto: 'Pegá o subí el certificado y la clave privada.' })
+    // Para una cuenta nueva solo exigimos el CERTIFICADO (.crt) que da ARCA.
+    // La clave privada (.key) NO se re-pide: con el método CSR ya quedó guardada
+    // cifrada en el servidor, y la edge function conserva la existente si el campo
+    // va vacío. Si alguien pega un cert sin key y el server no tiene ninguna, el
+    // error real lo muestra "Probar conexión" (no este guard).
+    if (!yaConfig && !cert) {
+      setMsg({ ok: false, texto: 'Pegá o subí el certificado (.crt) que te dio ARCA. La clave privada ya quedó guardada cuando generaste el CSR — dejá ese campo vacío.' })
       return false
     }
     setGuardando(true); setMsg(null)
