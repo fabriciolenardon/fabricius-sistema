@@ -904,6 +904,7 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
   const [filtro, setFiltro] = useState('todos')
   const [cargar, setCargar] = useState(null) // { tipo } | null
   const [importar, setImportar] = useState(false)
+  const [cargarImp, setCargarImp] = useState(false) // form de pago de impuesto/cuota
 
   const cuenta = cuentas.find(c => c.id === Number(cuentaId))
   const esRI = esCuentaRI(cuenta)
@@ -941,6 +942,20 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
     return () => { vivo = false }
   }, [cuentaId, rDesde, rHasta, refrescar])
 
+  // Impuestos / cuotas pagados en el período (tabla aparte `impuestos_pagados`).
+  // Para monotributo, acá cae la CUOTA DE MONOTRIBUTO: es gasto del perfil y NO
+  // discrimina IVA (el IVA va integrado en el componente impositivo). Son pocas
+  // filas (carga manual) → se traen directo, sin paginar.
+  const [impPeriodo, setImpPeriodo] = useState([])
+  useEffect(() => {
+    let vivo = true
+    supabase.from('impuestos_pagados').select('*')
+      .eq('cuenta_id', Number(cuentaId)).gte('fecha_pago', rDesde).lte('fecha_pago', rHasta)
+      .order('fecha_pago', { ascending: false })
+      .then(({ data }) => { if (vivo) setImpPeriodo(data || []) })
+    return () => { vivo = false }
+  }, [cuentaId, rDesde, rHasta, refrescar])
+
   // Detalle paginado del rango (server-side, con filtro).
   useEffect(() => {
     let vivo = true
@@ -967,6 +982,7 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
   const ivaCredito = Number(r.iva_credito) || 0
   const saldoIva = ivaDebito - ivaCredito
   const acum12 = Number(r.acum12) || 0
+  const totImpuestos = impPeriodo.reduce((s, p) => s + (Number(p.monto) || 0), 0)
   const totalPagDet = Math.max(1, Math.ceil(totalDet / PAGE))
 
   async function abrirPdf(f) {
@@ -1017,6 +1033,7 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
         )}
         <button onClick={() => setImportar(true)} style={{ marginLeft: 'auto', padding: '8px 16px', background: 'var(--surface2)', border: '1px solid var(--gold)', color: 'var(--gold)', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>📥 Importar Mis Comprobantes</button>
         <button onClick={() => setCargar({ tipo: 'recibida' })} style={{ padding: '8px 16px', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>➕ Compra/gasto</button>
+        <button onClick={() => setCargarImp(true)} style={{ padding: '8px 16px', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }} title="Cuota de monotributo, IVA DDJJ, Ganancias, IIBB, tasas… (gasto del perfil, sin IVA)">💸 Pago impuesto/cuota</button>
         <button onClick={() => setCargar({ tipo: 'emitida' })} style={{ padding: '8px 16px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>🧾 Cargar venta</button>
       </div>
 
@@ -1035,7 +1052,37 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
         ) : (
           <KPI label="📈 Facturado 12 meses" value={fmt$(acum12)} sub="ARCA lo usa p/ recategorizar" color="#7dff7d" />
         )}
+        <KPI label="💸 Impuestos / Cuotas" value={fmt$(totImpuestos)} sub={`${impPeriodo.length} pago(s) · sin IVA`} color="var(--purple)" />
       </div>
+
+      {/* Impuestos / cuotas del período (incluye la cuota de monotributo) — gasto del perfil, sin IVA. */}
+      {impPeriodo.length > 0 && (
+        <div className="card" style={{ padding: 12, marginBottom: 12, borderColor: 'rgba(150,120,220,0.45)' }}>
+          <div style={{ fontSize: 10, color: 'var(--muted)', letterSpacing: 1, marginBottom: 8 }}>💸 IMPUESTOS / CUOTAS PAGADOS EN EL PERÍODO · GASTO DEL PERFIL · SIN IVA</div>
+          <table style={{ width: '100%', fontSize: 12 }}>
+            <thead>
+              <tr style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase' }}>
+                <th style={{ textAlign: 'left', padding: '4px 6px' }}>Fecha pago</th>
+                <th style={{ textAlign: 'left', padding: '4px 6px' }}>Concepto</th>
+                <th style={{ textAlign: 'left', padding: '4px 6px' }}>Período</th>
+                <th style={{ textAlign: 'left', padding: '4px 6px' }}>Comprob. (VEP)</th>
+                <th style={{ textAlign: 'right', padding: '4px 6px' }}>Monto</th>
+              </tr>
+            </thead>
+            <tbody>
+              {impPeriodo.map(p => (
+                <tr key={p.id} style={{ borderTop: '1px solid var(--border)' }}>
+                  <td style={{ padding: '5px 6px', whiteSpace: 'nowrap' }}>{fmtFecha(p.fecha_pago)}</td>
+                  <td style={{ padding: '5px 6px' }}>{CONCEPTOS_IMPUESTO.find(c => c.v === p.concepto)?.l || p.concepto}</td>
+                  <td style={{ padding: '5px 6px', color: 'var(--muted)' }}>{p.periodo_mes ? `${String(p.periodo_mes).padStart(2, '0')}/${p.periodo_anio}` : `Anual ${p.periodo_anio}`}</td>
+                  <td style={{ padding: '5px 6px', color: 'var(--muted)' }}>{p.comprobante || '—'}</td>
+                  <td style={{ padding: '5px 6px', textAlign: 'right', fontWeight: 700 }}>{fmt$(p.monto)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Filtros */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
@@ -1108,6 +1155,11 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
         <ModalImportarComprobantes cuenta={cuenta}
           onCerrar={() => setImportar(false)}
           onImportado={(n, d) => { setImportar(false); setRefrescar(x => x + 1); onChange(); alert(`✅ ${n} ${d === 'emitida' ? 'ventas' : 'comprobantes'} importados a ${cuenta.nombre}.`) }} />
+      )}
+      {cargarImp && (
+        <FormImpuesto cuentas={cuentas} cuentaInicial={Number(cuentaId)}
+          onCerrar={() => setCargarImp(false)}
+          onGuardado={() => { setCargarImp(false); setRefrescar(x => x + 1); onChange() }} />
       )}
     </div>
   )
@@ -2061,10 +2113,10 @@ function TabImpuestos({ cuentas, impuestos, onChange }) {
   )
 }
 
-function FormImpuesto({ cuentas, onCerrar, onGuardado }) {
+function FormImpuesto({ cuentas, cuentaInicial, onCerrar, onGuardado }) {
   const hoy = new Date()
   const VACIO = {
-    cuenta_id: cuentas[0]?.id || '',
+    cuenta_id: cuentaInicial || cuentas[0]?.id || '',
     concepto: 'monotributo',
     periodo_anio: hoy.getFullYear(),
     periodo_mes: hoy.getMonth() + 1,
