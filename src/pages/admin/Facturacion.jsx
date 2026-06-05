@@ -29,7 +29,7 @@ import {
   COMPROBANTES, DOC_TIPOS, COND_IVA_RECEPTOR, IVA_ALICUOTAS,
   comprobantesDeCuenta, guardarConfigArca, probarConexionArca, emitirComprobante,
   crearCertTestingArca, generarCsrArca, buildQrUrl, qrImgUrl,
-  condIvaAReceptorAfip, comprobanteRecomendado, ES_NOTA_CD,
+  condIvaAReceptorAfip, comprobanteRecomendado, ES_NOTA_CD, NOTAS_CREDITO,
 } from '../../lib/arca'
 import { imprimirComprobante } from '../../lib/comprobantePdf'
 
