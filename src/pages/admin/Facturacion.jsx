@@ -64,7 +64,31 @@ const CONCEPTOS_IMPUESTO = [
   { v: 'otro',                l: '— Otro' },
 ]
 
-const TIPOS_COMPROBANTE = ['A','B','C','E','M','Ticket','NCA','NCB','NCC','NDA','NDB','NDC','Otro']
+// Carga manual: tipos de comprobante con NOMBRE COMPLETO (como en ARCA RCEL),
+// no abreviado. El `v` (clave corta) es lo que se guarda en facturas.tipo_comprobante.
+const TIPOS_COMPROBANTE = [
+  { v: 'A', l: 'Factura A' },
+  { v: 'B', l: 'Factura B' },
+  { v: 'C', l: 'Factura C' },
+  { v: 'E', l: 'Factura E (exportación)' },
+  { v: 'M', l: 'Factura M' },
+  { v: 'NDA', l: 'Nota de Débito A' },
+  { v: 'NDB', l: 'Nota de Débito B' },
+  { v: 'NDC', l: 'Nota de Débito C' },
+  { v: 'NCA', l: 'Nota de Crédito A' },
+  { v: 'NCB', l: 'Nota de Crédito B' },
+  { v: 'NCC', l: 'Nota de Crédito C' },
+  { v: 'Ticket', l: 'Ticket' },
+  { v: 'Otro', l: 'Otro' },
+]
+// Nombre completo de un comprobante a partir de la clave corta (tipo_comprobante).
+const LABEL_TIPO_COMPROBANTE = Object.fromEntries(TIPOS_COMPROBANTE.map(t => [t.v, t.l]))
+// Nombre descriptivo de una factura para listados: usa el código AFIP si es ARCA,
+// si no la clave corta de carga manual. Ej: "Nota de Crédito A" en vez de "NCA".
+function nombreComprobante(f) {
+  if (f?.comprobante_codigo && COMPROBANTES[f.comprobante_codigo]) return COMPROBANTES[f.comprobante_codigo].label
+  return LABEL_TIPO_COMPROBANTE[f?.tipo_comprobante] || f?.tipo_comprobante || '—'
+}
 
 const inp = {
   background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)',
@@ -700,7 +724,7 @@ function TabFacturas({ cuentas, facturas, contrapartes, onChange }) {
                       {f.tipo === 'emitida' ? '↗ EMI' : '↙ REC'}
                     </span>
                   </td>
-                  <td style={{ textAlign: 'center', padding: '6px 6px', color: 'var(--muted)' }}>{f.tipo_comprobante || '—'}</td>
+                  <td style={{ textAlign: 'center', padding: '6px 6px', color: 'var(--muted)', whiteSpace: 'nowrap' }}>{nombreComprobante(f)}</td>
                   <td style={{ padding: '6px 6px', fontFamily: 'monospace', fontSize: 11 }}>
                     {f.punto_venta ? `${f.punto_venta}-` : ''}{f.numero || '—'}
                     {f.archivo_url && (
@@ -1137,7 +1161,7 @@ function FormFactura({ cuentas, contrapartes, facturas, onCerrar, onGuardado }) 
             <>
               <Campo label="Comprobante">
                 <select value={form.tipo_comprobante} onChange={e => set('tipo_comprobante', e.target.value)} style={inp}>
-                  {TIPOS_COMPROBANTE.map(t => <option key={t} value={t}>{t}</option>)}
+                  {TIPOS_COMPROBANTE.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}
                 </select>
               </Campo>
               <Campo label="Punto venta">
