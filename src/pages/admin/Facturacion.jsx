@@ -905,6 +905,7 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
   const [cargar, setCargar] = useState(null) // { tipo } | null
   const [importar, setImportar] = useState(false)
   const [cargarImp, setCargarImp] = useState(false) // form de pago de impuesto/cuota
+  const [exportando, setExportando] = useState(null) // null | { hechos, total }
 
   const cuenta = cuentas.find(c => c.id === Number(cuentaId))
   const esRI = esCuentaRI(cuenta)
@@ -1005,6 +1006,55 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
     }
   }
 
+  // Exporta a un ZIP todos los comprobantes con archivo adjunto (PDF/foto) del
+  // período + un índice CSV. Pensado para pasarle al contador para el balance.
+  async function exportarArchivos() {
+    const { data: rows, error } = await supabase.from('facturas')
+      .select('fecha,tipo,clasificacion,tipo_comprobante,punto_venta,numero,contraparte_nombre,monto_neto,monto_iva,monto_total,archivo_url')
+      .eq('cuenta_id', Number(cuentaId)).gte('fecha', rDesde).lte('fecha', rHasta)
+      .not('archivo_url', 'is', null)
+      .order('fecha', { ascending: true })
+    if (error) { alert('❌ ' + error.message); return }
+    if (!rows || rows.length === 0) { alert('No hay comprobantes con archivo adjunto en este período.'); return }
+
+    const { default: JSZip } = await import('jszip')
+    const zip = new JSZip()
+    const esc = s => `"${String(s ?? '').replace(/"/g, '""')}"`
+    const filas = [['Fecha', 'Tipo', 'Clasif', 'Comprobante', 'Nro', 'Contraparte', 'Neto', 'IVA', 'Total', 'Archivo'].map(esc).join(';')]
+    const usados = {}
+    setExportando({ hechos: 0, total: rows.length })
+    for (let i = 0; i < rows.length; i++) {
+      const f = rows[i]
+      let nombreArch = ''
+      try {
+        const { data: sig } = await supabase.storage.from('facturas').createSignedUrl(f.archivo_url, 120)
+        if (sig?.signedUrl) {
+          const blob = await (await fetch(sig.signedUrl)).blob()
+          const ext = (f.archivo_url.match(/\.[a-zA-Z0-9]+$/) || ['.bin'])[0]
+          const comp = `${(f.tipo_comprobante || f.clasificacion || 'comprob')}_${String(f.numero || i + 1)}`.replace(/[^a-zA-Z0-9._-]/g, '_')
+          let base = `${f.fecha}_${comp}`
+          usados[base] = (usados[base] || 0) + 1
+          if (usados[base] > 1) base += `_${usados[base]}`
+          nombreArch = base + ext
+          zip.file(nombreArch, blob)
+        }
+      } catch { /* archivo faltante → sigue */ }
+      filas.push([f.fecha, f.tipo, f.clasificacion || (f.tipo === 'emitida' ? 'venta' : 'compra'),
+        f.tipo_comprobante || '', `${f.punto_venta || ''}-${f.numero || ''}`, f.contraparte_nombre || '',
+        f.monto_neto || 0, f.monto_iva || 0, f.monto_total || 0, nombreArch].map(esc).join(';'))
+      setExportando({ hechos: i + 1, total: rows.length })
+    }
+    zip.file('00_INDICE.csv', '﻿' + filas.join('\r\n'))
+    const out = await zip.generateAsync({ type: 'blob' })
+    const url = URL.createObjectURL(out)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `comprobantes_${(cuenta?.nombre || 'cuenta').trim().replace(/\s+/g, '_')}_${rDesde}_a_${rHasta}.zip`
+    a.click()
+    URL.revokeObjectURL(url)
+    setExportando(null)
+  }
+
   const navBtn = { padding: '6px 11px', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, cursor: 'pointer', fontWeight: 700 }
   const chip = activo => ({ padding: '6px 14px', borderRadius: 20, border: '1px solid ' + (activo ? 'var(--gold)' : 'var(--border)'), background: activo ? 'rgba(201,168,76,0.15)' : 'var(--surface)', color: activo ? 'var(--gold)' : 'var(--muted)', cursor: 'pointer', fontWeight: 700, fontSize: 12 })
   const badge = clasif => {
@@ -1042,7 +1092,8 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
             <input type="date" value={hasta} onChange={e => { setHasta(e.target.value); setPagDet(1) }} style={{ ...inp, width: 150 }} />
           </div>
         )}
-        <button onClick={() => setImportar(true)} style={{ marginLeft: 'auto', padding: '8px 16px', background: 'var(--surface2)', border: '1px solid var(--gold)', color: 'var(--gold)', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>📥 Importar Mis Comprobantes</button>
+        <button onClick={exportarArchivos} disabled={!!exportando} style={{ marginLeft: 'auto', padding: '8px 16px', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, cursor: exportando ? 'wait' : 'pointer', fontWeight: 700, fontSize: 13, opacity: exportando ? 0.6 : 1 }} title="Descarga un ZIP con todos los PDF/fotos adjuntos del período + un índice CSV, para pasarle al contador.">{exportando ? `📦 ${exportando.hechos}/${exportando.total}…` : '📦 Exportar archivos'}</button>
+        <button onClick={() => setImportar(true)} style={{ padding: '8px 16px', background: 'var(--surface2)', border: '1px solid var(--gold)', color: 'var(--gold)', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>📥 Importar Mis Comprobantes</button>
         <button onClick={() => setCargar({ tipo: 'recibida' })} style={{ padding: '8px 16px', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>➕ Compra/gasto</button>
         <button onClick={() => setCargarImp(true)} style={{ padding: '8px 16px', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }} title="Cuota de monotributo, IVA DDJJ, Ganancias, IIBB, tasas… (gasto del perfil, sin IVA)">💸 Pago impuesto/cuota</button>
         <button onClick={() => setCargar({ tipo: 'emitida' })} style={{ padding: '8px 16px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>🧾 Cargar venta</button>
@@ -1902,8 +1953,8 @@ function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInici
               </select>
             </Campo>
           </div>
-          <Campo label="📎 Adjuntar PDF (opcional)">
-            <input type="file" accept="application/pdf,image/*" onChange={e => subirPdf(e.target.files?.[0])}
+          <Campo label="📎 Adjuntar comprobante — PDF o foto (luz, combustible, etc.)">
+            <input type="file" accept="application/pdf,image/*" capture="environment" onChange={e => subirPdf(e.target.files?.[0])}
               style={{ ...inp, padding: '6px 8px' }} />
             {archivoSubido && (
               <div style={{ fontSize: 10, color: 'var(--green)', marginTop: 4 }}>✅ {archivoSubido.nombre} subido</div>
