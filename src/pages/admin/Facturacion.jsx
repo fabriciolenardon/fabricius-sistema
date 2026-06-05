@@ -29,7 +29,7 @@ import {
   COMPROBANTES, DOC_TIPOS, COND_IVA_RECEPTOR, IVA_ALICUOTAS,
   comprobantesDeCuenta, guardarConfigArca, probarConexionArca, emitirComprobante,
   crearCertTestingArca, generarCsrArca, buildQrUrl, qrImgUrl,
-  condIvaAReceptorAfip, comprobanteRecomendado,
+  condIvaAReceptorAfip, comprobanteRecomendado, ES_NOTA_CD,
 } from '../../lib/arca'
 import { imprimirComprobante } from '../../lib/comprobantePdf'
 
@@ -652,12 +652,15 @@ function TabFacturas({ cuentas, facturas, contrapartes, onChange }) {
           <option value="emitida">Solo emitidas</option>
           <option value="recibida">Solo recibidas</option>
         </select>
-        <button onClick={() => setMostrarLibro(true)}
-          style={{ marginLeft: 'auto', padding: '8px 16px', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
-          📊 Libro IVA
-        </button>
+        {/* Libro IVA solo para Responsables Inscriptos (la SAS). Monotributo no lleva. */}
+        {cuentas.some(esCuentaRI) && (
+          <button onClick={() => setMostrarLibro(true)}
+            style={{ marginLeft: 'auto', padding: '8px 16px', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+            📊 Libro IVA
+          </button>
+        )}
         <button onClick={() => setMostrarForm(true)}
-          style={{ padding: '8px 16px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+          style={{ marginLeft: cuentas.some(esCuentaRI) ? undefined : 'auto', padding: '8px 16px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
           + Cargar factura
         </button>
       </div>
@@ -741,7 +744,7 @@ function TabFacturas({ cuentas, facturas, contrapartes, onChange }) {
       </div>
 
       {mostrarForm && (
-        <FormFactura cuentas={cuentas} contrapartes={contrapartes} onCerrar={() => setMostrarForm(false)} onGuardado={() => { setMostrarForm(false); onChange() }} />
+        <FormFactura cuentas={cuentas} contrapartes={contrapartes} facturas={facturas} onCerrar={() => setMostrarForm(false)} onGuardado={() => { setMostrarForm(false); onChange() }} />
       )}
       {mostrarLibro && (
         <ModalLibroIva cuentas={cuentas} facturas={facturas} onCerrar={() => setMostrarLibro(false)} />
@@ -764,7 +767,7 @@ function receptorArcaDesde(condIvaTexto, cuit) {
   }
 }
 
-function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
+function FormFactura({ cuentas, contrapartes, facturas, onCerrar, onGuardado }) {
   const VACIO = {
     cuenta_id: cuentas[0]?.id || '',
     tipo: 'emitida',
@@ -791,6 +794,7 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
     items: [{ descripcion: '', cantidad: 1, precio_unit: '', iva_id: 4 }],
   }
   const [form, setForm] = useState(VACIO)
+  const [cbteAsoc, setCbteAsoc] = useState(null) // factura original asociada (NC/ND)
   const [guardando, setGuardando] = useState(false)
   const [archivoSubido, setArchivoSubido] = useState(null)
   const [modoArca, setModoArca] = useState(false)
@@ -804,12 +808,20 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
     [cuentas, form.cuenta_id]
   )
   const puedeArca = !!cuentaSel?.arca_habilitado
-  // Comprobantes que esta cuenta puede emitir y que la edge function soporta hoy (A=1, B=6, C=11)
+  // Comprobantes que esta cuenta puede emitir (Factura/NC/ND según condición IVA).
   const compsArca = useMemo(() => {
     if (!cuentaSel) return []
-    return comprobantesDeCuenta(cuentaSel).filter(c => c === 11 || c === 6 || c === 1)
+    return comprobantesDeCuenta(cuentaSel)
   }, [cuentaSel])
-  const esFacturaC = Number(form.comprobante_codigo) === 11
+  const esFacturaC = [11, 12, 13].includes(Number(form.comprobante_codigo)) // letra C: sin IVA discriminado
+  const esNotaCD = ES_NOTA_CD(form.comprobante_codigo)
+  // Facturas originales (emitidas con CAE) de esta cuenta, para asociar una NC/ND.
+  const facturasOriginales = useMemo(() => {
+    if (!cuentaSel) return []
+    return (facturas || []).filter(f =>
+      f.cuenta_id === cuentaSel.id && f.tipo === 'emitida' && f.cae && [1, 6, 11].includes(Number(f.comprobante_codigo))
+    )
+  }, [facturas, cuentaSel])
 
   // Si la cuenta no puede emitir, apagar el modo ARCA
   useEffect(() => { if (!puedeArca && modoArca) setModoArca(false) }, [puedeArca, modoArca])
@@ -819,16 +831,19 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
       set('comprobante_codigo', compsArca[0])
     }
   }, [modoArca, compsArca]) // eslint-disable-line
-  // Para emisor Responsable Inscripto: la LETRA depende del receptor (A=1 si el
-  // receptor es RI, B=6 si no). Monotributo siempre C (lo cubre compsArca). Así
-  // no se emite Factura A a un consumidor final ni Factura B a un RI por error.
+  // Para emisor Responsable Inscripto: la LETRA de la FACTURA depende del receptor
+  // (A=1 si el receptor es RI, B=6 si no). NO toca las NC/ND (esas las elige el
+  // usuario a mano). Monotributo siempre C.
   useEffect(() => {
     if (!modoArca || !cuentaSel) return
+    if (![1, 6, 11].includes(Number(form.comprobante_codigo))) return // no pisar NC/ND
     const recomendado = comprobanteRecomendado(cuentaSel.condicion_iva, form.contraparte_iva)
     if (recomendado !== 11 && Number(form.comprobante_codigo) !== recomendado) {
       set('comprobante_codigo', recomendado)
     }
   }, [modoArca, cuentaSel, form.contraparte_iva]) // eslint-disable-line
+  // Al cambiar de comprobante: si dejó de ser NC/ND, limpiar el asociado.
+  useEffect(() => { if (!esNotaCD && cbteAsoc) setCbteAsoc(null) }, [esNotaCD]) // eslint-disable-line
 
   function elegirContraparte(c) {
     if (!c) return
@@ -840,6 +855,30 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
       contraparte_iva: c.condicion_iva || 'consumidor_final',
       // Sincroniza la sección RECEPTOR (ARCA) con la contraparte elegida.
       ...receptorArcaDesde(c.condicion_iva, c.cuit),
+    }))
+  }
+
+  // Al asociar una NC/ND a su factura original: guarda la referencia y copia el
+  // receptor, la contraparte y los importes/ítems (mirror por defecto; editable
+  // para una NC/ND parcial).
+  function elegirOriginal(f) {
+    if (!f) { setCbteAsoc(null); return }
+    setCbteAsoc(f)
+    setForm(prev => ({
+      ...prev,
+      contraparte_id: f.contraparte_id || null,
+      contraparte_nombre: f.contraparte_nombre || '',
+      contraparte_cuit: f.contraparte_cuit || '',
+      contraparte_iva: f.contraparte_iva || 'consumidor_final',
+      doc_tipo: f.doc_tipo || 99,
+      doc_nro: f.doc_nro || '',
+      cond_iva_receptor: f.cond_iva_receptor || 5,
+      items: Array.isArray(f.items) && f.items.length
+        ? f.items.map(it => ({ descripcion: it.descripcion || '', cantidad: it.cantidad || 1, precio_unit: it.precio_unit ?? '', iva_id: it.iva_id || 4 }))
+        : prev.items,
+      monto_neto: f.monto_neto != null ? String(f.monto_neto) : prev.monto_neto,
+      monto_iva: f.monto_iva != null ? String(f.monto_iva) : prev.monto_iva,
+      monto_total: f.monto_total != null ? String(f.monto_total) : prev.monto_total,
     }))
   }
 
@@ -923,6 +962,9 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
     if (docTipo !== 99 && !String(form.doc_nro).trim()) {
       return alert('Ingresá el número de documento del receptor (o elegí Consumidor Final sin identificar)')
     }
+    if (esNotaCD && !cbteAsoc) {
+      return alert('Una Nota de Crédito/Débito necesita la factura original asociada. Elegila en "Comprobante asociado".')
+    }
     setEmitiendo(true); setErrorArca(null)
     const r = await emitirComprobante({
       cuenta_id: Number(form.cuenta_id),
@@ -932,6 +974,12 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
       cond_iva_receptor: Number(form.cond_iva_receptor),
       concepto: 1,
       fecha: form.fecha,
+      cbte_asoc: esNotaCD && cbteAsoc ? {
+        tipo: Number(cbteAsoc.comprobante_codigo),
+        pto_vta: Number(String(cbteAsoc.punto_venta).replace(/\D/g, '')),
+        nro: Number(String(cbteAsoc.numero).replace(/\D/g, '')),
+        fecha: cbteAsoc.fecha,
+      } : undefined,
       importe_total: total,
       importe_neto: totalesItems.neto,
       importe_iva: esFacturaC ? 0 : totalesItems.iva,
@@ -1101,6 +1149,32 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
             </>
           )}
         </div>
+
+        {/* Comprobante asociado — obligatorio para Notas de Crédito/Débito */}
+        {modoArca && esNotaCD && (
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8, letterSpacing: 1 }}>🔗 COMPROBANTE ASOCIADO (factura original) *</div>
+            {facturasOriginales.length === 0 ? (
+              <div style={{ fontSize: 12, color: '#ffb84d', background: '#3a2f1a', border: '1px solid #5a4a2d', borderRadius: 8, padding: '10px 12px' }}>
+                No hay facturas emitidas con CAE para esta cuenta. Una Nota de Crédito/Débito tiene que referenciar una factura existente.
+              </div>
+            ) : (
+              <select value={cbteAsoc?.id || ''} onChange={e => elegirOriginal(facturasOriginales.find(f => f.id === Number(e.target.value)))} style={inp}>
+                <option value="">— Elegí la factura original —</option>
+                {facturasOriginales.map(f => (
+                  <option key={f.id} value={f.id}>
+                    {COMPROBANTES[f.comprobante_codigo]?.label || f.comprobante_codigo} {String(f.punto_venta).padStart(5, '0')}-{String(f.numero).padStart(8, '0')} · {fmtFecha(f.fecha)} · {fmt$(f.monto_total)}{f.contraparte_nombre ? ' · ' + f.contraparte_nombre : ''}
+                  </option>
+                ))}
+              </select>
+            )}
+            {cbteAsoc && (
+              <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 6 }}>
+                ✅ Asociada a {COMPROBANTES[cbteAsoc.comprobante_codigo]?.label} {String(cbteAsoc.punto_venta).padStart(5, '0')}-{String(cbteAsoc.numero).padStart(8, '0')}. Copié receptor e importes — editalos si la nota es por un monto parcial.
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Datos del receptor exigidos por ARCA */}
         {modoArca && (
@@ -1808,6 +1882,10 @@ function SimuladorDistribucion({ cuentas, facturacionPorCuenta, onCerrar }) {
   )
 }
 
+// El Libro IVA es SOLO para Responsables Inscriptos (la SAS). Los monotributos
+// no llevan Libro IVA (no discriminan IVA), así que se excluyen.
+const esCuentaRI = c => c?.condicion_iva === 'responsable_inscripto' || c?.tipo === 'sas'
+
 // --- Modal de generación de Libro IVA Ventas/Compras ---
 function ModalLibroIva({ cuentas, facturas, onCerrar }) {
   const hoy = new Date()
@@ -1816,11 +1894,16 @@ function ModalLibroIva({ cuentas, facturas, onCerrar }) {
   const [anio, setAnio] = useState(hoy.getFullYear())
   const [mes, setMes] = useState(hoy.getMonth() + 1)
 
+  // Solo cuentas Responsable Inscripto (Libro IVA no aplica a monotributo).
+  const cuentasRI = cuentas.filter(esCuentaRI)
+  const idsRI = new Set(cuentasRI.map(c => c.id))
+
   function generar() {
     const desde = `${anio}-${String(mes).padStart(2, '0')}-01`
     const ult = new Date(anio, mes, 0).getDate()
     const hasta = `${anio}-${String(mes).padStart(2, '0')}-${String(ult).padStart(2, '0')}`
-    let filtradas = facturas.filter(f => f.fecha >= desde && f.fecha <= hasta)
+    // Solo facturas de cuentas RI (las de monotributo no van al Libro IVA).
+    let filtradas = facturas.filter(f => f.fecha >= desde && f.fecha <= hasta && idsRI.has(f.cuenta_id))
     if (cuentaId !== 'todas') filtradas = filtradas.filter(f => f.cuenta_id === Number(cuentaId))
 
     const contenido = tipo === 'ventas'
@@ -1841,9 +1924,18 @@ function ModalLibroIva({ cuentas, facturas, onCerrar }) {
           <button onClick={onCerrar} style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: 20, cursor: 'pointer' }}>✕</button>
         </div>
         <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
-          Genera un CSV que tu contador puede abrir directo en Excel. Separador <code>;</code> con BOM UTF-8 para acentos correctos.
+          El <strong>Libro IVA es solo para Responsables Inscriptos</strong> (la SAS). Los monotributos no llevan Libro IVA. Genera un CSV que tu contador abre directo en Excel (separador <code>;</code>, BOM UTF-8).
         </div>
 
+        {cuentasRI.length === 0 ? (
+          <div style={{ background: 'var(--surface2)', border: '1px dashed var(--border)', borderRadius: 8, padding: '18px 16px', textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
+            No tenés cuentas <strong>Responsable Inscripto</strong>. El Libro IVA no aplica a monotributo.
+            <div style={{ marginTop: 14 }}>
+              <button onClick={onCerrar} style={{ padding: '10px 20px', background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>Cerrar</button>
+            </div>
+          </div>
+        ) : (
+        <>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <Campo label="Tipo">
             <select value={tipo} onChange={e => setTipo(e.target.value)} style={inp}>
@@ -1851,10 +1943,10 @@ function ModalLibroIva({ cuentas, facturas, onCerrar }) {
               <option value="compras">📥 Compras (recibidas)</option>
             </select>
           </Campo>
-          <Campo label="Cuenta">
+          <Campo label="Cuenta (Resp. Inscripto)">
             <select value={cuentaId} onChange={e => setCuentaId(e.target.value)} style={inp}>
-              <option value="todas">Todas las cuentas</option>
-              {cuentas.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+              <option value="todas">Todas las RI</option>
+              {cuentasRI.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
             </select>
           </Campo>
           <Campo label="Año">
@@ -1878,6 +1970,8 @@ function ModalLibroIva({ cuentas, facturas, onCerrar }) {
             ⬇️ Descargar CSV
           </button>
         </div>
+        </>
+        )}
       </div>
     </div>
   )

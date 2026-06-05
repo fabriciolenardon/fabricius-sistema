@@ -84,6 +84,18 @@ export async function solicitarCAE(
   const servXml = det.FchServDesde
     ? `<ar:FchServDesde>${det.FchServDesde}</ar:FchServDesde><ar:FchServHasta>${det.FchServHasta}</ar:FchServHasta><ar:FchVtoPago>${det.FchVtoPago}</ar:FchVtoPago>`
     : ''
+  // Comprobantes asociados (obligatorio en Notas de Crédito/Débito: referencian
+  // la factura original). Va DESPUÉS de CondicionIVAReceptorId y ANTES de Iva (XSD).
+  const cbtesAsocXml = Array.isArray(det.CbtesAsoc) && det.CbtesAsoc.length
+    ? `<ar:CbtesAsoc>${det.CbtesAsoc.map((c: any) =>
+        `<ar:CbteAsoc>` +
+        `<ar:Tipo>${c.Tipo}</ar:Tipo>` +
+        `<ar:PtoVta>${c.PtoVta}</ar:PtoVta>` +
+        `<ar:Nro>${c.Nro}</ar:Nro>` +
+        (c.Cuit ? `<ar:Cuit>${c.Cuit}</ar:Cuit>` : '') +
+        (c.CbteFch ? `<ar:CbteFch>${c.CbteFch}</ar:CbteFch>` : '') +
+        `</ar:CbteAsoc>`).join('')}</ar:CbtesAsoc>`
+    : ''
   // Orden de elementos según el XSD de WSFEv1 (es estricto).
   const detXml =
     `<ar:Concepto>${det.Concepto}</ar:Concepto>` +
@@ -102,6 +114,7 @@ export async function solicitarCAE(
     `<ar:MonId>${det.MonId}</ar:MonId>` +
     `<ar:MonCotiz>${det.MonCotiz}</ar:MonCotiz>` +
     `<ar:CondicionIVAReceptorId>${det.CondicionIVAReceptorId}</ar:CondicionIVAReceptorId>` +
+    cbtesAsocXml +
     ivaXml
   const inner =
     `<ar:FECAESolicitar>${authXml(auth)}<ar:FeCAEReq>` +
