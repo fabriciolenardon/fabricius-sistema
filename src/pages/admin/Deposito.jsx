@@ -2425,6 +2425,36 @@ const CATEGORIAS = {
     const precio = precioConOferta(prod, getLista(form.destino, form.clienteId))
     setForm(f => ({ ...f, productoId: id, precio }))
   }
+
+  // Normaliza para matchear nombres (minúsculas, sin acentos, espacios colapsados).
+  function normalizarNombre(s) {
+    return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim()
+  }
+  // Busca el producto de la lista PIEZAS BOVINAS que corresponde al tipo de una
+  // pieza física (ej. tipo "Costillar Completo" → producto "Costillar Completo
+  // (Costilla-Vacío-Matambre)"). Prioridad: exacto → empieza con → contiene.
+  // Devuelve null si no hay match (ej. "Pierna" no tiene producto) → precio manual.
+  function buscarProductoPorTipoPieza(tipoPieza) {
+    const t = normalizarNombre(tipoPieza)
+    if (!t) return null
+    const prods = todosPrecios.filter(p => p.categoria === 'bovino_pieza')
+    return prods.find(p => normalizarNombre(p.nombre) === t)
+      || prods.find(p => normalizarNombre(p.nombre).startsWith(t))
+      || prods.find(p => normalizarNombre(p.nombre).includes(t))
+      || null
+  }
+  // Al elegir una pieza física: setea el kg y, si hay match en la lista, también
+  // el producto (tipo) y el precio con oferta. El precio queda editable a mano.
+  function seleccionarPiezaEntera(pz) {
+    setPiezaEnteraSeleccionada(pz)
+    const prodMatch = buscarProductoPorTipoPieza(pz.tipo_pieza)
+    if (prodMatch) {
+      const precio = precioConOferta(prodMatch, getLista(form.destino, form.clienteId))
+      setForm(f => ({ ...f, kg: String(pz.kg), productoId: prodMatch.id, precio }))
+    } else {
+      setForm(f => ({ ...f, kg: String(pz.kg) }))
+    }
+  }
 async function agregarItem() {
     const esUnidadLocal = CATEGORIAS_POR_UNIDAD.has(form.categoria)
     const unidadLabel = esUnidadLocal ? 'cantidad' : 'kg'
@@ -2440,8 +2470,9 @@ async function agregarItem() {
     } else {
       if (!form.kg || !form.precio) { showAlert({ type: 'error', msg: `Completá ${unidadLabel} y precio` }); return }
     }
-    // pieza_entera ahora SÍ requiere producto (el tipo de pieza define el precio).
-    if (form.categoria !== 'bovino_mr' && !esCajaLocal && !form.productoId) {
+    // pieza_entera NO requiere producto: el precio se autocompleta al elegir la
+    // pieza (si hay match en PIEZAS BOVINAS) pero también puede ponerse a mano.
+    if (form.categoria !== 'bovino_mr' && form.categoria !== 'pieza_entera' && !esCajaLocal && !form.productoId) {
       showAlert({ type: 'error', msg: 'Seleccioná un producto' }); return
     }
 
@@ -2716,7 +2747,7 @@ for (const item of items) {
         <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>{tipo} ({lista.length})</div>
         {lista.map(pz => (
           <div key={pz.id}
-            onClick={() => { setPiezaEnteraSeleccionada(pz); setForm(f => ({ ...f, kg: String(pz.kg) })) }}
+            onClick={() => seleccionarPiezaEntera(pz)}
             style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', borderRadius: 8, marginBottom: 4, cursor: 'pointer', border: `2px solid ${piezaEnteraSeleccionada?.id === pz.id ? 'var(--gold)' : 'var(--border)'}`, background: piezaEnteraSeleccionada?.id === pz.id ? 'rgba(201,168,76,0.12)' : 'var(--surface2)' }}>
             <div>
               <div style={{ fontWeight: 600, fontSize: 12 }}>#{pz.id} · {pz.tipo_pieza}</div>
