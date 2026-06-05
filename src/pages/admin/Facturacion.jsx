@@ -1490,6 +1490,12 @@ function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInici
   }, [cuentaSel])
   const esFacturaC = [11, 12, 13].includes(Number(form.comprobante_codigo)) // letra C: sin IVA discriminado
   const esNotaCD = ES_NOTA_CD(form.comprobante_codigo)
+  // Código AFIP de condición IVA del receptor: SIEMPRE deriva de la condición real
+  // de la contraparte elegida (fuente de verdad). Evita que un valor viejo del form
+  // —p. ej. arrastrado por una NC— quede desincronizado y salga RI como Mono/CF.
+  const condIvaReceptorAfip = form.contraparte_iva
+    ? condIvaAReceptorAfip(form.contraparte_iva)
+    : Number(form.cond_iva_receptor || 5)
   // Facturas originales (emitidas con CAE) de esta cuenta, para asociar una NC/ND.
   const facturasOriginales = useMemo(() => {
     if (!cuentaSel) return []
@@ -1658,7 +1664,7 @@ function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInici
       comprobante_codigo: Number(form.comprobante_codigo),
       doc_tipo: docTipo,
       doc_nro: String(form.doc_nro || '0'),
-      cond_iva_receptor: Number(form.cond_iva_receptor),
+      cond_iva_receptor: condIvaReceptorAfip,
       concepto: 1,
       fecha: form.fecha,
       cbte_asoc: esNotaCD && cbteAsoc ? {
@@ -1741,7 +1747,7 @@ function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInici
                 cae_vto: resultadoCae.cae_vto,
                 doc_tipo: Number(form.doc_tipo),
                 doc_nro: form.doc_nro,
-                cond_iva_receptor: Number(form.cond_iva_receptor),
+                cond_iva_receptor: condIvaReceptorAfip,
                 contraparte_nombre: form.contraparte_nombre,
                 monto_neto: totalesItems.neto,
                 monto_iva: esFacturaC ? 0 : totalesItems.iva,
@@ -1908,7 +1914,13 @@ function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInici
                   disabled={Number(form.doc_tipo) === 99} style={inp} />
               </Campo>
               <Campo label="Condición IVA receptor">
-                <select value={form.cond_iva_receptor} onChange={e => set('cond_iva_receptor', Number(e.target.value))} style={inp}>
+                {/* Refleja la condición real de la contraparte. Si la cambiás acá, también
+                    actualiza la contraparte para que ambos queden sincronizados. */}
+                <select value={condIvaReceptorAfip} onChange={e => {
+                  const cod = Number(e.target.value)
+                  const txt = { 1: 'responsable_inscripto', 4: 'exento', 5: 'consumidor_final', 6: 'monotributo', 13: 'monotributo_social', 16: 'monotributo' }[cod] || 'consumidor_final'
+                  setForm(f => ({ ...f, cond_iva_receptor: cod, contraparte_iva: txt }))
+                }} style={inp}>
                   {COND_IVA_RECEPTOR.map(c => <option key={c.v} value={c.v}>{c.l}</option>)}
                 </select>
               </Campo>
