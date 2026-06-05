@@ -24,12 +24,12 @@ import {
   proyectarFacturacionAnual, distribuirEntreCuentas, calcularAvisos,
 } from '../../lib/facturacionHelpers'
 import { fechaHoyARG } from '../../lib/fechas'
-import { fmtPrecio } from '../../lib/formatos'
+import { fmtPrecio, parseNumero } from '../../lib/formatos'
 import {
   COMPROBANTES, DOC_TIPOS, COND_IVA_RECEPTOR, IVA_ALICUOTAS,
   comprobantesDeCuenta, guardarConfigArca, probarConexionArca, emitirComprobante,
   crearCertTestingArca, generarCsrArca, buildQrUrl, qrImgUrl,
-  condIvaAReceptorAfip, comprobanteRecomendado, ES_NOTA_CD, NOTAS_CREDITO,
+  condIvaAReceptorAfip, comprobanteRecomendado, ES_NOTA_CD, NOTAS_CREDITO, NOTAS_DEBITO,
 } from '../../lib/arca'
 import { imprimirComprobante } from '../../lib/comprobantePdf'
 
@@ -619,6 +619,199 @@ function Campo({ label, children }) {
 }
 
 // ============================================================
+// IMPORTADOR "Mis Comprobantes" (Recibidos) de ARCA
+// ============================================================
+// ARCA no expone los comprobantes RECIBIDOS por web service: se exportan del
+// portal "Mis Comprobantes → Recibidos" como CSV. Este parser entiende ese
+// formato (detecta separador, mapea columnas por nombre, fechas AR y montos AR)
+// y crea las facturas recibidas (compra) de la cuenta, salteando duplicados.
+function parseCsvRows(text, delim) {
+  const rows = []; let row = [], field = '', q = false
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++ } else q = false } else field += c }
+    else if (c === '"') q = true
+    else if (c === delim) { row.push(field); field = '' }
+    else if (c === '\n') { row.push(field); rows.push(row); row = []; field = '' }
+    else if (c === '\r') { /* skip */ }
+    else field += c
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row) }
+  return rows.filter(r => r.some(f => String(f).trim() !== ''))
+}
+const normHdr = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
+function colIdx(headers, ...keywordSets) {
+  for (const kws of keywordSets) {
+    const i = headers.findIndex(h => kws.every(k => h.includes(k)))
+    if (i >= 0) return i
+  }
+  return -1
+}
+function parseFechaAfip(s) {
+  s = String(s || '').trim()
+  let m = s.match(/(\d{1,2})[/-](\d{1,2})[/-](\d{4})/)
+  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
+  m = s.match(/(\d{4})[/-](\d{1,2})[/-](\d{1,2})/)
+  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`
+  return null
+}
+function tipoCortoDeCodigo(codigo) {
+  const letra = COMPROBANTES[codigo]?.letra || ''
+  if (NOTAS_CREDITO.has(codigo)) return 'NC' + letra
+  if (NOTAS_DEBITO.has(codigo)) return 'ND' + letra
+  return letra || 'Otro'
+}
+function tipoCortoDelCsv(raw) {
+  const s = String(raw || '').trim()
+  const num = parseInt((s.match(/\d+/) || [])[0] || '', 10)
+  if (num && COMPROBANTES[num]) return tipoCortoDeCodigo(num)
+  const t = normHdr(s)
+  const letra = /factura a|nota.* a\b|\ba\b/.test(t) ? 'A' : (/factura b|nota.* b\b|\bb\b/.test(t) ? 'B' : 'C')
+  if (t.includes('credito')) return 'NC' + letra
+  if (t.includes('debito')) return 'ND' + letra
+  return letra
+}
+function parseMisComprobantes(texto) {
+  const linea1 = texto.split(/\r?\n/).find(l => l.trim()) || ''
+  const delim = (linea1.split(';').length > linea1.split(',').length) ? ';' : ','
+  const rows = parseCsvRows(texto, delim)
+  if (rows.length < 2) return { error: 'El archivo no tiene datos. ¿Exportaste el CSV de "Mis Comprobantes → Recibidos"?', filas: [] }
+  const headers = rows[0].map(normHdr)
+  const iFecha = colIdx(headers, ['fecha'])
+  const iTipo = colIdx(headers, ['tipo', 'comprob'])
+  const iPv = colIdx(headers, ['punto', 'venta'])
+  const iNro = colIdx(headers, ['numero', 'desde'], ['numero'], ['nro comprob'])
+  const iNombre = colIdx(headers, ['denominacion', 'emisor'], ['denominacion'], ['razon'])
+  const iCuit = colIdx(headers, ['nro', 'doc', 'emisor'], ['cuit'])
+  const iNeto = colIdx(headers, ['neto', 'gravado'], ['imp neto'])
+  const iIva = colIdx(headers, ['iva'])
+  const iTotal = colIdx(headers, ['imp', 'total'], ['total'])
+  if (iFecha < 0 || iTotal < 0) return { error: 'No reconozco las columnas (esperaba al menos Fecha e Imp. Total). ¿Es el CSV de Mis Comprobantes de ARCA?', filas: [] }
+  const filas = []
+  for (const r of rows.slice(1)) {
+    const fecha = parseFechaAfip(r[iFecha])
+    const total = parseNumero(r[iTotal])
+    if (!fecha || !(total > 0)) continue
+    filas.push({
+      fecha,
+      tipo_comprobante: iTipo >= 0 ? tipoCortoDelCsv(r[iTipo]) : 'Otro',
+      punto_venta: iPv >= 0 ? String(r[iPv] || '').replace(/\D/g, '') : '',
+      numero: iNro >= 0 ? String(r[iNro] || '').replace(/\D/g, '') : '',
+      contraparte_nombre: iNombre >= 0 ? String(r[iNombre] || '').trim() : '',
+      contraparte_cuit: iCuit >= 0 ? String(r[iCuit] || '').replace(/\D/g, '') : '',
+      monto_neto: iNeto >= 0 ? parseNumero(r[iNeto]) : 0,
+      monto_iva: iIva >= 0 ? parseNumero(r[iIva]) : 0,
+      monto_total: total,
+    })
+  }
+  return { error: null, filas }
+}
+
+function ModalImportarRecibidos({ cuenta, facturas, onCerrar, onImportado }) {
+  const [filas, setFilas] = useState(null)
+  const [error, setError] = useState(null)
+  const [nombreArch, setNombreArch] = useState('')
+  const [importando, setImportando] = useState(false)
+
+  const yaCargadas = useMemo(() => {
+    const set = new Set()
+    facturas.filter(f => f.cuenta_id === cuenta.id && f.tipo === 'recibida').forEach(f => {
+      set.add(`${String(f.tipo_comprobante || '')}|${String(f.punto_venta || '').replace(/\D/g, '')}|${String(f.numero || '').replace(/\D/g, '')}|${String(f.contraparte_cuit || '').replace(/\D/g, '')}`)
+    })
+    return set
+  }, [facturas, cuenta])
+
+  function onFile(file) {
+    if (!file) return
+    setNombreArch(file.name); setError(null); setFilas(null)
+    const reader = new FileReader()
+    reader.onload = () => {
+      const res = parseMisComprobantes(String(reader.result || ''))
+      if (res.error) { setError(res.error); return }
+      const marcadas = res.filas.map(f => ({ ...f, dup: yaCargadas.has(`${f.tipo_comprobante}|${f.punto_venta}|${f.numero}|${f.contraparte_cuit}`) }))
+      setFilas(marcadas)
+    }
+    reader.readAsText(file)
+  }
+
+  const nuevas = (filas || []).filter(f => !f.dup)
+  const dups = (filas || []).filter(f => f.dup).length
+  const totalNuevas = nuevas.reduce((s, f) => s + (f.monto_total || 0), 0)
+
+  async function importar() {
+    if (!nuevas.length) return
+    setImportando(true)
+    const datos = nuevas.map(f => ({
+      cuenta_id: cuenta.id, tipo: 'recibida', clasificacion: 'compra',
+      fecha: f.fecha, tipo_comprobante: f.tipo_comprobante,
+      punto_venta: f.punto_venta || null, numero: f.numero || null,
+      contraparte_nombre: f.contraparte_nombre || null, contraparte_cuit: f.contraparte_cuit || null,
+      monto_neto: f.monto_neto || 0, monto_iva: f.monto_iva || 0, monto_otros: 0, monto_total: f.monto_total || 0,
+    }))
+    const { error: e } = await supabase.from('facturas').insert(datos)
+    setImportando(false)
+    if (e) { alert('❌ ' + e.message); return }
+    onImportado(nuevas.length)
+  }
+
+  return (
+    <div onClick={onCerrar} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, overflow: 'auto' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: 'var(--surface)', border: '1px solid var(--gold)', borderRadius: 12, padding: 20, maxWidth: 640, width: '100%', maxHeight: '90vh', overflow: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+          <div style={{ fontSize: 18, fontWeight: 700 }}>📥 Importar de Mis Comprobantes — {cuenta.nombre}</div>
+          <button onClick={onCerrar} style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: 20, cursor: 'pointer' }}>✕</button>
+        </div>
+
+        <div style={{ fontSize: 12, color: 'var(--muted)', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px', marginBottom: 14, lineHeight: 1.6 }}>
+          <strong>Cómo obtener el archivo:</strong> en ARCA → <strong>Mis Comprobantes</strong> → pestaña <strong>Recibidos</strong> → elegí el rango de fechas → <strong>Consultar</strong> → botón <strong>Exportar / Descargar CSV</strong>. Después subilo acá. Se cargan como <strong>Compra</strong> (en RI reclasificás los Gastos después).
+        </div>
+
+        <input type="file" accept=".csv,text/csv,text/plain" onChange={e => onFile(e.target.files?.[0])}
+          style={{ ...inp, padding: 8 }} />
+
+        {nombreArch && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>📄 {nombreArch}</div>}
+        {error && <div style={{ fontSize: 12, color: '#ff8b8b', background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 8, padding: '10px 12px', marginTop: 10 }}>❌ {error}</div>}
+
+        {filas && (
+          <div style={{ marginTop: 14 }}>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+              <KPI label="✅ Nuevas a importar" value={String(nuevas.length)} sub={fmt$(totalNuevas)} color="#7dff7d" />
+              <KPI label="↩️ Ya cargadas (saltean)" value={String(dups)} sub="duplicados" color="var(--muted)" />
+            </div>
+            <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+              <table style={{ width: '100%', fontSize: 11 }}>
+                <thead><tr style={{ color: 'var(--muted)', fontSize: 9, textTransform: 'uppercase' }}>
+                  <th style={{ textAlign: 'left', padding: 5 }}>Fecha</th><th style={{ textAlign: 'left', padding: 5 }}>Comp.</th><th style={{ textAlign: 'left', padding: 5 }}>Emisor</th><th style={{ textAlign: 'right', padding: 5 }}>Total</th>
+                </tr></thead>
+                <tbody>
+                  {filas.slice(0, 100).map((f, i) => (
+                    <tr key={i} style={{ borderTop: '1px solid var(--border)', opacity: f.dup ? 0.45 : 1 }}>
+                      <td style={{ padding: 5, whiteSpace: 'nowrap' }}>{fmtFecha(f.fecha)}</td>
+                      <td style={{ padding: 5 }}>{LABEL_TIPO_COMPROBANTE[f.tipo_comprobante] || f.tipo_comprobante}{f.dup ? ' (ya está)' : ''}</td>
+                      <td style={{ padding: 5 }}>{f.contraparte_nombre || f.contraparte_cuit || '—'}</td>
+                      <td style={{ padding: 5, textAlign: 'right' }}>{fmt$(f.monto_total)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {filas.length > 100 && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>… y {filas.length - 100} más (se importan todos).</div>}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
+          <button onClick={onCerrar} style={{ flex: 1, padding: 12, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>Cancelar</button>
+          <button onClick={importar} disabled={!nuevas.length || importando}
+            style={{ flex: 2, padding: 12, background: nuevas.length ? 'var(--gold)' : 'var(--surface2)', color: nuevas.length ? '#000' : 'var(--muted)', border: 'none', borderRadius: 8, cursor: nuevas.length ? 'pointer' : 'not-allowed', fontWeight: 800, letterSpacing: 1 }}>
+            {importando ? '⏳ Importando...' : `⬇️ Importar ${nuevas.length} comprobantes`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================
 // TAB HISTORIAL — control mensual por cuenta (ventas/compras/gastos)
 // RI: IVA débito (ventas) − IVA crédito (SOLO Factura A) = saldo IVA del mes.
 // Monotributo: sin IVA; muestra el acumulado 12 meses (control de recategorización).
@@ -643,6 +836,7 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
   const [mes, setMes] = useState(() => String(fechaHoyARG() || '2026-01-01').slice(0, 7))
   const [filtro, setFiltro] = useState('todos')
   const [cargar, setCargar] = useState(null) // { tipo } | null
+  const [importar, setImportar] = useState(false)
 
   const cuenta = cuentas.find(c => c.id === Number(cuentaId))
   const esRI = esCuentaRI(cuenta)
@@ -719,7 +913,8 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
           <input type="month" value={mes} onChange={e => setMes(e.target.value)} style={{ ...inp, width: 160 }} />
           <button onClick={() => cambiarMes(1)} style={navBtn}>▶</button>
         </div>
-        <button onClick={() => setCargar({ tipo: 'recibida' })} style={{ marginLeft: 'auto', padding: '8px 16px', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>📥 Cargar compra/gasto</button>
+        <button onClick={() => setImportar(true)} style={{ marginLeft: 'auto', padding: '8px 16px', background: 'var(--surface2)', border: '1px solid var(--gold)', color: 'var(--gold)', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>📥 Importar Mis Comprobantes</button>
+        <button onClick={() => setCargar({ tipo: 'recibida' })} style={{ padding: '8px 16px', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>➕ Compra/gasto</button>
         <button onClick={() => setCargar({ tipo: 'emitida' })} style={{ padding: '8px 16px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>🧾 Cargar venta</button>
       </div>
 
@@ -793,6 +988,11 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
         <FormFactura cuentas={cuentas} contrapartes={contrapartes} facturas={facturas}
           cuentaInicial={Number(cuentaId)} tipoInicial={cargar.tipo}
           onCerrar={() => setCargar(null)} onGuardado={() => { setCargar(null); onChange() }} />
+      )}
+      {importar && cuenta && (
+        <ModalImportarRecibidos cuenta={cuenta} facturas={facturas}
+          onCerrar={() => setImportar(false)}
+          onImportado={(n) => { setImportar(false); onChange(); alert(`✅ ${n} comprobantes importados a ${cuenta.nombre}.`) }} />
       )}
     </div>
   )
