@@ -102,44 +102,37 @@ export default function Facturacion() {
   const [facturas, setFacturas] = useState([])
   const [impuestos, setImpuestos] = useState([])
   const [contrapartes, setContrapartes] = useState([])
+  const [facturacionPorCuenta, setFacturacionPorCuenta] = useState({})
   const [loading, setLoading] = useState(true)
 
   useEffect(() => { cargarTodo() }, [])
 
   async function cargarTodo() {
     setLoading(true)
-    const [{ data: cs }, { data: fs }, { data: ps }, { data: kp }] = await Promise.all([
+    const [{ data: cs }, { data: fs }, { data: ps }, { data: kp }, { data: fac12 }] = await Promise.all([
       supabase.from('cuentas_fiscales').select('*').order('nombre'),
       supabase.from('facturas').select('*').order('fecha', { ascending: false }),
       supabase.from('impuestos_pagados').select('*').order('fecha_pago', { ascending: false }),
       supabase.from('contrapartes').select('*').eq('activa', true).order('nombre'),
+      // Facturado últimos 12 meses por cuenta — calculado en el servidor (no depende
+      // del tope de 1.000 filas), clave para el semáforo de tope del monotributo.
+      supabase.rpc('facturado_cuentas_12m'),
     ])
     setCuentas(cs || [])
     setFacturas(fs || [])
     setImpuestos(ps || [])
     setContrapartes(kp || [])
-    setLoading(false)
-  }
-
-  // Calcula facturación últimos 12 meses por cuenta
-  const facturacionPorCuenta = useMemo(() => {
-    const desdeISO = haceUnAno()
     const map = {}
-    cuentas.forEach(c => { map[c.id] = { emitido: 0, recibido: 0, cantEmitidas: 0, cantRecibidas: 0 } })
-    facturas.forEach(f => {
-      if (!map[f.cuenta_id]) return
-      if (f.fecha < desdeISO) return
-      const monto = Number(f.monto_total) || 0
-      if (f.tipo === 'emitida') {
-        map[f.cuenta_id].emitido += monto
-        map[f.cuenta_id].cantEmitidas += 1
-      } else {
-        map[f.cuenta_id].recibido += monto
-        map[f.cuenta_id].cantRecibidas += 1
+    ;(cs || []).forEach(c => { map[c.id] = { emitido: 0, recibido: 0, cantEmitidas: 0, cantRecibidas: 0 } })
+    ;(fac12 || []).forEach(r => {
+      map[r.cuenta_id] = {
+        emitido: Number(r.emitido) || 0, recibido: Number(r.recibido) || 0,
+        cantEmitidas: Number(r.cant_emitidas) || 0, cantRecibidas: Number(r.cant_recibidas) || 0,
       }
     })
-    return map
-  }, [cuentas, facturas])
+    setFacturacionPorCuenta(map)
+    setLoading(false)
+  }
 
   const tabBtn = (id, label) => (
     <button onClick={() => setTab(id)} key={id}
@@ -881,8 +874,12 @@ function letraFactura(f) {
 }
 
 function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
+  const HOY = String(fechaHoyARG() || '2026-01-01').slice(0, 10)
   const [cuentaId, setCuentaId] = useState(cuentas[0]?.id || '')
-  const [mes, setMes] = useState(() => String(fechaHoyARG() || '2026-01-01').slice(0, 7))
+  const [modo, setModo] = useState('mes') // 'mes' (mes a mes) | 'periodo' (rango Desde/Hasta)
+  const [mes, setMes] = useState(() => HOY.slice(0, 7))
+  const [desde, setDesde] = useState(HOY.slice(0, 7) + '-01')
+  const [hasta, setHasta] = useState(HOY)
   const [filtro, setFiltro] = useState('todos')
   const [cargar, setCargar] = useState(null) // { tipo } | null
   const [importar, setImportar] = useState(false)
@@ -896,9 +893,16 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
     setMes(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
   }
 
+  // Rango efectivo: modo 'mes' = el mes completo · modo 'periodo' = Desde/Hasta.
+  const [my, mm] = mes.split('-').map(Number)
+  const ultimoDia = new Date(my, mm, 0).getDate()
+  const rDesde = modo === 'periodo' ? desde : `${mes}-01`
+  const rHasta = modo === 'periodo' ? hasta : `${mes}-${String(ultimoDia).padStart(2, '0')}`
+  const etiquetaPeriodo = modo === 'periodo' ? `${fmtFecha(rDesde)} → ${fmtFecha(rHasta)}` : `${MESES_NOMBRE[(mm || 1) - 1]} ${my}`
+
   // Una cuenta puede tener DECENAS DE MILES de facturas → no se traen todas al
-  // front (Supabase corta en 1.000). Los TOTALES del mes los calcula una función
-  // SQL (facturas_historial) y el DETALLE se pagina del lado del servidor.
+  // front (Supabase corta en 1.000). Los TOTALES los calcula una función SQL
+  // (facturas_historial por rango de fechas) y el DETALLE se pagina en el servidor.
   const [resumen, setResumen] = useState(null)
   const [detalle, setDetalle] = useState([])
   const [totalDet, setTotalDet] = useState(0)
@@ -907,26 +911,21 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
   const [refrescar, setRefrescar] = useState(0)
   const PAGE = 25
 
-  const [y, m] = mes.split('-').map(Number)
-  const nombreMes = `${MESES_NOMBRE[(m || 1) - 1]} ${y}`
-  const mesStart = `${mes}-01`
-  const mesNextStart = `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, '0')}-01`
-
-  // Resumen del mes (RPC). Recalcula al cambiar cuenta/mes/refresco.
+  // Resumen del rango (RPC). Recalcula al cambiar cuenta / rango / refresco.
   useEffect(() => {
     let vivo = true
     setResumen(null); setPagDet(1)
-    supabase.rpc('facturas_historial', { p_cuenta: Number(cuentaId), p_mes: mes })
+    supabase.rpc('facturas_historial', { p_cuenta: Number(cuentaId), p_desde: rDesde, p_hasta: rHasta })
       .then(({ data }) => { if (vivo) setResumen(data || {}) })
     return () => { vivo = false }
-  }, [cuentaId, mes, refrescar])
+  }, [cuentaId, rDesde, rHasta, refrescar])
 
-  // Detalle paginado del mes (server-side, con filtro).
+  // Detalle paginado del rango (server-side, con filtro).
   useEffect(() => {
     let vivo = true
     setCargandoDet(true)
     let q = supabase.from('facturas').select('*', { count: 'exact' })
-      .eq('cuenta_id', Number(cuentaId)).gte('fecha', mesStart).lt('fecha', mesNextStart)
+      .eq('cuenta_id', Number(cuentaId)).gte('fecha', rDesde).lte('fecha', rHasta)
     if (filtro === 'venta') q = q.or('clasificacion.eq.venta,and(clasificacion.is.null,tipo.eq.emitida)')
     else if (filtro === 'compra') q = q.or('clasificacion.eq.compra,and(clasificacion.is.null,tipo.eq.recibida)')
     else if (filtro === 'gasto') q = q.eq('clasificacion', 'gasto')
@@ -934,7 +933,7 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
     q.order('fecha', { ascending: false }).order('id', { ascending: false }).range(from, from + PAGE - 1)
       .then(({ data, count }) => { if (vivo) { setDetalle(data || []); setTotalDet(count || 0); setCargandoDet(false) } })
     return () => { vivo = false }
-  }, [cuentaId, mes, filtro, pagDet, refrescar])
+  }, [cuentaId, rDesde, rHasta, filtro, pagDet, refrescar])
 
   const r = resumen || {}
   const totVentas = Number(r.ventas_total) || 0
@@ -978,17 +977,30 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
           {cuentas.map(c => <option key={c.id} value={c.id}>{c.nombre} · {esCuentaRI(c) ? 'Resp. Inscripto' : 'Monotributo'}</option>)}
         </select>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <button onClick={() => cambiarMes(-1)} style={navBtn}>◀</button>
-          <input type="month" value={mes} onChange={e => setMes(e.target.value)} style={{ ...inp, width: 160 }} />
-          <button onClick={() => cambiarMes(1)} style={navBtn}>▶</button>
+          <button onClick={() => { setModo('mes'); setPagDet(1) }} style={chip(modo === 'mes')}>Mes</button>
+          <button onClick={() => { setModo('periodo'); setPagDet(1) }} style={chip(modo === 'periodo')}>Período</button>
         </div>
+        {modo === 'mes' ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button onClick={() => cambiarMes(-1)} style={navBtn}>◀</button>
+            <input type="month" value={mes} onChange={e => setMes(e.target.value)} style={{ ...inp, width: 160 }} />
+            <button onClick={() => cambiarMes(1)} style={navBtn}>▶</button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>Desde</span>
+            <input type="date" value={desde} onChange={e => { setDesde(e.target.value); setPagDet(1) }} style={{ ...inp, width: 150 }} />
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>Hasta</span>
+            <input type="date" value={hasta} onChange={e => { setHasta(e.target.value); setPagDet(1) }} style={{ ...inp, width: 150 }} />
+          </div>
+        )}
         <button onClick={() => setImportar(true)} style={{ marginLeft: 'auto', padding: '8px 16px', background: 'var(--surface2)', border: '1px solid var(--gold)', color: 'var(--gold)', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>📥 Importar Mis Comprobantes</button>
         <button onClick={() => setCargar({ tipo: 'recibida' })} style={{ padding: '8px 16px', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>➕ Compra/gasto</button>
         <button onClick={() => setCargar({ tipo: 'emitida' })} style={{ padding: '8px 16px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>🧾 Cargar venta</button>
       </div>
 
       {/* Totales del mes */}
-      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6, letterSpacing: 1 }}>📅 {nombreMes.toUpperCase()}</div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6, letterSpacing: 1 }}>📅 {etiquetaPeriodo.toUpperCase()}</div>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
         <KPI label="📤 Ventas" value={fmt$(totVentas)} sub={`${cantVentas} comprob.`} color="var(--gold)" />
         <KPI label="📥 Compras" value={fmt$(totCompras)} sub={`${cantCompras} comprob.`} color="#7a9dff" />
@@ -1031,7 +1043,7 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
               {cargandoDet ? (
                 <tr><td colSpan={esRI ? 8 : 6} style={{ textAlign: 'center', padding: 24, color: 'var(--muted)' }}>Cargando…</td></tr>
               ) : detalle.length === 0 ? (
-                <tr><td colSpan={esRI ? 8 : 6} style={{ textAlign: 'center', padding: 24, color: 'var(--muted)' }}>Sin movimientos en {nombreMes}.</td></tr>
+                <tr><td colSpan={esRI ? 8 : 6} style={{ textAlign: 'center', padding: 24, color: 'var(--muted)' }}>Sin movimientos en {etiquetaPeriodo}.</td></tr>
               ) : detalle.map(f => {
                 const sg = signoFactura(f)
                 return (
