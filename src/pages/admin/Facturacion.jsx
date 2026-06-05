@@ -714,25 +714,40 @@ function parseMisComprobantes(texto) {
 const nrmNum = x => String(parseInt(String(x ?? '').replace(/\D/g, ''), 10) || 0)
 const claveComprobante = f => `${f.tipo_comprobante || ''}|${nrmNum(f.punto_venta)}|${nrmNum(f.numero)}`
 
-function ModalImportarComprobantes({ cuenta, facturas, onCerrar, onImportado }) {
+function ModalImportarComprobantes({ cuenta, onCerrar, onImportado }) {
   const [dir, setDir] = useState('recibida') // 'recibida' (compras) | 'emitida' (ventas)
   const [filas, setFilas] = useState(null)
   const [error, setError] = useState(null)
   const [nombreArch, setNombreArch] = useState('')
   const [importando, setImportando] = useState(false)
   const [progreso, setProgreso] = useState(0)
+  const [analizando, setAnalizando] = useState(false)
 
-  const yaCargadas = useMemo(() => {
+  // Trae TODAS las claves ya cargadas de la cuenta+tipo (paginando, porque Supabase
+  // corta en 1.000). Así el dedup mira la base completa, no un subconjunto.
+  async function clavesExistentes() {
     const set = new Set()
-    facturas.filter(f => f.cuenta_id === cuenta.id && f.tipo === dir).forEach(f => set.add(claveComprobante(f)))
+    let from = 0
+    for (;;) {
+      const { data } = await supabase.from('facturas')
+        .select('tipo_comprobante,punto_venta,numero')
+        .eq('cuenta_id', cuenta.id).eq('tipo', dir)
+        .range(from, from + 999)
+      if (!data || !data.length) break
+      data.forEach(f => set.add(claveComprobante(f)))
+      if (data.length < 1000) break
+      from += 1000
+    }
     return set
-  }, [facturas, cuenta, dir])
+  }
 
-  function procesar(texto) {
+  async function procesar(texto) {
     const res = parseMisComprobantes(String(texto || ''))
     if (res.error) { setError(res.error); setFilas(null); return }
-    setError(null)
+    setError(null); setAnalizando(true)
+    const yaCargadas = await clavesExistentes()
     setFilas(res.filas.map(f => ({ ...f, dup: yaCargadas.has(claveComprobante(f)) })))
+    setAnalizando(false)
   }
   function onFile(file) {
     if (!file) return
@@ -803,6 +818,7 @@ function ModalImportarComprobantes({ cuenta, facturas, onCerrar, onImportado }) 
           style={{ ...inp, padding: 8 }} />
 
         {nombreArch && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>📄 {nombreArch}</div>}
+        {analizando && <div style={{ fontSize: 12, color: 'var(--gold)', marginTop: 8 }}>⏳ Analizando y comparando con lo ya cargado…</div>}
         {error && <div style={{ fontSize: 12, color: '#ff8b8b', background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 8, padding: '10px 12px', marginTop: 10 }}>❌ {error}</div>}
 
         {filas && (
@@ -880,38 +896,58 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
     setMes(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
   }
 
-  const delCuenta = useMemo(() => facturas.filter(f => f.cuenta_id === Number(cuentaId)), [facturas, cuentaId])
-  const delMes = useMemo(() => delCuenta.filter(f => String(f.fecha || '').slice(0, 7) === mes), [delCuenta, mes])
-
-  const ventas = delMes.filter(f => clasifFactura(f) === 'venta')
-  const compras = delMes.filter(f => clasifFactura(f) === 'compra')
-  const gastos = delMes.filter(f => clasifFactura(f) === 'gasto')
-
-  const sumaT = arr => arr.reduce((s, f) => s + signoFactura(f) * (Number(f.monto_total) || 0), 0)
-  const sumaIva = arr => arr.reduce((s, f) => s + signoFactura(f) * (Number(f.monto_iva) || 0), 0)
-  // IVA crédito computable: SOLO de Facturas A (B/C recibidas → IVA no computable).
-  const sumaIvaA = arr => arr.reduce((s, f) => s + (letraFactura(f) === 'A' ? signoFactura(f) * (Number(f.monto_iva) || 0) : 0), 0)
-
-  const totVentas = sumaT(ventas), totCompras = sumaT(compras), totGastos = sumaT(gastos)
-  const ivaDebito = sumaIva(ventas)
-  const ivaCredito = sumaIvaA([...compras, ...gastos])
-  const saldoIva = ivaDebito - ivaCredito
-
-  const acum12 = useMemo(() => {
-    const d = new Date(); d.setMonth(d.getMonth() - 12)
-    const desde = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
-    return delCuenta.filter(f => clasifFactura(f) === 'venta' && String(f.fecha || '') >= desde)
-      .reduce((s, f) => s + signoFactura(f) * (Number(f.monto_total) || 0), 0)
-  }, [delCuenta])
-
-  const detalle = useMemo(() => {
-    const arr = filtro === 'todos' ? delMes : delMes.filter(f => clasifFactura(f) === filtro)
-    return [...arr].sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)) || ((b.id || 0) - (a.id || 0)))
-  }, [delMes, filtro])
-  const pag = usePaginacion(detalle, 15)
+  // Una cuenta puede tener DECENAS DE MILES de facturas → no se traen todas al
+  // front (Supabase corta en 1.000). Los TOTALES del mes los calcula una función
+  // SQL (facturas_historial) y el DETALLE se pagina del lado del servidor.
+  const [resumen, setResumen] = useState(null)
+  const [detalle, setDetalle] = useState([])
+  const [totalDet, setTotalDet] = useState(0)
+  const [pagDet, setPagDet] = useState(1)
+  const [cargandoDet, setCargandoDet] = useState(false)
+  const [refrescar, setRefrescar] = useState(0)
+  const PAGE = 25
 
   const [y, m] = mes.split('-').map(Number)
   const nombreMes = `${MESES_NOMBRE[(m || 1) - 1]} ${y}`
+  const mesStart = `${mes}-01`
+  const mesNextStart = `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, '0')}-01`
+
+  // Resumen del mes (RPC). Recalcula al cambiar cuenta/mes/refresco.
+  useEffect(() => {
+    let vivo = true
+    setResumen(null); setPagDet(1)
+    supabase.rpc('facturas_historial', { p_cuenta: Number(cuentaId), p_mes: mes })
+      .then(({ data }) => { if (vivo) setResumen(data || {}) })
+    return () => { vivo = false }
+  }, [cuentaId, mes, refrescar])
+
+  // Detalle paginado del mes (server-side, con filtro).
+  useEffect(() => {
+    let vivo = true
+    setCargandoDet(true)
+    let q = supabase.from('facturas').select('*', { count: 'exact' })
+      .eq('cuenta_id', Number(cuentaId)).gte('fecha', mesStart).lt('fecha', mesNextStart)
+    if (filtro === 'venta') q = q.or('clasificacion.eq.venta,and(clasificacion.is.null,tipo.eq.emitida)')
+    else if (filtro === 'compra') q = q.or('clasificacion.eq.compra,and(clasificacion.is.null,tipo.eq.recibida)')
+    else if (filtro === 'gasto') q = q.eq('clasificacion', 'gasto')
+    const from = (pagDet - 1) * PAGE
+    q.order('fecha', { ascending: false }).order('id', { ascending: false }).range(from, from + PAGE - 1)
+      .then(({ data, count }) => { if (vivo) { setDetalle(data || []); setTotalDet(count || 0); setCargandoDet(false) } })
+    return () => { vivo = false }
+  }, [cuentaId, mes, filtro, pagDet, refrescar])
+
+  const r = resumen || {}
+  const totVentas = Number(r.ventas_total) || 0
+  const totCompras = Number(r.compras_total) || 0
+  const totGastos = Number(r.gastos_total) || 0
+  const cantVentas = Number(r.ventas_cant) || 0
+  const cantCompras = Number(r.compras_cant) || 0
+  const cantGastos = Number(r.gastos_cant) || 0
+  const ivaDebito = Number(r.iva_debito) || 0
+  const ivaCredito = Number(r.iva_credito) || 0
+  const saldoIva = ivaDebito - ivaCredito
+  const acum12 = Number(r.acum12) || 0
+  const totalPagDet = Math.max(1, Math.ceil(totalDet / PAGE))
 
   async function abrirPdf(f) {
     if (f.cae) { imprimirComprobante(f, cuenta || {}); return }
@@ -954,9 +990,9 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
       {/* Totales del mes */}
       <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6, letterSpacing: 1 }}>📅 {nombreMes.toUpperCase()}</div>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
-        <KPI label="📤 Ventas" value={fmt$(totVentas)} sub={`${ventas.length} comprob.`} color="var(--gold)" />
-        <KPI label="📥 Compras" value={fmt$(totCompras)} sub={`${compras.length} comprob.`} color="#7a9dff" />
-        <KPI label="🧾 Gastos" value={fmt$(totGastos)} sub={`${gastos.length} comprob.`} color="var(--purple)" />
+        <KPI label="📤 Ventas" value={fmt$(totVentas)} sub={`${cantVentas} comprob.`} color="var(--gold)" />
+        <KPI label="📥 Compras" value={fmt$(totCompras)} sub={`${cantCompras} comprob.`} color="#7a9dff" />
+        <KPI label="🧾 Gastos" value={fmt$(totGastos)} sub={`${cantGastos} comprob.`} color="var(--purple)" />
         {esRI ? (
           <>
             <KPI label="IVA Débito" value={fmt$(ivaDebito)} sub="de las ventas" color="#ff8b8b" />
@@ -971,7 +1007,7 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
       {/* Filtros */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
         {[['todos', 'Todos'], ['venta', 'Ventas'], ['compra', 'Compras'], ['gasto', 'Gastos']].map(([v, l]) => (
-          <button key={v} onClick={() => setFiltro(v)} style={chip(filtro === v)}>{l}</button>
+          <button key={v} onClick={() => { setFiltro(v); setPagDet(1) }} style={chip(filtro === v)}>{l}</button>
         ))}
       </div>
 
@@ -992,9 +1028,11 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
               </tr>
             </thead>
             <tbody>
-              {pag.items.length === 0 ? (
+              {cargandoDet ? (
+                <tr><td colSpan={esRI ? 8 : 6} style={{ textAlign: 'center', padding: 24, color: 'var(--muted)' }}>Cargando…</td></tr>
+              ) : detalle.length === 0 ? (
                 <tr><td colSpan={esRI ? 8 : 6} style={{ textAlign: 'center', padding: 24, color: 'var(--muted)' }}>Sin movimientos en {nombreMes}.</td></tr>
-              ) : pag.items.map(f => {
+              ) : detalle.map(f => {
                 const sg = signoFactura(f)
                 return (
                   <tr key={f.id} style={{ borderTop: '1px solid var(--border)' }}>
@@ -1014,18 +1052,29 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
             </tbody>
           </table>
         </div>
-        <Paginador {...pag.controles} label="comprobantes" />
+        {totalDet > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '10px 12px', background: 'var(--surface2)', borderRadius: 8, marginTop: 10, fontSize: 12, color: 'var(--muted)' }}>
+            <div><span style={{ color: 'var(--text)', fontWeight: 600 }}>{(pagDet - 1) * PAGE + 1}–{Math.min(pagDet * PAGE, totalDet)}</span> de <span style={{ color: 'var(--text)', fontWeight: 600 }}>{totalDet}</span> comprobantes</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
+              <button onClick={() => setPagDet(1)} disabled={pagDet === 1} style={{ ...navBtn, opacity: pagDet === 1 ? 0.4 : 1, fontSize: 12 }}>« Primera</button>
+              <button onClick={() => setPagDet(p => Math.max(1, p - 1))} disabled={pagDet === 1} style={{ ...navBtn, opacity: pagDet === 1 ? 0.4 : 1, fontSize: 12 }}>‹ Ant</button>
+              <span style={{ minWidth: 90, textAlign: 'center', color: 'var(--text)', fontWeight: 600 }}>Pág {pagDet} / {totalPagDet}</span>
+              <button onClick={() => setPagDet(p => Math.min(totalPagDet, p + 1))} disabled={pagDet === totalPagDet} style={{ ...navBtn, opacity: pagDet === totalPagDet ? 0.4 : 1, fontSize: 12 }}>Sig ›</button>
+              <button onClick={() => setPagDet(totalPagDet)} disabled={pagDet === totalPagDet} style={{ ...navBtn, opacity: pagDet === totalPagDet ? 0.4 : 1, fontSize: 12 }}>Última »</button>
+            </div>
+          </div>
+        )}
       </div>
 
       {cargar && (
         <FormFactura cuentas={cuentas} contrapartes={contrapartes} facturas={facturas}
           cuentaInicial={Number(cuentaId)} tipoInicial={cargar.tipo}
-          onCerrar={() => setCargar(null)} onGuardado={() => { setCargar(null); onChange() }} />
+          onCerrar={() => setCargar(null)} onGuardado={() => { setCargar(null); setRefrescar(x => x + 1); onChange() }} />
       )}
       {importar && cuenta && (
-        <ModalImportarComprobantes cuenta={cuenta} facturas={facturas}
+        <ModalImportarComprobantes cuenta={cuenta}
           onCerrar={() => setImportar(false)}
-          onImportado={(n, d) => { setImportar(false); onChange(); alert(`✅ ${n} ${d === 'emitida' ? 'ventas' : 'comprobantes'} importados a ${cuenta.nombre}.`) }} />
+          onImportado={(n, d) => { setImportar(false); setRefrescar(x => x + 1); onChange(); alert(`✅ ${n} ${d === 'emitida' ? 'ventas' : 'comprobantes'} importados a ${cuenta.nombre}.`) }} />
       )}
     </div>
   )
