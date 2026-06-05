@@ -36,6 +36,31 @@ export const COND_IVA_RECEPTOR = [
   { v: 16, l: 'Monotributo Trabajador Independiente Promovido' },
 ]
 
+// Mapea la condición IVA en texto (la que usamos en `contrapartes`/`cuentas_fiscales`:
+// responsable_inscripto / monotributo / exento / consumidor_final / no_aplica) al
+// código AFIP de "Condición IVA del receptor" (RG 5616). Default: Consumidor Final (5).
+export function condIvaAReceptorAfip(condicionIva) {
+  switch (condicionIva) {
+    case 'responsable_inscripto': return 1
+    case 'exento':                return 4
+    case 'monotributo':           return 6
+    case 'monotributo_social':    return 13
+    case 'consumidor_final':      return 5
+    default:                      return 5 // 'no_aplica' u otros → CF
+  }
+}
+
+// Letra de comprobante recomendada según la condición IVA del EMISOR y la del RECEPTOR.
+// - Monotributo emisor → siempre C (11), a cualquier receptor.
+// - Responsable Inscripto emisor → A (1) si el receptor es RI; B (6) si no.
+export function comprobanteRecomendado(condIvaEmisor, condIvaReceptorTexto) {
+  if (condIvaEmisor === 'monotributo') return 11
+  if (condIvaEmisor === 'responsable_inscripto') {
+    return condIvaReceptorTexto === 'responsable_inscripto' ? 1 : 6
+  }
+  return 11
+}
+
 // --- Concepto ---
 export const CONCEPTOS = [
   { v: 1, l: 'Productos' },

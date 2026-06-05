@@ -29,6 +29,7 @@ import {
   COMPROBANTES, DOC_TIPOS, COND_IVA_RECEPTOR, IVA_ALICUOTAS,
   comprobantesDeCuenta, guardarConfigArca, probarConexionArca, emitirComprobante,
   crearCertTestingArca, generarCsrArca, buildQrUrl, qrImgUrl,
+  condIvaAReceptorAfip, comprobanteRecomendado,
 } from '../../lib/arca'
 import { imprimirComprobante } from '../../lib/comprobantePdf'
 
@@ -749,6 +750,20 @@ function TabFacturas({ cuentas, facturas, contrapartes, onChange }) {
   )
 }
 
+// Deriva los campos ARCA del receptor (lo que se manda al WSFE y va al PDF) a
+// partir de la condición IVA (texto) y el CUIT de la contraparte. Así "Condición
+// IVA receptor", "Tipo doc." y "Nº documento" quedan correctos según la contraparte
+// (antes quedaban en el default Consumidor Final / sin identificar → factura mal).
+function receptorArcaDesde(condIvaTexto, cuit) {
+  const cuitLimpio = String(cuit || '').replace(/\D/g, '')
+  const tieneCuit = cuitLimpio.length === 11
+  return {
+    cond_iva_receptor: condIvaAReceptorAfip(condIvaTexto),
+    doc_tipo: tieneCuit ? 80 : 99,            // 80=CUIT · 99=Consumidor Final sin identificar
+    doc_nro: tieneCuit ? cuitLimpio : '',
+  }
+}
+
 function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
   const VACIO = {
     cuenta_id: cuentas[0]?.id || '',
@@ -804,6 +819,16 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
       set('comprobante_codigo', compsArca[0])
     }
   }, [modoArca, compsArca]) // eslint-disable-line
+  // Para emisor Responsable Inscripto: la LETRA depende del receptor (A=1 si el
+  // receptor es RI, B=6 si no). Monotributo siempre C (lo cubre compsArca). Así
+  // no se emite Factura A a un consumidor final ni Factura B a un RI por error.
+  useEffect(() => {
+    if (!modoArca || !cuentaSel) return
+    const recomendado = comprobanteRecomendado(cuentaSel.condicion_iva, form.contraparte_iva)
+    if (recomendado !== 11 && Number(form.comprobante_codigo) !== recomendado) {
+      set('comprobante_codigo', recomendado)
+    }
+  }, [modoArca, cuentaSel, form.contraparte_iva]) // eslint-disable-line
 
   function elegirContraparte(c) {
     if (!c) return
@@ -813,6 +838,8 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
       contraparte_nombre: c.nombre,
       contraparte_cuit: c.cuit || '',
       contraparte_iva: c.condicion_iva || 'consumidor_final',
+      // Sincroniza la sección RECEPTOR (ARCA) con la contraparte elegida.
+      ...receptorArcaDesde(c.condicion_iva, c.cuit),
     }))
   }
 
@@ -1117,11 +1144,17 @@ function FormFactura({ cuentas, contrapartes, onCerrar, onGuardado }) {
           <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 10 }}>
             <Campo label="Nombre / razón social"><input value={form.contraparte_nombre} onChange={e => set('contraparte_nombre', e.target.value)} style={inp} /></Campo>
             <Campo label="CUIT">
-              <input value={form.contraparte_cuit} onChange={e => set('contraparte_cuit', e.target.value)}
+              <input value={form.contraparte_cuit} onChange={e => {
+                const v = e.target.value
+                setForm(f => ({ ...f, contraparte_cuit: v, ...receptorArcaDesde(f.contraparte_iva, v) }))
+              }}
                 style={{ ...inp, borderColor: form.contraparte_cuit ? (esCuitValido(form.contraparte_cuit) ? 'var(--green)' : 'var(--border)') : 'var(--border)' }} />
             </Campo>
             <Campo label="Condición IVA">
-              <select value={form.contraparte_iva} onChange={e => set('contraparte_iva', e.target.value)} style={inp}>
+              <select value={form.contraparte_iva} onChange={e => {
+                const v = e.target.value
+                setForm(f => ({ ...f, contraparte_iva: v, ...receptorArcaDesde(v, f.contraparte_cuit) }))
+              }} style={inp}>
                 <option value="responsable_inscripto">RI</option>
                 <option value="monotributo">Mono</option>
                 <option value="exento">Exento</option>
