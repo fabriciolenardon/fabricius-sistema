@@ -720,6 +720,7 @@ function ModalImportarComprobantes({ cuenta, facturas, onCerrar, onImportado }) 
   const [error, setError] = useState(null)
   const [nombreArch, setNombreArch] = useState('')
   const [importando, setImportando] = useState(false)
+  const [progreso, setProgreso] = useState(0)
 
   const yaCargadas = useMemo(() => {
     const set = new Set()
@@ -749,7 +750,7 @@ function ModalImportarComprobantes({ cuenta, facturas, onCerrar, onImportado }) 
 
   async function importar() {
     if (!nuevas.length) return
-    setImportando(true)
+    setImportando(true); setProgreso(0)
     const datos = nuevas.map(f => ({
       cuenta_id: cuenta.id, tipo: dir,
       clasificacion: esEmitida ? 'venta' : 'compra',
@@ -759,10 +760,22 @@ function ModalImportarComprobantes({ cuenta, facturas, onCerrar, onImportado }) 
       monto_neto: f.monto_neto || 0, monto_iva: f.monto_iva || 0, monto_otros: 0, monto_total: f.monto_total || 0,
       ...(esEmitida && f.cae ? { cae: f.cae, arca_estado: 'autorizada' } : {}),
     }))
-    const { error: e } = await supabase.from('facturas').insert(datos)
-    setImportando(false)
-    if (e) { alert('❌ ' + e.message); return }
-    onImportado(nuevas.length, dir)
+    // Insert en lotes — un insert único de miles de filas supera el límite de Supabase.
+    const CHUNK = 400
+    let insertadas = 0, errMsg = null
+    for (let i = 0; i < datos.length; i += CHUNK) {
+      const { error: e } = await supabase.from('facturas').insert(datos.slice(i, i + CHUNK))
+      if (e) { errMsg = e.message; break }
+      insertadas += Math.min(CHUNK, datos.length - i)
+      setProgreso(insertadas)
+    }
+    setImportando(false); setProgreso(0)
+    if (errMsg) {
+      alert(`⚠️ Se importaron ${insertadas} de ${datos.length}. Se cortó por un error: ${errMsg}`)
+      if (insertadas) onImportado(insertadas, dir)
+      return
+    }
+    onImportado(insertadas, dir)
   }
 
   const tabBtn = (d, label) => (
@@ -823,7 +836,7 @@ function ModalImportarComprobantes({ cuenta, facturas, onCerrar, onImportado }) 
           <button onClick={onCerrar} style={{ flex: 1, padding: 12, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>Cancelar</button>
           <button onClick={importar} disabled={!nuevas.length || importando}
             style={{ flex: 2, padding: 12, background: nuevas.length ? 'var(--gold)' : 'var(--surface2)', color: nuevas.length ? '#000' : 'var(--muted)', border: 'none', borderRadius: 8, cursor: nuevas.length ? 'pointer' : 'not-allowed', fontWeight: 800, letterSpacing: 1 }}>
-            {importando ? '⏳ Importando...' : `⬇️ Importar ${nuevas.length} ${esEmitida ? 'ventas' : 'comprobantes'}`}
+            {importando ? `⏳ Importando ${progreso} / ${nuevas.length}...` : `⬇️ Importar ${nuevas.length} ${esEmitida ? 'ventas' : 'comprobantes'}`}
           </button>
         </div>
       </div>
