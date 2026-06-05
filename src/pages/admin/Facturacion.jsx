@@ -764,9 +764,9 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
               </tr>
             </thead>
             <tbody>
-              {pag.pagina.length === 0 ? (
+              {pag.items.length === 0 ? (
                 <tr><td colSpan={esRI ? 8 : 6} style={{ textAlign: 'center', padding: 24, color: 'var(--muted)' }}>Sin movimientos en {nombreMes}.</td></tr>
-              ) : pag.pagina.map(f => {
+              ) : pag.items.map(f => {
                 const sg = signoFactura(f)
                 return (
                   <tr key={f.id} style={{ borderTop: '1px solid var(--border)' }}>
