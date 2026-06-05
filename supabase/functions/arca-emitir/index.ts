@@ -22,7 +22,10 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
-const COMPROBANTES_OK = new Set([1, 6, 11]) // 1=Factura A, 6=Factura B, 11=Factura C
+// Facturas: A=1, B=6, C=11 · Notas de Débito: A=2, B=7, C=12 · Notas de Crédito: A=3, B=8, C=13
+const COMPROBANTES_OK = new Set([1, 2, 3, 6, 7, 8, 11, 12, 13])
+const CODIGOS_C = new Set([11, 12, 13])   // letra C (sin IVA discriminado): Factura/ND/NC C
+const CODIGOS_A = new Set([1, 2, 3])      // letra A
 const IVA_IDS_OK = new Set([3, 4, 5, 6, 8, 9])
 const IVA_PCT: Record<number, number> = { 3: 0, 4: 10.5, 5: 21, 6: 27, 8: 5, 9: 2.5 }
 
@@ -45,9 +48,10 @@ serve(async (req) => {
     const cuenta_id = Number(body.cuenta_id)
     if (!cuenta_id) return jsonError('cuenta_id es obligatorio')
     const comprobante_codigo = Number(body.comprobante_codigo)
-    if (!COMPROBANTES_OK.has(comprobante_codigo)) return jsonError('Comprobante no soportado todavía (por ahora: Factura A=1, B=6, C=11)')
+    if (!COMPROBANTES_OK.has(comprobante_codigo)) return jsonError('Comprobante no soportado (Factura/NC/ND A, B o C)')
     const iva_id = IVA_IDS_OK.has(Number(body.iva_id)) ? Number(body.iva_id) : 4
-    const esC = comprobante_codigo === 11
+    const esC = CODIGOS_C.has(comprobante_codigo)
+    const esNotaCD = [2, 3, 7, 8, 12, 13].includes(comprobante_codigo) // Nota de Crédito/Débito
 
     // Importes: desde ítems (detalle) o modo simple.
     let items = Array.isArray(body.items) ? body.items.filter((it: any) => it && Number(it.cantidad) > 0) : null
@@ -109,7 +113,17 @@ serve(async (req) => {
     const ult = await ultimoAutorizado(ambiente, Auth, punto_venta, comprobante_codigo)
     if (!ult.ok) return jsonError('No se pudo consultar el último comprobante: ' + ult.error)
     const numero = (ult.nro || 0) + 1
-    const letraComp = esC ? 'C' : comprobante_codigo === 1 ? 'A' : 'B'
+    const letraComp = esC ? 'C' : (CODIGOS_A.has(comprobante_codigo) ? 'A' : 'B')
+
+    // Comprobante asociado (obligatorio en Notas de Crédito/Débito): la factura original.
+    let cbtesAsoc: Array<Record<string, unknown>> | null = null
+    if (esNotaCD) {
+      const a = body.cbte_asoc || {}
+      const aTipo = Number(a.tipo) || 0, aPtoVta = Number(a.pto_vta) || 0, aNro = Number(a.nro) || 0
+      if (!aTipo || !aPtoVta || !aNro) return jsonError('Una Nota de Crédito/Débito necesita el comprobante original asociado (tipo, punto de venta y número).')
+      const aFch = /^\d{4}-\d{2}-\d{2}$/.test(String(a.fecha || '')) ? String(a.fecha).replace(/-/g, '') : null
+      cbtesAsoc = [{ Tipo: aTipo, PtoVta: aPtoVta, Nro: aNro, Cuit: cuitNum, ...(aFch ? { CbteFch: aFch } : {}) }]
+    }
 
     // 3) FECAESolicitar
     const fch = fecha.replace(/-/g, '')
@@ -118,6 +132,7 @@ serve(async (req) => {
       CbteDesde: numero, CbteHasta: numero, CbteFch: fch,
       ImpTotal: impTotal, ImpTotConc: 0, ImpNeto: impNeto, ImpOpEx: 0, ImpTrib: 0,
       ImpIVA: esC ? 0 : impIva, MonId: 'PES', MonCotiz: 1, CondicionIVAReceptorId: cond_iva_receptor,
+      ...(cbtesAsoc ? { CbtesAsoc: cbtesAsoc } : {}),
     }
     if (concepto !== 1) { det.FchServDesde = fch; det.FchServHasta = fch; det.FchVtoPago = fch }
 
@@ -139,11 +154,12 @@ serve(async (req) => {
       concepto: body.descripcion || null, condicion_pago: body.condicion_pago || 'contado',
       items: itemsCalc.length ? itemsCalc : null, emitida_por_arca: true,
     }
+    const cbteAsocGuardar = cbtesAsoc ? body.cbte_asoc : null // referencia del comprobante original (NC/ND)
 
     if (resultado !== 'A' || !dResp?.CAE) {
       const { data: filaRech } = await supabaseAdmin.from('facturas').insert({
         ...filaBase, arca_estado: resultado === 'R' ? 'rechazada' : 'error',
-        arca_resultado: { resultado, errores },
+        arca_resultado: { resultado, errores, cbte_asoc: cbteAsocGuardar },
       }).select('id').single()
       return jsonError(`ARCA rechazó el comprobante: ${errores || 'sin detalle'}`, 422, { factura_id: filaRech?.id, estado: resultado === 'R' ? 'rechazada' : 'error', errores })
     }
@@ -153,7 +169,7 @@ serve(async (req) => {
     const cae_vto = caeVtoRaw.length === 8 ? `${caeVtoRaw.slice(0, 4)}-${caeVtoRaw.slice(4, 6)}-${caeVtoRaw.slice(6, 8)}` : null
 
     const { data: fila, error: insErr } = await supabaseAdmin.from('facturas').insert({
-      ...filaBase, cae, cae_vto, arca_estado: 'autorizada', arca_resultado: { resultado, observaciones: errores || null },
+      ...filaBase, cae, cae_vto, arca_estado: 'autorizada', arca_resultado: { resultado, observaciones: errores || null, cbte_asoc: cbteAsocGuardar },
     }).select('*').single()
     if (insErr) return jsonError(`Se obtuvo CAE ${cae} pero falló el guardado local: ${insErr.message}. Anotá el número ${punto_venta}-${numero} y el CAE.`, 500, { cae, cae_vto, numero, punto_venta })
 

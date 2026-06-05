@@ -15,8 +15,21 @@ export const COMPROBANTES = {
   1:  { letra: 'A', label: 'Factura A' },
   6:  { letra: 'B', label: 'Factura B' },
   11: { letra: 'C', label: 'Factura C' },
-  // (NC/ND y otros quedan para una iteración posterior)
+  2:  { letra: 'A', label: 'Nota de Débito A' },
+  7:  { letra: 'B', label: 'Nota de Débito B' },
+  12: { letra: 'C', label: 'Nota de Débito C' },
+  3:  { letra: 'A', label: 'Nota de Crédito A' },
+  8:  { letra: 'B', label: 'Nota de Crédito B' },
+  13: { letra: 'C', label: 'Nota de Crédito C' },
 }
+
+// Notas de Crédito (restan) y de Débito (suman) — necesitan comprobante asociado.
+export const NOTAS_CREDITO = new Set([3, 8, 13])
+export const NOTAS_DEBITO = new Set([2, 7, 12])
+export const ES_NOTA_CD = c => NOTAS_CREDITO.has(Number(c)) || NOTAS_DEBITO.has(Number(c))
+// Para una factura de código X, la NC y ND de la misma letra:
+export const NC_DE_FACTURA = { 1: 3, 6: 8, 11: 13 }
+export const ND_DE_FACTURA = { 1: 2, 6: 7, 11: 12 }
 
 // --- Tipo de documento del receptor ---
 export const DOC_TIPOS = [
@@ -77,15 +90,15 @@ export const IVA_ALICUOTAS = [
 ]
 
 // Comprobantes que la edge function `arca-emitir` ya soporta.
-export const COMPROBANTES_SOPORTADOS = [11, 6, 1]
+export const COMPROBANTES_SOPORTADOS = [1, 2, 3, 6, 7, 8, 11, 12, 13]
 
 // Sugiere qué comprobantes puede emitir una cuenta según su condición IVA.
-// Monotributo → Factura C. Responsable Inscripto / SAS → A (a RI) o B (a CF).
+// Monotributo → C (Factura, NC, ND). Responsable Inscripto / SAS → A y B (Factura, NC, ND).
 export function comprobantesDeCuenta(cuenta) {
   const cond = cuenta?.condicion_iva || cuenta?.tipo
-  if (cond === 'monotributo') return [11]
-  if (cond === 'responsable_inscripto' || cuenta?.tipo === 'sas') return [6, 1]
-  return [11]
+  if (cond === 'monotributo') return [11, 13, 12]                 // Factura C, NC C, ND C
+  if (cond === 'responsable_inscripto' || cuenta?.tipo === 'sas') return [1, 6, 3, 8, 2, 7] // A, B, NC A, NC B, ND A, ND B
+  return [11, 13, 12]
 }
 
 // ============================================================

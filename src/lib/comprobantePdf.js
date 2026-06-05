@@ -68,6 +68,13 @@ export function comprobanteHtml(factura, cuenta) {
   const condEmisor = CONDICION_EMISOR[cuenta.condicion_iva] || CONDICION_EMISOR[cuenta.tipo] || ''
   const docRecLabel = DOC_LABEL[factura.doc_tipo] || ''
   const condRec = CONDICION_RECEPTOR[factura.cond_iva_receptor] || 'Consumidor Final'
+  // Título del documento: FACTURA / NOTA DE CRÉDITO / NOTA DE DÉBITO (según el código).
+  const tituloDoc = (COMPROBANTES[codigo]?.label || 'Factura').replace(/\s+[ABC]$/, '').toUpperCase()
+  // Comprobante asociado (en NC/ND): se guarda en arca_resultado.cbte_asoc.
+  const asoc = factura.arca_resultado?.cbte_asoc || null
+  const asocTxt = asoc
+    ? `${COMPROBANTES[Number(asoc.tipo)]?.label || 'Comprobante'} ${String(asoc.pto_vta || '').padStart(5, '0')}-${String(asoc.nro || '').padStart(8, '0')}`
+    : ''
 
   // Filas de ítems
   const filas = items.length ? items.map(it => {
@@ -112,7 +119,7 @@ export function comprobanteHtml(factura, cuenta) {
         <div style="font-size:9px; margin-top:2px;">COD. ${COD_AFIP[codigo] || codigo}</div>
       </div>
       <div style="width:46%; padding:12px;">
-        <div class="big">FACTURA</div>
+        <div class="big">${tituloDoc}</div>
         <div class="muted" style="margin-top:6px;">
           <strong>Punto de Venta:</strong> ${pv} &nbsp; <strong>Comp. Nro:</strong> ${nro}<br/>
           <strong>Fecha de Emisión:</strong> ${fechaAR(factura.fecha)}<br/>
@@ -129,6 +136,7 @@ export function comprobanteHtml(factura, cuenta) {
         <strong>${docRecLabel ? docRecLabel + ':' : 'Documento:'}</strong> ${esc(factura.doc_nro && Number(factura.doc_nro) ? formatearCuit(factura.doc_nro) : '—')}
         &nbsp;·&nbsp; <strong>Condición frente al IVA:</strong> ${esc(condRec)}
         ${factura.contraparte_nombre ? `<br/><strong>Apellido y Nombre / Razón social:</strong> ${esc(factura.contraparte_nombre)}` : ''}
+        ${asocTxt ? `<br/><strong>Comprobante asociado:</strong> ${esc(asocTxt)}` : ''}
       </div>
     </div>
 
