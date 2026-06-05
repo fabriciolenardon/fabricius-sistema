@@ -72,6 +72,9 @@ const TIPOS_COMPROBANTE = [
   { v: 'C', l: 'Factura C' },
   { v: 'E', l: 'Factura E (exportación)' },
   { v: 'M', l: 'Factura M' },
+  { v: 'LSA', l: 'Liquidación de Servicios A (luz, gas, etc.)' },
+  { v: 'LSB', l: 'Liquidación de Servicios B' },
+  { v: 'LSC', l: 'Liquidación de Servicios C' },
   { v: 'NDA', l: 'Nota de Débito A' },
   { v: 'NDB', l: 'Nota de Débito B' },
   { v: 'NDC', l: 'Nota de Débito C' },
@@ -1597,7 +1600,7 @@ function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInici
       <div onClick={e => e.stopPropagation()}
         style={{ background: 'var(--surface)', border: '1px solid var(--gold)', borderRadius: 12, padding: 20, maxWidth: 720, width: '100%', maxHeight: '90vh', overflow: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-          <div style={{ fontSize: 18, fontWeight: 700 }}>{modoArca ? '⚡ Emitir factura electrónica' : '+ Nueva factura'}</div>
+          <div style={{ fontSize: 18, fontWeight: 700 }}>{modoArca ? '⚡ Emitir factura electrónica' : form.tipo === 'recibida' ? '📥 Cargar comprobante recibido (compra / gasto)' : '🧾 Cargar venta / factura'}</div>
           <button onClick={onCerrar} style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: 20, cursor: 'pointer' }}>✕</button>
         </div>
 
