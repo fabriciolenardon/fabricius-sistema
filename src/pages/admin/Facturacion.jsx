@@ -1033,7 +1033,7 @@ function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInici
   }, [facturas, cuentaSel])
 
   // Si la cuenta no puede emitir, apagar el modo ARCA
-  useEffect(() => { if (!puedeArca && modoArca) setModoArca(false) }, [puedeArca, modoArca])
+  useEffect(() => { if ((!puedeArca || form.tipo !== 'emitida') && modoArca) setModoArca(false) }, [puedeArca, modoArca, form.tipo])
   // Mantener un comprobante válido para la cuenta elegida
   useEffect(() => {
     if (modoArca && compsArca.length && !compsArca.includes(Number(form.comprobante_codigo))) {
@@ -1307,7 +1307,9 @@ function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInici
           <button onClick={onCerrar} style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: 20, cursor: 'pointer' }}>✕</button>
         </div>
 
-        {/* Toggle modo emisión electrónica (solo si la cuenta tiene ARCA configurado) */}
+        {/* Toggle modo emisión electrónica — SOLO para VENTAS (emitidas). Una
+            compra/gasto la emitió otro: nosotros somos el receptor, no se emite. */}
+        {form.tipo === 'emitida' && (
         <div style={{ marginBottom: 14, padding: 12, borderRadius: 8,
           background: modoArca ? '#1a2a14' : 'var(--surface2)',
           border: `1px solid ${modoArca ? 'var(--gold)' : 'var(--border)'}` }}>
@@ -1324,6 +1326,12 @@ function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInici
             </div>
           </label>
         </div>
+        )}
+        {form.tipo === 'recibida' && (
+          <div style={{ marginBottom: 14, padding: '10px 12px', borderRadius: 8, background: 'var(--surface2)', border: '1px solid var(--border)', fontSize: 12, color: 'var(--muted)' }}>
+            📥 <strong>Factura recibida</strong> — la emitió tu proveedor; vos la registrás como comprobante recibido (compra o gasto). Adjuntá el PDF abajo.
+          </div>
+        )}
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
           <Campo label="Cuenta *">
