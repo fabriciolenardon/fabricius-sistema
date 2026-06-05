@@ -657,10 +657,19 @@ function tipoCortoDeCodigo(codigo) {
   if (NOTAS_DEBITO.has(codigo)) return 'ND' + letra
   return letra || 'Otro'
 }
+// Códigos AFIP que NO son Factura/NC/ND comunes pero igual definen la CLASE (letra)
+// del comprobante — clave para el IVA crédito (solo computa clase A): Recibos, Notas
+// de Venta, Tique-Factura (controlador fiscal), Liquidación de Servicios Públicos, FCE.
+const CODIGO_LETRA = {
+  4: 'A', 5: 'A', 16: 'A', 17: 'A', 81: 'A', 201: 'A', 202: 'A', 203: 'A',
+  9: 'B', 10: 'B', 18: 'B', 82: 'B', 206: 'B', 207: 'B', 208: 'B',
+  15: 'C', 19: 'C', 83: 'C', 211: 'C', 212: 'C', 213: 'C',
+}
 function tipoCortoDelCsv(raw) {
   const s = String(raw || '').trim()
   const num = parseInt((s.match(/\d+/) || [])[0] || '', 10)
   if (num && COMPROBANTES[num]) return tipoCortoDeCodigo(num)
+  if (num && CODIGO_LETRA[num]) return CODIGO_LETRA[num] // Tique/Recibo/Liq. Servicios → su letra
   const t = normHdr(s)
   const letra = /factura a|nota.* a\b|\ba\b/.test(t) ? 'A' : (/factura b|nota.* b\b|\bb\b/.test(t) ? 'B' : 'C')
   if (t.includes('credito')) return 'NC' + letra
