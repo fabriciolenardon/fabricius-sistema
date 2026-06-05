@@ -985,6 +985,17 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
   const totImpuestos = impPeriodo.reduce((s, p) => s + (Number(p.monto) || 0), 0)
   const totalPagDet = Math.max(1, Math.ceil(totalDet / PAGE))
 
+  // --- Liquidación mensual (solo Responsable Inscripto, ej. la SAS) ---
+  // IIBB y municipal se calculan sobre las VENTAS NETAS (sin IVA): el IVA débito
+  // no integra la base imponible de Ingresos Brutos del RI.
+  const ventasNeto = Math.max(0, totVentas - ivaDebito)
+  const iibbAlic = Number(cuenta?.alicuota_iibb_pct) || 0
+  const iibbMes = esRI && cuenta?.inscripto_iibb ? ventasNeto * iibbAlic / 100 : 0
+  const munAlic = Number(cuenta?.alicuota_municipal_pct) || 0
+  const munMes = esRI && cuenta?.inscripto_municipal ? ventasNeto * munAlic / 100 : 0
+  const ivaAPagar = Math.max(0, saldoIva)
+  const totalAPagar = ivaAPagar + iibbMes + munMes
+
   async function abrirPdf(f) {
     if (f.cae) { imprimirComprobante(f, cuenta || {}); return }
     if (f.archivo_url) {
@@ -1054,6 +1065,43 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
         )}
         <KPI label="💸 Impuestos / Cuotas" value={fmt$(totImpuestos)} sub={`${impPeriodo.length} pago(s) · sin IVA`} color="var(--purple)" />
       </div>
+
+      {/* Liquidación mensual a pagar (solo Responsable Inscripto, ej. la SAS): IVA + IIBB + municipal. */}
+      {esRI && (
+        <div className="card" style={{ padding: 14, marginBottom: 12, border: '1px solid var(--gold)' }}>
+          <div style={{ fontSize: 11, color: 'var(--gold)', letterSpacing: 1, marginBottom: 10, fontWeight: 700 }}>🧾 LIQUIDACIÓN MENSUAL A PAGAR · {etiquetaPeriodo.toUpperCase()}</div>
+          <table style={{ width: '100%', fontSize: 13 }}>
+            <tbody>
+              <tr style={{ borderTop: '1px solid var(--border)' }}>
+                <td style={{ padding: '7px 6px', whiteSpace: 'nowrap', fontWeight: 600 }}>📕 IVA {saldoIva < 0 ? '(saldo a favor)' : 'a pagar'}</td>
+                <td style={{ padding: '7px 6px', color: 'var(--muted)', fontSize: 11 }}>Débito {fmt$(ivaDebito)} − Crédito {fmt$(ivaCredito)} · ARCA → Presentación de DDJJ y Pagos → Nuevo VEP</td>
+                <td style={{ padding: '7px 6px', textAlign: 'right', fontWeight: 700, color: saldoIva > 0 ? '#ff8b8b' : '#7dff7d' }}>{saldoIva < 0 ? 'a favor ' : ''}{fmt$(Math.abs(saldoIva))}</td>
+              </tr>
+              {cuenta?.inscripto_iibb && (
+                <tr style={{ borderTop: '1px solid var(--border)' }}>
+                  <td style={{ padding: '7px 6px', whiteSpace: 'nowrap', fontWeight: 600 }}>🏛️ IIBB Córdoba</td>
+                  <td style={{ padding: '7px 6px', color: 'var(--muted)', fontSize: 11 }}>{iibbAlic.toLocaleString('es-AR')}% × ventas netas {fmt$(ventasNeto)} · mínimo $19.200/mes · SIFERE / Rentas Córdoba</td>
+                  <td style={{ padding: '7px 6px', textAlign: 'right', fontWeight: 700, color: '#ff8b8b' }}>{fmt$(Math.max(iibbMes, modo === 'mes' ? 19200 : 0))}</td>
+                </tr>
+              )}
+              {cuenta?.inscripto_municipal && munMes > 0 && (
+                <tr style={{ borderTop: '1px solid var(--border)' }}>
+                  <td style={{ padding: '7px 6px', whiteSpace: 'nowrap', fontWeight: 600 }}>🏢 Municipal</td>
+                  <td style={{ padding: '7px 6px', color: 'var(--muted)', fontSize: 11 }}>{munAlic.toLocaleString('es-AR')}% × ventas netas {fmt$(ventasNeto)} · Río Primero</td>
+                  <td style={{ padding: '7px 6px', textAlign: 'right', fontWeight: 700, color: '#ff8b8b' }}>{fmt$(munMes)}</td>
+                </tr>
+              )}
+              <tr style={{ borderTop: '2px solid var(--gold)' }}>
+                <td style={{ padding: '9px 6px', fontWeight: 800 }} colSpan={2}>TOTAL A PAGAR (estimado)</td>
+                <td style={{ padding: '9px 6px', textAlign: 'right', fontWeight: 800, fontSize: 16, color: 'var(--gold)' }}>{fmt$(ivaAPagar + Math.max(iibbMes, modo === 'mes' && cuenta?.inscripto_iibb ? 19200 : 0) + munMes)}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8, lineHeight: 1.5 }}>
+            💡 Los VEP los generás vos: <strong>IVA</strong> en ARCA (Presentación de DDJJ y Pagos → Nuevo VEP, tras la DDJJ F.2002) · <strong>IIBB</strong> en SIFERE / Rentas Córdoba. Después registrá lo pagado con <strong>💸 Pago impuesto/cuota</strong>. Estos montos son orientativos — confirmá contra tu primer VEP real (puede haber retenciones/percepciones a deducir).
+          </div>
+        </div>
+      )}
 
       {/* Impuestos / cuotas del período (incluye la cuota de monotributo) — gasto del perfil, sin IVA. */}
       {impPeriodo.length > 0 && (
