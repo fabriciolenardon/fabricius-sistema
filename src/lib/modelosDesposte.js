@@ -3,11 +3,30 @@
 // ============================================================
 // Estos son los modelos predefinidos de desposte de una
 // media res. Cada modelo corta las piezas en proporciones
-// distintas. Las piezas se cargan a stock como 'bovino_pieza'.
+// distintas. Cada pieza se carga a su PROPIO bucket de stock
+// (pieza_pierna, pieza_cortito, etc.) — ya NO al genérico
+// 'bovino_pieza' (deprecado). Ver PIEZA_BOVINA_A_STOCK abajo.
 //
 // IMPORTANTE: Esta definición debe coincidir con la usada
 // en pages/admin/Deposito.jsx. Si modificás acá, sincronizar allá.
 // ============================================================
+
+// Bucket de stock_actual propio de cada pieza bovina (stock por pieza).
+// Fuente de verdad única para desposte, venta, conversión y anulación.
+export const PIEZA_BOVINA_A_STOCK = {
+  'Cuarto Pistola': 'pieza_cuarto_pistola',
+  'Cortito': 'pieza_cortito',
+  'Costillar Completo': 'pieza_costillar',
+  'Pierna': 'pieza_pierna',
+  'Parrillero': 'pieza_parrillero',
+  'Costeletal con Lomo': 'pieza_costeletal',
+  'Paleta': 'pieza_paleta',
+}
+// Devuelve el bucket de una pieza por su nombre. Fallback al genérico solo
+// si el nombre no se reconoce (no debería pasar con los modelos actuales).
+export function bucketDePiezaBovina(nombre) {
+  return PIEZA_BOVINA_A_STOCK[nombre] || 'bovino_pieza'
+}
 
 export const MODELOS_DESPOSTE = {
   A: {
@@ -15,9 +34,9 @@ export const MODELOS_DESPOSTE = {
     icono: '🅰️',
     merma_desposte_pct: 0.03,
     piezas: [
-      { nombre: 'Cuarto Pistola',    pct: 0.44, tipo_stock: 'bovino_pieza', busqueda_precio: 'pistola' },
-      { nombre: 'Cortito',           pct: 0.33, tipo_stock: 'bovino_pieza', busqueda_precio: 'cortito' },
-      { nombre: 'Costillar Completo', pct: 0.20, tipo_stock: 'bovino_pieza', busqueda_precio: 'costilla' },
+      { nombre: 'Cuarto Pistola',    pct: 0.44, tipo_stock: 'pieza_cuarto_pistola', busqueda_precio: 'pistola' },
+      { nombre: 'Cortito',           pct: 0.33, tipo_stock: 'pieza_cortito', busqueda_precio: 'cortito' },
+      { nombre: 'Costillar Completo', pct: 0.20, tipo_stock: 'pieza_costillar', busqueda_precio: 'costilla' },
     ],
   },
   B: {
@@ -25,10 +44,10 @@ export const MODELOS_DESPOSTE = {
     icono: '🅱️',
     merma_desposte_pct: 0.03,
     piezas: [
-      { nombre: 'Pierna',             pct: 0.30, tipo_stock: 'bovino_pieza', busqueda_precio: 'pierna' },
-      { nombre: 'Costeletal con Lomo', pct: 0.14, tipo_stock: 'bovino_pieza', busqueda_precio: 'lomo' },
-      { nombre: 'Cortito',            pct: 0.33, tipo_stock: 'bovino_pieza', busqueda_precio: 'cortito' },
-      { nombre: 'Costillar Completo', pct: 0.20, tipo_stock: 'bovino_pieza', busqueda_precio: 'costilla' },
+      { nombre: 'Pierna',             pct: 0.30, tipo_stock: 'pieza_pierna', busqueda_precio: 'pierna' },
+      { nombre: 'Costeletal con Lomo', pct: 0.14, tipo_stock: 'pieza_costeletal', busqueda_precio: 'lomo' },
+      { nombre: 'Cortito',            pct: 0.33, tipo_stock: 'pieza_cortito', busqueda_precio: 'cortito' },
+      { nombre: 'Costillar Completo', pct: 0.20, tipo_stock: 'pieza_costillar', busqueda_precio: 'costilla' },
     ],
   },
   C: {
@@ -36,9 +55,9 @@ export const MODELOS_DESPOSTE = {
     icono: '🅲',
     merma_desposte_pct: 0.02,
     piezas: [
-      { nombre: 'Pierna',     pct: 0.30, tipo_stock: 'bovino_pieza', busqueda_precio: 'pierna' },
-      { nombre: 'Parrillero', pct: 0.35, tipo_stock: 'bovino_pieza', busqueda_precio: 'parrillero' },
-      { nombre: 'Cortito',    pct: 0.33, tipo_stock: 'bovino_pieza', busqueda_precio: 'cortito' },
+      { nombre: 'Pierna',     pct: 0.30, tipo_stock: 'pieza_pierna', busqueda_precio: 'pierna' },
+      { nombre: 'Parrillero', pct: 0.35, tipo_stock: 'pieza_parrillero', busqueda_precio: 'parrillero' },
+      { nombre: 'Cortito',    pct: 0.33, tipo_stock: 'pieza_cortito', busqueda_precio: 'cortito' },
     ],
   },
 }

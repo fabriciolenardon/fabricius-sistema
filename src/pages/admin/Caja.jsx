@@ -543,11 +543,19 @@ export default function Caja() {
       // kg al agregado al despostar; la venta lo resta (igual que el remito de
       // Depósito). Sin esto el Dashboard quedaría inflado por las piezas vendidas.
       if (item.pieza_id) {
-        const { data: stkPz } = await supabase.from('stock_actual').select('*').eq('tipo', 'bovino_pieza').maybeSingle()
+        // Descontar del bucket PROPIO de la pieza (pieza_pierna, pieza_cortito…),
+        // no del genérico. El bucket sale del stock_origen del item o, si no,
+        // del tipo_stock de la pieza en piezas_stock.
+        let bucketPz = item.stock_origen
+        if (!bucketPz) {
+          const { data: pz } = await supabase.from('piezas_stock').select('tipo_stock').eq('id', item.pieza_id).maybeSingle()
+          bucketPz = pz?.tipo_stock || 'bovino_pieza'
+        }
+        const { data: stkPz } = await supabase.from('stock_actual').select('*').eq('tipo', bucketPz).maybeSingle()
         if (stkPz) {
           await supabase.from('stock_actual')
             .update({ kg_disponible: (stkPz.kg_disponible || 0) - (item.kg || 0) })
-            .eq('tipo', 'bovino_pieza')
+            .eq('tipo', bucketPz)
         }
         continue
       }

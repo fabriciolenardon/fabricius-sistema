@@ -188,11 +188,17 @@ export default function HistorialCaja() {
           notas_salida: null,
         }).eq('id', item.pieza_id)
         if (error) errores.push(`Pieza #${item.pieza_id}: ${error.message}`)
-        const { data: stkPz } = await supabase.from('stock_actual').select('*').eq('tipo', 'bovino_pieza').maybeSingle()
+        // Reponer en el bucket PROPIO de la pieza (no en el genérico).
+        let bucketPz = item.stock_origen
+        if (!bucketPz) {
+          const { data: pz } = await supabase.from('piezas_stock').select('tipo_stock').eq('id', item.pieza_id).maybeSingle()
+          bucketPz = pz?.tipo_stock || 'bovino_pieza'
+        }
+        const { data: stkPz } = await supabase.from('stock_actual').select('*').eq('tipo', bucketPz).maybeSingle()
         if (stkPz) {
           await supabase.from('stock_actual')
             .update({ kg_disponible: (Number(stkPz.kg_disponible) || 0) + (Number(item.kg) || 0) })
-            .eq('tipo', 'bovino_pieza')
+            .eq('tipo', bucketPz)
         }
         continue
       }

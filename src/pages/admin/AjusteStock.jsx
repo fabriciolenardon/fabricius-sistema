@@ -47,6 +47,7 @@ const LABELS = {
   pieza_costillar: '🍖 Pieza — Costillar',
   pieza_cortito: '🥩 Pieza — Cortito',
   pieza_carre: '🥩 Pieza — Carré',
+  pieza_costeletal: '🥩 Pieza — Costeletal con Lomo',
   pieza_paleta: '🥩 Pieza — Paleta',
   pieza_parrillero: '🥩 Pieza — Parrillero',
   caja_cb: '📦 Caja CB',

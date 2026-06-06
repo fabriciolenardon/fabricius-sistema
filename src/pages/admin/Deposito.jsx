@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
 import { lunesDeLaSemana, domingoDeLaSemana } from '../../lib/cierreAuto'
 import { resolverDescuentoStock } from '../../lib/stockHelpers'
+import { bucketDePiezaBovina } from '../../lib/modelosDesposte'
 import { cargarCajasDisponibles, crearCajasIngreso, venderCaja, revertirVentaCaja, CATEGORIA_A_TIPO_CAJA } from '../../lib/cajasStock'
 import { fmtPrecio, fmtKg, parseNumero } from '../../lib/formatos'
 import { getCampoPrecio } from '../../lib/listasPrecios'
@@ -87,9 +88,9 @@ const MODELOS_DESPOSTE = {
     icono: '🅰️',
     merma_desposte_pct: 0.03,
     piezas: [
-      { nombre: 'Cuarto Pistola', pct: 0.44, tipo_stock: 'bovino_pieza', busqueda_precio: 'pistola' },
-      { nombre: 'Cortito', pct: 0.33, tipo_stock: 'bovino_pieza', busqueda_precio: 'cortito' },
-      { nombre: 'Costillar Completo', pct: 0.20, tipo_stock: 'bovino_pieza', busqueda_precio: 'costilla' },
+      { nombre: 'Cuarto Pistola', pct: 0.44, tipo_stock: 'pieza_cuarto_pistola', busqueda_precio: 'pistola' },
+      { nombre: 'Cortito', pct: 0.33, tipo_stock: 'pieza_cortito', busqueda_precio: 'cortito' },
+      { nombre: 'Costillar Completo', pct: 0.20, tipo_stock: 'pieza_costillar', busqueda_precio: 'costilla' },
     ],
   },
   B: {
@@ -97,10 +98,10 @@ const MODELOS_DESPOSTE = {
     icono: '🅱️',
     merma_desposte_pct: 0.03,
     piezas: [
-      { nombre: 'Pierna', pct: 0.30, tipo_stock: 'bovino_pieza', busqueda_precio: 'pierna' },
-      { nombre: 'Costeletal con Lomo', pct: 0.14, tipo_stock: 'bovino_pieza', busqueda_precio: 'lomo' },
-      { nombre: 'Cortito', pct: 0.33, tipo_stock: 'bovino_pieza', busqueda_precio: 'cortito' },
-      { nombre: 'Costillar Completo', pct: 0.20, tipo_stock: 'bovino_pieza', busqueda_precio: 'costilla' },
+      { nombre: 'Pierna', pct: 0.30, tipo_stock: 'pieza_pierna', busqueda_precio: 'pierna' },
+      { nombre: 'Costeletal con Lomo', pct: 0.14, tipo_stock: 'pieza_costeletal', busqueda_precio: 'lomo' },
+      { nombre: 'Cortito', pct: 0.33, tipo_stock: 'pieza_cortito', busqueda_precio: 'cortito' },
+      { nombre: 'Costillar Completo', pct: 0.20, tipo_stock: 'pieza_costillar', busqueda_precio: 'costilla' },
     ],
   },
   C: {
@@ -108,9 +109,9 @@ const MODELOS_DESPOSTE = {
     icono: '🅲',
     merma_desposte_pct: 0.02,
     piezas: [
-      { nombre: 'Pierna', pct: 0.30, tipo_stock: 'bovino_pieza', busqueda_precio: 'pierna' },
-      { nombre: 'Parrillero', pct: 0.35, tipo_stock: 'bovino_pieza', busqueda_precio: 'parrillero' },
-      { nombre: 'Cortito', pct: 0.33, tipo_stock: 'bovino_pieza', busqueda_precio: 'cortito' },
+      { nombre: 'Pierna', pct: 0.30, tipo_stock: 'pieza_pierna', busqueda_precio: 'pierna' },
+      { nombre: 'Parrillero', pct: 0.35, tipo_stock: 'pieza_parrillero', busqueda_precio: 'parrillero' },
+      { nombre: 'Cortito', pct: 0.33, tipo_stock: 'pieza_cortito', busqueda_precio: 'cortito' },
     ],
   },
 }
@@ -392,8 +393,9 @@ setElaboraciones(elaboracionesData || [])
         estado: 'despostada', desposte_id: desposteData.id, fecha_salida: fecha,
       }).eq('entrada_id', seleccionada.id)
       await actualizarStock('bovino_mr', -kgBase)
-      // Stock agregado (compat) — sigue sumando al total bovino_pieza
-      for (const pieza of piezas) { await actualizarStock('bovino_pieza', pieza.kg_editado) }
+      // Stock por pieza: cada pieza suma a SU bucket propio (pieza_pierna, pieza_cortito…),
+      // ya no al genérico bovino_pieza. Así cada pieza tiene su stock individual.
+      for (const pieza of piezas) { await actualizarStock(pieza.tipo_stock || bucketDePiezaBovina(pieza.nombre), pieza.kg_editado) }
       // Stock individual: una fila por pieza para trazabilidad completa
       const filasPiezas = piezas
         .filter(p => (p.kg_editado || 0) > 0)
@@ -421,7 +423,7 @@ setElaboraciones(elaboracionesData || [])
         'Costillar Completo': 'pieza_costillar',
         'Cortito': 'pieza_cortito',
         'Pierna': 'pieza_pierna',
-        'Costeletal con Lomo': 'pieza_carre',
+        'Costeletal con Lomo': 'pieza_costeletal',
         'Parrillero': 'pieza_parrillero',
         'Paleta': 'pieza_paleta',
       }
@@ -681,7 +683,9 @@ async function confirmarDesposteCerdo() {
     '📦 Caja CB': 'caja_cb',
     '📦 Caja PT': 'caja_pt',
   }
-  const tipoStock = PIEZA_A_STOCK[nombrePieza] || 'bovino_pieza'
+  // Preferir el bucket real de la pieza individual seleccionada (ya específico);
+  // si la conversión es por nombre suelto, mapear por nombre.
+  const tipoStock = piezaIndividualSeleccionada?.tipo_stock || PIEZA_A_STOCK[nombrePieza] || 'bovino_pieza'
 
   setLoading(true)
   try {
@@ -1914,8 +1918,10 @@ async function eliminar(entrada) {
     const { data: desposte } = await supabase.from('despostes').select('*').eq('id', entrada.desposte_id).single()
     if (desposte) {
       if (desposte.tipo_desposte === 'piezas') {
-        const kgPiezas = (desposte.piezas || []).reduce((s, p) => s + (p.kg || 0), 0)
-        await actualizarStock('bovino_pieza', -kgPiezas)
+        // Revertir cada pieza a SU bucket propio (no al genérico).
+        for (const p of (desposte.piezas || [])) {
+          await actualizarStock(p.tipo_stock || bucketDePiezaBovina(p.nombre), -(p.kg || 0))
+        }
       } else if (desposte.tipo_desposte === 'kilo') {
         await actualizarStock('bovino_corte', -(desposte.kg_neto || 0))
       } else if (desposte.tipo_desposte === 'pieza_kilo') {
@@ -2502,7 +2508,7 @@ const item = {
   // para items pesables. Las cajas individuales usan 'kg' porque la
   // unidad real de venta es el kg (cada caja tiene su peso propio).
   unidad: (esUnidadLocal && !esCajaLocal) ? 'u' : 'kg',
-  stock_origen: form.categoria === 'pieza_entera' ? 'bovino_pieza' : (prodItem?.stock_origen || null),
+  stock_origen: form.categoria === 'pieza_entera' ? (piezaEnteraSeleccionada?.tipo_stock || bucketDePiezaBovina(piezaEnteraSeleccionada?.tipo_pieza)) : (prodItem?.stock_origen || null),
   kg_por_unidad: prodItem?.kg_por_unidad || null,
   media_res_id: mediaSeleccionada?.id || null,
   pieza_id: form.categoria === 'pieza_entera' ? piezaEnteraSeleccionada?.id : null,
