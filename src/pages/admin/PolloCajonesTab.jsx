@@ -27,13 +27,16 @@ const norm = s => String(s || '').toUpperCase().normalize('NFD')
 // Variedades de pollo. ORDEN = prioridad de match (lo más específico primero;
 // POLLO último porque es genérico). Cada movimiento se asigna a la primera
 // variedad cuya palabra clave esté contenida en el nombre normalizado.
+// Las HAMBURGUESAS (de pollo y rellena) salen de la Pechuga B = Suprema, aunque
+// el nombre diga "pollo" → regla con prioridad sobre POLLO.
 const VARIEDADES = [
   { nombre: '⚙️ MDM (carne mecanizada)', kw: 'MDM' },
   { nombre: '🦅 Alita', kw: 'ALITA' },
   { nombre: '🍗 Pata Muslo', kw: 'PATAMUSLO' },
-  { nombre: '🍖 Pechuga c/hueso', kw: 'PECHUGA' },
+  { nombre: '🥩 Suprema', kw: 'HAMBURGUESA' }, // hamburguesa de pollo / rellena → pechuga B (suprema)
+  { nombre: '🍖 Pechuga c/hueso', kw: 'PECHUGA' }, // milanesa de pechuga, pechuga fresca
   { nombre: '🥩 Suprema', kw: 'SUPREMA' },
-  { nombre: '🐔 Pollo entero / fresco', kw: 'POLLO' },
+  { nombre: '🐔 Pollo entero / fresco', kw: 'POLLO' }, // pollo fresco, arrollado de pollo, cajón pollo
 ]
 function variedadDe(nombre) {
   const k = norm(nombre)
@@ -75,8 +78,8 @@ export default function PolloCajonesTab() {
       // al kilo: kg del registro = kilos reales
       v.outKg += s.tipo === 'pollo_cajon' ? (Number(s.kg) || 0) * KG_POR_CAJON : (Number(s.kg) || 0)
     })
-    // Orden: variedades del catálogo primero (en su orden), "Otros" al final
-    const orden = [...VARIEDADES.map(v => v.nombre), 'Otros / sin clasificar']
+    // Orden: variedades del catálogo primero (en su orden, sin duplicar), "Otros" al final
+    const orden = [...new Set([...VARIEDADES.map(v => v.nombre), 'Otros / sin clasificar'])]
     return orden.filter(v => agg[v]).map(v => ({
       nombre: v, inKg: agg[v].inKg, outKg: agg[v].outKg, stockKg: agg[v].inKg - agg[v].outKg,
     }))
