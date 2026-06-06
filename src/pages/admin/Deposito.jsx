@@ -1801,14 +1801,17 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     const kgUnidad = esSoloUnid ? 1 : parseNumero(form.kg)
     const kgTotal = kgUnidad * cantidad
     const kgReal = kgTotal * (1 - parseNumero(form.merma) / 100)
-    const importe = form.tipo === 'bovino_mr'
+    // Media res y capón (cerdo) se compran POR KG → importe = kg × precio/kg.
+    // El resto usa el importe total. Así el capón nunca queda en $0 y suma al
+    // debe del proveedor.
+    const esPorKg = form.tipo === 'bovino_mr' || form.tipo === 'cerdo'
+    const importe = esPorKg
       ? kgTotal * parseNumero(form.precioKg)
       : parseNumero(form.importe)
-    // BLOQUEO: nada entra al depósito sin precio. Para media res se exige el
-    // precio/kg; para el resto, el importe (total). Así no quedan ingresos en $0.
+    // BLOQUEO: nada entra al depósito sin precio.
     if (!(importe > 0)) {
-      showAlert({ type: 'error', msg: form.tipo === 'bovino_mr'
-        ? '⛔ Cargá el precio por kg — no se puede ingresar una media res sin precio.'
+      showAlert({ type: 'error', msg: esPorKg
+        ? '⛔ Cargá el precio por kg — no se puede ingresar sin precio.'
         : '⛔ Cargá el importe (precio total) — no se puede ingresar al depósito sin precio.' })
       return
     }
@@ -2169,7 +2172,8 @@ async function eliminar(entrada) {
               <input type="number" step="0.5" placeholder="2.5" value={form.merma} onChange={e => setForm(f => ({ ...f, merma: e.target.value }))} />
             </div>
           )}
-          {form.tipo !== 'bovino_mr' && (
+          {/* Capón (cerdo) se compra por kg como la media res → no pide importe total. */}
+          {form.tipo !== 'bovino_mr' && form.tipo !== 'cerdo' && (
             <div className="form-group"><label>Importe total ($)</label>
               <input type="number" placeholder="0" value={form.importe} onChange={e => setForm(f => ({ ...f, importe: e.target.value }))} />
             </div>
