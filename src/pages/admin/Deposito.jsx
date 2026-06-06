@@ -137,7 +137,7 @@ const CATEGORIA_A_STOCK = {
   pieza_cuarto_pistola: 'pieza_cuarto_pistola',
   pieza_costillar: 'pieza_costillar',
   pieza_cortito: 'pieza_cortito',
-  pieza_carre: 'pieza_carre',
+  pieza_carre: 'pieza_costeletal',  // carré = costeletal con lomo (fusionado)
   pieza_paleta: 'pieza_paleta',
   pieza_parrillero: 'pieza_parrillero',
   caja_cb: 'caja_cb',
@@ -677,7 +677,7 @@ async function confirmarDesposteCerdo() {
     '🥩 Cuarto pistola': 'pieza_cuarto_pistola',
     '🍖 Costillar completo': 'pieza_costillar',
     '🥩 Cortito': 'pieza_cortito',
-    '🥩 Carré sin lomo': 'pieza_carre',
+    '🥩 Costeletal con Lomo': 'pieza_costeletal',
     '🥩 Paleta entera': 'pieza_paleta',
     '🥩 Parrillero': 'pieza_parrillero',
     '📦 Caja CB': 'caja_cb',
@@ -1867,7 +1867,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     const TIPOS_PIEZA_BOVINA = {
       pieza_pierna: 'Pierna', pieza_cuarto_pistola: 'Cuarto Pistola',
       pieza_costillar: 'Costillar Completo', pieza_cortito: 'Cortito',
-      pieza_carre: 'Carré', pieza_paleta: 'Paleta', pieza_parrillero: 'Parrillero',
+      pieza_costeletal: 'Costeletal con Lomo', pieza_paleta: 'Paleta', pieza_parrillero: 'Parrillero',
     }
     if (TIPOS_PIEZA_BOVINA[form.tipo] && entradaInsertada) {
       const kgPorPieza = kgTotal / cantidad
@@ -2008,7 +2008,7 @@ async function eliminar(entrada) {
 <option value="pieza_cuarto_pistola">🥩 Cuarto pistola</option>
 <option value="pieza_costillar">🍖 Costillar completo</option>
 <option value="pieza_cortito">🥩 Cortito</option>
-<option value="pieza_carre">🥩 Carré sin lomo</option>
+<option value="pieza_costeletal">🥩 Costeletal con Lomo</option>
 <option value="pieza_paleta">🥩 Paleta entera</option>
 <option value="pieza_parrillero">🥩 Parrillero</option>
 <option value="caja_cb">📦 Caja bovina CB</option>
