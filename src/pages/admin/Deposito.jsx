@@ -13,6 +13,7 @@ import Paginador, { usePaginacion } from '../../components/Paginador'
 import FlujoDeposito from './FlujoDeposito'
 import AjusteStock from './AjusteStock'
 import CajasTab from './CajasTab'
+import PolloCajonesTab from './PolloCajonesTab'
 
 // ============================================================
 // Sinónimos de búsqueda de productos (buscador de remitos)
@@ -180,7 +181,8 @@ export function Deposito() {
           { id: 'entradas', label: '📥 Ingresos' },
           { id: 'desposte', label: '🔪 Desposte' },
           { id: 'piezas', label: '🥩 Piezas' },
-          { id: 'cajas', label: '📦 Cajas' },
+          { id: 'cajas', label: '📦 Cajas Bovinas' },
+          { id: 'pollo_cajones', label: '🍗 Pollo Cajones' },
           { id: 'flujo', label: '📥 Flujo Depósito' },
           { id: 'remitos', label: '🧾 Remitos' },
           { id: 'proveedores', label: '🏭 Proveedores' },
@@ -196,6 +198,7 @@ export function Deposito() {
         {tab === 'desposte' && <DesposteTab key={tab} onSaved={() => {}} />}
 {tab === 'piezas' && <PiezasTab key={tab} />}
 {tab === 'cajas' && <CajasTab key={tab} />}
+{tab === 'pollo_cajones' && <PolloCajonesTab key={tab} />}
 {tab === 'remitos' && <RemitosTab remitoActual={remitoActual} />}
       {tab === 'flujo' && <FlujoDeposito />}
       {tab === 'proveedores' && <ProveedoresTab />}
