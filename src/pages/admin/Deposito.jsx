@@ -613,6 +613,54 @@ async function confirmarElaboracionSalame() {
     } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
     setLoading(false)
   }
+
+  // Etapa 2 del salame: cuando termina la maduración se cargan los kg BRUTOS
+  // realmente obtenidos. Al registrar la elaboración NO se sumó nada al stock
+  // de embutidos (solo se descontaron las piezas de cerdo/bovino). Recién acá,
+  // con el peso real en mano, se suma al stock. El bruto queda en kg_final y la
+  // elaboración pasa a maduración completa.
+  async function finalizarMaduracionSalame(elab, kgBrutosStr) {
+    const kgBrutos = parseNumero(kgBrutosStr)
+    if (!(kgBrutos > 0)) { showAlert('Ingresá los kg brutos obtenidos de la maduración', 'error'); return }
+    setLoading(true)
+    try {
+      // Sumar al stock 'embutido' con verificación (mismo patrón anti-error
+      // que la elaboración de embutidos).
+      const { data: stockAntes } = await supabase.from('stock_actual').select('kg_disponible').eq('tipo', 'embutido').maybeSingle()
+      const kgEsperado = (Number(stockAntes?.kg_disponible) || 0) + kgBrutos
+      const { error: errStock } = await actualizarStock('embutido', kgBrutos)
+      if (errStock) throw new Error(`No se sumó al stock de embutidos: ${errStock.message}`)
+      const { data: stockDespues } = await supabase.from('stock_actual').select('kg_disponible').eq('tipo', 'embutido').maybeSingle()
+      if (Math.abs((Number(stockDespues?.kg_disponible) || 0) - kgEsperado) > 0.01) {
+        throw new Error('El stock de embutidos no se actualizó correctamente. Revisá el ajuste manual.')
+      }
+      // Marcar la elaboración como completa guardando el peso bruto final.
+      const pct = elab.kg_elaborado > 0 ? parseFloat(((kgBrutos / elab.kg_elaborado - 1) * 100).toFixed(2)) : 0
+      const { error: errUpd } = await supabase.from('elaboraciones_embutidos')
+        .update({ kg_final: kgBrutos, maduracion_completa: true, pct_aumento: pct })
+        .eq('id', elab.id)
+      if (errUpd) throw new Error(`No se actualizó la elaboración: ${errUpd.message}`)
+      // Entrada informativa para que figure junto a las compras y en el Dashboard.
+      const nombreSal = NOMBRE_EMBUTIDO[elab.tipo_embutido] || 'Salame'
+      const { error: errEnt } = await supabase.from('entradas_deposito').insert({
+        fecha: fechaHoyARG(),
+        tipo: 'embutido',
+        proveedor_nombre: 'Elaboración propia',
+        descripcion: `${nombreSal} finalizado — ${kgBrutos.toFixed(1)} kg brutos (de ${(elab.kg_elaborado || 0).toFixed(1)} kg netos)`,
+        kg: kgBrutos,
+        kg_real: kgBrutos,
+        merma_pct: 0,
+        precio_kg: 0,
+        importe: 0,
+        destino: 'elaboracion',
+        cantidad: 1,
+      })
+      if (errEnt) console.warn('No se registró la entrada del salame finalizado:', errEnt.message)
+      showAlert(`✅ Salame finalizado — ${kgBrutos.toFixed(1)} kg al stock de embutidos`)
+      await cargarDatos(); onSaved()
+    } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
+    setLoading(false)
+  }
 async function confirmarDesposteCerdo() {
   if (!caponSeleccionado) { showAlert('Seleccioná un capón', 'error'); return }
   const kgCapon = caponSeleccionado.kg_real || caponSeleccionado.kg || 0
@@ -1327,7 +1375,7 @@ async function confirmarDesposteCerdo() {
     </div>
   </div>
   <div style={{ marginTop: 16 }}>
-    <HistorialElaboraciones elaboraciones={elaboraciones} />
+    <HistorialElaboraciones elaboraciones={elaboraciones} onFinalizarSalame={finalizarMaduracionSalame} loading={loading} />
   </div>
   </>
 )}
@@ -1339,7 +1387,7 @@ async function confirmarDesposteCerdo() {
 {subtab === 'historial' && (
   <div>
     <HistorialDespostes despostes={despostes} />
-    <HistorialElaboraciones elaboraciones={elaboraciones} />
+    <HistorialElaboraciones elaboraciones={elaboraciones} onFinalizarSalame={finalizarMaduracionSalame} loading={loading} />
   </div>
 )}
 {false && (
@@ -1560,8 +1608,11 @@ function HistorialDespostes({ despostes }) {
   )
 }
 
-function HistorialElaboraciones({ elaboraciones }) {
+function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, loading }) {
   const pag = usePaginacion(elaboraciones || [], 15)
+  // id del salame que se está finalizando + kg brutos tipeados
+  const [finId, setFinId] = useState(null)
+  const [kgBruto, setKgBruto] = useState('')
   return (
     <div className="card">
       <div className="card-title">🌭 Historial de elaboraciones ({(elaboraciones || []).length})</div>
@@ -1572,17 +1623,17 @@ function HistorialElaboraciones({ elaboraciones }) {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
               <div>
                 <div style={{ fontWeight: 700, fontSize: 13 }}>
-                  {e.tipo === 'salame' ? '🥩 Salame' : '🌭'} {e.tipo === 'embutido' ? e.tipo_embutido?.replace(/_/g, ' ').toUpperCase() : ''}
+                  {e.tipo === 'salame' ? '🥩 Salame' : '🌭'} {e.tipo === 'embutido' ? e.tipo_embutido?.replace(/_/g, ' ').toUpperCase() : (e.tipo_embutido?.replace(/_/g, ' ').toUpperCase() || '')}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--muted)' }}>
                   {e.fecha}{e.created_at ? ` · ${fmtHora(e.created_at)}` : ''} · {(e.kg_carne_cerdo || 0).toFixed(1)} kg cerdo + {(e.kg_carne_bovina || 0).toFixed(1)} kg bovino
                   {e.kg_queso > 0 ? ` + ${e.kg_queso.toFixed(1)} kg queso` : ''}
                 </div>
                 {e.tipo === 'salame' && !e.maduracion_completa && (
-                  <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 2 }}>⏳ En maduración hasta: {e.fecha_fin_maduracion}</div>
+                  <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 2 }}>⏳ En maduración hasta: {e.fecha_fin_maduracion} · {(e.kg_elaborado || 0).toFixed(1)} kg netos (no suma al stock todavía)</div>
                 )}
                 {e.tipo === 'salame' && e.maduracion_completa && (
-                  <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 2 }}>✅ Maduración completa</div>
+                  <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 2 }}>✅ Maduración completa · {(e.kg_final || 0).toFixed(1)} kg brutos al stock</div>
                 )}
                 {e.notas && <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>{e.notas}</div>}
               </div>
@@ -1591,10 +1642,43 @@ function HistorialElaboraciones({ elaboraciones }) {
                   {e.tipo === 'salame' ? 'SALAME' : 'EMBUTIDO'}
                 </span>
                 <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: 'var(--gold)', marginTop: 4 }}>
-                  {e.tipo === 'salame' ? `${(e.kg_elaborado || 0).toFixed(1)} kg salame` : `${(e.kg_final || 0).toFixed(1)} kg`}
+                  {e.tipo === 'salame'
+                    ? (e.maduracion_completa ? `${(e.kg_final || 0).toFixed(1)} kg` : `${(e.kg_elaborado || 0).toFixed(1)} kg netos`)
+                    : `${(e.kg_final || 0).toFixed(1)} kg`}
                 </div>
               </div>
             </div>
+            {/* Etapa 2: finalizar maduración cargando los kg brutos obtenidos */}
+            {e.tipo === 'salame' && !e.maduracion_completa && onFinalizarSalame && (
+              finId === e.id ? (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                  <input
+                    type="number" step="0.1" min="0" autoFocus
+                    value={kgBruto}
+                    onChange={ev => setKgBruto(ev.target.value)}
+                    placeholder="kg brutos obtenidos"
+                    style={{ background: 'var(--surface)', border: '1px solid var(--gold)', color: 'var(--text)', borderRadius: 8, padding: '7px 10px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, width: 160, boxSizing: 'border-box' }}
+                  />
+                  <button
+                    className="btn btn-gold"
+                    disabled={loading}
+                    onClick={async () => { await onFinalizarSalame(e, kgBruto); setFinId(null); setKgBruto('') }}
+                    style={{ fontSize: 12 }}
+                  >
+                    {loading ? '⏳' : '✅ Confirmar y sumar al stock'}
+                  </button>
+                  <button className="btn" onClick={() => { setFinId(null); setKgBruto('') }} style={{ fontSize: 12 }}>Cancelar</button>
+                </div>
+              ) : (
+                <button
+                  className="btn"
+                  onClick={() => { setFinId(e.id); setKgBruto('') }}
+                  style={{ fontSize: 12, marginTop: 6, borderColor: 'var(--gold)', color: 'var(--gold)' }}
+                >
+                  ✅ Finalizar maduración (cargar kg brutos)
+                </button>
+              )
+            )}
           </div>
         ))}
       <Paginador {...pag.controles} label="elaboraciones" />
