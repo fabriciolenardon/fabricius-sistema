@@ -15,6 +15,17 @@ import AjusteStock from './AjusteStock'
 import CajasTab from './CajasTab'
 import PolloCajonesTab from './PolloCajonesTab'
 
+// Nombre legible de cada tipo de embutido/salame (para descripciones de
+// historial y entradas registradas). El <select> usa estas mismas claves.
+const NOMBRE_EMBUTIDO = {
+  chorizo_parrillero: 'Chorizo Parrillero',
+  chorizo_saborizado: 'Chorizo Saborizado',
+  salchicha_parrillera: 'Salchicha Parrillera',
+  salame_comun: 'Salame Común',
+  salame_rockeford: 'Salame Rockeford',
+  salame_holanda: 'Salame Holanda',
+}
+
 // ============================================================
 // Sinónimos de búsqueda de productos (buscador de remitos)
 // ------------------------------------------------------------
@@ -535,6 +546,25 @@ async function confirmarElaboracionEmbutido() {
     if (Math.abs(kgReal - kgEsperado) > 0.01) {
       throw new Error(`El stock de embutidos no se actualizó correctamente. Esperado: ${kgEsperado.toFixed(2)} kg, real: ${kgReal.toFixed(2)} kg. Revisá el ajuste manual.`)
     }
+    // Registrar la elaboración como entrada informativa, así aparece junto a
+    // las compras en "Entradas registradas" y en el historial del Dashboard.
+    // Mismo patrón que el desposte de cerdo: importe 0 y NO toca el stock
+    // (eso ya se hizo arriba) — es solo trazabilidad/visibilidad.
+    const kgBovinaEmb = parseNumero(kgCarneBovinaEmbutido)
+    const { error: errEntrada } = await supabase.from('entradas_deposito').insert({
+      fecha,
+      tipo: 'embutido',
+      proveedor_nombre: 'Elaboración propia',
+      descripcion: `${NOMBRE_EMBUTIDO[tipoEmbutido] || 'Embutido'} elaborado (${kgCerdo.toFixed(1)} kg cerdo${kgBovinaEmb > 0 ? ` + ${kgBovinaEmb.toFixed(1)} kg bovino` : ''})`,
+      kg: kgFinal,
+      kg_real: kgFinal,
+      merma_pct: 0,
+      precio_kg: 0,
+      importe: 0,
+      destino: 'elaboracion',
+      cantidad: 1,
+    })
+    if (errEntrada) console.warn('No se pudo registrar la entrada de la elaboración:', errEntrada.message)
     showAlert(`✅ ${kgFinal.toFixed(1)} kg de embutidos elaborados al stock`)
     setPiezasEmbutido({ cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '', cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: '' })
     setKgCarneBovinaEmbutido(''); setKgQuesoEmbutido(''); setNotas('')
