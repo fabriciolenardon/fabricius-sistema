@@ -579,9 +579,10 @@ async function confirmarElaboracionSalame() {
     if (kgCerdo === 0) { showAlert('Ingresá al menos una pieza de cerdo', 'error'); return }
     setLoading(true)
     try {
+      // kg netos = suma de piezas de cerdo + bovino + queso. NO se aplica
+      // ninguna merma automática: el peso final real se carga después del
+      // secado (varía mucho cuánto tarda, así que no se fija una fecha).
       const kgTotal = kgCerdo + (parseNumero(kgCarneBovinaEmbutido)) + (parseNumero(kgQuesoEmbutido))
-      const fechaFin = new Date(fecha)
-      fechaFin.setDate(fechaFin.getDate() + 21)
       const piezasUsadas = Object.entries(piezasEmbutido)
         .filter(([, v]) => parseFloat(v) > 0)
         .map(([tipo, v]) => ({ tipo, kg: parseFloat(v) }))
@@ -593,7 +594,7 @@ async function confirmarElaboracionSalame() {
         kg_queso: parseNumero(kgQuesoEmbutido),
         kg_elaborado: kgTotal, pct_aumento: 0,
         kg_final: 0, maduracion_completa: false,
-        fecha_fin_maduracion: fechaHoyARG(fechaFin),
+        fecha_fin_maduracion: null,
         notas
       })
       for (const [tipo, v] of Object.entries(piezasEmbutido)) {
@@ -606,7 +607,7 @@ async function confirmarElaboracionSalame() {
         const { error } = await actualizarStock('bovino_corte', -parseNumero(kgCarneBovinaEmbutido))
         if (error) throw new Error(`No se descontó bovino_corte: ${error.message}`)
       }
-      showAlert(`✅ Salame registrado — Maduración hasta ${fechaHoyARG(fechaFin)}`)
+      showAlert(`✅ Salame registrado en secado — ${kgTotal.toFixed(1)} kg netos. Cargá el peso final cuando esté seco.`)
       setPiezasEmbutido({ cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '', cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: '' })
       setKgCarneBovinaEmbutido(''); setKgQuesoEmbutido(''); setNotas('')
       await cargarDatos(); onSaved()
@@ -614,30 +615,31 @@ async function confirmarElaboracionSalame() {
     setLoading(false)
   }
 
-  // Etapa 2 del salame: cuando termina la maduración se cargan los kg BRUTOS
-  // realmente obtenidos. Al registrar la elaboración NO se sumó nada al stock
-  // de embutidos (solo se descontaron las piezas de cerdo/bovino). Recién acá,
-  // con el peso real en mano, se suma al stock. El bruto queda en kg_final y la
-  // elaboración pasa a maduración completa.
-  async function finalizarMaduracionSalame(elab, kgBrutosStr) {
-    const kgBrutos = parseNumero(kgBrutosStr)
-    if (!(kgBrutos > 0)) { showAlert('Ingresá los kg brutos obtenidos de la maduración', 'error'); return }
+  // Etapa 2 del salame: una vez seco, se pesa y se cargan los kg FINALES
+  // reales. Al registrar la elaboración NO se sumó nada al stock de embutidos
+  // (solo se descontaron las piezas de cerdo/bovino). Recién acá, con el peso
+  // seco real en mano, se suma al stock. Ese peso queda en kg_final, la merma
+  // real se calcula sola (kg_final vs kg netos) y la elaboración pasa a completa.
+  async function finalizarMaduracionSalame(elab, kgFinalesStr) {
+    const kgFinales = parseNumero(kgFinalesStr)
+    if (!(kgFinales > 0)) { showAlert('Ingresá los kg finales pesados después del secado', 'error'); return }
     setLoading(true)
     try {
       // Sumar al stock 'embutido' con verificación (mismo patrón anti-error
       // que la elaboración de embutidos).
       const { data: stockAntes } = await supabase.from('stock_actual').select('kg_disponible').eq('tipo', 'embutido').maybeSingle()
-      const kgEsperado = (Number(stockAntes?.kg_disponible) || 0) + kgBrutos
-      const { error: errStock } = await actualizarStock('embutido', kgBrutos)
+      const kgEsperado = (Number(stockAntes?.kg_disponible) || 0) + kgFinales
+      const { error: errStock } = await actualizarStock('embutido', kgFinales)
       if (errStock) throw new Error(`No se sumó al stock de embutidos: ${errStock.message}`)
       const { data: stockDespues } = await supabase.from('stock_actual').select('kg_disponible').eq('tipo', 'embutido').maybeSingle()
       if (Math.abs((Number(stockDespues?.kg_disponible) || 0) - kgEsperado) > 0.01) {
         throw new Error('El stock de embutidos no se actualizó correctamente. Revisá el ajuste manual.')
       }
-      // Marcar la elaboración como completa guardando el peso bruto final.
-      const pct = elab.kg_elaborado > 0 ? parseFloat(((kgBrutos / elab.kg_elaborado - 1) * 100).toFixed(2)) : 0
+      // Marcar la elaboración como completa guardando el peso final seco.
+      // pct_aumento = merma real (negativa) calculada con el peso exacto.
+      const pct = elab.kg_elaborado > 0 ? parseFloat(((kgFinales / elab.kg_elaborado - 1) * 100).toFixed(2)) : 0
       const { error: errUpd } = await supabase.from('elaboraciones_embutidos')
-        .update({ kg_final: kgBrutos, maduracion_completa: true, pct_aumento: pct })
+        .update({ kg_final: kgFinales, maduracion_completa: true, pct_aumento: pct })
         .eq('id', elab.id)
       if (errUpd) throw new Error(`No se actualizó la elaboración: ${errUpd.message}`)
       // Entrada informativa para que figure junto a las compras y en el Dashboard.
@@ -646,9 +648,9 @@ async function confirmarElaboracionSalame() {
         fecha: fechaHoyARG(),
         tipo: 'embutido',
         proveedor_nombre: 'Elaboración propia',
-        descripcion: `${nombreSal} finalizado — ${kgBrutos.toFixed(1)} kg brutos (de ${(elab.kg_elaborado || 0).toFixed(1)} kg netos)`,
-        kg: kgBrutos,
-        kg_real: kgBrutos,
+        descripcion: `${nombreSal} seco finalizado — ${kgFinales.toFixed(1)} kg finales (de ${(elab.kg_elaborado || 0).toFixed(1)} kg netos · merma ${pct.toFixed(1)}%)`,
+        kg: kgFinales,
+        kg_real: kgFinales,
         merma_pct: 0,
         precio_kg: 0,
         importe: 0,
@@ -656,7 +658,7 @@ async function confirmarElaboracionSalame() {
         cantidad: 1,
       })
       if (errEnt) console.warn('No se registró la entrada del salame finalizado:', errEnt.message)
-      showAlert(`✅ Salame finalizado — ${kgBrutos.toFixed(1)} kg al stock de embutidos`)
+      showAlert(`✅ Salame seco finalizado — ${kgFinales.toFixed(1)} kg al stock de embutidos`)
       await cargarDatos(); onSaved()
     } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
     setLoading(false)
@@ -1250,7 +1252,7 @@ async function confirmarDesposteCerdo() {
               <option value="salame_holanda">🥩 Salame Holanda (con queso)</option>
             </select>
             <div style={{ background: '#1a1a2a', border: '1px solid #2a2a5a', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#7db5ff' }}>
-              ℹ️ Los salames tienen 15-30 días de maduración y pierden ~50% del peso. El stock se actualiza al finalizar la maduración.
+              ℹ️ Registrás los <strong>kg netos</strong> que entran al secado (descuentan de cada pieza). <strong>No se aplica ninguna merma automática.</strong> El salame queda "🔒 en proceso de secado" y NO suma al stock de embutidos hasta que, una vez seco, lo peses y cargues los <strong>kg finales</strong> reales desde el historial.
             </div>
           </div>
         )}
@@ -1348,18 +1350,27 @@ async function confirmarDesposteCerdo() {
           const kgBovino = parseNumero(kgCarneBovinaEmbutido)
           const kgQueso = parseNumero(kgQuesoEmbutido)
           const kgTotal = kgCerdo + kgBovino + kgQueso
-          // Si se cargó el peso real embutido (comunes + saborizados), ese es el final
-          // y la merma sale de ahí; si no, se usa el % manual.
-          const totalElabBox = tipoElaboracion === 'embutido' ? (parseNumero(kgComunes) + parseNumero(kgSaborizados)) : 0
+          // SALAME: sin merma automática. Solo se muestra el peso neto que entra
+          // al secado; el peso final real se carga después desde el historial.
+          if (tipoElaboracion === 'salame') {
+            return (
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Kg netos que entran al secado</div>
+                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 30, color: 'var(--gold)' }}>{kgTotal.toFixed(1)} kg</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>🔒 No suma al stock todavía. El peso final se carga seco, sin merma automática.</div>
+              </div>
+            )
+          }
+          // EMBUTIDO: si se cargó el peso real (comunes + saborizados), ese es el
+          // final y la merma sale de ahí; si no, se usa el % manual.
+          const totalElabBox = parseNumero(kgComunes) + parseNumero(kgSaborizados)
           const usaReal = totalElabBox > 0
-          const kgFinal = tipoElaboracion === 'embutido'
-            ? (usaReal ? totalElabBox : kgTotal * (1 + pctAumentoEmbutido / 100))
-            : kgTotal * 0.5
+          const kgFinal = usaReal ? totalElabBox : kgTotal * (1 + pctAumentoEmbutido / 100)
           const pctMostrar = kgTotal > 0 ? ((kgFinal / kgTotal - 1) * 100) : 0
           return (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
               <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg carne total</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{kgTotal.toFixed(1)} kg</div></div>
-              <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>{tipoElaboracion === 'embutido' ? `${pctMostrar >= 0 ? '+' : ''}${pctMostrar.toFixed(1)}% ${usaReal ? '(real)' : pctMostrar >= 0 ? 'agregados' : 'merma'}` : '-50% maduración'}</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: (kgFinal - kgTotal) >= 0 ? 'var(--green)' : 'var(--red-light)' }}>{(kgFinal - kgTotal) >= 0 ? '+' : ''}{(kgFinal - kgTotal).toFixed(1)} kg</div></div>
+              <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>{`${pctMostrar >= 0 ? '+' : ''}${pctMostrar.toFixed(1)}% ${usaReal ? '(real)' : pctMostrar >= 0 ? 'agregados' : 'merma'}`}</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: (kgFinal - kgTotal) >= 0 ? 'var(--green)' : 'var(--red-light)' }}>{(kgFinal - kgTotal) >= 0 ? '+' : ''}{(kgFinal - kgTotal).toFixed(1)} kg</div></div>
               <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg finales</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{kgFinal.toFixed(1)} kg</div></div>
             </div>
           )
@@ -1370,7 +1381,7 @@ async function confirmarDesposteCerdo() {
         <div className="form-group"><label>Notas</label><input placeholder="Observaciones..." value={notas} onChange={e => setNotas(e.target.value)} style={inp} /></div>
       </div>
       <button className="btn btn-gold" onClick={tipoElaboracion === 'embutido' ? confirmarElaboracionEmbutido : confirmarElaboracionSalame} disabled={loading} style={{ width: '100%' }}>
-        {loading ? '⏳ Procesando...' : tipoElaboracion === 'embutido' ? '🌭 Confirmar elaboración de embutidos' : '🥩 Registrar salame en maduración'}
+        {loading ? '⏳ Procesando...' : tipoElaboracion === 'embutido' ? '🌭 Confirmar elaboración de embutidos' : '🥩 Registrar salame en secado'}
       </button>
     </div>
   </div>
@@ -1610,9 +1621,9 @@ function HistorialDespostes({ despostes }) {
 
 function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, loading }) {
   const pag = usePaginacion(elaboraciones || [], 15)
-  // id del salame que se está finalizando + kg brutos tipeados
+  // id del salame cuyo candado está abierto + kg finales tipeados
   const [finId, setFinId] = useState(null)
-  const [kgBruto, setKgBruto] = useState('')
+  const [kgFinalInput, setKgFinalInput] = useState('')
   return (
     <div className="card">
       <div className="card-title">🌭 Historial de elaboraciones ({(elaboraciones || []).length})</div>
@@ -1630,10 +1641,10 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, loading }) {
                   {e.kg_queso > 0 ? ` + ${e.kg_queso.toFixed(1)} kg queso` : ''}
                 </div>
                 {e.tipo === 'salame' && !e.maduracion_completa && (
-                  <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 2 }}>⏳ En maduración hasta: {e.fecha_fin_maduracion} · {(e.kg_elaborado || 0).toFixed(1)} kg netos (no suma al stock todavía)</div>
+                  <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 2 }}>🔒 En proceso de secado · {(e.kg_elaborado || 0).toFixed(1)} kg netos (no suma al stock todavía)</div>
                 )}
                 {e.tipo === 'salame' && e.maduracion_completa && (
-                  <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 2 }}>✅ Maduración completa · {(e.kg_final || 0).toFixed(1)} kg brutos al stock</div>
+                  <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 2 }}>✅ Secado finalizado · {(e.kg_final || 0).toFixed(1)} kg finales al stock{e.kg_elaborado > 0 ? ` · merma ${(((e.kg_final || 0) / e.kg_elaborado - 1) * 100).toFixed(1)}%` : ''}</div>
                 )}
                 {e.notas && <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>{e.notas}</div>}
               </div>
@@ -1648,34 +1659,38 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, loading }) {
                 </div>
               </div>
             </div>
-            {/* Etapa 2: finalizar maduración cargando los kg brutos obtenidos */}
+            {/* Etapa 2: candado de secado. Cerrado = en proceso; al abrirlo se
+                cargan los kg finales reales (pesados secos) y recién ahí suben
+                al stock de embutidos. */}
             {e.tipo === 'salame' && !e.maduracion_completa && onFinalizarSalame && (
               finId === e.id ? (
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 16 }}>🔓</span>
                   <input
                     type="number" step="0.1" min="0" autoFocus
-                    value={kgBruto}
-                    onChange={ev => setKgBruto(ev.target.value)}
-                    placeholder="kg brutos obtenidos"
-                    style={{ background: 'var(--surface)', border: '1px solid var(--gold)', color: 'var(--text)', borderRadius: 8, padding: '7px 10px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, width: 160, boxSizing: 'border-box' }}
+                    value={kgFinalInput}
+                    onChange={ev => setKgFinalInput(ev.target.value)}
+                    placeholder="kg finales (pesados secos)"
+                    style={{ background: 'var(--surface)', border: '1px solid var(--gold)', color: 'var(--text)', borderRadius: 8, padding: '7px 10px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, width: 180, boxSizing: 'border-box' }}
                   />
                   <button
                     className="btn btn-gold"
                     disabled={loading}
-                    onClick={async () => { await onFinalizarSalame(e, kgBruto); setFinId(null); setKgBruto('') }}
+                    onClick={async () => { await onFinalizarSalame(e, kgFinalInput); setFinId(null); setKgFinalInput('') }}
                     style={{ fontSize: 12 }}
                   >
                     {loading ? '⏳' : '✅ Confirmar y sumar al stock'}
                   </button>
-                  <button className="btn" onClick={() => { setFinId(null); setKgBruto('') }} style={{ fontSize: 12 }}>Cancelar</button>
+                  <button className="btn" onClick={() => { setFinId(null); setKgFinalInput('') }} style={{ fontSize: 12 }}>Cancelar</button>
                 </div>
               ) : (
                 <button
                   className="btn"
-                  onClick={() => { setFinId(e.id); setKgBruto('') }}
+                  title="Desbloquear para cargar el peso final del salame seco"
+                  onClick={() => { setFinId(e.id); setKgFinalInput('') }}
                   style={{ fontSize: 12, marginTop: 6, borderColor: 'var(--gold)', color: 'var(--gold)' }}
                 >
-                  ✅ Finalizar maduración (cargar kg brutos)
+                  🔒 Cargar peso final (secado listo)
                 </button>
               )
             )}
