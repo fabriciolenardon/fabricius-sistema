@@ -488,10 +488,14 @@ export default function Precios() {
             {loading ? <p style={{ color: 'var(--muted)' }}>Cargando...</p> : (
               <table>
                 <thead><tr>
-                  <th style={{ width: '45%' }}>Producto</th>
-                  <th style={{ color: 'var(--red-light)' }}>🔴 Carnicería</th>
-                  <th style={{ color: 'var(--amber)' }}>🟡 Mayorista</th>
-                  <th style={{ color: 'var(--green)' }}>🟢 Minorista</th>
+                  <th style={{ width: filtro === 'insumos' ? '65%' : '45%' }}>Producto</th>
+                  {filtro === 'insumos' ? (
+                    <th style={{ color: 'var(--gold)' }}>🧰 Precio Franquicia</th>
+                  ) : (<>
+                    <th style={{ color: 'var(--red-light)' }}>🔴 Carnicería</th>
+                    <th style={{ color: 'var(--amber)' }}>🟡 Mayorista</th>
+                    <th style={{ color: 'var(--green)' }}>🟢 Minorista</th>
+                  </>)}
                 </tr></thead>
                 <tbody>
                   {productosFiltradosConOfertas.map(p => (
@@ -500,9 +504,13 @@ export default function Precios() {
                         {p.nombre}
                         {p.enOferta && <span style={{ marginLeft: 8, background: '#4a8a2a', color: '#fff', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700 }}>🏷️ OFERTA</span>}
                       </td>
-                      <td style={{ color: p.enOferta ? '#7dff7d' : 'var(--red-light)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_carniceria)}</td>
-                      <td style={{ color: p.enOferta ? '#7dff7d' : 'var(--amber)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_mayorista)}</td>
-                      <td style={{ color: p.enOferta ? '#7dff7d' : 'var(--green)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_minorista)}</td>
+                      {filtro === 'insumos' ? (
+                        <td style={{ color: 'var(--gold)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_carniceria)}</td>
+                      ) : (<>
+                        <td style={{ color: p.enOferta ? '#7dff7d' : 'var(--red-light)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_carniceria)}</td>
+                        <td style={{ color: p.enOferta ? '#7dff7d' : 'var(--amber)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_mayorista)}</td>
+                        <td style={{ color: p.enOferta ? '#7dff7d' : 'var(--green)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_minorista)}</td>
+                      </>)}
                     </tr>
                   ))}
                 </tbody>
@@ -527,12 +535,23 @@ export default function Precios() {
                 <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Nombre del producto</label>
                 <input value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} placeholder="Ej: Asado x kg" style={inp} />
               </div>
-              {[['precio_carniceria', '🔴 Precio Carnicería'], ['precio_mayorista', '🟡 Precio Mayorista'], ['precio_minorista', '🟢 Precio Minorista']].map(([campo, label]) => (
-                <div key={campo}>
-                  <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>{label}</label>
-                  <input type="number" value={form[campo]} onChange={e => setForm({ ...form, [campo]: e.target.value })} placeholder="Vacío = —" style={inp} />
+              {form.categoria === 'insumos' ? (
+                // Insumos: un solo precio (Precio Franquicia). Se guarda en las 3
+                // columnas para que el despacho lo tome con cualquier lista.
+                <div style={{ gridColumn: '1/-1' }}>
+                  <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>🧰 Precio Franquicia (final, ya con el 10%)</label>
+                  <input type="number" value={form.precio_carniceria}
+                    onChange={e => setForm({ ...form, precio_carniceria: e.target.value, precio_mayorista: e.target.value, precio_minorista: e.target.value })}
+                    placeholder="Ej: 5500" style={inp} />
                 </div>
-              ))}
+              ) : (
+                [['precio_carniceria', '🔴 Precio Carnicería'], ['precio_mayorista', '🟡 Precio Mayorista'], ['precio_minorista', '🟢 Precio Minorista']].map(([campo, label]) => (
+                  <div key={campo}>
+                    <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>{label}</label>
+                    <input type="number" value={form[campo]} onChange={e => setForm({ ...form, [campo]: e.target.value })} placeholder="Vacío = —" style={inp} />
+                  </div>
+                ))
+              )}
               <div>
                 <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>⚖️ PLU Balanza (1-9999)</label>
                 <input type="number" min="1" max="9999" value={form.codigo_balanza} onChange={e => setForm({ ...form, codigo_balanza: e.target.value })} placeholder="Ej: 1" style={inp} />
