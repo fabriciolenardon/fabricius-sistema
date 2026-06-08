@@ -25,7 +25,12 @@ const CATEGORIAS = {
   bebidas: '🥤 Bebidas',
   insumos: '🧰 Insumos',
 }
-const VACIO = { categoria: 'bovino_corte', nombre: '', precio_carniceria: '', precio_mayorista: '', precio_minorista: '', codigo_balanza: '', dias_vencimiento: '3', descripcion_etiqueta: '', pesable: true, kg_por_unidad: '', vende_por_pieza: false }
+
+// Subgrupos dentro de Insumos (como en el PDF original)
+const INSUMO_SUBCAT = { descartables: '📦 Descartables', limpieza: '🧽 Limpieza', carniceria: '🔪 Insumos Carnicería' }
+const INSUMO_SUBCAT_ORDEN = { descartables: 0, limpieza: 1, carniceria: 2 }
+const INSUMO_SUBCAT_OPCIONES = [['descartables', '📦 Descartables'], ['limpieza', '🧽 Limpieza'], ['carniceria', '🔪 Insumos Carnicería']]
+const VACIO = { categoria: 'bovino_corte', subcategoria: 'descartables', nombre: '', precio_carniceria: '', precio_mayorista: '', precio_minorista: '', codigo_balanza: '', dias_vencimiento: '3', descripcion_etiqueta: '', pesable: true, kg_por_unidad: '', vende_por_pieza: false }
 
 // Categorías que se venden por cajón (unidad con peso fijo) y por lo tanto
 // necesitan el campo kg_por_unidad cargado para descontar stock correctamente.
@@ -118,6 +123,7 @@ export default function Precios() {
     const nuevoPlu = form.codigo_balanza === '' ? null : Number(form.codigo_balanza)
     const datos = {
       categoria: form.categoria, nombre: form.nombre,
+      subcategoria: form.categoria === 'insumos' ? (form.subcategoria || 'descartables') : null,
       precio_carniceria: form.precio_carniceria === '' ? null : Number(form.precio_carniceria),
       precio_mayorista: form.precio_mayorista === '' ? null : Number(form.precio_mayorista),
       precio_minorista: form.precio_minorista === '' ? null : Number(form.precio_minorista),
@@ -189,6 +195,7 @@ export default function Precios() {
     setEditando(p.id)
     setForm({
       categoria: p.categoria, nombre: p.nombre,
+      subcategoria: p.subcategoria || 'descartables',
       precio_carniceria: p.precio_carniceria ?? '',
       precio_mayorista: p.precio_mayorista ?? '',
       precio_minorista: p.precio_minorista ?? '',
@@ -498,21 +505,39 @@ export default function Precios() {
                   </>)}
                 </tr></thead>
                 <tbody>
-                  {productosFiltradosConOfertas.map(p => (
-                    <tr key={p.id} style={{ background: p.enOferta ? 'rgba(125,255,125,0.04)' : 'transparent' }}>
-                      <td style={{ fontWeight: 500 }}>
-                        {p.nombre}
-                        {p.enOferta && <span style={{ marginLeft: 8, background: '#4a8a2a', color: '#fff', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700 }}>🏷️ OFERTA</span>}
-                      </td>
-                      {filtro === 'insumos' ? (
-                        <td style={{ color: 'var(--gold)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_carniceria)}</td>
-                      ) : (<>
-                        <td style={{ color: p.enOferta ? '#7dff7d' : 'var(--red-light)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_carniceria)}</td>
-                        <td style={{ color: p.enOferta ? '#7dff7d' : 'var(--amber)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_mayorista)}</td>
-                        <td style={{ color: p.enOferta ? '#7dff7d' : 'var(--green)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_minorista)}</td>
-                      </>)}
-                    </tr>
-                  ))}
+                  {(() => {
+                    const lista = filtro === 'insumos'
+                      ? [...productosFiltradosConOfertas].sort((a, b) => (INSUMO_SUBCAT_ORDEN[a.subcategoria] ?? 9) - (INSUMO_SUBCAT_ORDEN[b.subcategoria] ?? 9) || a.nombre.localeCompare(b.nombre))
+                      : productosFiltradosConOfertas
+                    const rows = []
+                    let lastSub = null
+                    lista.forEach(p => {
+                      if (filtro === 'insumos' && p.subcategoria !== lastSub) {
+                        lastSub = p.subcategoria
+                        rows.push(
+                          <tr key={'sub-' + (p.subcategoria || 'x')}>
+                            <td colSpan={2} style={{ background: 'var(--surface2)', color: 'var(--gold)', fontWeight: 700, fontSize: 12, padding: '6px 10px', letterSpacing: 0.5 }}>{INSUMO_SUBCAT[p.subcategoria] || p.subcategoria}</td>
+                          </tr>
+                        )
+                      }
+                      rows.push(
+                        <tr key={p.id} style={{ background: p.enOferta ? 'rgba(125,255,125,0.04)' : 'transparent' }}>
+                          <td style={{ fontWeight: 500 }}>
+                            {p.nombre}
+                            {p.enOferta && <span style={{ marginLeft: 8, background: '#4a8a2a', color: '#fff', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700 }}>🏷️ OFERTA</span>}
+                          </td>
+                          {filtro === 'insumos' ? (
+                            <td style={{ color: 'var(--gold)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_carniceria)}</td>
+                          ) : (<>
+                            <td style={{ color: p.enOferta ? '#7dff7d' : 'var(--red-light)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_carniceria)}</td>
+                            <td style={{ color: p.enOferta ? '#7dff7d' : 'var(--amber)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_mayorista)}</td>
+                            <td style={{ color: p.enOferta ? '#7dff7d' : 'var(--green)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_minorista)}</td>
+                          </>)}
+                        </tr>
+                      )
+                    })
+                    return rows
+                  })()}
                 </tbody>
               </table>
             )}
@@ -531,6 +556,14 @@ export default function Precios() {
                   {Object.entries(CATEGORIAS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
                 </select>
               </div>
+              {form.categoria === 'insumos' && (
+                <div style={{ gridColumn: '1/-1' }}>
+                  <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Grupo de insumo</label>
+                  <select value={form.subcategoria} onChange={e => setForm({ ...form, subcategoria: e.target.value })} style={inp}>
+                    {INSUMO_SUBCAT_OPCIONES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                  </select>
+                </div>
+              )}
               <div style={{ gridColumn: '1/-1' }}>
                 <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Nombre del producto</label>
                 <input value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} placeholder="Ej: Asado x kg" style={inp} />
