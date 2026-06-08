@@ -176,8 +176,11 @@ export default function Precios() {
   }
 
   async function eliminar(id) {
-    if (!confirm('¿Seguro que querés eliminar este producto?')) return
-    await supabase.from('precios').delete().eq('id', id)
+    if (!confirm('¿Seguro que querés eliminar este producto? También se borrarán sus ofertas.')) return
+    // Antes el error se tragaba: si el borrado fallaba (p. ej. el producto estaba
+    // en una oferta) parecía que "no pasaba nada". Ahora se muestra el motivo.
+    const { error } = await supabase.from('precios').delete().eq('id', id)
+    if (error) { mostrarMsg('❌ No se pudo eliminar: ' + error.message); return }
     mostrarMsg('🗑️ Eliminado'); await cargar()
   }
 
