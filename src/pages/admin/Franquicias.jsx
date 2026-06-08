@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
 import { parseNumero, fmtPrecio, fmtKg } from '../../lib/formatos'
+import Paginador, { usePaginacion } from '../../components/Paginador'
 const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
 
 const FRANQUICIAS = [
@@ -18,6 +19,9 @@ export default function Franquicias() {
   const [pago, setPago] = useState({ importe: '', forma: 'efectivo', fecha: fechaHoyARG(), notas: '' })
   const [clientes, setClientes] = useState([])
   const [msg, setMsg] = useState(null)
+  // Paginación de los historiales (antes mostraban TODO sin cortar)
+  const pagRemitos = usePaginacion(remitos, 15)
+  const pagMovs = usePaginacion(movimientos, 15)
 
   useEffect(() => {
     supabase.from('clientes').select('*').order('nombre').then(({ data }) => setClientes(data || []))
@@ -225,7 +229,7 @@ export default function Franquicias() {
               <table>
                 <thead><tr><th>N° Remito</th><th>Fecha</th><th>Total</th><th>Imprimir</th></tr></thead>
                 <tbody>
-                  {remitos.map(r => (
+                  {pagRemitos.items.map(r => (
                     <tr key={r.id}>
                       <td><strong>N° {String(r.numero).padStart(5, '0')}</strong></td>
                       <td>{r.fecha}</td>
@@ -236,6 +240,7 @@ export default function Franquicias() {
                   {remitos.length === 0 && <tr><td colSpan={4} className="empty">Sin remitos</td></tr>}
                 </tbody>
               </table>
+              <Paginador {...pagRemitos.controles} label="remitos" />
             </div>
 
             {/* CUENTA CORRIENTE */}
@@ -244,7 +249,7 @@ export default function Franquicias() {
               <table>
                 <thead><tr><th>Fecha</th><th>Tipo</th><th>Descripción</th><th>Debe</th><th>Haber</th><th>Saldo</th></tr></thead>
                 <tbody>
-                  {movimientos.map(m => (
+                  {pagMovs.items.map(m => (
                     <tr key={m.id}>
                       <td>{m.fecha}</td>
                       <td><span className={`badge ${m.tipo === 'compra' ? 'badge-red' : 'badge-green'}`}>{m.tipo}</span></td>
@@ -257,6 +262,7 @@ export default function Franquicias() {
                   {movimientos.length === 0 && <tr><td colSpan={6} className="empty">Sin movimientos</td></tr>}
                 </tbody>
               </table>
+              <Paginador {...pagMovs.controles} label="movimientos" />
             </div>
           </div>
         )}
