@@ -38,7 +38,9 @@ export async function recalcularSaldo(proveedorId) {
   const movs = await cargarMovimientos(proveedorId)
   let saldo = 0
   for (const m of movs) {
-    saldo += (Number(m.debe) || 0) - (Number(m.haber) || 0)
+    // Los movimientos ANULADOS quedan visibles en el extracto pero NO afectan
+    // el saldo (es como si la compra/pago no hubiera existido).
+    if (!m.anulado) saldo += (Number(m.debe) || 0) - (Number(m.haber) || 0)
     // Solo actualizamos si cambió, para minimizar writes
     if (Number(m.saldo) !== saldo) {
       await supabase.from('movimientos_proveedores').update({ saldo }).eq('id', m.id)
@@ -119,14 +121,20 @@ export async function eliminarMovimiento(movId, proveedorId) {
 // Revierte el/los movimiento(s) de compra asociados a una entrada al
 // depósito (por entrada_id) cuando esa entrada se elimina. Recalcula el
 // saldo de cada proveedor afectado.
-export async function revertirCompraDeEntrada(entradaId) {
+export async function revertirCompraDeEntrada(entradaId, anuladoPor = null) {
   if (!entradaId) return
   const { data: movs } = await supabase
-    .from('movimientos_proveedores').select('id, proveedor_id').eq('entrada_id', entradaId)
+    .from('movimientos_proveedores').select('id, proveedor_id, anulado').eq('entrada_id', entradaId)
   if (!movs || movs.length === 0) return
   const provIds = new Set()
   for (const m of movs) {
-    await supabase.from('movimientos_proveedores').delete().eq('id', m.id)
+    // Antes se borraba el movimiento. Ahora se ANULA (queda visible en el
+    // extracto del proveedor, marcado, pero deja de sumar a la deuda).
+    if (!m.anulado) {
+      await supabase.from('movimientos_proveedores')
+        .update({ anulado: true, anulado_por: anuladoPor, anulado_en: new Date().toISOString() })
+        .eq('id', m.id)
+    }
     if (m.proveedor_id) provIds.add(m.proveedor_id)
   }
   for (const pid of provIds) await recalcularSaldo(pid)

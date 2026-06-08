@@ -2078,8 +2078,15 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
   }
 
 async function eliminar(entrada) {
-  if (!confirm(`¿Eliminar esta entrada de ${entrada.kg} kg de ${entrada.proveedor_nombre}?`)) return
-  
+  if (entrada.eliminado) { showAlert({ type: 'error', msg: 'Este ingreso ya está anulado' }); return }
+  if (!confirm(`¿Anular este ingreso de ${entrada.kg} kg de ${entrada.proveedor_nombre}?\n\nQueda marcado ANULADO (no se borra), se revierte el stock, se anulan sus piezas y se anula la compra en la cuenta del proveedor.`)) return
+
+  // Quién anula — para la trazabilidad (igual patrón que la anulación de remitos)
+  const { data: { user } } = await supabase.auth.getUser()
+  const { data: perfil } = await supabase.from('profiles').select('nombre').eq('id', user?.id).maybeSingle()
+  const anuladoPor = perfil?.nombre || user?.email || 'admin'
+  const ahora = new Date().toISOString()
+
   if (entrada.despostada && entrada.desposte_id) {
     const { data: desposte } = await supabase.from('despostes').select('*').eq('id', entrada.desposte_id).single()
     if (desposte) {
@@ -2088,33 +2095,47 @@ async function eliminar(entrada) {
         for (const p of (desposte.piezas || [])) {
           await actualizarStock(p.tipo_stock || bucketDePiezaBovina(p.nombre), -(p.kg || 0))
         }
-      } else if (desposte.tipo_desposte === 'kilo') {
-        await actualizarStock('bovino_corte', -(desposte.kg_neto || 0))
-      } else if (desposte.tipo_desposte === 'pieza_kilo') {
+      } else if (desposte.tipo_desposte === 'kilo' || desposte.tipo_desposte === 'pieza_kilo') {
         await actualizarStock('bovino_corte', -(desposte.kg_neto || 0))
       }
       await supabase.from('despostes').delete().eq('id', entrada.desposte_id)
     }
   }
-  await supabase.from('compras_proveedores').delete()
-  .eq('fecha', entrada.fecha)
-  .eq('proveedor_nombre', entrada.proveedor_nombre)
-  .eq('kg', entrada.kg)
-  // Revertir la compra en la cuenta corriente (si esta entrada la generó)
-  await revertirCompraDeEntrada(entrada.id)
-  // Si la entrada era una media res, anular su fila en medias_stock. Antes se
-  // borraba la entrada pero la media quedaba "huérfana" (sin entrada que la
-  // respalde) y seguía contando como disponible en el Historial de Medias,
-  // descuadrando el conteo contra el Historial de Ingresos. Se marca 'anulada'
-  // (no se borra) para conservar el código MR-XXX en la pestaña Anuladas.
+  // Marcar la compra del proveedor como anulada (queda en "Buscar remitos de
+  // ingreso" marcada, sin sumar a los totales) en vez de borrarla.
+  await supabase.from('compras_proveedores')
+    .update({ anulado: true, anulado_por: anuladoPor, anulado_en: ahora })
+    .eq('fecha', entrada.fecha)
+    .eq('proveedor_nombre', entrada.proveedor_nombre)
+    .eq('kg', entrada.kg)
+  // Cuenta corriente del proveedor: la compra se ANULA (queda visible marcada
+  // en el extracto, deja de sumar a la deuda) en vez de borrarse.
+  await revertirCompraDeEntrada(entrada.id, anuladoPor)
+  // Media res → su fila en medias_stock pasa a 'anulada'.
   if (entrada.tipo === 'bovino_mr') {
     const { error: errMedia } = await supabase.from('medias_stock')
       .update({ estado: 'anulada' }).eq('entrada_id', entrada.id)
     if (errMedia) console.warn('No se pudo anular la media asociada:', errMedia.message)
   }
-  await supabase.from('entradas_deposito').delete().eq('id', entrada.id)
+  // Piezas individuales que generó esta entrada (pierna, cortito, etc.): las que
+  // siguen DISPONIBLES pasan a 'anulada' + por quién (dejan de contar como stock
+  // y aparecen anuladas en el Historial de Piezas). Las ya vendidas/despostadas
+  // no se tocan (esa salida no se puede revertir desde acá).
+  const { data: piezasEntrada } = await supabase.from('piezas_stock').select('id, estado').eq('entrada_id', entrada.id)
+  const piezasDisp = (piezasEntrada || []).filter(p => p.estado === 'disponible')
+  if (piezasDisp.length > 0) {
+    await supabase.from('piezas_stock')
+      .update({ estado: 'anulada', anulada_por: anuladoPor, anulada_en: ahora })
+      .in('id', piezasDisp.map(p => p.id))
+  }
+  const piezasNoRevert = (piezasEntrada || []).length - piezasDisp.length
+  // Revertir el stock agregado que sumó la entrada.
   await actualizarStock(entrada.tipo, -(entrada.kg_real || entrada.kg))
-  showAlert({ type: 'success', msg: '🗑️ Entrada y desposte eliminados — Stock revertido' })
+  // Soft-delete: la entrada NO se borra, queda marcada ANULADA + por quién.
+  await supabase.from('entradas_deposito')
+    .update({ eliminado: true, eliminado_por: anuladoPor, eliminado_en: ahora })
+    .eq('id', entrada.id)
+  showAlert({ type: 'success', msg: `❌ Ingreso anulado por ${anuladoPor} — stock revertido${piezasNoRevert > 0 ? ` · ⚠️ ${piezasNoRevert} pieza(s) ya vendida(s)/despostada(s) no se revirtieron` : ''}` })
   cargarHistorial()
   onSaved()
 }
@@ -2393,7 +2414,7 @@ async function eliminar(entrada) {
                   </td>
                 </tr>
               ) : (
-                <tr key={e.id}>
+                <tr key={e.id} style={{ background: e.eliminado ? 'rgba(255,50,50,0.08)' : 'transparent', opacity: e.eliminado ? 0.65 : 1 }}>
                   <td>
                     <div style={{ fontWeight: 600 }}>{e.fecha}</div>
                     {/* Hora real de ingreso (created_at) para que el orden
@@ -2405,14 +2426,21 @@ async function eliminar(entrada) {
                   <td>{e.codigo_media ? <span style={{ background: 'var(--gold)', color: '#000', padding: '2px 7px', borderRadius: 6, fontSize: 11, fontWeight: 800, letterSpacing: 0.5 }}>{e.codigo_media}</span> : <span style={{ color: 'var(--muted)' }}>—</span>}</td>
                   <td style={{ fontSize: 12 }}>{TIPOS[e.tipo] || e.tipo}</td>
                   <td>{e.proveedor_nombre}</td>
-                  <td>{e.descripcion}</td>
+                  <td>
+                    {e.descripcion}
+                    {e.eliminado && <span style={{ marginLeft: 6, background: '#3a1a1a', color: '#ff6b6b', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700 }}>❌ ANULADO{e.eliminado_por ? ' por ' + e.eliminado_por : ''}</span>}
+                  </td>
                   <td style={{ color: 'var(--gold)', fontWeight: 600 }}>{(e.kg_real || e.kg || 0).toFixed(1)} kg</td>
                   <td style={{ color: 'var(--muted)' }}>{e.precio_kg > 0 ? '$' + Math.round(e.precio_kg).toLocaleString('es-AR') : '—'}</td>
                   <td>
-                    <div style={{ display: 'flex', gap: 4 }}>
-                      <button onClick={() => abrirEdicion(e)} style={{ background: 'var(--amber)', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#fff' }}>✏️</button>
-                      <button onClick={() => eliminar(e)} style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12, color: '#ff6b6b' }}>🗑️</button>
-                    </div>
+                    {e.eliminado ? (
+                      <span style={{ fontSize: 10, color: '#ff6b6b', fontWeight: 700 }}>❌ ANULADO</span>
+                    ) : (
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button onClick={() => abrirEdicion(e)} style={{ background: 'var(--amber)', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#fff' }}>✏️</button>
+                        <button onClick={() => eliminar(e)} title="Anular ingreso" style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12, color: '#ff6b6b' }}>🗑️</button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               )
@@ -3762,10 +3790,13 @@ function ProveedoresTab() {
     setPagos(p || [])
     setProveedoresDB(prov || [])
     setEntradas(ent || [])
-    // Totales debe/haber del ledger por proveedor + set de inicializados
+    // Totales debe/haber del ledger por proveedor + set de inicializados.
+    // Los movimientos ANULADOS no suman al saldo (pero el proveedor sigue
+    // inicializado aunque solo tenga movimientos anulados).
     const tot = {}
     ;(movs || []).forEach(m => {
       if (!tot[m.proveedor_id]) tot[m.proveedor_id] = { debe: 0, haber: 0 }
+      if (m.anulado) return
       tot[m.proveedor_id].debe  += Number(m.debe) || 0
       tot[m.proveedor_id].haber += Number(m.haber) || 0
     })
@@ -3804,11 +3835,13 @@ function ProveedoresTab() {
     })
   }, [compras, filtroDesde, filtroHasta, filtroProvSel, filtroTexto])
 
+  // Los totales (kg y $) excluyen las compras ANULADAS — siguen visibles en la
+  // lista marcadas, pero no cuentan.
   const sumaFiltrada = useMemo(() =>
-    comprasFiltradas.reduce((s, c) => s + (Number(c.importe) || 0), 0),
+    comprasFiltradas.filter(c => !c.anulado).reduce((s, c) => s + (Number(c.importe) || 0), 0),
     [comprasFiltradas])
   const kgFiltrados = useMemo(() =>
-    comprasFiltradas.reduce((s, c) => s + (Number(c.kg) || 0), 0),
+    comprasFiltradas.filter(c => !c.anulado).reduce((s, c) => s + (Number(c.kg) || 0), 0),
     [comprasFiltradas])
 
   function limpiarFiltros() {
@@ -4175,12 +4208,15 @@ function ProveedoresTab() {
                 <thead><tr><th>Fecha</th><th>Proveedor</th><th>Producto</th><th>Kg</th><th style={{ textAlign: 'right' }}>Importe</th><th style={{ textAlign: 'center' }}>Detalle</th></tr></thead>
                 <tbody>
                   {pagCompras.items.map(c => (
-                    <tr key={c.id}>
+                    <tr key={c.id} style={{ background: c.anulado ? 'rgba(255,50,50,0.08)' : 'transparent', opacity: c.anulado ? 0.65 : 1 }}>
                       <td>{c.fecha}</td>
                       <td><strong>{c.proveedor_nombre}</strong></td>
-                      <td>{c.producto || '—'}</td>
-                      <td>{c.kg > 0 ? c.kg + ' kg' : '—'}</td>
-                      <td style={{ color: 'var(--amber)', fontWeight: 600, textAlign: 'right' }}>{fmt(c.importe)}</td>
+                      <td>
+                        {c.producto || '—'}
+                        {c.anulado && <span style={{ marginLeft: 6, background: '#3a1a1a', color: '#ff6b6b', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700 }}>❌ ANULADA{c.anulado_por ? ' por ' + c.anulado_por : ''}</span>}
+                      </td>
+                      <td style={{ color: c.anulado ? 'var(--muted)' : undefined, textDecoration: c.anulado ? 'line-through' : 'none' }}>{c.kg > 0 ? c.kg + ' kg' : '—'}</td>
+                      <td style={{ color: c.anulado ? 'var(--muted)' : 'var(--amber)', fontWeight: 600, textAlign: 'right', textDecoration: c.anulado ? 'line-through' : 'none' }}>{fmt(c.importe)}</td>
                       <td style={{ textAlign: 'center' }}>
                         <button onClick={() => abrirDetalleRemito(c)}
                           style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#000' }}>
@@ -4622,14 +4658,18 @@ function PiezasTab() {
                         </span>
                       </td>
                       <td style={{ fontSize: 11 }}>
-                        {p.destino === 'cortes' && <span style={{ color: 'var(--blue)' }}>→ Bovino Cortes</span>}
-                        {p.destino && p.destino !== 'cortes' && (
-                          <div>
-                            <div style={{ color: 'var(--text)', fontWeight: 600 }}>{p.cliente_nombre || p.destino}</div>
-                            <div style={{ color: 'var(--muted)' }}>{p.destino !== p.cliente_nombre ? p.destino : ''}</div>
-                          </div>
-                        )}
-                        {!p.destino && <span style={{ color: 'var(--muted)' }}>—</span>}
+                        {p.estado === 'anulada'
+                          ? <span style={{ color: '#ff6b6b', fontWeight: 700 }}>❌ Anulada{p.anulada_por ? ' por ' + p.anulada_por : ''}</span>
+                          : <>
+                              {p.destino === 'cortes' && <span style={{ color: 'var(--blue)' }}>→ Bovino Cortes</span>}
+                              {p.destino && p.destino !== 'cortes' && (
+                                <div>
+                                  <div style={{ color: 'var(--text)', fontWeight: 600 }}>{p.cliente_nombre || p.destino}</div>
+                                  <div style={{ color: 'var(--muted)' }}>{p.destino !== p.cliente_nombre ? p.destino : ''}</div>
+                                </div>
+                              )}
+                              {!p.destino && <span style={{ color: 'var(--muted)' }}>—</span>}
+                            </>}
                       </td>
                       <td style={{ fontSize: 11, color: 'var(--muted)' }}>{p.fecha_salida || '—'}</td>
                       <td style={{ fontSize: 11, color: 'var(--green)', fontWeight: 700 }}>
