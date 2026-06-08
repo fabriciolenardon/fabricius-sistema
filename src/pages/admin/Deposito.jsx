@@ -2083,6 +2083,10 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     onSaved()
     cargarHistorial()
     setTimeout(() => showAlert(null), 3000)
+    } finally {
+      guardandoRef.current = false
+      setGuardandoEntrada(false)
+    }
   }
 
 async function eliminar(entrada) {
@@ -2146,10 +2150,6 @@ async function eliminar(entrada) {
   showAlert({ type: 'success', msg: `❌ Ingreso anulado por ${anuladoPor} — stock revertido${piezasNoRevert > 0 ? ` · ⚠️ ${piezasNoRevert} pieza(s) ya vendida(s)/despostada(s) no se revirtieron` : ''}` })
   cargarHistorial()
   onSaved()
-    } finally {
-      guardandoRef.current = false
-      setGuardandoEntrada(false)
-    }
 }
 
   function abrirEdicion(entrada) {
