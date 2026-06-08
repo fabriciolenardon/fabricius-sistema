@@ -486,6 +486,7 @@ async function eliminarMovimiento(mov) {
               <select style={inp} value={form.tipo} onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))}>
                 <option value="carniceria">🥩 Carnicería</option>
                 <option value="mayorista">📦 Gastronómico / Mayorista</option>
+                <option value="minorista">🛒 Minorista</option>
                 <option value="sucursal">🏪 Sucursal</option>
               </select>
             </div>
