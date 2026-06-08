@@ -51,7 +51,7 @@ export default function FranquiciaPrecios() {
             <table>
               <thead><tr>
                 <th style={{ width: '65%' }}>Insumo</th>
-                <th style={{ color: 'var(--gold)' }}>Precio</th>
+                <th style={{ color: 'var(--gold)' }}>🧰 Precio Franquicia</th>
               </tr></thead>
               <tbody>
                 {productosFiltrados.map(p => (
