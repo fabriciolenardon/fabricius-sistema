@@ -2177,7 +2177,16 @@ async function eliminar(entrada) {
   const TIPOS = {
     bovino_mr: '🐄 Media Res', bovino_corte: '🥩 Bovino Corte',
     bovino_brosa: '🫀 Brosa', cerdo: '🐷 Cerdo',
-    pollo: '🍗 Pollo', embutido: '🌭 Embutido'
+    pollo: '🍗 Pollo', embutido: '🌭 Embutido',
+    // Piezas bovinas — mismos nombres que la lista de precios (entran por
+    // desposte interno de media res o por compra directa a proveedor).
+    pieza_pierna: '🥩 Pierna Bovina – Mocho',
+    pieza_cuarto_pistola: '🥩 Cuarto Pistola',
+    pieza_costillar: '🥩 Costillar Completo',
+    pieza_cortito: '🥩 Cortito',
+    pieza_costeletal: '🥩 Costeletal con Lomo',
+    pieza_paleta: '🥩 Paleta/Cogote',
+    pieza_parrillero: '🥩 Parrillero',
   }
 
   const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, width: '100%', boxSizing: 'border-box' }
@@ -2191,12 +2200,12 @@ async function eliminar(entrada) {
             <select value={form.tipo} onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))}>
               <option value="">— Seleccioná —</option>
 <option value="bovino_mr">🐄 Media Res</option>
-<option value="pieza_pierna">🦵 Pierna bovina con hueso</option>
-<option value="pieza_cuarto_pistola">🥩 Cuarto pistola</option>
-<option value="pieza_costillar">🍖 Costillar completo</option>
+<option value="pieza_pierna">🥩 Pierna Bovina – Mocho</option>
+<option value="pieza_cuarto_pistola">🥩 Cuarto Pistola</option>
+<option value="pieza_costillar">🥩 Costillar Completo</option>
 <option value="pieza_cortito">🥩 Cortito</option>
 <option value="pieza_costeletal">🥩 Costeletal con Lomo</option>
-<option value="pieza_paleta">🥩 Paleta entera</option>
+<option value="pieza_paleta">🥩 Paleta/Cogote</option>
 <option value="pieza_parrillero">🥩 Parrillero</option>
 <option value="caja_cb">📦 Caja bovina CB</option>
 <option value="caja_pt">📦 Caja bovina PT</option>
