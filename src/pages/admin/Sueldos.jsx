@@ -98,6 +98,8 @@ export default function Sueldos() {
   const [horas, setHoras] = useState({})
   const [boletas, setBoletas] = useState({})
   const [adelantos, setAdelantos] = useState({})
+  const [viaticos, setViaticos] = useState({})       // monto de viáticos por empleado (suma al neto)
+  const [viaticosOn, setViaticosOn] = useState({})   // toggle: si está activado, suma y aparece en el resumen
   const [alert, setAlert] = useState(null)
   const [loading, setLoading] = useState(false)
   const [importando, setImportando] = useState(false)
@@ -259,19 +261,29 @@ export default function Sueldos() {
   function getHoras(empId) { return parseFloat(horas[empId]) || 0 }
   function getBoletas(empId) { return parseFloat(boletas[empId]) || 0 }
   function getAdelantos(empId) { return parseFloat(adelantos[empId]) || 0 }
+  function getViaticos(empId) { return parseFloat(viaticos[empId]) || 0 }
+  // ¿El toggle de viáticos está activado para este empleado? Si el usuario no lo
+  // tocó, usa el default del empleado (tiene_viaticos): pre-activado solo para
+  // los que cobran viáticos (Luciano y Giuliana).
+  function viaticosActivo(emp) {
+    return emp.id in viaticosOn ? viaticosOn[emp.id] : !!emp.tiene_viaticos
+  }
 
   function calcNeto(emp) {
     const h = getHoras(emp.id)
     const b = getBoletas(emp.id)
     const a = getAdelantos(emp.id)
+    const vOn = viaticosActivo(emp)
+    const v = vOn ? getViaticos(emp.id) : 0      // viáticos SUMAN, solo si el toggle está activo
     const bruto = h * emp.valor_hora
-    const neto = Math.max(0, bruto - a - b)   // se restan adelantos y boletas
-    return { bruto, neto, h, b, a }
+    const neto = Math.max(0, bruto + v - a - b)
+    return { bruto, neto, h, b, a, v, vOn }
   }
 
   const totalBruto = empleados.reduce((s, e) => s + calcNeto(e).bruto, 0)
   const totalBoletas = empleados.reduce((s, e) => s + calcNeto(e).b, 0)
   const totalAdelantos = empleados.reduce((s, e) => s + calcNeto(e).a, 0)
+  const totalViaticos = empleados.reduce((s, e) => s + calcNeto(e).v, 0)
   const totalNeto = empleados.reduce((s, e) => s + calcNeto(e).neto, 0)
 
   async function guardarLiquidacion() {
@@ -279,14 +291,14 @@ export default function Sueldos() {
     if (totalNeto === 0) { setAlert({ type: 'error', msg: 'Cargá las horas de al menos un empleado' }); return }
     setLoading(true)
     const rows = empleados.map(emp => {
-      const { bruto, neto, h, b, a } = calcNeto(emp)
-      return { semana_inicio: inicio, semana_fin: fin, empleado_nombre: `${emp.apellido}, ${emp.nombre}`, horas: h, bruto, adelantos: a, boletas: b, neto }
+      const { bruto, neto, h, b, a, v } = calcNeto(emp)
+      return { semana_inicio: inicio, semana_fin: fin, empleado_nombre: `${emp.apellido}, ${emp.nombre}`, horas: h, bruto, viaticos: v, adelantos: a, boletas: b, neto }
     }).filter(r => r.horas > 0)
     const { error } = await supabase.from('liquidaciones_sueldos').insert(rows)
     setLoading(false)
     if (error) { setAlert({ type: 'error', msg: error.message }); return }
     setAlert({ type: 'success', msg: '✅ Liquidación confirmada y guardada' })
-    setHoras({}); setBoletas({}); setAdelantos({}); setDetalleImport([])
+    setHoras({}); setBoletas({}); setAdelantos({}); setViaticos({}); setViaticosOn({}); setDetalleImport([])
     fetchLiquidaciones()
     setTimeout(() => setAlert(null), 4000)
   }
@@ -294,7 +306,7 @@ export default function Sueldos() {
   // Imprime un resumen de pago simple (sin logos) para un empleado: horas,
   // valor hora, sueldo bruto, adelantos (resta), boletas (resta) y neto.
   function imprimirResumen(emp) {
-    const { bruto, neto, h, b, a } = calcNeto(emp)
+    const { bruto, neto, h, b, a, v, vOn } = calcNeto(emp)
     if (h <= 0) { setAlert({ type: 'error', msg: 'Cargá las horas de ese empleado antes de imprimir el resumen' }); return }
     const fmtF = d => d ? new Date(d + 'T12:00').toLocaleDateString('es-AR') : ''
     const periodo = inicio && fin ? `${fmtF(inicio)} al ${fmtF(fin)}` : ''
@@ -318,6 +330,7 @@ export default function Sueldos() {
           ${fila('Horas trabajadas', h + ' h')}
           ${fila('Valor hora', fmt(emp.valor_hora))}
           ${fila('Sueldo (bruto)', fmt(bruto), { cls: 'sep' })}
+          ${vOn && v > 0 ? fila('Viáticos', '+ ' + fmt(v), { color: '#1e7e34' }) : ''}
           ${a > 0 ? fila('Adelantos', '− ' + fmt(a), { color: '#c0392b' }) : ''}
           ${b > 0 ? fila('Boletas', '− ' + fmt(b), { color: '#c0392b' }) : ''}
           ${fila('NETO A COBRAR', fmt(neto), { cls: 'neto' })}
@@ -401,7 +414,7 @@ export default function Sueldos() {
           {/* TARJETAS EMPLEADOS */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 20 }}>
             {empleados.map(emp => {
-              const { bruto, neto } = calcNeto(emp)
+              const { bruto, neto, v, vOn } = calcNeto(emp)
               return (
                 <div key={emp.id} className="card" style={{ marginBottom: 0, borderColor: neto > 0 ? '#7c3aed' : 'var(--border)' }}>
                   <div style={{ marginBottom: 12 }}>
@@ -411,6 +424,18 @@ export default function Sueldos() {
                   <div className="form-group" style={{ marginBottom: 8 }}>
                     <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Horas trabajadas</label>
                     <input style={{ ...inp, borderColor: getHoras(emp.id) > 0 ? '#7c3aed' : 'var(--border)' }} type="number" step="0.5" placeholder="0" value={horas[emp.id] || ''} onChange={e => setHoras(h => ({ ...h, [emp.id]: e.target.value }))} />
+                  </div>
+                  {/* Viáticos: toggle clickeable. Si está activo SUMA al neto y
+                      aparece en el resumen; si no, ni se suma ni se muestra. */}
+                  <div className="form-group" style={{ marginBottom: 8 }}>
+                    <label onClick={() => setViaticosOn(o => ({ ...o, [emp.id]: !viaticosActivo(emp) }))}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, marginBottom: 3, cursor: 'pointer', color: vOn ? '#22c55e' : 'var(--muted)', fontWeight: vOn ? 700 : 400 }}>
+                      <input type="checkbox" checked={vOn} readOnly style={{ cursor: 'pointer' }} />
+                      ✈️ Viáticos ($) — suma {vOn ? '· aparece en el resumen' : ''}
+                    </label>
+                    {vOn && (
+                      <input style={{ ...inp, borderColor: '#22c55e' }} type="number" placeholder="0" value={viaticos[emp.id] || ''} onChange={e => setViaticos(v => ({ ...v, [emp.id]: e.target.value }))} />
+                    )}
                   </div>
                   <div className="form-group" style={{ marginBottom: 8 }}>
                     <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Adelantos ($) — se restan</label>
@@ -423,6 +448,7 @@ export default function Sueldos() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 10, borderTop: '1px solid var(--border)', alignItems: 'center' }}>
                     <div>
                       <div style={{ fontSize: 10, color: 'var(--muted)' }}>Bruto: {fmt(bruto)}</div>
+                      {vOn && v > 0 && <div style={{ fontSize: 10, color: '#22c55e' }}>Viáticos: +{fmt(v)}</div>}
                       {getAdelantos(emp.id) > 0 && <div style={{ fontSize: 10, color: 'var(--red-light)' }}>Adelantos: -{fmt(getAdelantos(emp.id))}</div>}
                       {getBoletas(emp.id) > 0 && <div style={{ fontSize: 10, color: 'var(--red-light)' }}>Boletas: -{fmt(getBoletas(emp.id))}</div>}
                     </div>
@@ -442,16 +468,17 @@ export default function Sueldos() {
           <div className="card" style={{ borderColor: '#7c3aed' }}>
             <div className="card-title">Resumen de liquidación</div>
             <table>
-              <thead><tr><th>Empleado</th><th>Horas</th><th>Valor/h</th><th>Bruto</th><th>Adelantos</th><th>Boletas</th><th>NETO</th><th></th></tr></thead>
+              <thead><tr><th>Empleado</th><th>Horas</th><th>Valor/h</th><th>Bruto</th><th>Viáticos</th><th>Adelantos</th><th>Boletas</th><th>NETO</th><th></th></tr></thead>
               <tbody>
                 {empleados.map(emp => {
-                  const { bruto, neto, h, b, a } = calcNeto(emp)
+                  const { bruto, neto, h, b, a, v, vOn } = calcNeto(emp)
                   return (
                     <tr key={emp.id} style={{ opacity: h === 0 ? 0.4 : 1 }}>
                       <td><strong>{emp.apellido}, {emp.nombre}</strong></td>
                       <td>{h > 0 ? h + 'h' : '—'}</td>
                       <td style={{ color: 'var(--muted)' }}>{fmt(emp.valor_hora)}</td>
                       <td style={{ color: '#a78bfa' }}>{fmt(bruto)}</td>
+                      <td style={{ color: '#22c55e' }}>{vOn && v > 0 ? '+' + fmt(v) : '—'}</td>
                       <td style={{ color: 'var(--red-light)' }}>{a > 0 ? '-' + fmt(a) : '—'}</td>
                       <td style={{ color: 'var(--red-light)' }}>{b > 0 ? '-' + fmt(b) : '—'}</td>
                       <td style={{ color: 'var(--gold)', fontWeight: 700, fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(neto)}</td>
@@ -464,6 +491,7 @@ export default function Sueldos() {
                 <tr style={{ background: 'var(--surface2)' }}>
                   <td colSpan={3}><strong>TOTAL</strong></td>
                   <td style={{ color: '#a78bfa', fontWeight: 700 }}>{fmt(totalBruto)}</td>
+                  <td style={{ color: '#22c55e', fontWeight: 700 }}>{totalViaticos > 0 ? '+' + fmt(totalViaticos) : '—'}</td>
                   <td style={{ color: 'var(--red-light)', fontWeight: 700 }}>{totalAdelantos > 0 ? '-' + fmt(totalAdelantos) : '—'}</td>
                   <td style={{ color: 'var(--red-light)', fontWeight: 700 }}>{totalBoletas > 0 ? '-' + fmt(totalBoletas) : '—'}</td>
                   <td style={{ color: 'var(--gold)', fontWeight: 700, fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{fmt(totalNeto)}</td>
@@ -526,13 +554,14 @@ export default function Sueldos() {
                   <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>TOTAL: {fmt(totalSemana)}</div>
                 </div>
                 <table>
-                  <thead><tr><th>Empleado</th><th>Horas</th><th>Bruto</th><th>Adelantos</th><th>Boletas</th><th>Neto</th></tr></thead>
+                  <thead><tr><th>Empleado</th><th>Horas</th><th>Bruto</th><th>Viáticos</th><th>Adelantos</th><th>Boletas</th><th>Neto</th></tr></thead>
                   <tbody>
                     {liqSemana.map(l => (
                       <tr key={l.id}>
                         <td><strong>{l.empleado_nombre}</strong></td>
                         <td>{l.horas > 0 ? l.horas + 'h' : '—'}</td>
                         <td style={{ color: '#a78bfa' }}>{fmt(l.bruto)}</td>
+                        <td style={{ color: '#22c55e' }}>{l.viaticos > 0 ? '+' + fmt(l.viaticos) : '—'}</td>
                         <td style={{ color: 'var(--red-light)' }}>{l.adelantos > 0 ? '-' + fmt(l.adelantos) : '—'}</td>
                         <td style={{ color: 'var(--red-light)' }}>{l.boletas > 0 ? '-' + fmt(l.boletas) : '—'}</td>
                         <td style={{ color: 'var(--gold)', fontWeight: 700 }}>{fmt(l.neto)}</td>
