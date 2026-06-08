@@ -23,6 +23,7 @@ const CATEGORIAS = {
   rebozado_cajon: '🧊 Rebozado Cajón',
   almacen: '🛒 Almacén',
   bebidas: '🥤 Bebidas',
+  insumos: '🧰 Insumos',
 }
 const VACIO = { categoria: 'bovino_corte', nombre: '', precio_carniceria: '', precio_mayorista: '', precio_minorista: '', codigo_balanza: '', dias_vencimiento: '3', descripcion_etiqueta: '', pesable: true, kg_por_unidad: '', vende_por_pieza: false }
 

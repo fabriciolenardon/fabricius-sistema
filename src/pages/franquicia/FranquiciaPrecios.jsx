@@ -7,8 +7,9 @@ const CATEGORIAS = {
   bovino_pieza: '🍖 Piezas',
   cerdo_corte: '🐷 Cerdo',
   embutido: '🌭 Embutidos',
-  pollo: '🍗 Pollo Cajones',
+  pollo: '🍗 Pollo x Kg',
   rebozado: '🧊 Rebozados',
+  insumos: '🧰 Insumos',
 }
 
 import { fmtPrecio } from '../../lib/formatos'
@@ -45,22 +46,42 @@ export default function FranquiciaPrecios() {
       <div className="card">
         <div className="card-title">{CATEGORIAS[filtro]}</div>
         {loading ? <p style={{ color: 'var(--muted)' }}>Cargando precios...</p> : (
-          <table>
-            <thead><tr>
-              <th style={{ width: '50%' }}>Producto</th>
-              <th style={{ color: 'var(--amber)' }}>🟡 Mayorista</th>
-              <th style={{ color: 'var(--green)' }}>🟢 Minorista</th>
-            </tr></thead>
-            <tbody>
-              {productosFiltrados.map(p => (
-                <tr key={p.id}>
-                  <td style={{ fontWeight: 500 }}>{p.nombre}</td>
-                  <td style={{ color: 'var(--amber)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_mayorista)}</td>
-                  <td style={{ color: 'var(--green)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_minorista)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          filtro === 'insumos' ? (
+            // Insumos: una sola lista de precio (lo que les cobramos, ya con el 10%).
+            <table>
+              <thead><tr>
+                <th style={{ width: '65%' }}>Insumo</th>
+                <th style={{ color: 'var(--gold)' }}>Precio</th>
+              </tr></thead>
+              <tbody>
+                {productosFiltrados.map(p => (
+                  <tr key={p.id}>
+                    <td style={{ fontWeight: 500 }}>{p.nombre}</td>
+                    <td style={{ color: 'var(--gold)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_carniceria)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <table>
+              <thead><tr>
+                <th style={{ width: '40%' }}>Producto</th>
+                <th style={{ color: 'var(--red-light)' }}>🔴 Carnicería</th>
+                <th style={{ color: 'var(--amber)' }}>🟡 Mayorista</th>
+                <th style={{ color: 'var(--green)' }}>🟢 Minorista</th>
+              </tr></thead>
+              <tbody>
+                {productosFiltrados.map(p => (
+                  <tr key={p.id}>
+                    <td style={{ fontWeight: 500 }}>{p.nombre}</td>
+                    <td style={{ color: 'var(--red-light)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_carniceria)}</td>
+                    <td style={{ color: 'var(--amber)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_mayorista)}</td>
+                    <td style={{ color: 'var(--green)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_minorista)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )
         )}
       </div>
     </div>

@@ -2546,6 +2546,7 @@ export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
     'bebidas',         // 🥤 Bebidas
     'bovino_caja_cb',  // 📦 Caja CB
     'bovino_caja_pt',  // 📦 Caja PT
+    'insumos',         // 🧰 Insumos (se venden por unidad, NO descuentan stock)
   ])
   const esUnidad = CATEGORIAS_POR_UNIDAD.has(form.categoria)
   const esCaja = form.categoria === 'bovino_caja_cb' || form.categoria === 'bovino_caja_pt'
@@ -2565,6 +2566,7 @@ const CATEGORIAS = {
     pollo_cajon: '🍗 Pollo x Cajón',
     rebozado: '🧊 Rebozado x Kg',
     rebozado_cajon: '🧊 Rebozado x Cajón',
+    insumos: '🧰 Insumos',
   }
   // CATEGORIA_A_STOCK se movió a nivel de módulo (arriba) para que RemitosTab
   // también pueda usarlo al revertir el stock de un remito anulado.
@@ -2836,6 +2838,7 @@ const item = {
     const kgPorTipo = {}
 for (const item of items) {
   if (item.manual) continue  // los items manuales (descartables/insumos) no descuentan stock
+  if (item.tipo === 'insumos') continue  // los insumos no tienen stock — solo se facturan
   // Cajas individuales: las marcamos vendidas con venderCaja() abajo, que
   // ya decrementa stock_actual.caja_cb/caja_pt por su peso individual.
   // Skipear acá para no descontar dos veces.
