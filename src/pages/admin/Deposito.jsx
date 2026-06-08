@@ -2487,7 +2487,8 @@ const CATEGORIAS = {
     embutido: '🌭 Embutidos',
     pollo: '🍗 Pollo x Kg',
     pollo_cajon: '🍗 Pollo x Cajón',
-    rebozado: '🧊 Rebozados',
+    rebozado: '🧊 Rebozado x Kg',
+    rebozado_cajon: '🧊 Rebozado x Cajón',
   }
   // CATEGORIA_A_STOCK se movió a nivel de módulo (arriba) para que RemitosTab
   // también pueda usarlo al revertir el stock de un remito anulado.
