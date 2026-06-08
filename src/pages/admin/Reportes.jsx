@@ -58,7 +58,7 @@ export function useReportesData(periodo) {
       const [entradas, salidas, ventasCaja, pedidos, clientes,
              despostesCosto, cajasCosto, preciosLookup, entradasCosto,
              gastos, sueldos, pagosProveedores, movimientosCtacte] = await Promise.all([
-        supabase.from('entradas_deposito').select('*').gte('fecha', desde).lte('fecha', hoy),
+        supabase.from('entradas_deposito').select('*').eq('eliminado', false).gte('fecha', desde).lte('fecha', hoy),
         supabase.from('salidas_deposito').select('*').gte('fecha', desde).lte('fecha', hoy),
         supabase.from('ventas_minoristas').select('*').eq('origen', 'caja').gte('fecha', desde).lte('fecha', hoy),
         supabase.from('pedidos').select('*').gte('dia_entrega', desde).lte('dia_entrega', hoy).eq('estado', 'confirmado'),
@@ -67,7 +67,7 @@ export function useReportesData(periodo) {
         supabase.from('despostes').select('piezas, fecha').gte('fecha', desdeCosto).lte('fecha', hoy),
         supabase.from('cajas_stock').select('producto_id, precio_costo_kg, kg, fecha_ingreso').gte('fecha_ingreso', desdeCosto),
         supabase.from('precios').select('id, nombre, categoria, kg_por_unidad, precio_minorista, precio_mayorista, precio_carniceria'),
-        supabase.from('entradas_deposito').select('descripcion, tipo, kg, precio_kg, fecha').gte('fecha', desdeCosto).lte('fecha', hoy),
+        supabase.from('entradas_deposito').select('descripcion, tipo, kg, precio_kg, fecha').eq('eliminado', false).gte('fecha', desdeCosto).lte('fecha', hoy),
         // Finanzas (Flujo / Gastos)
         supabase.from('gastos').select('*').gte('fecha', desde).lte('fecha', hoy),
         supabase.from('liquidaciones_sueldos').select('*').gte('semana_inicio', desde).lte('semana_fin', hoy),
