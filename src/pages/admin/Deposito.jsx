@@ -34,6 +34,15 @@ const COBRO_LABEL = {
   transferencia: { txt: 'PAGADO · TRANSF.',   color: '#5fd55f', bg: '#10240f' },
   cheque:        { txt: 'PAGADO · CHEQUE',    color: '#5fd55f', bg: '#10240f' },
   echeq:         { txt: 'PAGADO · E-CHEQ',    color: '#5fd55f', bg: '#10240f' },
+  mixto:         { txt: 'PAGADO · MIXTO',     color: '#5fd55f', bg: '#10240f' },
+}
+
+// Nombre corto de cada forma de pago (para el desglose del pago dividido).
+const METODO_PAGO_LABEL = {
+  efectivo: 'Efectivo',
+  transferencia: 'Transferencia',
+  cheque: 'Cheque',
+  echeq: 'E-cheq',
 }
 
 // ============================================================
@@ -2405,6 +2414,10 @@ async function eliminar(entrada) {
 
 export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   const [form, setForm] = useState({ destino: '', clienteId: '', clienteNombre: '', domicilio: '', fecha: fechaHoyARG(), categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
+  // Pago dividido (cobro='mixto'): hasta 3 líneas { metodo, monto }. Solo se usa
+  // cuando la venta se cobra en 2-3 formas distintas (ej. parte efectivo + parte
+  // transferencia). Es 100% pagado: no genera deuda en cuenta corriente.
+  const [pagosSplit, setPagosSplit] = useState([{ metodo: 'efectivo', monto: '' }, { metodo: 'transferencia', monto: '' }])
   const [items, setItems] = useState([])
   // Anti-doble-emisión: el ref bloquea de forma SÍNCRONA (un segundo click
   // entra antes de que React re-renderice con guardando=true), y el state
@@ -2701,6 +2714,22 @@ const item = {
     if (guardandoRef.current) return
     if (items.length === 0) { showAlert({ type: 'error', msg: 'Agregá al menos un producto' }); return }
     if (!form.destino) { showAlert({ type: 'error', msg: 'Elegí un destino antes de despachar' }); return }
+    // Pago dividido (cobro='mixto'): 2+ formas con monto y la suma debe igualar
+    // el total. Se guarda el desglose en remitos.pagos. Es 100% pagado → no
+    // genera deuda en cuenta corriente (cobro != 'cta_cte').
+    let pagosMixto = null
+    if (form.cobro === 'mixto') {
+      pagosMixto = pagosSplit
+        .map(p => ({ metodo: p.metodo, monto: parseNumero(p.monto) }))
+        .filter(p => p.monto > 0)
+      if (pagosMixto.length < 2) {
+        showAlert({ type: 'error', msg: 'El pago dividido necesita al menos 2 formas con monto cargado' }); return
+      }
+      const sumaPagos = pagosMixto.reduce((s, p) => s + p.monto, 0)
+      if (Math.abs(sumaPagos - total) > 1) {
+        showAlert({ type: 'error', msg: `Los pagos suman $${Math.round(sumaPagos).toLocaleString('es-AR')} pero el total es $${Math.round(total).toLocaleString('es-AR')}. Tienen que coincidir.` }); return
+      }
+    }
     guardandoRef.current = true
     setGuardando(true)
     try {
@@ -2778,7 +2807,7 @@ for (const item of items) {
       fecha: form.fecha, cliente_nombre: clienteNombre,
       cliente_id: clienteId || null,
       domicilio, telefono, localidad,
-      items, total, cobro: form.cobro, notas: form.notas
+      items, total, cobro: form.cobro, pagos: pagosMixto, notas: form.notas
     }).select().single()
 
     // Marcar cajas individuales como vendidas (cajas_stock) — venderCaja
@@ -2836,6 +2865,7 @@ for (const item of items) {
     setItems([])
     setBusqueda('')
     setForm({ destino: 'MITRE', clienteId: '', clienteNombre: '', domicilio: '', fecha: fechaHoyARG(), categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
+    setPagosSplit([{ metodo: 'efectivo', monto: '' }, { metodo: 'transferencia', monto: '' }])
     // Refrescar el stockMap para que las cajas/almacén/bebidas reflejen la
     // resta inmediatamente — sin esto, el cajero ve disponibilidad vieja
     // hasta que recarga la página.
@@ -3133,12 +3163,56 @@ for (const item of items) {
               <option value="transferencia">Transferencia</option>
               <option value="cheque">Cheque</option>
               <option value="echeq">E-cheq</option>
+              <option value="mixto">💰 Pago dividido (2-3 formas)</option>
             </select>
           </div>
           <div className="form-group"><label>Notas</label>
             <input placeholder="Observaciones" value={form.notas} onChange={e => setForm(f => ({ ...f, notas: e.target.value }))} />
           </div>
         </div>
+
+        {/* Editor de pago dividido: una venta cobrada en 2-3 formas distintas.
+            Los montos deben sumar el total. No genera deuda (es 100% pagado). */}
+        {form.cobro === 'mixto' && (() => {
+          const sumaPagos = pagosSplit.reduce((s, p) => s + (parseNumero(p.monto) || 0), 0)
+          const restante = total - sumaPagos
+          const ok = Math.abs(restante) <= 1
+          return (
+            <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--gold)', marginBottom: 10 }}>💰 Repartí el cobro entre 2 o 3 formas — total a cubrir: ${Math.round(total).toLocaleString('es-AR')}</div>
+              {pagosSplit.map((p, i) => (
+                <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                  <select value={p.metodo} onChange={e => setPagosSplit(arr => arr.map((x, j) => j === i ? { ...x, metodo: e.target.value } : x))} style={{ flex: 1 }}>
+                    <option value="efectivo">Efectivo</option>
+                    <option value="transferencia">Transferencia</option>
+                    <option value="cheque">Cheque</option>
+                    <option value="echeq">E-cheq</option>
+                  </select>
+                  <input type="number" step="0.01" placeholder="$ monto" value={p.monto}
+                    onChange={e => setPagosSplit(arr => arr.map((x, j) => j === i ? { ...x, monto: e.target.value } : x))}
+                    style={{ width: 150 }} />
+                  <button type="button" title="Autocompletar con lo que falta"
+                    onClick={() => setPagosSplit(arr => arr.map((x, j) => j === i ? { ...x, monto: String(Math.max(0, Math.round((total - arr.reduce((s, y, k) => s + (k === i ? 0 : (parseNumero(y.monto) || 0)), 0)) * 100) / 100)) } : x))}
+                    style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 11, color: 'var(--muted)' }}>↪ resto</button>
+                  {pagosSplit.length > 2 && (
+                    <button type="button" onClick={() => setPagosSplit(arr => arr.filter((_, j) => j !== i))}
+                      style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 11, color: '#ff6b6b' }}>🗑️</button>
+                  )}
+                </div>
+              ))}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
+                {pagosSplit.length < 3
+                  ? <button type="button" onClick={() => setPagosSplit(arr => [...arr, { metodo: 'efectivo', monto: '' }])} style={{ background: 'var(--surface)', border: '1px dashed var(--gold)', borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontSize: 12, color: 'var(--gold)' }}>➕ Agregar forma</button>
+                  : <span />}
+                <div style={{ fontSize: 12, fontWeight: 700, color: ok ? 'var(--green)' : 'var(--red-light)' }}>
+                  Suma ${Math.round(sumaPagos).toLocaleString('es-AR')} / ${Math.round(total).toLocaleString('es-AR')}
+                  {ok ? ' ✅' : ` · falta $${Math.round(restante).toLocaleString('es-AR')}`}
+                </div>
+              </div>
+            </div>
+          )
+        })()}
+
         <button className="btn btn-gold" onClick={guardar} disabled={guardando} style={{ opacity: guardando ? 0.5 : 1, cursor: guardando ? 'not-allowed' : 'pointer' }}>{guardando ? '⏳ Registrando…' : '📤 Registrar despacho y generar remito'}</button>
       </div>
     </div>
@@ -3597,9 +3671,18 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
                 <td>{r.cliente_nombre}</td>
                 <td style={{ color: 'var(--gold)' }}>
                   ${Math.round(r.total).toLocaleString('es-AR')}
-                  {(() => { const c = COBRO_LABEL[r.cobro] || COBRO_LABEL.cta_cte; return (
-                    <div style={{ marginTop: 3 }}><span style={{ fontSize: 9, fontWeight: 700, color: c.color, background: c.bg, borderRadius: 4, padding: '1px 6px', letterSpacing: 0.3 }}>{c.txt}</span></div>
-                  ) })()}
+                  {(() => {
+                    const c = COBRO_LABEL[r.cobro] || COBRO_LABEL.cta_cte
+                    const desglose = Array.isArray(r.pagos) && r.pagos.length
+                      ? r.pagos.map(p => `${METODO_PAGO_LABEL[p.metodo] || p.metodo}: $${Math.round(p.monto).toLocaleString('es-AR')}`).join('  ·  ')
+                      : null
+                    return (
+                      <div style={{ marginTop: 3 }}>
+                        <span title={desglose || undefined} style={{ fontSize: 9, fontWeight: 700, color: c.color, background: c.bg, borderRadius: 4, padding: '1px 6px', letterSpacing: 0.3, cursor: desglose ? 'help' : 'default' }}>{c.txt}</span>
+                        {desglose && <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 2 }}>{desglose}</div>}
+                      </div>
+                    )
+                  })()}
                 </td>
                 <td>
                   <div style={{ display: 'flex', gap: 6 }}>
