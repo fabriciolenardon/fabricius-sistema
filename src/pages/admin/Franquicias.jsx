@@ -7,7 +7,7 @@ const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
 
 const FRANQUICIAS = [
   { nombre: 'ALVEAR', titular: 'Roxana', direccion: 'Carnicería Alvear' },
-  { nombre: 'MONTE CRISTO', titular: 'Agustín', direccion: 'Monte Cristo' },
+  { nombre: 'MONTE CRISTO', titular: 'Carla Tissera', direccion: 'Monte Cristo' },
 ]
 
 export default function Franquicias() {

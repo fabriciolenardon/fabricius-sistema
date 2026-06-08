@@ -11,6 +11,10 @@ function useClienteFranquicia() {
   const { profile } = useAuth()
   const [cliente, setCliente] = useState(null)
   const [loading, setLoading] = useState(true)
+  // Saldo que ve el portal: si el cliente tiene `portal_fecha_desde` (p. ej. tras
+  // un cambio de dueño), se recalcula con los movimientos desde esa fecha, así el
+  // nuevo dueño NO ve la deuda histórica del anterior. Si no, es el saldo total.
+  const [saldoEfectivo, setSaldoEfectivo] = useState(0)
 
   useEffect(() => {
     if (!profile) return
@@ -28,15 +32,23 @@ function useClienteFranquicia() {
       if (data) { clienteEncontrado = data; break }
     }
     setCliente(clienteEncontrado)
+    if (clienteEncontrado?.portal_fecha_desde) {
+      const { data: movs } = await supabase.from('movimientos_ctacte')
+        .select('debe, haber').eq('cliente_id', clienteEncontrado.id)
+        .gte('fecha', clienteEncontrado.portal_fecha_desde)
+      setSaldoEfectivo((movs || []).reduce((a, m) => a + (Number(m.debe) || 0) - (Number(m.haber) || 0), 0))
+    } else {
+      setSaldoEfectivo(clienteEncontrado?.saldo || 0)
+    }
     setLoading(false)
   }
 
-  return { cliente, loading }
+  return { cliente, loading, fechaDesde: cliente?.portal_fecha_desde || null, saldo: saldoEfectivo }
 }
 
 export function FranquiciaDashboard() {
   const { profile } = useAuth()
-  const { cliente, loading } = useClienteFranquicia()
+  const { cliente, loading, fechaDesde, saldo } = useClienteFranquicia()
   const [movimientos, setMovimientos] = useState([])
   const [remitos, setRemitos] = useState([])
   const [notifNueva, setNotifNueva] = useState(null)
@@ -55,15 +67,20 @@ export function FranquiciaDashboard() {
 
   async function cargarDatos() {
     if (!cliente) return
+    let qMov = supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id)
+    let qRem = supabase.from('remitos').select('*').eq('cliente_id', cliente.id)
+    if (cliente.portal_fecha_desde) {
+      qMov = qMov.gte('fecha', cliente.portal_fecha_desde)
+      qRem = qRem.gte('fecha', cliente.portal_fecha_desde)
+    }
     const [{ data: movs }, { data: rems }] = await Promise.all([
-      supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id).order('fecha', { ascending: false }).limit(5),
-      supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false }).limit(3)
+      qMov.order('fecha', { ascending: false }).limit(5),
+      qRem.order('created_at', { ascending: false }).limit(3)
     ])
     setMovimientos(movs || [])
     setRemitos(rems || [])
   }
 
-  const saldo = cliente?.saldo || 0
   const totCompras = movimientos.filter(m => m.debe > 0).reduce((s, m) => s + m.debe, 0)
   const totPagado = movimientos.filter(m => m.haber > 0).reduce((s, m) => s + m.haber, 0)
 
@@ -94,6 +111,7 @@ export function FranquiciaDashboard() {
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8, letterSpacing: 2 }}>SALDO ACTUAL</div>
           <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 40, color: saldo > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(saldo)}</div>
           <div style={{ fontSize: 12, marginTop: 4, color: saldo > 0 ? 'var(--red-light)' : 'var(--green)' }}>{saldo > 0 ? '⚠️ Saldo adeudado' : '✅ Al día'}</div>
+          {fechaDesde && <div style={{ fontSize: 10, marginTop: 6, color: 'var(--muted)' }}>📅 Desde {new Date(fechaDesde + 'T12:00').toLocaleDateString('es-AR')}</div>}
         </div>
         <div className="stat"><div className="stat-label">Total compras</div><div className="stat-value" style={{ color: 'var(--amber)' }}>{fmt(totCompras)}</div></div>
         <div className="stat"><div className="stat-label">Total pagado</div><div className="stat-value" style={{ color: 'var(--green)' }}>{fmt(totPagado)}</div></div>
@@ -146,20 +164,22 @@ export function FranquiciaDashboard() {
 }
 
 export function FranquiciaCtaCte() {
-  const { cliente } = useClienteFranquicia()
+  const { cliente, saldo } = useClienteFranquicia()
   const [movimientos, setMovimientos] = useState([])
 
   useEffect(() => {
     if (!cliente) return
-    supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id).order('fecha', { ascending: false }).then(({ data }) => setMovimientos(data || []))
+    const traer = () => {
+      let q = supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id)
+      if (cliente.portal_fecha_desde) q = q.gte('fecha', cliente.portal_fecha_desde)
+      q.order('fecha', { ascending: false }).then(({ data }) => setMovimientos(data || []))
+    }
+    traer()
     const canal = supabase.channel('ctacte-franquicia')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'movimientos_ctacte', filter: `cliente_id=eq.${cliente.id}` }, () => {
-        supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id).order('fecha', { ascending: false }).then(({ data }) => setMovimientos(data || []))
-      }).subscribe()
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'movimientos_ctacte', filter: `cliente_id=eq.${cliente.id}` }, traer).subscribe()
     return () => supabase.removeChannel(canal)
   }, [cliente])
 
-  const saldo = cliente?.saldo || 0
   // Paginación del historial de cta cte de la franquicia
   const pagMov = usePaginacion(movimientos, 20)
 
@@ -207,11 +227,14 @@ export function FranquiciaRemitos() {
 
   useEffect(() => {
     if (!cliente) return
-    supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false }).then(({ data }) => setRemitos(data || []))
+    const traer = () => {
+      let q = supabase.from('remitos').select('*').eq('cliente_id', cliente.id)
+      if (cliente.portal_fecha_desde) q = q.gte('fecha', cliente.portal_fecha_desde)
+      q.order('created_at', { ascending: false }).then(({ data }) => setRemitos(data || []))
+    }
+    traer()
     const canal = supabase.channel('remitos-lista')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'remitos', filter: `cliente_id=eq.${cliente.id}` }, () => {
-        supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false }).then(({ data }) => setRemitos(data || []))
-      }).subscribe()
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'remitos', filter: `cliente_id=eq.${cliente.id}` }, traer).subscribe()
     return () => supabase.removeChannel(canal)
   }, [cliente])
 
