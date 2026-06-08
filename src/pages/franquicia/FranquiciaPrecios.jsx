@@ -11,6 +11,8 @@ const CATEGORIAS = {
   rebozado: '🧊 Rebozados',
   insumos: '🧰 Insumos',
 }
+const INSUMO_SUBCAT = { descartables: '📦 Descartables', limpieza: '🧽 Limpieza', carniceria: '🔪 Insumos Carnicería' }
+const INSUMO_SUBCAT_ORDEN = { descartables: 0, limpieza: 1, carniceria: 2 }
 
 import { fmtPrecio } from '../../lib/formatos'
 const fmt = n => n != null ? fmtPrecio(Number(n) || 0) : '—'
@@ -54,12 +56,24 @@ export default function FranquiciaPrecios() {
                 <th style={{ color: 'var(--gold)' }}>🧰 Precio Franquicia</th>
               </tr></thead>
               <tbody>
-                {productosFiltrados.map(p => (
-                  <tr key={p.id}>
-                    <td style={{ fontWeight: 500 }}>{p.nombre}</td>
-                    <td style={{ color: 'var(--gold)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_carniceria)}</td>
-                  </tr>
-                ))}
+                {(() => {
+                  const lista = [...productosFiltrados].sort((a, b) => (INSUMO_SUBCAT_ORDEN[a.subcategoria] ?? 9) - (INSUMO_SUBCAT_ORDEN[b.subcategoria] ?? 9) || a.nombre.localeCompare(b.nombre))
+                  const rows = []
+                  let lastSub = null
+                  lista.forEach(p => {
+                    if (p.subcategoria !== lastSub) {
+                      lastSub = p.subcategoria
+                      rows.push(<tr key={'sub-' + (p.subcategoria || 'x')}><td colSpan={2} style={{ background: 'var(--surface2)', color: 'var(--gold)', fontWeight: 700, fontSize: 12, padding: '6px 10px' }}>{INSUMO_SUBCAT[p.subcategoria] || p.subcategoria}</td></tr>)
+                    }
+                    rows.push(
+                      <tr key={p.id}>
+                        <td style={{ fontWeight: 500 }}>{p.nombre}</td>
+                        <td style={{ color: 'var(--gold)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_carniceria)}</td>
+                      </tr>
+                    )
+                  })
+                  return rows
+                })()}
               </tbody>
             </table>
           ) : (
