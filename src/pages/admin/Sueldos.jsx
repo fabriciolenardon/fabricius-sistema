@@ -97,13 +97,19 @@ export default function Sueldos() {
   const [fin, setFin] = useState('')
   const [horas, setHoras] = useState({})
   const [boletas, setBoletas] = useState({})
+  const [adelantos, setAdelantos] = useState({})
   const [alert, setAlert] = useState(null)
   const [loading, setLoading] = useState(false)
   const [importando, setImportando] = useState(false)
   const [detalleImport, setDetalleImport] = useState([])
+  // Empleados cargados de la base (valor_hora editable). Fallback al hardcode.
+  const [empleados, setEmpleados] = useState(EMPLEADOS_DEFAULT)
+  const [editHora, setEditHora] = useState({})     // valor_hora tipeado en la pestaña Empleados
+  const [guardandoEmp, setGuardandoEmp] = useState(null)
 
   useEffect(() => {
     fetchLiquidaciones()
+    cargarEmpleados()
     const hoy = new Date()
     const dia = hoy.getDay()
     const lunes = new Date(hoy); lunes.setDate(hoy.getDate() - (dia === 0 ? 6 : dia - 1))
@@ -118,6 +124,28 @@ export default function Sueldos() {
     // Sin .limit() — paginamos en cliente con usePaginacion para mostrar TODAS las semanas
     const { data } = await supabase.from('liquidaciones_sueldos').select('*').order('semana_inicio', { ascending: false })
     setLiquidaciones(data || [])
+  }
+
+  async function cargarEmpleados() {
+    // Los empleados (con su valor hora) viven en la tabla empleados_sueldos.
+    // Si la tabla está vacía o falla, se usa el hardcode como fallback.
+    const { data } = await supabase.from('empleados_sueldos').select('*').eq('activo', true).order('id')
+    if (data && data.length) setEmpleados(data.map(e => ({ ...e, valor_hora: Number(e.valor_hora) || 0 })))
+  }
+
+  // Guarda el nuevo valor hora de un empleado (pestaña Empleados).
+  async function guardarHora(emp) {
+    const v = parseFloat(editHora[emp.id])
+    if (!(v > 0)) { setAlert({ type: 'error', msg: 'Ingresá un valor hora válido' }); return }
+    setGuardandoEmp(emp.id)
+    const { error } = await supabase.from('empleados_sueldos')
+      .update({ valor_hora: v, updated_at: new Date().toISOString() }).eq('id', emp.id)
+    setGuardandoEmp(null)
+    if (error) { setAlert({ type: 'error', msg: error.message }); return }
+    setEditHora(h => { const n = { ...h }; delete n[emp.id]; return n })
+    setAlert({ type: 'success', msg: `✅ Valor hora de ${emp.nombre} actualizado a ${fmt(v)}` })
+    cargarEmpleados()
+    setTimeout(() => setAlert(null), 3500)
   }
 
   async function importarExcel(e) {
@@ -230,34 +258,74 @@ export default function Sueldos() {
 
   function getHoras(empId) { return parseFloat(horas[empId]) || 0 }
   function getBoletas(empId) { return parseFloat(boletas[empId]) || 0 }
+  function getAdelantos(empId) { return parseFloat(adelantos[empId]) || 0 }
 
   function calcNeto(emp) {
     const h = getHoras(emp.id)
     const b = getBoletas(emp.id)
+    const a = getAdelantos(emp.id)
     const bruto = h * emp.valor_hora
-    const neto = Math.max(0, bruto - b)
-    return { bruto, neto, h, b }
+    const neto = Math.max(0, bruto - a - b)   // se restan adelantos y boletas
+    return { bruto, neto, h, b, a }
   }
 
-  const totalBruto = EMPLEADOS_DEFAULT.reduce((s, e) => s + calcNeto(e).bruto, 0)
-  const totalBoletas = EMPLEADOS_DEFAULT.reduce((s, e) => s + calcNeto(e).b, 0)
-  const totalNeto = EMPLEADOS_DEFAULT.reduce((s, e) => s + calcNeto(e).neto, 0)
+  const totalBruto = empleados.reduce((s, e) => s + calcNeto(e).bruto, 0)
+  const totalBoletas = empleados.reduce((s, e) => s + calcNeto(e).b, 0)
+  const totalAdelantos = empleados.reduce((s, e) => s + calcNeto(e).a, 0)
+  const totalNeto = empleados.reduce((s, e) => s + calcNeto(e).neto, 0)
 
   async function guardarLiquidacion() {
     if (!inicio || !fin) { setAlert({ type: 'error', msg: 'Seleccioná el período' }); return }
     if (totalNeto === 0) { setAlert({ type: 'error', msg: 'Cargá las horas de al menos un empleado' }); return }
     setLoading(true)
-    const rows = EMPLEADOS_DEFAULT.map(emp => {
-      const { bruto, neto, h, b } = calcNeto(emp)
-      return { semana_inicio: inicio, semana_fin: fin, empleado_nombre: `${emp.apellido}, ${emp.nombre}`, horas: h, bruto, boletas: b, neto }
+    const rows = empleados.map(emp => {
+      const { bruto, neto, h, b, a } = calcNeto(emp)
+      return { semana_inicio: inicio, semana_fin: fin, empleado_nombre: `${emp.apellido}, ${emp.nombre}`, horas: h, bruto, adelantos: a, boletas: b, neto }
     }).filter(r => r.horas > 0)
     const { error } = await supabase.from('liquidaciones_sueldos').insert(rows)
     setLoading(false)
     if (error) { setAlert({ type: 'error', msg: error.message }); return }
     setAlert({ type: 'success', msg: '✅ Liquidación confirmada y guardada' })
-    setHoras({}); setBoletas({}); setDetalleImport([])
+    setHoras({}); setBoletas({}); setAdelantos({}); setDetalleImport([])
     fetchLiquidaciones()
     setTimeout(() => setAlert(null), 4000)
+  }
+
+  // Imprime un resumen de pago simple (sin logos) para un empleado: horas,
+  // valor hora, sueldo bruto, adelantos (resta), boletas (resta) y neto.
+  function imprimirResumen(emp) {
+    const { bruto, neto, h, b, a } = calcNeto(emp)
+    if (h <= 0) { setAlert({ type: 'error', msg: 'Cargá las horas de ese empleado antes de imprimir el resumen' }); return }
+    const fmtF = d => d ? new Date(d + 'T12:00').toLocaleDateString('es-AR') : ''
+    const periodo = inicio && fin ? `${fmtF(inicio)} al ${fmtF(fin)}` : ''
+    const fila = (label, valor, opts = {}) =>
+      `<tr class="${opts.cls || ''}"><td style="padding:6px 0;color:#444">${label}</td><td style="padding:6px 0;text-align:right;font-weight:700;${opts.color ? `color:${opts.color};` : ''}">${valor}</td></tr>`
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Resumen — ${emp.apellido}</title>
+      <style>
+        @page { margin: 12mm; }
+        body { font-family: Arial, Helvetica, sans-serif; color:#111; margin:0; padding:16px; }
+        .box { width: 330px; border: 2px solid #111; border-radius: 12px; padding: 18px 22px; }
+        .nombre { font-size: 18px; font-weight: 800; }
+        .periodo { font-size: 11px; color:#666; margin-bottom: 12px; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        tr.sep td { border-top: 1px dashed #bbb; padding-top: 10px; }
+        tr.neto td { border-top: 2px solid #111; font-size: 19px; padding-top: 10px; }
+      </style></head><body onload="window.print()">
+      <div class="box">
+        <div class="nombre">${emp.apellido}, ${emp.nombre}</div>
+        <div class="periodo">Liquidación ${periodo}</div>
+        <table>
+          ${fila('Horas trabajadas', h + ' h')}
+          ${fila('Valor hora', fmt(emp.valor_hora))}
+          ${fila('Sueldo (bruto)', fmt(bruto), { cls: 'sep' })}
+          ${a > 0 ? fila('Adelantos', '− ' + fmt(a), { color: '#c0392b' }) : ''}
+          ${b > 0 ? fila('Boletas', '− ' + fmt(b), { color: '#c0392b' }) : ''}
+          ${fila('NETO A COBRAR', fmt(neto), { cls: 'neto' })}
+        </table>
+      </div></body></html>`
+    const w = window.open('', '_blank', 'width=440,height=600')
+    if (!w) { setAlert({ type: 'error', msg: 'Habilitá las ventanas emergentes para poder imprimir' }); return }
+    w.document.write(html); w.document.close()
   }
 
   // Lista única de semanas (ordenadas) y paginada — antes era slice(0,10)
@@ -304,7 +372,7 @@ export default function Sueldos() {
                   <thead><tr><th>Empleado</th><th>Fecha</th><th>Entrada</th><th>Salida</th><th>Horas</th></tr></thead>
                   <tbody>
                     {detalleImport.map((d, i) => {
-                      const emp = EMPLEADOS_DEFAULT.find(e => e.id === parseInt(d.empId))
+                      const emp = empleados.find(e => e.id === parseInt(d.empId))
                       return (
                         <tr key={i}>
                           <td>{emp ? `${emp.apellido}, ${emp.nombre}` : d.empId}</td>
@@ -332,7 +400,7 @@ export default function Sueldos() {
 
           {/* TARJETAS EMPLEADOS */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 20 }}>
-            {EMPLEADOS_DEFAULT.map(emp => {
+            {empleados.map(emp => {
               const { bruto, neto } = calcNeto(emp)
               return (
                 <div key={emp.id} className="card" style={{ marginBottom: 0, borderColor: neto > 0 ? '#7c3aed' : 'var(--border)' }}>
@@ -344,17 +412,26 @@ export default function Sueldos() {
                     <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Horas trabajadas</label>
                     <input style={{ ...inp, borderColor: getHoras(emp.id) > 0 ? '#7c3aed' : 'var(--border)' }} type="number" step="0.5" placeholder="0" value={horas[emp.id] || ''} onChange={e => setHoras(h => ({ ...h, [emp.id]: e.target.value }))} />
                   </div>
+                  <div className="form-group" style={{ marginBottom: 8 }}>
+                    <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Adelantos ($) — se restan</label>
+                    <input style={inp} type="number" placeholder="0" value={adelantos[emp.id] || ''} onChange={e => setAdelantos(a => ({ ...a, [emp.id]: e.target.value }))} />
+                  </div>
                   <div className="form-group" style={{ marginBottom: 10 }}>
-                    <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Boletas / Descuentos ($)</label>
+                    <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Boletas / Descuentos ($) — se restan</label>
                     <input style={inp} type="number" placeholder="0" value={boletas[emp.id] || ''} onChange={e => setBoletas(b => ({ ...b, [emp.id]: e.target.value }))} />
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 10, borderTop: '1px solid var(--border)', alignItems: 'center' }}>
                     <div>
                       <div style={{ fontSize: 10, color: 'var(--muted)' }}>Bruto: {fmt(bruto)}</div>
-                      {getBoletas(emp.id) > 0 && <div style={{ fontSize: 10, color: 'var(--red-light)' }}>Desc: -{fmt(getBoletas(emp.id))}</div>}
+                      {getAdelantos(emp.id) > 0 && <div style={{ fontSize: 10, color: 'var(--red-light)' }}>Adelantos: -{fmt(getAdelantos(emp.id))}</div>}
+                      {getBoletas(emp.id) > 0 && <div style={{ fontSize: 10, color: 'var(--red-light)' }}>Boletas: -{fmt(getBoletas(emp.id))}</div>}
                     </div>
                     <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 24, color: neto > 0 ? '#a78bfa' : 'var(--muted)' }}>{fmt(neto)}</div>
                   </div>
+                  <button onClick={() => imprimirResumen(emp)} disabled={getHoras(emp.id) <= 0}
+                    style={{ width: '100%', marginTop: 10, padding: '7px', background: 'transparent', border: '1px solid #7c3aed', color: getHoras(emp.id) > 0 ? '#a78bfa' : 'var(--muted)', borderRadius: 8, cursor: getHoras(emp.id) > 0 ? 'pointer' : 'not-allowed', fontWeight: 600, fontSize: 12, opacity: getHoras(emp.id) > 0 ? 1 : 0.5 }}>
+                    🖨️ Imprimir resumen
+                  </button>
                   {emp.cbu && <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 6, borderTop: '1px solid var(--border)', paddingTop: 6 }}>📲 {emp.cbu}</div>}
                 </div>
               )
@@ -365,18 +442,20 @@ export default function Sueldos() {
           <div className="card" style={{ borderColor: '#7c3aed' }}>
             <div className="card-title">Resumen de liquidación</div>
             <table>
-              <thead><tr><th>Empleado</th><th>Horas</th><th>Valor/h</th><th>Bruto</th><th>Boletas</th><th>NETO</th></tr></thead>
+              <thead><tr><th>Empleado</th><th>Horas</th><th>Valor/h</th><th>Bruto</th><th>Adelantos</th><th>Boletas</th><th>NETO</th><th></th></tr></thead>
               <tbody>
-                {EMPLEADOS_DEFAULT.map(emp => {
-                  const { bruto, neto, h, b } = calcNeto(emp)
+                {empleados.map(emp => {
+                  const { bruto, neto, h, b, a } = calcNeto(emp)
                   return (
                     <tr key={emp.id} style={{ opacity: h === 0 ? 0.4 : 1 }}>
                       <td><strong>{emp.apellido}, {emp.nombre}</strong></td>
                       <td>{h > 0 ? h + 'h' : '—'}</td>
                       <td style={{ color: 'var(--muted)' }}>{fmt(emp.valor_hora)}</td>
                       <td style={{ color: '#a78bfa' }}>{fmt(bruto)}</td>
-                      <td style={{ color: 'var(--red-light)' }}>{b > 0 ? fmt(b) : '—'}</td>
+                      <td style={{ color: 'var(--red-light)' }}>{a > 0 ? '-' + fmt(a) : '—'}</td>
+                      <td style={{ color: 'var(--red-light)' }}>{b > 0 ? '-' + fmt(b) : '—'}</td>
                       <td style={{ color: 'var(--gold)', fontWeight: 700, fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(neto)}</td>
+                      <td>{h > 0 && <button onClick={() => imprimirResumen(emp)} title="Imprimir resumen" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', fontSize: 13 }}>🖨️</button>}</td>
                     </tr>
                   )
                 })}
@@ -385,8 +464,10 @@ export default function Sueldos() {
                 <tr style={{ background: 'var(--surface2)' }}>
                   <td colSpan={3}><strong>TOTAL</strong></td>
                   <td style={{ color: '#a78bfa', fontWeight: 700 }}>{fmt(totalBruto)}</td>
-                  <td style={{ color: 'var(--red-light)', fontWeight: 700 }}>{fmt(totalBoletas)}</td>
+                  <td style={{ color: 'var(--red-light)', fontWeight: 700 }}>{totalAdelantos > 0 ? '-' + fmt(totalAdelantos) : '—'}</td>
+                  <td style={{ color: 'var(--red-light)', fontWeight: 700 }}>{totalBoletas > 0 ? '-' + fmt(totalBoletas) : '—'}</td>
                   <td style={{ color: 'var(--gold)', fontWeight: 700, fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{fmt(totalNeto)}</td>
+                  <td></td>
                 </tr>
               </tfoot>
             </table>
@@ -402,13 +483,23 @@ export default function Sueldos() {
 
       {tab === 'empleados' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
-          {EMPLEADOS_DEFAULT.map(emp => (
+          {empleados.map(emp => {
+            const editando = editHora[emp.id] !== undefined
+            return (
             <div key={emp.id} className="card">
               <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: '#a78bfa', marginBottom: 4 }}>{emp.apellido}</div>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>{emp.nombre}</div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface2)', borderRadius: 8, padding: '8px 12px', marginBottom: 8 }}>
-                <span style={{ fontSize: 12, color: 'var(--muted)' }}>Valor hora</span>
-                <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{fmt(emp.valor_hora)}</span>
+              <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '8px 12px', marginBottom: 8 }}>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Valor hora ($)</div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input type="number" step="100" style={{ ...inp, padding: '6px 10px', borderColor: editando ? '#7c3aed' : 'var(--border)' }}
+                    value={editando ? editHora[emp.id] : emp.valor_hora}
+                    onChange={e => setEditHora(h => ({ ...h, [emp.id]: e.target.value }))} />
+                  <button onClick={() => guardarHora(emp)} disabled={!editando || guardandoEmp === emp.id}
+                    style={{ padding: '6px 12px', background: editando ? '#7c3aed' : 'var(--surface)', color: editando ? '#fff' : 'var(--muted)', border: 'none', borderRadius: 8, cursor: editando ? 'pointer' : 'not-allowed', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>
+                    {guardandoEmp === emp.id ? '⏳' : '💾 Guardar'}
+                  </button>
+                </div>
               </div>
               {emp.cbu && (
                 <div style={{ fontSize: 11, color: 'var(--muted)', background: 'var(--surface2)', borderRadius: 6, padding: '6px 10px' }}>
@@ -416,7 +507,8 @@ export default function Sueldos() {
                 </div>
               )}
             </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
@@ -434,14 +526,15 @@ export default function Sueldos() {
                   <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>TOTAL: {fmt(totalSemana)}</div>
                 </div>
                 <table>
-                  <thead><tr><th>Empleado</th><th>Horas</th><th>Bruto</th><th>Boletas</th><th>Neto</th></tr></thead>
+                  <thead><tr><th>Empleado</th><th>Horas</th><th>Bruto</th><th>Adelantos</th><th>Boletas</th><th>Neto</th></tr></thead>
                   <tbody>
                     {liqSemana.map(l => (
                       <tr key={l.id}>
                         <td><strong>{l.empleado_nombre}</strong></td>
                         <td>{l.horas > 0 ? l.horas + 'h' : '—'}</td>
                         <td style={{ color: '#a78bfa' }}>{fmt(l.bruto)}</td>
-                        <td style={{ color: 'var(--red-light)' }}>{l.boletas > 0 ? fmt(l.boletas) : '—'}</td>
+                        <td style={{ color: 'var(--red-light)' }}>{l.adelantos > 0 ? '-' + fmt(l.adelantos) : '—'}</td>
+                        <td style={{ color: 'var(--red-light)' }}>{l.boletas > 0 ? '-' + fmt(l.boletas) : '—'}</td>
                         <td style={{ color: 'var(--gold)', fontWeight: 700 }}>{fmt(l.neto)}</td>
                       </tr>
                     ))}
