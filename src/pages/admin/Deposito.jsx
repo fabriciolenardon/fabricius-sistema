@@ -26,6 +26,16 @@ const NOMBRE_EMBUTIDO = {
   salame_holanda: 'Salame Holanda',
 }
 
+// Etiqueta/estilo de la forma de cobro de un remito. Solo 'cta_cte' es a
+// crédito (deuda); el resto es contado = pagado en el acto.
+const COBRO_LABEL = {
+  cta_cte:       { txt: 'CTA CTE',            color: '#e0a030', bg: '#2a1f0a' },
+  efectivo:      { txt: 'PAGADO · EFECTIVO',  color: '#5fd55f', bg: '#10240f' },
+  transferencia: { txt: 'PAGADO · TRANSF.',   color: '#5fd55f', bg: '#10240f' },
+  cheque:        { txt: 'PAGADO · CHEQUE',    color: '#5fd55f', bg: '#10240f' },
+  echeq:         { txt: 'PAGADO · E-CHEQ',    color: '#5fd55f', bg: '#10240f' },
+}
+
 // ============================================================
 // Sinónimos de búsqueda de productos (buscador de remitos)
 // ------------------------------------------------------------
@@ -2803,7 +2813,12 @@ for (const item of items) {
     }
     if (itemsPiezaEntera.length > 0) await recargarPiezasDispVenta()
 
-    if (clienteId) {
+    // Solo los despachos a CUENTA CORRIENTE generan deuda en el ledger del
+    // cliente. Si el cobro es contado (efectivo/transferencia/cheque/echeq) el
+    // remito ya queda pago: NO se registra movimiento de cta cte ni se toca el
+    // saldo. (Antes se cargaba la compra siempre → el cliente "debía" algo que
+    // ya había pagado.)
+    if (clienteId && form.cobro === 'cta_cte') {
       const { data: clienteActual } = await supabase.from('clientes').select('saldo').eq('id', clienteId).single()
       const nuevoSaldo = (clienteActual?.saldo || 0) + total
       await supabase.from('movimientos_ctacte').insert({
@@ -3228,9 +3243,16 @@ export function RemitosTab({ remitoActual }) {
     eliminado_en: new Date().toISOString()
   }).eq('id', remito.id)
   if (remito.cliente_id) {
-    const { data: clienteActual } = await supabase.from('clientes').select('saldo').eq('id', remito.cliente_id).single()
-    const nuevoSaldo = (clienteActual?.saldo || 0) - remito.total
-    await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', remito.cliente_id)
+    // Revertir del saldo SOLO lo que este remito realmente aplicó al ledger
+    // (Σdebe − Σhaber de sus movimientos). Un remito pagado al contado no tiene
+    // movimiento → netoLedger = 0 → no afecta el saldo. Así nunca se descuenta
+    // de más (antes restaba el total fijo aunque no hubiera generado deuda).
+    const { data: movsRemito } = await supabase.from('movimientos_ctacte').select('debe, haber').eq('remito_id', remito.id)
+    const netoLedger = (movsRemito || []).reduce((s, m) => s + (Number(m.debe) || 0) - (Number(m.haber) || 0), 0)
+    if (netoLedger !== 0) {
+      const { data: clienteActual } = await supabase.from('clientes').select('saldo').eq('id', remito.cliente_id).single()
+      await supabase.from('clientes').update({ saldo: (clienteActual?.saldo || 0) - netoLedger }).eq('id', remito.cliente_id)
+    }
     await supabase.from('movimientos_ctacte').delete().eq('remito_id', remito.id)
   }
   // Revertir cajas individuales vendidas en este remito (vuelven a 'disponible')
@@ -3368,10 +3390,13 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
         }
         if (fechaCambio) upd.fecha = fechaEdit
         await supabase.from('movimientos_ctacte').update(upd).eq('id', movs.id)
-      }
-      if (diferencia !== 0) {
-        const { data: clienteActual } = await supabase.from('clientes').select('saldo').eq('id', editando.cliente_id).single()
-        await supabase.from('clientes').update({ saldo: (clienteActual?.saldo || 0) + diferencia }).eq('id', editando.cliente_id)
+        // El saldo del cliente solo se ajusta si el remito tiene movimiento de
+        // cuenta corriente (fue a crédito). Los remitos pagados al contado no
+        // tienen movimiento, así que editar su total NO debe tocar el saldo.
+        if (diferencia !== 0) {
+          const { data: clienteActual } = await supabase.from('clientes').select('saldo').eq('id', editando.cliente_id).single()
+          await supabase.from('clientes').update({ saldo: (clienteActual?.saldo || 0) + diferencia }).eq('id', editando.cliente_id)
+        }
       }
     }
 
@@ -3568,7 +3593,12 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
 </td>
                 <td>{r.fecha}</td>
                 <td>{r.cliente_nombre}</td>
-                <td style={{ color: 'var(--gold)' }}>${Math.round(r.total).toLocaleString('es-AR')}</td>
+                <td style={{ color: 'var(--gold)' }}>
+                  ${Math.round(r.total).toLocaleString('es-AR')}
+                  {(() => { const c = COBRO_LABEL[r.cobro] || COBRO_LABEL.cta_cte; return (
+                    <div style={{ marginTop: 3 }}><span style={{ fontSize: 9, fontWeight: 700, color: c.color, background: c.bg, borderRadius: 4, padding: '1px 6px', letterSpacing: 0.3 }}>{c.txt}</span></div>
+                  ) })()}
+                </td>
                 <td>
                   <div style={{ display: 'flex', gap: 6 }}>
                     <button onClick={() => imprimir(r)} style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>🖨️</button>
