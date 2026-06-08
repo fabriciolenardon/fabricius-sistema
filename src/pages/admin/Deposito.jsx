@@ -1737,6 +1737,10 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
   const [historial, setHistorial] = useState([])
   const [editando, setEditando] = useState(null)
   const [formEdit, setFormEdit] = useState({})
+  // Anti doble-submit: el ref bloquea de forma SÍNCRONA (el estado de React se
+  // actualiza async, así que dos clicks muy rápidos pasarían igual).
+  const [guardandoEntrada, setGuardandoEntrada] = useState(false)
+  const guardandoRef = useRef(false)
   // Para cajas CB/PT: array con el peso de cada caja individual.
   // Se sincroniza con form.cantidad cuando tipo es caja_cb / caja_pt.
   const [cajasPesos, setCajasPesos] = useState([])
@@ -1833,6 +1837,10 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
   const esSoloUnidades = TIPOS_SOLO_UNIDADES.includes(form.tipo)
 
   async function guardar() {
+    if (guardandoRef.current) return       // bloqueo síncrono contra doble click
+    guardandoRef.current = true
+    setGuardandoEntrada(true)
+    try {
     const esSoloUnid = TIPOS_SOLO_UNIDADES.includes(form.tipo)
     if (!form.tipo || !form.proveedor) { showAlert({ type: 'error', msg: 'Completá los campos requeridos' }); return }
 
@@ -2138,6 +2146,10 @@ async function eliminar(entrada) {
   showAlert({ type: 'success', msg: `❌ Ingreso anulado por ${anuladoPor} — stock revertido${piezasNoRevert > 0 ? ` · ⚠️ ${piezasNoRevert} pieza(s) ya vendida(s)/despostada(s) no se revirtieron` : ''}` })
   cargarHistorial()
   onSaved()
+    } finally {
+      guardandoRef.current = false
+      setGuardandoEntrada(false)
+    }
 }
 
   function abrirEdicion(entrada) {
@@ -2386,7 +2398,7 @@ async function eliminar(entrada) {
         <div style={{ fontSize: 12, color: 'var(--green)', marginBottom: 12 }}>
           ✅ La entrada actualizará el stock y se registrará en Cuenta Proveedores
         </div>
-        <button className="btn btn-gold" onClick={guardar}>✅ Registrar entrada</button>
+        <button className="btn btn-gold" onClick={guardar} disabled={guardandoEntrada} style={{ opacity: guardandoEntrada ? 0.5 : 1, cursor: guardandoEntrada ? 'not-allowed' : 'pointer' }}>{guardandoEntrada ? '⏳ Registrando…' : '✅ Registrar entrada'}</button>
       </div>
 
       <div className="card">
@@ -3771,6 +3783,9 @@ function ProveedoresTab() {
   const [formLegajo, setFormLegajo] = useState({ contacto: '', telefono: '', cuit: '', direccion: '', producto_principal: '', notas: '' })
   const [formCompra, setFormCompra] = useState({ fecha: fechaHoyARG(), semana_inicio: '', semana_fin: '', proveedor_nombre: '', producto: '', kg: '', importe: '' })
   const [formPago, setFormPago] = useState({ fecha: fechaHoyARG(), proveedor_nombre: '', percepcion: '', entrega: '', notas: '' })
+  // Anti doble-submit para compra/pago (financiero) — bloqueo síncrono.
+  const [procesandoProv, setProcesandoProv] = useState(false)
+  const procesandoProvRef = useRef(false)
   const [pagosLedger, setPagosLedger] = useState([])  // movimientos tipo 'pago' para el historial global
 
   // Filtros y modal de detalle del nuevo buscador de compras
@@ -3954,9 +3969,13 @@ function ProveedoresTab() {
   async function guardarCompra() {
     if (!formCompra.proveedor_nombre) { showMsg('Seleccioná un proveedor', 'error'); return }
     if (!(parseNumero(formCompra.importe) > 0)) { showMsg('⛔ Cargá el importe (precio) — debe ser mayor a 0', 'error'); return }
-    await supabase.from('compras_proveedores').insert({ fecha: formCompra.fecha, semana_inicio: formCompra.semana_inicio || null, semana_fin: formCompra.semana_fin || null, proveedor_nombre: formCompra.proveedor_nombre, producto: formCompra.producto, kg: parseNumero(formCompra.kg), importe: parseNumero(formCompra.importe) })
-    showMsg('✅ Compra registrada')
-    setFormCompra(f => ({ ...f, producto: '', kg: '', importe: '', proveedor_nombre: '' })); fetchAll()
+    if (procesandoProvRef.current) return       // anti doble-click
+    procesandoProvRef.current = true; setProcesandoProv(true)
+    try {
+      await supabase.from('compras_proveedores').insert({ fecha: formCompra.fecha, semana_inicio: formCompra.semana_inicio || null, semana_fin: formCompra.semana_fin || null, proveedor_nombre: formCompra.proveedor_nombre, producto: formCompra.producto, kg: parseNumero(formCompra.kg), importe: parseNumero(formCompra.importe) })
+      showMsg('✅ Compra registrada')
+      setFormCompra(f => ({ ...f, producto: '', kg: '', importe: '', proveedor_nombre: '' })); fetchAll()
+    } finally { procesandoProvRef.current = false; setProcesandoProv(false) }
   }
 
   // Registra un PAGO directo en la cuenta corriente del proveedor:
@@ -3973,16 +3992,20 @@ function ProveedoresTab() {
     const entrega = parseNumero(formPago.entrega)
     const percepcion = parseNumero(formPago.percepcion)
     if (entrega <= 0 && percepcion <= 0) { showMsg('Ingresá una entrega o una percepción', 'error'); return }
-    const { error } = await agregarMovimiento({
-      proveedorId: prov.id, proveedorNombre: prov.nombre, fecha: formPago.fecha,
-      tipo: 'pago',
-      descripcion: `Pago${formPago.notas ? ' — ' + formPago.notas : ''}${percepcion > 0 ? ` (percepción ${fmt(percepcion)})` : ''}`,
-      debe: percepcion, haber: entrega, notas: formPago.notas,
-    })
-    if (error) { showMsg('❌ ' + error, 'error'); return }
-    showMsg('✅ Pago registrado en cuenta corriente')
-    setFormPago({ fecha: fechaHoyARG(), proveedor_nombre: '', percepcion: '', entrega: '', notas: '' })
-    fetchAll()
+    if (procesandoProvRef.current) return       // anti doble-click
+    procesandoProvRef.current = true; setProcesandoProv(true)
+    try {
+      const { error } = await agregarMovimiento({
+        proveedorId: prov.id, proveedorNombre: prov.nombre, fecha: formPago.fecha,
+        tipo: 'pago',
+        descripcion: `Pago${formPago.notas ? ' — ' + formPago.notas : ''}${percepcion > 0 ? ` (percepción ${fmt(percepcion)})` : ''}`,
+        debe: percepcion, haber: entrega, notas: formPago.notas,
+      })
+      if (error) { showMsg('❌ ' + error, 'error'); return }
+      showMsg('✅ Pago registrado en cuenta corriente')
+      setFormPago({ fecha: fechaHoyARG(), proveedor_nombre: '', percepcion: '', entrega: '', notas: '' })
+      fetchAll()
+    } finally { procesandoProvRef.current = false; setProcesandoProv(false) }
   }
 
   // Elimina un pago de la cuenta corriente (recalcula el saldo del proveedor)
@@ -4161,7 +4184,7 @@ function ProveedoresTab() {
               <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Importe ($)</label><input type="number" value={formCompra.importe} onChange={e => setFormCompra(f => ({ ...f, importe: e.target.value }))} placeholder="0" style={{ ...inp, borderColor: 'var(--gold)' }} /></div>
               <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Semana</label><div style={{ display: 'flex', gap: 4 }}><input type="date" value={formCompra.semana_inicio} onChange={e => setFormCompra(f => ({ ...f, semana_inicio: e.target.value }))} style={{ ...inp, fontSize: 11 }} /><input type="date" value={formCompra.semana_fin} onChange={e => setFormCompra(f => ({ ...f, semana_fin: e.target.value }))} style={{ ...inp, fontSize: 11 }} /></div></div>
             </div>
-            <button className="btn btn-gold" onClick={guardarCompra}>✅ Registrar compra</button>
+            <button className="btn btn-gold" onClick={guardarCompra} disabled={procesandoProv} style={{ opacity: procesandoProv ? 0.5 : 1, cursor: procesandoProv ? 'not-allowed' : 'pointer' }}>{procesandoProv ? '⏳ Registrando…' : '✅ Registrar compra'}</button>
           </div>
 
           {/* BUSCADOR DE REMITOS DE INGRESO */}
@@ -4268,7 +4291,7 @@ function ProveedoresTab() {
                 {parseNumero(formPago.percepcion) > 0 && <div style={{ fontSize: 12 }}><span style={{ color: 'var(--muted)' }}>📋 Percepción (sube deuda): </span><strong style={{ color: 'var(--amber)' }}>{fmt(parseNumero(formPago.percepcion))}</strong></div>}
               </div>
             )}
-            <button className="btn btn-gold" onClick={guardarPago}>✅ Registrar pago</button>
+            <button className="btn btn-gold" onClick={guardarPago} disabled={procesandoProv} style={{ opacity: procesandoProv ? 0.5 : 1, cursor: procesandoProv ? 'not-allowed' : 'pointer' }}>{procesandoProv ? '⏳ Registrando…' : '✅ Registrar pago'}</button>
           </div>
           <div className="card">
             <div className="card-title">Historial de pagos ({pagosLedger.length})</div>
