@@ -45,6 +45,18 @@ const METODO_PAGO_LABEL = {
   echeq: 'E-cheq',
 }
 
+// Tipos que se COMPRAN POR KG a un proveedor: el importe se calcula como
+// kg × precio/kg (no se pide un importe total manual). Incluye media res,
+// capón y las piezas bovinas compradas directas al frigorífico.
+// IMPORTANTE: las piezas que salen de despostar una media res NUESTRA NO pasan
+// por acá — entran por el flujo de desposte con importe 0 (su costo ya está en
+// la media res). Esto solo aplica a las COMPRAS directas vía EntradaForm.
+const TIPOS_COMPRA_POR_KG = new Set([
+  'bovino_mr', 'cerdo',
+  'pieza_pierna', 'pieza_cuarto_pistola', 'pieza_costillar', 'pieza_cortito',
+  'pieza_costeletal', 'pieza_paleta', 'pieza_parrillero',
+])
+
 // ============================================================
 // Sinónimos de búsqueda de productos (buscador de remitos)
 // ------------------------------------------------------------
@@ -1955,7 +1967,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     // Media res y capón (cerdo) se compran POR KG → importe = kg × precio/kg.
     // El resto usa el importe total. Así el capón nunca queda en $0 y suma al
     // debe del proveedor.
-    const esPorKg = form.tipo === 'bovino_mr' || form.tipo === 'cerdo'
+    const esPorKg = TIPOS_COMPRA_POR_KG.has(form.tipo)
     const importe = esPorKg
       ? kgTotal * parseNumero(form.precioKg)
       : parseNumero(form.importe)
@@ -2323,8 +2335,10 @@ async function eliminar(entrada) {
               <input type="number" step="0.5" placeholder="2.5" value={form.merma} onChange={e => setForm(f => ({ ...f, merma: e.target.value }))} />
             </div>
           )}
-          {/* Capón (cerdo) se compra por kg como la media res → no pide importe total. */}
-          {form.tipo !== 'bovino_mr' && form.tipo !== 'cerdo' && (
+          {/* Los tipos que se compran por kg (media res, capón, piezas bovinas
+              compradas a proveedor) calculan el importe = kg × precio/kg, así que
+              no piden importe total — el campo solo aparece para el resto. */}
+          {!TIPOS_COMPRA_POR_KG.has(form.tipo) && (
             <div className="form-group"><label>Importe total ($)</label>
               <input type="number" placeholder="0" value={form.importe} onChange={e => setForm(f => ({ ...f, importe: e.target.value }))} />
             </div>
