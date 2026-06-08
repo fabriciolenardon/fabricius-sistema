@@ -2485,7 +2485,8 @@ const CATEGORIAS = {
     cerdo_corte: '🐷 Cerdo — Cortes',
     cerdo_pieza: '🐷 Cerdo — Piezas',
     embutido: '🌭 Embutidos',
-    pollo: '🍗 Pollo Cajones',
+    pollo: '🍗 Pollo x Kg',
+    pollo_cajon: '🍗 Pollo x Cajón',
     rebozado: '🧊 Rebozados',
   }
   // CATEGORIA_A_STOCK se movió a nivel de módulo (arriba) para que RemitosTab
