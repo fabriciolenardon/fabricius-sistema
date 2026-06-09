@@ -23,6 +23,29 @@ import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
 import { fmtKg } from '../../lib/formatos'
 
 const fmt$ = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
+
+// Nombres legibles para los tipos de stock (la clave interna no se muestra cruda).
+// Ej: 'cerdo_parrillero' → 'Carnaza de cerdo'. Si no está en el mapa, se prettifica
+// la clave (reemplaza '_' por espacio y capitaliza).
+const NOMBRE_STOCK = {
+  cerdo_parrillero: 'Carnaza de cerdo',
+  cerdo_pierna: 'Pierna de cerdo',
+  cerdo_paleta: 'Paleta de cerdo',
+  cerdo_bondiola: 'Bondiola de cerdo',
+  cerdo_pechito: 'Pechito de cerdo',
+  cerdo_matambre: 'Matambre de cerdo',
+  cerdo_carre: 'Carré de cerdo',
+  cerdo_tocino: 'Tocino de cerdo',
+  cerdo_costilla: 'Costilla de cerdo',
+  cerdo: 'Cerdo (capón)',
+  bovino_mr: 'Media res bovina',
+  bovino_corte: 'Cortes bovinos',
+  bovino_pieza: 'Piezas bovinas',
+  pollo: 'Pollo',
+}
+const nombreStock = tipo => NOMBRE_STOCK[tipo] || String(tipo || '')
+  .replace(/_/g, ' ')
+  .replace(/^\w/, c => c.toUpperCase())
 // Wrappers cortos sobre fechaHoyARG/fechaRelativaARG para mantener legibilidad
 // del código existente. Antes eran toISOString().split('T')[0] (UTC) → bug
 // después de las 21hs ARG (devolvía la fecha del día siguiente).
@@ -92,7 +115,7 @@ export default function AlertasAnomalias() {
       list.push({
         nivel: 'alta',
         icono: '⚠️',
-        titulo: `Stock NEGATIVO en "${s.tipo}": ${fmtKg(s.kg_disponible)}`,
+        titulo: `Stock NEGATIVO en "${nombreStock(s.tipo)}": ${fmtKg(s.kg_disponible)}`,
         detalle: 'Significa que se vendió más mercadería de la que figura como ingresada. Revisar entradas/salidas.',
       })
     }
