@@ -65,6 +65,9 @@ const FORM_VACIO = {
   // Factura
   tieneFactura: false, fechaEmision: '', ivaPct: '21', proveedor: '', comprobante: '',
   facturaPath: '', facturaNombre: '', facturaMime: '',
+  // Factura a nombre de la SAS pero pagada por un tercero (ej: luz Alvear la
+  // paga Roxana). Se guarda para el balance pero NO suma a nuestros gastos.
+  soloBalance: false,
 }
 
 // Carga pdf-lib desde CDN una sola vez (mismo patrón que JsBarcode en Etiquetas)
@@ -150,6 +153,7 @@ export default function Gastos() {
         iva_pct: conFactura ? (parseFloat(form.ivaPct) || 0) : null,
         proveedor: conFactura ? (form.proveedor || null) : null,
         comprobante: conFactura ? (form.comprobante || null) : null,
+        solo_balance: conFactura && !!form.soloBalance,
       }
 
       if (editandoId) {
@@ -205,6 +209,7 @@ export default function Gastos() {
       facturaPath: g.factura_path || '',
       facturaNombre: g.factura_nombre || '',
       facturaMime: g.factura_mime || '',
+      soloBalance: !!g.solo_balance,
     })
     setVista('todos')
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -317,11 +322,13 @@ export default function Gastos() {
     return true // todos
   })
 
-  // Totales del período filtrado
-  const totVar = gastosFiltrados.filter(g => g.tipo === 'variable').reduce((s, g) => s + (g.monto || 0), 0)
-  const totFijo = gastosFiltrados.filter(g => g.tipo === 'fijo').reduce((s, g) => s + (g.monto || 0), 0)
-  const totSocio = gastosFiltrados.filter(g => g.tipo === 'socio').reduce((s, g) => s + (g.monto || 0), 0)
-  const totIngreso = gastosFiltrados.filter(g => g.tipo === 'ingreso').reduce((s, g) => s + (g.monto || 0), 0)
+  // Totales del período filtrado. Los "solo balance" (facturas a nombre de la
+  // SAS que paga un tercero) NO suman: son solo documentación para el balance.
+  const gastosQueSuman = gastosFiltrados.filter(g => !g.solo_balance)
+  const totVar = gastosQueSuman.filter(g => g.tipo === 'variable').reduce((s, g) => s + (g.monto || 0), 0)
+  const totFijo = gastosQueSuman.filter(g => g.tipo === 'fijo').reduce((s, g) => s + (g.monto || 0), 0)
+  const totSocio = gastosQueSuman.filter(g => g.tipo === 'socio').reduce((s, g) => s + (g.monto || 0), 0)
+  const totIngreso = gastosQueSuman.filter(g => g.tipo === 'ingreso').reduce((s, g) => s + (g.monto || 0), 0)
   const totalEgresos = totVar + totFijo + totSocio
   const balance = totIngreso - totalEgresos
 
@@ -522,6 +529,13 @@ export default function Gastos() {
 
               {form.tieneFactura && (
                 <div style={{ marginTop: 12 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600, fontSize: 12, marginBottom: 12, padding: '8px 10px', borderRadius: 8, border: `1px solid ${form.soloBalance ? 'var(--blue)' : 'var(--border)'}`, background: form.soloBalance ? '#0e1a2a' : 'transparent', color: form.soloBalance ? 'var(--blue)' : 'var(--muted)' }}>
+                    <input type="checkbox" checked={form.soloBalance}
+                      onChange={e => setForm(f => ({ ...f, soloBalance: e.target.checked }))}
+                      style={{ width: 15, height: 15, accentColor: 'var(--blue)' }} />
+                    📑 Solo para balance — la paga un tercero (NO suma a nuestros gastos)
+                  </label>
+
                   <div className="form-group"><label>Archivo (imagen o PDF)</label>
                     <input type="file" accept="image/*,application/pdf,.pdf"
                       onChange={e => setFacturaFile(e.target.files?.[0] || null)} style={{ ...inp, padding: 7 }} />
@@ -591,6 +605,7 @@ export default function Gastos() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
                         <span style={{ background: t.color + '22', color: t.color, borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>{t.label}</span>
                         {g.tiene_factura && <span title="Tiene factura adjunta" style={{ fontSize: 12 }}>🧾</span>}
+                        {g.solo_balance && <span title="Solo para balance: la paga un tercero, no suma a los gastos" style={{ background: '#0e1a2a', color: 'var(--blue)', border: '1px solid var(--blue)', borderRadius: 4, padding: '1px 6px', fontSize: 9, fontWeight: 700, whiteSpace: 'nowrap' }}>📑 SOLO BALANCE</span>}
                         <div style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.descripcion}</div>
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--muted)' }}>
@@ -601,8 +616,8 @@ export default function Gastos() {
                       {g.notas && <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>{g.notas}</div>}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontWeight: 700, color: g.tipo === 'ingreso' ? 'var(--green)' : t.color, fontSize: 13 }}>
-                        {g.tipo === 'ingreso' ? '+' : '−'}{fmt(g.monto)}
+                      <span style={{ fontWeight: 700, color: g.solo_balance ? 'var(--muted)' : g.tipo === 'ingreso' ? 'var(--green)' : t.color, fontSize: 13 }}>
+                        {g.solo_balance ? '' : g.tipo === 'ingreso' ? '+' : '−'}{fmt(g.monto)}
                       </span>
                       {g.factura_path && (
                         <button onClick={() => verFactura(g.factura_path)} title="Ver factura"
@@ -699,7 +714,10 @@ function VistaFacturas({ meses, mapa, onVer, onEditar, onEliminar, onExport, exp
                     <tr key={g.id} style={{ borderTop: '1px solid var(--border)' }}>
                       <td style={{ padding: '7px 8px', whiteSpace: 'nowrap' }}>{fmtFecha(g.fecha_emision || g.fecha)}</td>
                       <td style={{ padding: '7px 8px' }}>
-                        <div style={{ fontWeight: 600 }}>{g.proveedor || g.descripcion}</div>
+                        <div style={{ fontWeight: 600 }}>
+                          {g.proveedor || g.descripcion}
+                          {g.solo_balance && <span title="Solo para balance: la paga un tercero, no suma a los gastos" style={{ background: '#0e1a2a', color: 'var(--blue)', border: '1px solid var(--blue)', borderRadius: 4, padding: '1px 6px', fontSize: 9, fontWeight: 700, whiteSpace: 'nowrap', marginLeft: 6 }}>📑 SOLO BALANCE</span>}
+                        </div>
                         {g.proveedor && <div style={{ fontSize: 10, color: 'var(--muted)' }}>{g.descripcion}</div>}
                       </td>
                       <td style={{ padding: '7px 8px', color: 'var(--muted)' }}>{g.comprobante || '—'}</td>

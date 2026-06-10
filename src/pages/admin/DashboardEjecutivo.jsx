@@ -177,7 +177,8 @@ function ResumenEjecutivo() {
       supabase.from('cheques').select('*').gte('fecha_pago', hoy).lte('fecha_pago', fechaHaceDias(-15)),
       supabase.from('clientes').select('nombre, saldo').gt('saldo', 100000).order('saldo', { ascending: false }).limit(5),
       // Egresos del mes
-      supabase.from('gastos').select('tipo, monto, fecha').gte('fecha', mesIni).lte('fecha', hoy),
+      // solo_balance: facturas a nombre de la SAS que paga un tercero — no son gasto nuestro
+      supabase.from('gastos').select('tipo, monto, fecha, solo_balance').gte('fecha', mesIni).lte('fecha', hoy),
       supabase.from('liquidaciones_sueldos').select('neto, semana_fin').gte('semana_inicio', mesIni).lte('semana_fin', hoy),
       supabase.from('pagos_proveedores').select('importe, percepcion, fecha').gte('fecha', mesIni).lte('fecha', hoy),
       // Cobranzas en cta cte
@@ -218,10 +219,11 @@ function ResumenEjecutivo() {
     const ingresosTotalesMes = ingresoCajaMes + cobranzasCtacte + ingresoExtras
     const pctCobrado = facturadoMes > 0 ? (ingresosTotalesMes / facturadoMes) * 100 : 0
 
-    // ── EGRESOS DEL MES ──
-    const gastosFijos     = (gastosMes.data || []).filter(g => g.tipo === 'fijo').reduce((s, g) => s + (Number(g.monto) || 0), 0)
-    const gastosVariables = (gastosMes.data || []).filter(g => g.tipo === 'variable').reduce((s, g) => s + (Number(g.monto) || 0), 0)
-    const gastosSocios    = (gastosMes.data || []).filter(g => g.tipo === 'socio').reduce((s, g) => s + (Number(g.monto) || 0), 0)
+    // ── EGRESOS DEL MES ── (excluye "solo balance": los paga un tercero)
+    const gastosReales    = (gastosMes.data || []).filter(g => !g.solo_balance)
+    const gastosFijos     = gastosReales.filter(g => g.tipo === 'fijo').reduce((s, g) => s + (Number(g.monto) || 0), 0)
+    const gastosVariables = gastosReales.filter(g => g.tipo === 'variable').reduce((s, g) => s + (Number(g.monto) || 0), 0)
+    const gastosSocios    = gastosReales.filter(g => g.tipo === 'socio').reduce((s, g) => s + (Number(g.monto) || 0), 0)
     const sueldosTotalMes = (sueldosMes.data || []).reduce((s, l) => s + (Number(l.neto) || 0), 0)
     const pagosProvTotal  = (pagosProvMes.data || []).reduce((s, p) =>
       s + (Number(p.importe) || 0) + (Number(p.percepcion) || 0), 0)
