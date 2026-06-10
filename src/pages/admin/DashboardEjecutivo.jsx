@@ -287,7 +287,8 @@ function ResumenEjecutivo() {
       totalMes: totalCajaMes,   // legacy: el card "Este mes" sigue mostrando solo caja
       totalMesAnt, variacion,
       topProductosHoy, cuentasConPct, stockCritico,
-      cheques: cheques.data || [],
+      // Solo recibidos: los emitidos propios son plata que SALE, no que entra
+      cheques: (cheques.data || []).filter(c => c.origen !== 'emitido'),
       clientesDeudores: clientes.data || [],
       // NUEVO: Panel de Control
       panelControl: {

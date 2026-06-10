@@ -41,8 +41,10 @@ function useNotificaciones() {
       const en15Str = fechaHoyARG(en15)
       const haceUnAno = new Date(hoy.getFullYear() - 1, hoy.getMonth(), hoy.getDate())
 
-      const [{ data: cheques }, { data: clientes }, { data: cierres }, { data: stockData }, { data: cuentasFiscales }, { data: facturasRecientes }, { data: impuestosRecientes }] = await Promise.all([
-        supabase.from('cheques').select('*').gte('fecha_pago', hoyStr).lte('fecha_pago', en15Str),
+      const [{ data: cheques }, { data: chequesEmitidos }, { data: clientes }, { data: cierres }, { data: stockData }, { data: cuentasFiscales }, { data: facturasRecientes }, { data: impuestosRecientes }] = await Promise.all([
+        supabase.from('cheques').select('*').neq('origen', 'emitido').gte('fecha_pago', hoyStr).lte('fecha_pago', en15Str),
+        // Cheques propios pendientes de imputar que se debitan en ≤7 días (o ya vencieron)
+        supabase.from('cheques').select('*').eq('origen', 'emitido').neq('estado', 'imputado').lte('fecha_pago', fechaHoyARG(new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + 7))),
         supabase.from('clientes').select('*').gt('saldo', 0).order('saldo', { ascending: false }),
         supabase.from('cierres_semanales').select('*').order('semana_inicio', { ascending: false }).limit(1),
         supabase.from('stock_actual').select('*'),
@@ -57,6 +59,18 @@ function useNotificaciones() {
         cheques.forEach(ch => {
           const dias = Math.ceil((new Date(ch.fecha_pago + 'T12:00') - hoy) / (1000 * 60 * 60 * 24))
           nuevas.push({ tipo: 'warning', icono: '📄', titulo: `Cheque #${ch.numero} vence en ${dias} día${dias !== 1 ? 's' : ''}`, sub: `${ch.cliente_nombre} — ${fmtPrecio(ch.monto)}`, link: '/admin/cheques' })
+        })
+      }
+
+      // ── Cheques propios (emitidos): avisar para levantarlos a tiempo ──
+      if (chequesEmitidos?.length > 0) {
+        chequesEmitidos.forEach(ch => {
+          const dias = Math.ceil((new Date(ch.fecha_pago + 'T12:00') - hoy) / (1000 * 60 * 60 * 24))
+          if (dias <= 0) {
+            nuevas.push({ tipo: 'danger', icono: '📤', titulo: `Cheque propio #${ch.numero} ${dias === 0 ? 'se debita HOY' : 'VENCIDO sin imputar'}`, sub: `${ch.proveedor_nombre || 'sin beneficiario'} — ${fmtPrecio(ch.monto)} — imputalo si ya lo cubriste`, link: '/admin/cheques' })
+          } else {
+            nuevas.push({ tipo: 'warning', icono: '📤', titulo: `Cheque propio #${ch.numero} se debita en ${dias} día${dias !== 1 ? 's' : ''}`, sub: `${ch.proveedor_nombre || 'sin beneficiario'} — ${fmtPrecio(ch.monto)}`, link: '/admin/cheques' })
+          }
         })
       }
 

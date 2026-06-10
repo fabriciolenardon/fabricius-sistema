@@ -26,6 +26,7 @@ export default function Dashboard() {
   const [remitos, setRemitos] = useState([])
   const [gastos, setGastos] = useState([])
   const [cheques, setCheques] = useState([])
+  const [chequesPropios, setChequesPropios] = useState([])  // emitidos pendientes de imputar
   const [precios, setPrecios] = useState([])
   const [mediasMR, setMediasMR] = useState({ count: 0, kg: 0 })  // medias reses individuales disponibles
   const [loading, setLoading] = useState(true)
@@ -39,14 +40,16 @@ export default function Dashboard() {
   useEffect(() => { fetchData() }, [])
 
   async function fetchData() {
-    const [c, cl, st, r, g, ch, pr, md] = await Promise.all([
+    const [c, cl, st, r, g, ch, chProp, pr, md] = await Promise.all([
       supabase.from('cierres_semanales').select('*').order('semana_inicio', { ascending: false }).limit(8),
       supabase.from('clientes').select('*').order('saldo', { ascending: false }),
       supabase.from('stock_actual').select('*'),
       supabase.from('remitos').select('*').order('created_at', { ascending: false }).limit(5),
       // Sin "solo balance" (facturas que paga un tercero, no son gasto nuestro)
       supabase.from('gastos').select('*').eq('solo_balance', false).order('fecha', { ascending: false }).limit(5),
-      supabase.from('cheques').select('*').order('fecha_pago', { ascending: true }).limit(20),
+      supabase.from('cheques').select('*').neq('origen', 'emitido').order('fecha_pago', { ascending: true }).limit(20),
+      // Cheques propios (emitidos) pendientes de imputar
+      supabase.from('cheques').select('*').eq('origen', 'emitido').neq('estado', 'imputado').order('fecha_pago', { ascending: true }),
       supabase.from('precios').select('categoria'),
       // Medias reses individuales disponibles (fuente de verdad para el conteo,
       // igual que el historial). Evita estimar las medias por kg/105.
@@ -60,6 +63,7 @@ export default function Dashboard() {
     setRemitos(r.data || [])
     setGastos(g.data || [])
     setCheques(ch.data || [])
+    setChequesPropios(chProp.data || [])
     setPrecios(pr.data || [])
     const medias = md?.data || []
     setMediasMR({ count: medias.length, kg: medias.reduce((acc, m) => acc + (Number(m.kg) || 0), 0) })
@@ -218,6 +222,13 @@ export default function Dashboard() {
     return f >= hoy && f <= en15
   })
 
+  // Cheques propios a cubrir: vencidos sin imputar o que se debitan en ≤7 días
+  const en7 = new Date(); en7.setDate(hoy.getDate() + 7)
+  const chequesACubrir = chequesPropios.filter(ch => {
+    if (!ch.fecha_pago) return false
+    return new Date(ch.fecha_pago + 'T12:00') <= en7
+  })
+
   const datosGrafico = [...cierres].reverse().slice(-6).map(c => ({
     semana: new Date(c.semana_inicio + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' }),
     Ventas: c.ventas || 0,
@@ -244,8 +255,22 @@ export default function Dashboard() {
       <AlertasAnomalias />
 
       {/* ALERTAS */}
-      {(chequesPorVencer.length > 0 || totalDeuda > 0) && (
+      {(chequesPorVencer.length > 0 || chequesACubrir.length > 0 || totalDeuda > 0) && (
         <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+          {chequesACubrir.length > 0 && (
+            <div style={{ background: '#2a0e0e', border: '2px solid var(--red-light)', borderRadius: 10, padding: '10px 16px', flex: 1, minWidth: 200, cursor: 'pointer' }} onClick={() => navigate('/admin/cheques')}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--red-light)', marginBottom: 4 }}>📤 Cheques propios a cubrir</div>
+              {chequesACubrir.map(ch => {
+                const dias = Math.round((new Date(ch.fecha_pago + 'T12:00') - hoy) / (1000 * 60 * 60 * 24))
+                return (
+                  <div key={ch.id} style={{ fontSize: 12, color: 'var(--text2)' }}>
+                    #{ch.numero} — {ch.proveedor_nombre || 'sin beneficiario'} — {fmtFull(ch.monto)} — {dias <= 0 ? (dias === 0 ? '🚨 se debita HOY' : `🚨 venció hace ${-dias}d`) : `en ${dias}d`}
+                  </div>
+                )
+              })}
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Tocá para ir a Cheques e imputar →</div>
+            </div>
+          )}
           {chequesPorVencer.length > 0 && (
             <div style={{ background: '#2a1a0a', border: '1px solid var(--amber)', borderRadius: 10, padding: '10px 16px', flex: 1, minWidth: 200 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--amber)', marginBottom: 4 }}>⚠️ Cheques por vencer</div>
