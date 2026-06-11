@@ -57,6 +57,40 @@ const TIPOS_COMPRA_POR_KG = new Set([
   'pieza_costeletal', 'pieza_paleta', 'pieza_parrillero',
 ])
 
+// ── Detector de posibles cargas duplicadas ──────────────────
+// Devuelve el Set de ids de entradas que comparten MISMO peso y MISMA fecha
+// con otra entrada de la lista. Caso real del 11/06: se cargaron 7 medias
+// dos veces y el depostero despostó la copia equivocada (dos medias de
+// 100 kg idénticas en el selector). Con esto el selector lo grita.
+function idsConPosibleDuplicado(lista) {
+  const porClave = {}
+  ;(lista || []).forEach(e => {
+    const clave = `${e.fecha}|${Number(e.kg_real || e.kg || 0)}`
+    ;(porClave[clave] = porClave[clave] || []).push(e.id)
+  })
+  return new Set(Object.values(porClave).filter(g => g.length > 1).flat())
+}
+
+// Banner de aviso cuando el selector tiene posibles duplicadas
+function AvisoDuplicadas({ cantidad }) {
+  if (!cantidad) return null
+  return (
+    <div style={{ background: '#3a2a1a', border: '1px solid #ffb86b', borderRadius: 8, padding: '8px 12px', marginBottom: 10, fontSize: 12, color: '#ffb86b', fontWeight: 700 }}>
+      ⚠️ Hay {cantidad} medias con el MISMO peso y fecha — puede haber una carga duplicada.
+      Verificá el código MR antes de operar; si sobra alguna, anulala primero en el Historial de Ingresos.
+    </div>
+  )
+}
+
+// Etiqueta chica para marcar cada tarjeta sospechosa
+function TagDuplicada() {
+  return (
+    <span style={{ background: '#3a2a1a', color: '#ffb86b', border: '1px solid #ffb86b', borderRadius: 4, padding: '1px 6px', fontSize: 9, fontWeight: 800, letterSpacing: 0.5 }}>
+      ⚠️ MISMO PESO Y FECHA
+    </span>
+  )
+}
+
 // ============================================================
 // Sinónimos de búsqueda de productos (buscador de remitos)
 // ------------------------------------------------------------
@@ -341,13 +375,15 @@ const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(n
   // NOTA: NO se filtra por `reservada`. El Flujo Depósito es solo informativo
   // y no debe sacar medias de circulación; toda media no despostada está
   // disponible para despostar/vender. (Ver DesposteMediaRes — ya no reserva.)
-  supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false }).order('created_at', { ascending: false }),
+  // SÍ se filtra `eliminado`: un ingreso anulado no puede despostarse — bug del
+  // 11/06: una media duplicada anulada seguía en este selector y se despostó.
+  supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).eq('eliminado', false).order('fecha', { ascending: false }).order('created_at', { ascending: false }),
   // Orden por fecha + created_at (timestamp real de emisión) para que los del
   // mismo día queden de más nuevo a más viejo, no desordenados.
   supabase.from('despostes').select('*').order('fecha', { ascending: false }).order('created_at', { ascending: false }).order('id', { ascending: false }),
   supabase.from('precios').select('*').eq('categoria', 'bovino_pieza'),
   supabase.from('stock_actual').select('*'),
-  supabase.from('entradas_deposito').select('*').eq('tipo', 'cerdo').eq('despostada', false).order('fecha', { ascending: false }).order('created_at', { ascending: false }),
+  supabase.from('entradas_deposito').select('*').eq('tipo', 'cerdo').eq('despostada', false).eq('eliminado', false).order('fecha', { ascending: false }).order('created_at', { ascending: false }),
   supabase.from('elaboraciones_embutidos').select('*').order('fecha', { ascending: false }).order('created_at', { ascending: false }),
   supabase.from('piezas_stock').select('*').order('fecha_ingreso', { ascending: false }).order('id', { ascending: false }),
   // Trazabilidad individual de medias reses con codigo MR-XXX.
@@ -879,14 +915,16 @@ async function confirmarDesposteCerdo() {
           <div>
             <div className="card">
               <div className="card-title">🐄 Medias Reses disponibles</div>
-              {mediasRes.length === 0 ? <div className="empty">Sin medias reses para despostar</div> : mediasRes.map(e => (
+              <AvisoDuplicadas cantidad={idsConPosibleDuplicado(mediasRes).size} />
+              {mediasRes.length === 0 ? <div className="empty">Sin medias reses para despostar</div> : (() => { const dupIds = idsConPosibleDuplicado(mediasRes); return mediasRes.map(e => (
                 <div key={e.id} onClick={() => seleccionarMedia(e)}
-                  style={{ padding: 12, borderRadius: 8, marginBottom: 8, cursor: 'pointer', border: `2px solid ${seleccionada?.id === e.id ? 'var(--gold)' : 'var(--border)'}`, background: seleccionada?.id === e.id ? 'rgba(201,168,76,0.08)' : 'var(--surface2)' }}>
+                  style={{ padding: 12, borderRadius: 8, marginBottom: 8, cursor: 'pointer', border: `2px solid ${seleccionada?.id === e.id ? 'var(--gold)' : (dupIds.has(e.id) ? '#ffb86b' : 'var(--border)')}`, background: seleccionada?.id === e.id ? 'rgba(201,168,76,0.08)' : 'var(--surface2)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <div>
                       <div style={{ fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
                         {e.codigo_media && <span style={{ background: 'var(--gold)', color: '#000', padding: '2px 7px', borderRadius: 6, fontSize: 11, fontWeight: 800, letterSpacing: 0.5 }}>{e.codigo_media}</span>}
                         🐄 {e.descripcion || 'Media Res'}
+                        {dupIds.has(e.id) && <TagDuplicada />}
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.fecha} · {e.proveedor_nombre}</div>
                       {e.precio_kg > 0 && <div style={{ fontSize: 11, color: 'var(--amber)' }}>{fmtPrecio(e.precio_kg)}/kg</div>}
@@ -897,7 +935,7 @@ async function confirmarDesposteCerdo() {
                     </div>
                   </div>
                 </div>
-              ))}
+              )) })()}
             </div>
           </div>
           {seleccionada && (
@@ -979,14 +1017,16 @@ async function confirmarDesposteCerdo() {
             </div>
             <div className="card">
               <div className="card-title">🐄 Seleccioná una media res</div>
-              {mediasRes.length === 0 ? <div className="empty">Sin medias reses disponibles</div> : mediasRes.map(e => (
+              <AvisoDuplicadas cantidad={idsConPosibleDuplicado(mediasRes).size} />
+              {mediasRes.length === 0 ? <div className="empty">Sin medias reses disponibles</div> : (() => { const dupIds = idsConPosibleDuplicado(mediasRes); return mediasRes.map(e => (
                 <div key={e.id} onClick={() => setSeleccionada(e)}
-                  style={{ padding: 12, borderRadius: 8, marginBottom: 8, cursor: 'pointer', border: `2px solid ${seleccionada?.id === e.id ? 'var(--blue)' : 'var(--border)'}`, background: seleccionada?.id === e.id ? 'rgba(41,128,185,0.08)' : 'var(--surface2)' }}>
+                  style={{ padding: 12, borderRadius: 8, marginBottom: 8, cursor: 'pointer', border: `2px solid ${seleccionada?.id === e.id ? 'var(--blue)' : (dupIds.has(e.id) ? '#ffb86b' : 'var(--border)')}`, background: seleccionada?.id === e.id ? 'rgba(41,128,185,0.08)' : 'var(--surface2)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <div>
                       <div style={{ fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
                         {e.codigo_media && <span style={{ background: 'var(--blue)', color: '#fff', padding: '2px 7px', borderRadius: 6, fontSize: 11, fontWeight: 800, letterSpacing: 0.5 }}>{e.codigo_media}</span>}
                         🐄 {e.descripcion || 'Media Res'}
+                        {dupIds.has(e.id) && <TagDuplicada />}
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.fecha} · {e.proveedor_nombre}</div>
                       {e.precio_kg > 0 && <div style={{ fontSize: 11, color: 'var(--amber)' }}>Costo: {fmtPrecio(e.precio_kg)}/kg</div>}
@@ -994,7 +1034,7 @@ async function confirmarDesposteCerdo() {
                     <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--blue)' }}>{fmtKg(e.kg_real || e.kg || 0, { decimales: 2 })}</div>
                   </div>
                 </div>
-              ))}
+              )) })()}
             </div>
           </div>
           {seleccionada && (
@@ -2530,7 +2570,7 @@ export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   // Orden por created_at además de fecha: dos medias reses cargadas el mismo
   // día necesitan ordenarse por hora real de creación (la columna `fecha` es
   // DATE y `id` es UUID — ninguno sirve solo como criterio cronológico).
-  supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false }).order('created_at', { ascending: false }).then(({ data }) => setMediasDisponibles(data || []))
+  supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).eq('eliminado', false).order('fecha', { ascending: false }).order('created_at', { ascending: false }).then(({ data }) => setMediasDisponibles(data || []))
   recargarPiezasDispVenta()
   recargarCajasDispVenta()
   recargarStockMap()
@@ -2867,7 +2907,7 @@ for (const item of items) {
         }).in('entrada_id', mediasIds)
       }
       setMediaSeleccionada(null)
-      const { data: medias } = await supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).order('fecha', { ascending: false }).order('created_at', { ascending: false })
+      const { data: medias } = await supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).eq('eliminado', false).order('fecha', { ascending: false }).order('created_at', { ascending: false })
       setMediasDisponibles(medias || [])
     const { data: remitoData } = await supabase.from('remitos').insert({
       fecha: form.fecha, cliente_nombre: clienteNombre,
@@ -2971,18 +3011,19 @@ for (const item of items) {
   return (
   <div style={{ background: '#1a2a1a', border: '1px solid #2d5a2d', borderRadius: 10, padding: '14px 16px', marginBottom: 12 }}>
     <div style={{ fontSize: 12, fontWeight: 700, color: '#7dff7d', marginBottom: 10 }}>🐄 Seleccioná la media res a despachar</div>
+    <AvisoDuplicadas cantidad={idsConPosibleDuplicado(mediasVisibles).size} />
     {mediasVisibles.length === 0 ? (
       <div style={{ fontSize: 12, color: 'var(--muted)' }}>Sin medias reses disponibles</div>
-    ) : mediasVisibles.map(e => (
+    ) : (() => { const dupIds = idsConPosibleDuplicado(mediasVisibles); return mediasVisibles.map(e => (
       <div key={e.id} onClick={() => { setMediaSeleccionada(e); setForm(f => ({ ...f, kg: (e.kg_real || e.kg || 0).toString() })) }}
-        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderRadius: 8, marginBottom: 6, cursor: 'pointer', border: `2px solid ${mediaSeleccionada?.id === e.id ? 'var(--gold)' : 'var(--border)'}`, background: mediaSeleccionada?.id === e.id ? 'rgba(201,168,76,0.1)' : 'var(--surface2)' }}>
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderRadius: 8, marginBottom: 6, cursor: 'pointer', border: `2px solid ${mediaSeleccionada?.id === e.id ? 'var(--gold)' : (dupIds.has(e.id) ? '#ffb86b' : 'var(--border)')}`, background: mediaSeleccionada?.id === e.id ? 'rgba(201,168,76,0.1)' : 'var(--surface2)' }}>
         <div>
-          <div style={{ fontWeight: 700, fontSize: 13 }}>🐄 {e.descripcion || 'Media Res'}</div>
+          <div style={{ fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>🐄 {e.descripcion || 'Media Res'}{dupIds.has(e.id) && <TagDuplicada />}</div>
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.fecha} · {e.proveedor_nombre}</div>
         </div>
         <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{(e.kg_real || e.kg || 0).toFixed(1)} kg</div>
       </div>
-    ))}
+    )) })()}
   </div>
   )
 })()}
