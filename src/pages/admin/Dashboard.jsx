@@ -44,7 +44,8 @@ export default function Dashboard() {
       supabase.from('clientes').select('*').order('saldo', { ascending: false }),
       supabase.from('stock_actual').select('*'),
       supabase.from('remitos').select('*').order('created_at', { ascending: false }).limit(5),
-      supabase.from('gastos').select('*').order('fecha', { ascending: false }).limit(5),
+      // Sin "solo balance" (facturas que paga un tercero, no son gasto nuestro)
+      supabase.from('gastos').select('*').eq('solo_balance', false).order('fecha', { ascending: false }).limit(5),
       supabase.from('cheques').select('*').order('fecha_pago', { ascending: true }).limit(20),
       supabase.from('precios').select('categoria'),
       // Medias reses individuales disponibles (fuente de verdad para el conteo,

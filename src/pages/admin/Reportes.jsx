@@ -107,8 +107,9 @@ export function useReportesData(periodo) {
           precios: preciosLookup.data || [],
           entradas: entradasCosto.data || [],
         },
-        // Finanzas (Flujo, Gastos)
-        gastos: gastos.data || [],
+        // Finanzas (Flujo, Gastos). Los "solo balance" (facturas a nombre de la
+        // SAS que paga un tercero, ej: luz Alvear) no son gastos nuestros.
+        gastos: (gastos.data || []).filter(g => !g.solo_balance),
         sueldos: sueldos.data || [],
         pagosProveedores: pagosProveedores.data || [],
         movimientosCtacte: movimientosCtacte.data || [],

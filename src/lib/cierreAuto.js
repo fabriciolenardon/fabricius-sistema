@@ -126,7 +126,7 @@ export async function calcularCierreAuto(desde, hasta) {
     // Gastos del período
     supabase
       .from('gastos')
-      .select('id, fecha, tipo, categoria, monto, socio, descripcion')
+      .select('id, fecha, tipo, categoria, monto, socio, descripcion, solo_balance')
       .gte('fecha', desde)
       .lte('fecha', hasta),
 
@@ -162,7 +162,9 @@ export async function calcularCierreAuto(desde, hasta) {
   const entradas = entradasR.data || []
   const pagosProv = pagosProvR.data || []
   const movProv = movProvR.data || []
-  const gastos = gastosR.data || []
+  // Excluye "solo balance": facturas a nombre de la SAS que paga un tercero
+  // (ej: luz Alvear la paga Roxana) — no son egreso nuestro.
+  const gastos = (gastosR.data || []).filter(g => !g.solo_balance)
   const sueldos = sueldosR.data || []
   const clientes = clientesR.data || []
 
