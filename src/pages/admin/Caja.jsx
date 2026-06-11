@@ -51,6 +51,11 @@ const CATEGORIAS = {
 export default function Caja() {
   const [precios, setPrecios] = useState([])
   const [ofertas, setOfertas] = useState([])
+  // Promo Mundial: -X% en compras pagadas 100% con efectivo y/o transferencia.
+  // Mientras está activa las ofertas se IGNORAN en la Caja para no acumular
+  // doble descuento. Se prende/apaga desde Precios → Ofertas (config_sistema,
+  // clave 'promo_mundial') y llega acá por el realtime de config_sistema.
+  const [promoMundial, setPromoMundial] = useState({ activa: false, descuento_pct: 10 })
   const [listaPrecio, setListaPrecio] = useState('minorista') // 'minorista' | 'mayorista'
   const [configEAN, setConfigEAN] = useState({
     // Formato REAL Cuora Max Fabricius — verificado con tickets el 2026-05-22:
@@ -115,7 +120,7 @@ export default function Caja() {
 
   async function cargarTodo() {
     const hoy = fechaHoyARG()  // Hora local ARG, NO UTC. Ver lib/fechas.js
-    const [{ data: pre }, { data: cfg }, { data: ventas }, { data: ofs }, { data: cajas }, { data: piezas }] = await Promise.all([
+    const [{ data: pre }, { data: cfg }, { data: ventas }, { data: ofs }, { data: cajas }, { data: piezas }, { data: promo }] = await Promise.all([
       supabase.from('precios').select('*').order('nombre'),
       supabase.from('config_sistema').select('*').eq('clave', 'ean13_formato').maybeSingle(),
       supabase.from('ventas_minoristas').select('*')
@@ -131,6 +136,7 @@ export default function Caja() {
       // Piezas bovinas individuales disponibles (para productos con vende_por_pieza=true)
       supabase.from('piezas_stock').select('*').eq('estado', 'disponible')
         .order('fecha_ingreso', { ascending: true }).order('id', { ascending: true }),
+      supabase.from('config_sistema').select('*').eq('clave', 'promo_mundial').maybeSingle(),
     ])
     setPrecios(pre || [])
     if (cfg?.valor) setConfigEAN(cfg.valor)
@@ -138,6 +144,7 @@ export default function Caja() {
     setOfertas(ofs || [])
     setCajasDisp(cajas || [])
     setPiezasDisp(piezas || [])
+    setPromoMundial(promo?.valor || { activa: false, descuento_pct: 10 })
   }
 
   // ---- Resuelve el precio final de un producto según lista activa + ofertas ----
@@ -151,7 +158,12 @@ export default function Caja() {
 
     const flagLista = listaPrecio === 'mayorista' ? 'aplica_mayorista' : 'aplica_minorista'
     // Ofertas viejas sin flags se asumen aplicables (default DB es TRUE).
-    const oferta = ofertas.find(o => o.precio_id === producto.id && o[flagLista] !== false)
+    // Con Promo Mundial activa las ofertas quedan PAUSADAS: el -X% se aplica
+    // sobre el total al cobrar, y si además aplicáramos la oferta sería doble
+    // descuento (pérdida de plata).
+    const oferta = promoMundial?.activa
+      ? null
+      : ofertas.find(o => o.precio_id === producto.id && o[flagLista] !== false)
 
     let precio = precioBase
     if (oferta) {
@@ -399,7 +411,20 @@ export default function Caja() {
   // con coma o punto sin preocuparse del formato.
   const total = carrito.reduce((s, i) => s + i.importe, 0)
   const cobrado = parseNumero(pago.efectivo) + parseNumero(pago.debito) + parseNumero(pago.transferencia)
-  const vuelto = cobrado - total
+  // ── Promo Mundial ──────────────────────────────────────────
+  // El descuento aplica SOLO si el pago es 100% efectivo y/o transferencia.
+  // Apenas el cajero carga algo en débito, el descuento desaparece y se
+  // cobra el total completo (la promo no cubre débito).
+  const promoPct = Number(promoMundial?.descuento_pct) || 10
+  const pagaConDebito = parseNumero(pago.debito) > 0
+  const promoDescuento = (promoMundial?.activa && !pagaConDebito)
+    ? Math.round(total * promoPct / 100)
+    : 0
+  // totalPromo: cuánto quedaría pagando SIN débito — para los botones rápidos
+  // de "Justo efectivo" / "Transfer." (que al click ponen débito en 0).
+  const totalPromo = promoMundial?.activa ? total - Math.round(total * promoPct / 100) : total
+  const totalACobrar = total - promoDescuento
+  const vuelto = cobrado - totalACobrar
 
   // Al cerrar el modal (cancelación o éxito) liberamos el client_id
   // para que la próxima venta nazca con un UUID nuevo. Cubre las
@@ -421,8 +446,8 @@ export default function Caja() {
       showMsg('❌ El carrito está vacío', 'error')
       return
     }
-    if (cobrado < total) {
-      showMsg(`❌ Falta cobrar ${fmt(total - cobrado)}`, 'error')
+    if (cobrado < totalACobrar) {
+      showMsg(`❌ Falta cobrar ${fmt(totalACobrar - cobrado)}`, 'error')
       return
     }
 
@@ -469,7 +494,12 @@ export default function Caja() {
         pieza_id: i.pieza_id || null,
         pieza_tipo: i.pieza_tipo || null,
       })),
-      total,
+      // total = lo efectivamente cobrado (con Promo Mundial ya descontada).
+      // La suma de items.importe puede ser mayor: la diferencia queda
+      // registrada en descuento_monto para auditoría/reportes.
+      total: totalACobrar,
+      descuento_pct: promoDescuento > 0 ? promoPct : null,
+      descuento_monto: promoDescuento > 0 ? promoDescuento : null,
       efectivo: parseNumero(pago.efectivo),
       debito: parseNumero(pago.debito),
       transferencia: parseNumero(pago.transferencia),
@@ -611,7 +641,7 @@ export default function Caja() {
       if (errPieza) console.warn('No se pudo marcar pieza vendida:', errPieza.message)
     }
 
-    setUltimaVenta({ ...venta, vuelto: cobrado - total, id: data.id })
+    setUltimaVenta({ ...venta, vuelto: cobrado - totalACobrar, id: data.id })
     setCarrito([])
     setPago({ efectivo: '', debito: '', transferencia: '' })
     setMostrarCierre(false)
@@ -761,7 +791,16 @@ export default function Caja() {
             ⚠️ cambiar lista no recalcula los items ya cargados
           </div>
         )}
-        {ofertas.length > 0 && (
+        {promoMundial?.activa ? (
+          <div style={{
+            marginLeft: 'auto', fontSize: 12, fontWeight: 800, color: '#7ec8ff',
+            background: '#16243a', border: '1px solid #3a6ea5', borderRadius: 8,
+            padding: '6px 14px', letterSpacing: 0.5,
+          }}>
+            ⚽ PROMO MUNDIAL −{promoPct}% efectivo/transferencia
+            {ofertas.length > 0 && <span style={{ color: '#ffb86b', fontWeight: 600 }}> · ofertas pausadas</span>}
+          </div>
+        ) : ofertas.length > 0 && (
           <div style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--green)', fontWeight: 700 }}>
             🏷️ {ofertas.length} oferta(s) vigente(s)
           </div>
@@ -992,6 +1031,12 @@ export default function Caja() {
                 <span style={{ color: 'var(--muted)' }}>Total:</span>
                 <strong style={{ color: 'var(--gold)' }}>{fmt(ultimaVenta.total)}</strong>
               </div>
+              {ultimaVenta.descuento_monto > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#7ec8ff', marginBottom: 4 }}>
+                  <span>⚽ Promo Mundial −{ultimaVenta.descuento_pct}%:</span>
+                  <span>−{fmt(ultimaVenta.descuento_monto)}</span>
+                </div>
+              )}
               {ultimaVenta.efectivo > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--muted)' }}><span>Efectivo:</span><span>{fmt(ultimaVenta.efectivo)}</span></div>}
               {ultimaVenta.debito > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--muted)' }}><span>Débito:</span><span>{fmt(ultimaVenta.debito)}</span></div>}
               {ultimaVenta.transferencia > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--muted)' }}><span>Transfer.:</span><span>{fmt(ultimaVenta.transferencia)}</span></div>}
@@ -1207,7 +1252,22 @@ export default function Caja() {
 
             <div style={{ background: 'var(--surface2)', borderRadius: 10, padding: 14, marginBottom: 16, textAlign: 'center' }}>
               <div style={{ fontSize: 11, color: 'var(--muted)' }}>TOTAL A COBRAR</div>
-              <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 48, color: 'var(--gold)' }}>{fmt(total)}</div>
+              {promoDescuento > 0 ? (
+                <>
+                  <div style={{ fontSize: 16, color: 'var(--muted)', textDecoration: 'line-through' }}>{fmt(total)}</div>
+                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 48, color: '#7ec8ff' }}>{fmt(totalACobrar)}</div>
+                  <div style={{ fontSize: 12, color: '#7ec8ff', fontWeight: 700 }}>
+                    ⚽ Promo Mundial −{promoPct}%: ahorra {fmt(promoDescuento)}
+                  </div>
+                </>
+              ) : (
+                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 48, color: 'var(--gold)' }}>{fmt(totalACobrar)}</div>
+              )}
+              {promoMundial?.activa && pagaConDebito && (
+                <div style={{ fontSize: 11, color: '#ffb86b', fontWeight: 700, marginTop: 4 }}>
+                  ⚠️ Con débito NO aplica la Promo Mundial — se cobra el total completo
+                </div>
+              )}
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
@@ -1215,7 +1275,7 @@ export default function Caja() {
                 <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>💵 EFECTIVO</label>
                 <input ref={efectivoRef} type="number" value={pago.efectivo}
                   onChange={e => setPago(p => ({ ...p, efectivo: e.target.value }))}
-                  onKeyDown={e => e.key === 'Enter' && cobrado >= total && !guardandoVenta && cerrarVenta()}
+                  onKeyDown={e => e.key === 'Enter' && cobrado >= totalACobrar && !guardandoVenta && cerrarVenta()}
                   style={{ ...inp, fontSize: 18, textAlign: 'right' }} placeholder="0" />
               </div>
               <div>
@@ -1233,7 +1293,9 @@ export default function Caja() {
             </div>
 
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-              <button onClick={() => setPago(p => ({ ...p, efectivo: total.toString(), debito: '', transferencia: '' }))}
+              {/* Efectivo y transferencia cargan el total CON promo (débito queda en 0);
+                  el botón de débito carga el total completo, sin descuento. */}
+              <button onClick={() => setPago(p => ({ ...p, efectivo: totalPromo.toString(), debito: '', transferencia: '' }))}
                 style={{ flex: 1, padding: 10, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text)', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
                 ✋ Justo efectivo
               </button>
@@ -1241,7 +1303,7 @@ export default function Caja() {
                 style={{ flex: 1, padding: 10, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text)', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
                 💳 Solo débito
               </button>
-              <button onClick={() => setPago(p => ({ ...p, transferencia: total.toString(), efectivo: '', debito: '' }))}
+              <button onClick={() => setPago(p => ({ ...p, transferencia: totalPromo.toString(), efectivo: '', debito: '' }))}
                 style={{ flex: 1, padding: 10, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text)', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
                 📲 Transfer.
               </button>
@@ -1261,8 +1323,8 @@ export default function Caja() {
                 style={{ flex: 1, padding: 14, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 10, color: 'var(--muted)', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>
                 Cancelar
               </button>
-              <button onClick={cerrarVenta} disabled={cobrado < total || guardandoVenta}
-                style={{ flex: 2, padding: 14, background: guardandoVenta ? 'var(--surface2)' : (cobrado >= total ? 'var(--green)' : 'var(--surface2)'), color: guardandoVenta ? 'var(--muted)' : (cobrado >= total ? '#000' : 'var(--muted)'), border: 'none', borderRadius: 10, fontSize: 16, fontWeight: 800, cursor: (cobrado >= total && !guardandoVenta) ? 'pointer' : 'not-allowed', fontFamily: "'Bebas Neue',cursive", letterSpacing: 2 }}>
+              <button onClick={cerrarVenta} disabled={cobrado < totalACobrar || guardandoVenta}
+                style={{ flex: 2, padding: 14, background: guardandoVenta ? 'var(--surface2)' : (cobrado >= totalACobrar ? 'var(--green)' : 'var(--surface2)'), color: guardandoVenta ? 'var(--muted)' : (cobrado >= totalACobrar ? '#000' : 'var(--muted)'), border: 'none', borderRadius: 10, fontSize: 16, fontWeight: 800, cursor: (cobrado >= totalACobrar && !guardandoVenta) ? 'pointer' : 'not-allowed', fontFamily: "'Bebas Neue',cursive", letterSpacing: 2 }}>
                 {guardandoVenta ? '⏳ GUARDANDO…' : '✅ CONFIRMAR VENTA'}
               </button>
             </div>

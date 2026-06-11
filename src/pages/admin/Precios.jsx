@@ -72,7 +72,47 @@ export default function Precios() {
   const [mostrarDropdown, setMostrarDropdown] = useState(false)
   const [productoSeleccionado, setProductoSeleccionado] = useState(null)
 
-  useEffect(() => { cargar(); cargarOfertas() }, [])
+  // Promo Mundial: -X% en la Caja para compras 100% efectivo/transferencia.
+  // Vive en config_sistema (clave 'promo_mundial') y la Caja la lee por
+  // realtime. Mientras está activa, la Caja PAUSA las ofertas (no se acumulan).
+  const [promoMundial, setPromoMundial] = useState({ activa: false, descuento_pct: 10 })
+  const [promoPctInput, setPromoPctInput] = useState('10')
+  const [promoLoading, setPromoLoading] = useState(false)
+
+  useEffect(() => { cargar(); cargarOfertas(); cargarPromoMundial() }, [])
+
+  async function cargarPromoMundial() {
+    const { data } = await supabase.from('config_sistema').select('*').eq('clave', 'promo_mundial').maybeSingle()
+    if (data?.valor) {
+      setPromoMundial(data.valor)
+      setPromoPctInput(String(data.valor.descuento_pct ?? 10))
+    }
+  }
+
+  async function togglePromoMundial() {
+    const pct = parseFloat(promoPctInput)
+    if (!promoMundial.activa && (!pct || pct <= 0 || pct >= 100)) {
+      mostrarMsg('❌ El % de la promo debe estar entre 1 y 99')
+      return
+    }
+    setPromoLoading(true)
+    const nuevo = { activa: !promoMundial.activa, descuento_pct: promoMundial.activa ? (promoMundial.descuento_pct ?? 10) : pct }
+    const { error } = await supabase.from('config_sistema').upsert({
+      clave: 'promo_mundial',
+      valor: nuevo,
+      descripcion: 'Promo Mundial: % de descuento en Caja para pagos 100% efectivo/transferencia. Pausa las ofertas mientras está activa.',
+      updated_at: new Date().toISOString(),
+    })
+    setPromoLoading(false)
+    if (error) {
+      mostrarMsg('❌ Error al guardar la promo: ' + error.message)
+      return
+    }
+    setPromoMundial(nuevo)
+    mostrarMsg(nuevo.activa
+      ? `⚽ Promo Mundial ACTIVADA: −${nuevo.descuento_pct}% efectivo/transferencia (ofertas pausadas en Caja)`
+      : '✅ Promo Mundial desactivada — las ofertas vuelven a aplicar')
+  }
 
   async function cargar() {
     setLoading(true)
@@ -754,6 +794,42 @@ export default function Precios() {
 
       {tab === 'ofertas' && (
         <div>
+          {/* PROMO MUNDIAL */}
+          <div className="card" style={{ marginBottom: 20, borderColor: promoMundial.activa ? '#3a6ea5' : 'var(--border)', background: promoMundial.activa ? '#16243a' : undefined }}>
+            <div className="card-title" style={{ color: '#7ec8ff' }}>⚽ Promo Mundial — día de partido de Argentina</div>
+            <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
+              Activala el día que juega la Selección: la Caja aplica el descuento al total de toda compra pagada
+              <strong> 100% en efectivo y/o transferencia</strong> (con débito no aplica).
+              Mientras esté activa, <strong style={{ color: '#ffb86b' }}>las ofertas quedan pausadas en la Caja</strong> para
+              no hacer doble descuento. Al desactivarla, las ofertas vuelven a aplicar solas.
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+              {!promoMundial.activa && (
+                <div>
+                  <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>% de descuento</label>
+                  <input type="number" value={promoPctInput} onChange={e => setPromoPctInput(e.target.value)}
+                    style={{ ...inp, width: 90, textAlign: 'right' }} placeholder="10" />
+                </div>
+              )}
+              <button onClick={togglePromoMundial} disabled={promoLoading}
+                style={{
+                  padding: '12px 28px', borderRadius: 10, border: 'none', cursor: promoLoading ? 'wait' : 'pointer',
+                  background: promoMundial.activa ? '#a53a3a' : '#3a6ea5', color: '#fff',
+                  fontWeight: 800, fontSize: 14, fontFamily: "'DM Sans',sans-serif", letterSpacing: 0.5,
+                  alignSelf: 'flex-end',
+                }}>
+                {promoLoading ? '⏳ Guardando…'
+                  : promoMundial.activa ? `🛑 DESACTIVAR PROMO (−${promoMundial.descuento_pct}%)`
+                  : '⚽ ACTIVAR PROMO MUNDIAL'}
+              </button>
+              {promoMundial.activa && (
+                <div style={{ fontSize: 13, color: '#7ec8ff', fontWeight: 700 }}>
+                  ✅ Activa ahora: −{promoMundial.descuento_pct}% en efectivo/transferencia · ofertas pausadas en Caja
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* NUEVA OFERTA */}
           <div className="card" style={{ marginBottom: 20, borderColor: '#4a8a2a' }}>
             <div className="card-title">🏷️ Nueva oferta semanal</div>
@@ -926,6 +1002,11 @@ export default function Precios() {
           {ofertasVigentes.length > 0 && (
             <div className="card" style={{ marginBottom: 16, borderColor: '#4a8a2a' }}>
               <div className="card-title">✅ Ofertas vigentes ahora</div>
+              {promoMundial.activa && (
+                <div style={{ background: '#3a2a1a', border: '1px solid #ffb86b', borderRadius: 8, padding: '8px 14px', marginBottom: 10, fontSize: 12, color: '#ffb86b', fontWeight: 700 }}>
+                  ⏸️ Estas ofertas están PAUSADAS en la Caja mientras dure la Promo Mundial (siguen vigentes en Depósito/listas mayoristas).
+                </div>
+              )}
               <table>
                 <thead><tr><th>Producto</th><th>Aplica a</th><th>Tipo</th><th>Descuento</th><th>Resulta en</th><th>Vigencia</th><th>Acciones</th></tr></thead>
                 <tbody>
