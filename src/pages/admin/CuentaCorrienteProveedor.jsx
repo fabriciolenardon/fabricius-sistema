@@ -296,19 +296,31 @@ export default function CuentaCorrienteProveedor({ proveedor, saldoSugerido = 0,
               <tbody>
                 {pag.items.map(m => {
                   const cs = Number(m.saldo) > 0 ? 'var(--red-light)' : Number(m.saldo) < 0 ? 'var(--green)' : 'var(--muted)'
+                  // Anulados: visibles pero marcados y tachados (no suman al saldo)
+                  const tachado = m.anulado ? 'line-through' : 'none'
                   return (
-                    <tr key={m.id} style={{ borderTop: '1px solid var(--border)' }}>
+                    <tr key={m.id} style={{ borderTop: '1px solid var(--border)', background: m.anulado ? 'rgba(255,50,50,0.07)' : 'transparent', opacity: m.anulado ? 0.65 : 1 }}>
                       <td style={{ padding: '6px 4px', whiteSpace: 'nowrap' }}>{m.fecha}</td>
                       <td style={{ padding: '6px 4px' }}>
                         <span style={{ fontSize: 10, color: 'var(--muted)', marginRight: 6 }}>{TIPO_LABEL[m.tipo] || m.tipo}</span>
-                        {m.descripcion}
+                        <span style={{ textDecoration: tachado }}>{m.descripcion}</span>
+                        {m.anulado && (
+                          <span style={{ marginLeft: 6, background: '#3a1a1a', color: '#ff6b6b', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700 }}>
+                            ❌ ANULADO{m.anulado_por ? ' por ' + m.anulado_por : ''}
+                          </span>
+                        )}
+                        {m.registrado_por && (
+                          <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 1 }}>✍️ Registrado por {m.registrado_por}</div>
+                        )}
                       </td>
-                      <td style={{ padding: '6px 4px', textAlign: 'right', color: Number(m.debe) > 0 ? 'var(--amber)' : 'var(--muted)', fontWeight: Number(m.debe) > 0 ? 700 : 400 }}>{Number(m.debe) > 0 ? fmt(m.debe) : '—'}</td>
-                      <td style={{ padding: '6px 4px', textAlign: 'right', color: Number(m.haber) > 0 ? 'var(--green)' : 'var(--muted)', fontWeight: Number(m.haber) > 0 ? 700 : 400 }}>{Number(m.haber) > 0 ? fmt(m.haber) : '—'}</td>
+                      <td style={{ padding: '6px 4px', textAlign: 'right', textDecoration: tachado, color: Number(m.debe) > 0 ? 'var(--amber)' : 'var(--muted)', fontWeight: Number(m.debe) > 0 ? 700 : 400 }}>{Number(m.debe) > 0 ? fmt(m.debe) : '—'}</td>
+                      <td style={{ padding: '6px 4px', textAlign: 'right', textDecoration: tachado, color: Number(m.haber) > 0 ? 'var(--green)' : 'var(--muted)', fontWeight: Number(m.haber) > 0 ? 700 : 400 }}>{Number(m.haber) > 0 ? fmt(m.haber) : '—'}</td>
                       <td style={{ padding: '6px 4px', textAlign: 'right', color: cs, fontWeight: 700 }}>{fmt(m.saldo)}{Number(m.saldo) < 0 ? ' a favor' : ''}</td>
                       <td style={{ padding: '6px 4px', textAlign: 'center' }}>
-                        <button onClick={() => borrarMov(m)} title="Eliminar movimiento"
-                          style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '2px 7px', cursor: 'pointer', fontSize: 11, color: 'var(--red-light)' }}>🗑️</button>
+                        {!m.anulado && (
+                          <button onClick={() => borrarMov(m)} title="Eliminar movimiento"
+                            style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '2px 7px', cursor: 'pointer', fontSize: 11, color: 'var(--red-light)' }}>🗑️</button>
+                        )}
                       </td>
                     </tr>
                   )

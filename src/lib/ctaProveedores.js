@@ -53,6 +53,20 @@ export async function recalcularSaldo(proveedorId) {
   return saldo
 }
 
+// Nombre del usuario logueado para `registrado_por` (mig 58). Best effort:
+// si falla la consulta, el movimiento se guarda igual sin autor — la plata
+// nunca se traba por la trazabilidad.
+// Motivo: el 11/06 aparecieron 3 pagos a PRETTO y nadie pudo decir quién
+// los cargó. Desde ahora cada movimiento queda firmado.
+async function nombreUsuarioActual() {
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return null
+    const { data: perfil } = await supabase.from('profiles').select('nombre').eq('id', user.id).maybeSingle()
+    return perfil?.nombre || user.email || null
+  } catch { return null }
+}
+
 // Inserta un movimiento genérico y recalcula el saldo del proveedor.
 // mov: { fecha, proveedorId, proveedorNombre, tipo, descripcion, debe, haber, entradaId, forma, notas }
 export async function agregarMovimiento(mov) {
@@ -68,6 +82,7 @@ export async function agregarMovimiento(mov) {
     entrada_id: mov.entradaId || null,
     forma: mov.forma || null,
     notas: mov.notas || null,
+    registrado_por: await nombreUsuarioActual(),
   }
   const { data, error } = await supabase.from('movimientos_proveedores').insert(fila).select().single()
   if (error) return { error: error.message }
