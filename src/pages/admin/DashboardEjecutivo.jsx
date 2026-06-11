@@ -187,7 +187,7 @@ function useDashboardData(refreshMs = 120000) {
     const [ventasHoy, ventasAyer, ventasSemana, ventasMes, ventasMesAnt, ventasAnioPasado,
            salidasMes, pedidosMes, cuentas, facturas12m, stock, cheques, clientes,
            gastosMes, sueldosMes, pagosProvMes, movCtacteMes, todasCajas, todosDeudores, promoCfg,
-           comprasMesQ, cierresQ, comprasSemQ] = await Promise.all([
+           comprasMesQ, cierresQ, comprasSemQ, remitosHoyQ] = await Promise.all([
       supabase.from('ventas_minoristas').select('total, efectivo, debito, transferencia, items, fecha, hora').eq('origen', 'caja').eq('fecha', hoy),
       // hora incluida: alimenta la curva "hoy vs ayer a esta hora"
       supabase.from('ventas_minoristas').select('total, hora').eq('origen', 'caja').eq('fecha', ayer),
@@ -220,6 +220,8 @@ function useDashboardData(refreshMs = 120000) {
       supabase.from('cierres_semanales').select('*').lt('semana_fin', hoy).order('semana_inicio', { ascending: false }).limit(8),
       // Compras a proveedores de la SEMANA en curso (lunes → hoy)
       supabase.from('compras_proveedores').select('proveedor_nombre, importe').gte('fecha', inicioSemanaARG()).lte('fecha', hoy).not('anulado', 'is', true),
+      // Remitos/despachos mayoristas de HOY (para el ticker, sin flujos internos)
+      supabase.from('remitos').select('numero, cliente_nombre, total, created_at, cobro').eq('fecha', hoy).eq('eliminado', false).neq('cobro', 'interno'),
     ])
 
     const totalHoy  = (ventasHoy.data || []).reduce((s, v) => s + (Number(v.total) || 0), 0)
@@ -243,12 +245,28 @@ function useDashboardData(refreshMs = 120000) {
     const curvaHoy  = curvaAcumulada(ventasHoy.data)
     const curvaAyer = curvaAcumulada(ventasAyer.data)
 
-    // ── TICKER: últimas 12 ventas de hoy (más nuevas primero) ──
-    const ultimasVentas = (ventasHoy.data || [])
+    // ── TICKER: últimas ventas de HOY — caja minorista + despachos
+    // mayoristas (remitos), mezclados y ordenados por hora ──
+    const ventasCajaTicker = (ventasHoy.data || [])
       .filter(v => v.hora)
-      .sort((a, b) => String(b.hora).localeCompare(String(a.hora)))
-      .slice(0, 12)
-      .map(v => ({ hora: String(v.hora).slice(0, 5), total: Number(v.total) || 0, items: (v.items || []).length }))
+      .map(v => ({
+        tipo: 'caja',
+        hora: String(v.hora).slice(0, 5),
+        total: Number(v.total) || 0,
+        detalle: `${(v.items || []).length} prod`,
+      }))
+    const remitosTicker = (remitosHoyQ.data || [])
+      .map(r => ({
+        tipo: 'mayorista',
+        hora: r.created_at
+          ? new Date(r.created_at).toLocaleTimeString('es-AR', { timeZone: TZ_ARG, hour: '2-digit', minute: '2-digit' })
+          : '—',
+        total: Number(r.total) || 0,
+        detalle: (r.cliente_nombre || 'cliente').trim(),
+      }))
+    const ultimasVentas = [...ventasCajaTicker, ...remitosTicker]
+      .sort((a, b) => b.hora.localeCompare(a.hora))
+      .slice(0, 14)
 
     // ── COMPRAS DE LA SEMANA POR PROVEEDOR (lunes → hoy) ──
     const accProv = {}
@@ -397,6 +415,8 @@ function useDashboardData(refreshMs = 120000) {
     const debounced = () => { clearTimeout(timer); timer = setTimeout(cargar, 1500) }
     const canal = supabase.channel('dashboard-ejecutivo-live')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'ventas_minoristas' }, debounced)
+      // Despachos mayoristas: cada remito emitido entra al ticker en vivo
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'remitos' }, debounced)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'config_sistema' }, debounced)
       .subscribe()
     return () => {
@@ -990,9 +1010,14 @@ function TickerVentas({ ventas }) {
   if (!ventas || ventas.length === 0) return null
   const items = ventas.map((v, i) => (
     <span key={i} style={{ display: 'inline-flex', alignItems: 'baseline', gap: '0.5vw', marginRight: '3.2vw' }}>
-      <span style={{ color: NEON.muted, fontSize: '0.85vw' }}>🕐 {v.hora}</span>
-      <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '1.25vw', color: NEON.cianHi }}>{fmtArs(v.total)}</span>
-      <span style={{ color: NEON.muted, fontSize: '0.8vw' }}>{v.items} prod</span>
+      <span style={{ color: NEON.muted, fontSize: '0.85vw' }}>{v.tipo === 'mayorista' ? '🚚' : '🕐'} {v.hora}</span>
+      {v.tipo === 'mayorista' && (
+        <span style={{ fontSize: '0.7vw', fontWeight: 800, letterSpacing: 1.5, color: NEON.ambar, border: '1px solid rgba(255,179,92,0.4)', borderRadius: 3, padding: '0 0.35vw' }}>
+          MAYORISTA
+        </span>
+      )}
+      <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '1.25vw', color: v.tipo === 'mayorista' ? NEON.ambar : NEON.cianHi }}>{fmtArs(v.total)}</span>
+      <span style={{ color: NEON.muted, fontSize: '0.8vw', maxWidth: '12vw', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.detalle}</span>
       <span style={{ color: 'rgba(0,212,255,0.3)', fontSize: '1vw' }}>◆</span>
     </span>
   ))
