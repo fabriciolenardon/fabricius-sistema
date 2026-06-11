@@ -54,8 +54,10 @@ export default function DesposteMediaRes() {
       // necesitan `created_at` como desempate para ordenarse por hora real.
       // Ahora traemos TODAS las no despostadas (incluyendo reservadas) para
       // poder mostrarlas como "Pendiente de aprobación" en vez de ocultarlas.
+      // eliminado=false: los ingresos anulados (ej. cargas duplicadas) no
+      // deben aparecerle al operario como medias disponibles.
       supabase.from('entradas_deposito').select('*')
-        .eq('tipo', 'bovino_mr').eq('despostada', false)
+        .eq('tipo', 'bovino_mr').eq('despostada', false).eq('eliminado', false)
         .order('fecha', { ascending: false }).order('created_at', { ascending: false }),
       supabase.from('flujo_deposito').select('*')
         .order('created_at', { ascending: false }).limit(10),
