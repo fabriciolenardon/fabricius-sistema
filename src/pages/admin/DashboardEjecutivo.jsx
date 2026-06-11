@@ -483,7 +483,7 @@ export default function DashboardEjecutivo() {
             fontFamily: "'DM Sans',sans-serif",
             boxShadow: '0 0 24px rgba(0,212,255,0.15)',
           }}>
-          📺 MODO TV — EN VIVO
+          🦾 F.A.B.R.I. — EN VIVO
         </button>
       </div>
 
@@ -1178,9 +1178,14 @@ function ModoTV({ onSalir }) {
 
       {/* ── HEADER ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '1.4vw' }}>
-        <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '2.6vw', letterSpacing: 6, color: NEON.oro }}>
-          FABRICIUS
-        </span>
+        <div>
+          <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '2.6vw', letterSpacing: 6, color: NEON.oro, lineHeight: 1, textShadow: '0 0 18px rgba(255,209,122,0.35)' }}>
+            F.A.B.R.I.
+          </span>
+          <div style={{ fontSize: '0.58vw', letterSpacing: 2.5, color: NEON.muted, fontWeight: 700, marginTop: '0.1vw' }}>
+            FACTURACIÓN · ALERTAS · BALANCE · RESULTADOS INSTANTÁNEOS — CARNICERÍAS FABRICIUS
+          </div>
+        </div>
         <PuntoVivo size={10} />
         {data?.promoMundial?.activa && (
           <span style={{ padding: '0.4vw 1vw', borderRadius: 999, background: 'rgba(107,229,255,0.1)', border: '1px solid rgba(107,229,255,0.4)', color: NEON.cian, fontSize: '0.95vw', fontWeight: 800, letterSpacing: 1 }}>
@@ -1201,7 +1206,7 @@ function ModoTV({ onSalir }) {
 
       {loading || !data ? (
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: NEON.muted, fontSize: '1.5vw' }}>
-          Cargando datos en vivo…
+          🦾 F.A.B.R.I. iniciando sistemas…
         </div>
       ) : (
         <>
