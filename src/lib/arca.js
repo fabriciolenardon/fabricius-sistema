@@ -125,11 +125,9 @@ export function guardarConfigArca(payload) {
 export function probarConexionArca(cuenta_id) {
   return invokeFn('arca-config', { accion: 'probar', cuenta_id })
 }
-// Genera el certificado de homologación vía AfipSDK (logueándose a ARCA con la clave fiscal).
-export function crearCertTestingArca(payload) {
-  return invokeFn('arca-config', { accion: 'crear_cert_dev', ...payload })
-}
 // Genera clave + CSR (autónomo) para subir a ARCA y obtener el certificado.
+// Conexión 100% directa con ARCA — el generador vía AfipSDK se eliminó a
+// pedido de Fabricio (límite de CUITs del plan gratis + no depender de terceros).
 export function generarCsrArca(payload) {
   return invokeFn('arca-config', { accion: 'generar_csr', ...payload })
 }

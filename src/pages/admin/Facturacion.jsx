@@ -28,7 +28,7 @@ import { fmtPrecio, parseNumero } from '../../lib/formatos'
 import {
   COMPROBANTES, DOC_TIPOS, COND_IVA_RECEPTOR, IVA_ALICUOTAS,
   comprobantesDeCuenta, guardarConfigArca, probarConexionArca, emitirComprobante,
-  crearCertTestingArca, generarCsrArca, buildQrUrl, qrImgUrl,
+  generarCsrArca, buildQrUrl, qrImgUrl,
   condIvaAReceptorAfip, comprobanteRecomendado, ES_NOTA_CD, NOTAS_CREDITO, NOTAS_DEBITO,
 } from '../../lib/arca'
 import { imprimirComprobante } from '../../lib/comprobantePdf'
@@ -2892,13 +2892,10 @@ function ModalConfigArca({ cuenta, onCerrar, onGuardado }) {
   const [puntoVenta, setPuntoVenta] = useState(cuenta.arca_punto_venta || 1)
   const [cert, setCert] = useState('')
   const [key, setKey] = useState('')
-  const [accessToken, setAccessToken] = useState('')
   const [guardando, setGuardando] = useState(false)
   const [probando, setProbando] = useState(false)
   const [msg, setMsg] = useState(null) // { ok, texto }
   const [genUser, setGenUser] = useState(String(cuenta.cuit || '').replace(/\D/g, ''))
-  const [genPass, setGenPass] = useState('')
-  const [generando, setGenerando] = useState(false)
   const [csrResult, setCsrResult] = useState(null)
   const [generandoCsr, setGenerandoCsr] = useState(false)
   // Marca local: arranca con el estado de la cuenta, pero se prende apenas
@@ -2930,7 +2927,6 @@ function ModalConfigArca({ cuenta, onCerrar, onGuardado }) {
       punto_venta: Number(puntoVenta) || 1,
       cert: cert || undefined,            // si va vacío, la function conserva el anterior
       key: key || undefined,
-      afipsdk_access_token: accessToken || undefined,
     })
     setGuardando(false)
     if (!r.ok) { setMsg({ ok: false, texto: r.error }); return false }
@@ -2954,28 +2950,6 @@ function ModalConfigArca({ cuenta, onCerrar, onGuardado }) {
     if (r.ok) {
       setCsrResult(r.data?.csr || '')
       setMsg({ ok: true, texto: '✅ CSR generado. Seguí los 3 pasos de abajo para obtener el certificado.' })
-    } else {
-      setMsg({ ok: false, texto: '❌ ' + r.error })
-    }
-  }
-
-  async function generarCert() {
-    if (!genPass) { setMsg({ ok: false, texto: 'Ingresá la clave fiscal de ARCA del CUIT para generar el certificado.' }); return }
-    setGenerando(true)
-    setMsg({ ok: true, texto: `⏳ Generando certificado de ${ambiente === 'produccion' ? 'producción' : 'testing'} en ARCA... puede tardar hasta ~1 minuto, no cierres la ventana.` })
-    const r = await crearCertTestingArca({
-      cuenta_id: cuenta.id,
-      ambiente,
-      arca_username: genUser,
-      arca_password: genPass,
-      punto_venta: Number(puntoVenta) || 1,
-      afipsdk_access_token: accessToken || undefined,
-    })
-    setGenerando(false)
-    setGenPass('')
-    if (r.ok) {
-      setTieneCredsLocal(true) // ya hay cert/key en el server → no volver a pedirlos
-      setMsg({ ok: true, texto: '✅ ' + (r.data?.mensaje || 'Certificado de testing generado y guardado.') + ' Ahora probá la conexión.' })
     } else {
       setMsg({ ok: false, texto: '❌ ' + r.error })
     }
@@ -3010,47 +2984,16 @@ function ModalConfigArca({ cuenta, onCerrar, onGuardado }) {
           {yaConfig && <span style={{ color: '#7dff7d' }}> · Esta cuenta ya tiene credenciales cargadas (dejá los campos vacíos para conservarlas).</span>}
         </div>
 
-        {/* Generador automático de certificado (homologación o producción) */}
-        {(() => { const esProd = ambiente === 'produccion'; return (
-          <div style={{ marginBottom: 16, padding: 14, borderRadius: 10, background: 'var(--surface2)', border: `1px dashed ${esProd ? '#ff8b8b' : 'var(--gold)'}` }}>
-            <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4 }}>
-              ✨ Generar certificado de {esProd ? 'PRODUCCIÓN' : 'testing'} automáticamente
-            </div>
-            {esProd && (
-              <div style={{ marginBottom: 8, padding: 8, background: '#3a1a1a', color: '#ff8b8b', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>
-                ⚠️ PRODUCCIÓN: el certificado y las facturas son REALES, con validez fiscal. Asegurate del CUIT, el punto de venta y la clave fiscal.
-              </div>
-            )}
-            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
-              AfipSDK entra a ARCA con tu clave fiscal, crea el certificado de {esProd ? 'producción' : 'homologación'} y autoriza el servicio.
-              La clave fiscal se usa solo para esto y <strong>no se guarda</strong>. Si preferís, pegá el cert/key a mano abajo.
-              <br /><strong>Apoderado:</strong> si esta cuenta factura a través de otro CUIT (ej. una SAS a la que se entra
-              con el CUIT de un apoderado), poné en <em>Usuario ARCA</em> el CUIT y clave del apoderado. La factura igual
-              se emite con el CUIT de esta cuenta.
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <Campo label="Usuario ARCA (CUIT del titular / apoderado)">
-                <input value={genUser} onChange={e => setGenUser(e.target.value)} style={inp} />
-              </Campo>
-              <Campo label="Clave fiscal de ARCA">
-                <input type="password" value={genPass} onChange={e => setGenPass(e.target.value)}
-                  placeholder="tu clave fiscal" autoComplete="new-password" style={inp} />
-              </Campo>
-            </div>
-            <button onClick={generarCert} disabled={generando || guardando || probando}
-              style={{ marginTop: 10, width: '100%', padding: 11, background: esProd ? '#ff8b8b' : 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 800 }}>
-              {generando ? '⏳ Generando en ARCA...' : `✨ Generar certificado de ${esProd ? 'producción' : 'testing'}`}
-            </button>
-          </div>
-        ) })()}
-
-        {/* Opción AUTÓNOMA: generar CSR (sin AfipSDK, sin límites) */}
-        <div style={{ marginBottom: 16, padding: 14, borderRadius: 10, background: 'var(--surface2)', border: '1px solid var(--border)' }}>
-          <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4 }}>📄 Opción autónoma: generar mi propio certificado (sin AfipSDK)</div>
+        {/* Certificado propio: clave + CSR, conexión DIRECTA con ARCA (sin terceros) */}
+        <div style={{ marginBottom: 16, padding: 14, borderRadius: 10, background: 'var(--surface2)', border: '1px solid var(--gold)' }}>
+          <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4 }}>📄 Generar certificado propio (conexión directa con ARCA)</div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
             La app genera la <strong>clave privada + un CSR</strong>. Subís el CSR a ARCA, ARCA te da el certificado, lo pegás abajo y listo.
-            Sin terceros ni límites. Para <strong>apoderado</strong>, poné en "Usuario ARCA" el CUIT del apoderado (campo de arriba).
+            Sin intermediarios, sin límites y sin costo. Para <strong>apoderado</strong> (ej. la SAS), poné en "Usuario ARCA" el CUIT del apoderado.
           </div>
+          <Campo label="Usuario ARCA (CUIT del titular / apoderado)">
+            <input value={genUser} onChange={e => setGenUser(e.target.value)} style={inp} />
+          </Campo>
           <button onClick={generarCsr} disabled={generandoCsr || guardando || probando}
             style={{ width: '100%', padding: 11, background: 'var(--text)', color: 'var(--surface)', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 800 }}>
             {generandoCsr ? '⏳ Generando CSR...' : '📄 Generar clave + CSR'}
@@ -3105,13 +3048,6 @@ function ModalConfigArca({ cuenta, onCerrar, onGuardado }) {
             <textarea value={key} onChange={e => setKey(e.target.value)} rows={3}
               placeholder="-----BEGIN RSA PRIVATE KEY-----"
               style={{ ...inp, marginTop: 6, fontFamily: 'monospace', fontSize: 11, resize: 'vertical' }} />
-          </Campo>
-        </div>
-
-        <div style={{ marginTop: 10 }}>
-          <Campo label="Access token de AfipSDK (opcional — sube los límites de uso)">
-            <input value={accessToken} onChange={e => setAccessToken(e.target.value)} placeholder="Dejar vacío si no tenés cuenta paga"
-              style={{ ...inp, fontFamily: 'monospace', fontSize: 11 }} />
           </Campo>
         </div>
 
