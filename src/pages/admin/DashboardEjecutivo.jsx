@@ -67,6 +67,30 @@ const mismoDiaMesAnterior = () => {
   const ultimoDiaPrev = new Date(yPrev, mPrev, 0).getDate()
   return `${yPrev}-${String(mPrev).padStart(2, '0')}-${String(Math.min(d, ultimoDiaPrev)).padStart(2, '0')}`
 }
+// Lunes de la semana en curso (ARG) — las compras a proveedores van por semana
+const inicioSemanaARG = () => {
+  const d = new Date(fechaHoyARG() + 'T12:00')
+  const dow = (d.getDay() + 6) % 7 // 0 = lunes
+  d.setDate(d.getDate() - dow)
+  return fechaHoyARG(d)
+}
+// Hora actual en ARG (0-23) — para cortar la curva del día en "ahora"
+const horaActualARG = () =>
+  Number(new Date().toLocaleString('en-US', { timeZone: TZ_ARG, hour: '2-digit', hour12: false }))
+// Curva acumulada de ventas por hora (7 a 22 hs). Cada punto = total
+// facturado desde la apertura hasta esa hora inclusive.
+function curvaAcumulada(rows) {
+  const porHora = {}
+  ;(rows || []).forEach(v => {
+    const h = v.hora ? Number(String(v.hora).slice(0, 2)) : NaN
+    if (isNaN(h)) return
+    porHora[h] = (porHora[h] || 0) + (Number(v.total) || 0)
+  })
+  let acum = 0
+  const pts = []
+  for (let h = 7; h <= 22; h++) { acum += porHora[h] || 0; pts.push({ h, acum }) }
+  return pts
+}
 
 // ── Estética compartida: HUD holográfico (estilo laboratorio de Stark) ──
 // Cian translúcido dominante, paneles de "cristal" con esquinas marcadas,
@@ -98,6 +122,15 @@ const ESTILOS_GLOBALES = `
 @keyframes dejIn    { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes hudScan  { from { top: -10%; } to { top: 110%; } }
 @keyframes hudGiro  { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+/* Destello cuando entra una venta nueva (Modo TV) */
+@keyframes dejFlash {
+  0%   { transform: scale(1);    text-shadow: 0 0 16px rgba(0,212,255,0.45); }
+  18%  { transform: scale(1.05); text-shadow: 0 0 60px rgba(155,234,255,1), 0 0 24px rgba(255,255,255,0.8); }
+  100% { transform: scale(1);    text-shadow: 0 0 16px rgba(0,212,255,0.45); }
+}
+/* Cinta de últimas ventas (marquee continuo, contenido duplicado) */
+@keyframes dejTicker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.dej-ticker-pista { display: inline-flex; white-space: nowrap; animation: dejTicker 45s linear infinite; will-change: transform; }
 .dej-in { animation: dejIn .5s ease both; }
 /* Esquinas holográficas: dos escuadras cian en TL y BR */
 .hud { position: relative; }
@@ -154,9 +187,10 @@ function useDashboardData(refreshMs = 120000) {
     const [ventasHoy, ventasAyer, ventasSemana, ventasMes, ventasMesAnt, ventasAnioPasado,
            salidasMes, pedidosMes, cuentas, facturas12m, stock, cheques, clientes,
            gastosMes, sueldosMes, pagosProvMes, movCtacteMes, todasCajas, todosDeudores, promoCfg,
-           comprasMesQ, cierreSemQ] = await Promise.all([
+           comprasMesQ, cierresQ, comprasSemQ, remitosHoyQ] = await Promise.all([
       supabase.from('ventas_minoristas').select('total, efectivo, debito, transferencia, items, fecha, hora').eq('origen', 'caja').eq('fecha', hoy),
-      supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').eq('fecha', ayer),
+      // hora incluida: alimenta la curva "hoy vs ayer a esta hora"
+      supabase.from('ventas_minoristas').select('total, hora').eq('origen', 'caja').eq('fecha', ayer),
       supabase.from('ventas_minoristas').select('total, fecha').eq('origen', 'caja').gte('fecha', hace7).lte('fecha', hoy),
       supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').gte('fecha', mesIni).lte('fecha', hoy),
       // Mes anterior recortado al MISMO período (01 → mismo día), no el mes completo
@@ -181,8 +215,13 @@ function useDashboardData(refreshMs = 120000) {
       // COMPRAS del mes: ingresos de mercadería al depósito con importe real
       // (las entradas generadas por desposte tienen importe 0 y quedan afuera)
       supabase.from('entradas_deposito').select('importe').gte('fecha', mesIni).lte('fecha', hoy).gt('importe', 0).eq('eliminado', false),
-      // Cierre de la SEMANA ANTERIOR (la última semana ya cerrada)
-      supabase.from('cierres_semanales').select('*').lt('semana_fin', hoy).order('semana_inicio', { ascending: false }).limit(1).maybeSingle(),
+      // Últimas 8 semanas CERRADAS (la primera es "la semana anterior";
+      // todas juntas alimentan el gráfico de barras de tendencia)
+      supabase.from('cierres_semanales').select('*').lt('semana_fin', hoy).order('semana_inicio', { ascending: false }).limit(8),
+      // Compras a proveedores de la SEMANA en curso (lunes → hoy)
+      supabase.from('compras_proveedores').select('proveedor_nombre, importe').gte('fecha', inicioSemanaARG()).lte('fecha', hoy).not('anulado', 'is', true),
+      // Remitos/despachos mayoristas de HOY (para el ticker, sin flujos internos)
+      supabase.from('remitos').select('numero, cliente_nombre, total, created_at, cobro').eq('fecha', hoy).eq('eliminado', false).neq('cobro', 'interno'),
     ])
 
     const totalHoy  = (ventasHoy.data || []).reduce((s, v) => s + (Number(v.total) || 0), 0)
@@ -201,6 +240,45 @@ function useDashboardData(refreshMs = 120000) {
     // Última venta del día (para el "latido" del modo TV)
     const ultimaVentaHora = (ventasHoy.data || [])
       .map(v => v.hora).filter(Boolean).sort().slice(-1)[0] || null
+
+    // ── CURVA DEL DÍA: acumulado por hora, hoy vs ayer ──
+    const curvaHoy  = curvaAcumulada(ventasHoy.data)
+    const curvaAyer = curvaAcumulada(ventasAyer.data)
+
+    // ── TICKER: últimas ventas de HOY — caja minorista + despachos
+    // mayoristas (remitos), mezclados y ordenados por hora ──
+    const ventasCajaTicker = (ventasHoy.data || [])
+      .filter(v => v.hora)
+      .map(v => ({
+        tipo: 'caja',
+        hora: String(v.hora).slice(0, 5),
+        total: Number(v.total) || 0,
+        detalle: `${(v.items || []).length} prod`,
+      }))
+    const remitosTicker = (remitosHoyQ.data || [])
+      .map(r => ({
+        tipo: 'mayorista',
+        hora: r.created_at
+          ? new Date(r.created_at).toLocaleTimeString('es-AR', { timeZone: TZ_ARG, hour: '2-digit', minute: '2-digit' })
+          : '—',
+        total: Number(r.total) || 0,
+        detalle: (r.cliente_nombre || 'cliente').trim(),
+      }))
+    const ultimasVentas = [...ventasCajaTicker, ...remitosTicker]
+      .sort((a, b) => b.hora.localeCompare(a.hora))
+      .slice(0, 14)
+
+    // ── COMPRAS DE LA SEMANA POR PROVEEDOR (lunes → hoy) ──
+    const accProv = {}
+    ;(comprasSemQ.data || []).forEach(c => {
+      const k = (c.proveedor_nombre || '—').trim().toUpperCase()
+      accProv[k] = (accProv[k] || 0) + (Number(c.importe) || 0)
+    })
+    const comprasSemanaProv = Object.entries(accProv)
+      .map(([nombre, total]) => ({ nombre, total }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 6)
+    const comprasSemanaTotal = Object.values(accProv).reduce((s, v) => s + v, 0)
 
     // ── FACTURADO TOTAL DEL MES (caja + mayorista sin flujos internos) ──
     const salidasMesData = (salidasMes.data || []).filter(s => s.cobro !== 'interno')
@@ -301,7 +379,10 @@ function useDashboardData(refreshMs = 120000) {
       topProductosHoy, cuentasConPct, stockCritico,
       ultimaVentaHora,
       mensualVivo,
-      cierreSemana: cierreSemQ?.data || null,
+      curvaHoy, curvaAyer, ultimasVentas,
+      comprasSemanaProv, comprasSemanaTotal,
+      cierreSemana: (cierresQ?.data || [])[0] || null,
+      cierresHistorial: [...(cierresQ?.data || [])].reverse(), // viejas → nuevas (para las barras)
       promoMundial: promoCfg?.data?.valor || { activa: false },
       // Solo recibidos: los emitidos propios son plata que SALE, no que entra
       cheques: (cheques.data || []).filter(c => c.origen !== 'emitido'),
@@ -334,6 +415,8 @@ function useDashboardData(refreshMs = 120000) {
     const debounced = () => { clearTimeout(timer); timer = setTimeout(cargar, 1500) }
     const canal = supabase.channel('dashboard-ejecutivo-live')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'ventas_minoristas' }, debounced)
+      // Despachos mayoristas: cada remito emitido entra al ticker en vivo
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'remitos' }, debounced)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'config_sistema' }, debounced)
       .subscribe()
     return () => {
@@ -591,12 +674,18 @@ function ResumenEjecutivo() {
         )}
       </div>
 
+      {/* ── Curva del día + compras de la semana ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 12, marginTop: 12 }}>
+        <CurvaDia hoy={data.curvaHoy} ayer={data.curvaAyer} />
+        <PanelProveedoresSemana items={data.comprasSemanaProv} total={data.comprasSemanaTotal} />
+      </div>
+
       {/* ── Alertas ── */}
       <CentroAlertas data={data} />
 
       {/* ── Top productos + Stock + Monos ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 12, marginTop: 12 }}>
-        <CierreSemanaAnterior cierre={data.cierreSemana} />
+        <CierreSemanaAnterior cierre={data.cierreSemana} historial={data.cierresHistorial} />
 
         <div style={{ ...glass, padding: 18 }}>
           <Etiqueta texto={data.stockCritico.length > 0 ? '⚠️ STOCK CRÍTICO' : '✅ STOCK OK'}
@@ -742,7 +831,7 @@ const fcCorta = (s) => s ? `${String(s).slice(8, 10)}/${String(s).slice(5, 7)}` 
 // ── Cierre de la SEMANA ANTERIOR ────────────────────────────
 // Siempre muestra la última semana CERRADA (parámetro real, no parcial).
 // Durante la semana en curso se ve el cierre de la semana pasada.
-function CierreSemanaAnterior({ cierre }) {
+function CierreSemanaAnterior({ cierre, historial }) {
   if (!cierre) {
     return (
       <div className="hud" style={{ ...glass, padding: 18 }}>
@@ -779,6 +868,165 @@ function CierreSemanaAnterior({ cierre }) {
             </span>
           )
         ))}
+      </div>
+      <BarrasCierres cierres={historial} />
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════
+// 📈 CURVA DEL DÍA — acumulado por hora, hoy vs ayer
+// ────────────────────────────────────────────────────────────
+// Línea cian = hoy (cortada en la hora actual, con punto brillante).
+// Línea punteada = ayer completo. Responde de un vistazo:
+// "¿el día viene más fuerte o más flojo que ayer?"
+// ════════════════════════════════════════════════════════════
+function CurvaDia({ hoy, ayer, tv }) {
+  const hAhora = horaActualARG()
+  const hoyCortada = (hoy || []).filter(p => p.h <= Math.max(7, hAhora))
+  const maxY = Math.max(
+    ...(ayer || []).map(p => p.acum), ...(hoyCortada.map(p => p.acum)), 1)
+  const X = (h) => ((h - 7) / 15) * 100
+  const Y = (v) => 38 - (v / maxY) * 34
+  const path = (pts) => pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${X(p.h).toFixed(1)},${Y(p.acum).toFixed(1)}`).join(' ')
+  const ultimo = hoyCortada[hoyCortada.length - 1]
+  const ayerAEstaHora = (ayer || []).find(p => p.h === (ultimo?.h ?? 0))?.acum || 0
+  const fz = (n) => tv ? `${n}vw` : `${n * 13}px`
+  return (
+    <div className={tv ? 'dej-in hud' : 'hud'} style={{ ...glass, padding: tv ? '1.2vw 1.6vw' : 18, flex: tv ? 1 : undefined, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: tv ? '1vw' : 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: fz(0.85), letterSpacing: 3, color: NEON.cian, fontWeight: 800 }}>📈 CURVA DEL DÍA</span>
+        <span style={{ fontSize: fz(0.75), color: NEON.muted }}>
+          ayer a esta hora: <strong style={{ color: NEON.texto }}>{fmtArs(ayerAEstaHora)}</strong>
+          {ultimo && ayerAEstaHora > 0 && (
+            <strong style={{ marginLeft: 8, color: ultimo.acum >= ayerAEstaHora ? NEON.verde : NEON.rojo }}>
+              {ultimo.acum >= ayerAEstaHora ? '▲' : '▼'} {Math.abs(((ultimo.acum - ayerAEstaHora) / ayerAEstaHora) * 100).toFixed(0)}%
+            </strong>
+          )}
+        </span>
+      </div>
+      <svg viewBox="0 0 100 42" preserveAspectRatio="none" style={{ width: '100%', flex: 1, minHeight: tv ? 0 : 110, marginTop: 6 }}>
+        {/* guías horizontales */}
+        {[0.25, 0.5, 0.75].map(g => (
+          <line key={g} x1="0" x2="100" y1={38 - g * 34} y2={38 - g * 34} stroke="rgba(0,212,255,0.08)" strokeWidth="0.3" />
+        ))}
+        {/* ayer: punteada apagada */}
+        {(ayer || []).length > 0 && (
+          <path d={path(ayer)} fill="none" stroke="rgba(155,214,255,0.35)" strokeWidth="0.7" strokeDasharray="2 2" />
+        )}
+        {/* hoy: cian con relleno suave y glow */}
+        {hoyCortada.length > 1 && (
+          <>
+            <path d={`${path(hoyCortada)} L${X(ultimo.h).toFixed(1)},38 L0,38 Z`} fill="rgba(0,212,255,0.08)" stroke="none" />
+            <path d={path(hoyCortada)} fill="none" stroke={NEON.cian} strokeWidth="1.1"
+              style={{ filter: 'drop-shadow(0 0 3px rgba(0,212,255,0.9))' }} />
+          </>
+        )}
+        {ultimo && (
+          <circle cx={X(ultimo.h)} cy={Y(ultimo.acum)} r="1.6" fill={NEON.cianHi}
+            style={{ filter: 'drop-shadow(0 0 4px rgba(155,234,255,1))' }}>
+            <animate attributeName="r" values="1.3;2;1.3" dur="2s" repeatCount="indefinite" />
+          </circle>
+        )}
+      </svg>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fz(0.65), color: NEON.muted }}>
+        <span>7 hs</span><span>12 hs</span><span>17 hs</span><span>22 hs</span>
+      </div>
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════
+// 📊 BARRAS DE CIERRES — ganancia de las últimas 8 semanas
+// ════════════════════════════════════════════════════════════
+function BarrasCierres({ cierres, tv }) {
+  if (!cierres || cierres.length === 0) return null
+  const maxAbs = Math.max(...cierres.map(c => Math.abs(Number(c.ganancia) || 0)), 1)
+  const fz = (n) => tv ? `${n}vw` : `${n * 13}px`
+  return (
+    <div style={{ marginTop: tv ? '0.7vw' : 10 }}>
+      <div style={{ fontSize: fz(0.6), letterSpacing: 2, color: NEON.muted, fontWeight: 700, marginBottom: tv ? '0.3vw' : 4 }}>
+        GANANCIA ÚLTIMAS {cierres.length} SEMANAS
+      </div>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: tv ? '0.45vw' : 5, height: tv ? '3.4vw' : 44 }}>
+        {cierres.map((c, i) => {
+          const g = Number(c.ganancia) || 0
+          const hPct = Math.max(8, (Math.abs(g) / maxAbs) * 100)
+          const esUltima = i === cierres.length - 1
+          return (
+            <div key={c.id || i} title={`${fcCorta(c.semana_inicio)}: ${fmtArs(g)}`}
+              style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%' }}>
+              <div style={{
+                height: `${hPct}%`, borderRadius: 2,
+                background: g >= 0
+                  ? `linear-gradient(180deg, ${NEON.verde}${esUltima ? '' : '99'}, rgba(81,255,176,0.25))`
+                  : `linear-gradient(180deg, ${NEON.rojo}${esUltima ? '' : '99'}, rgba(255,92,108,0.25))`,
+                boxShadow: esUltima ? `0 0 8px ${g >= 0 ? 'rgba(81,255,176,0.5)' : 'rgba(255,92,108,0.5)'}` : 'none',
+              }} />
+              <div style={{ fontSize: fz(0.5), color: NEON.muted, textAlign: 'center', marginTop: 2 }}>{fcCorta(c.semana_inicio)}</div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════
+// 🏭 COMPRAS DE LA SEMANA POR PROVEEDOR (lunes → hoy)
+// ════════════════════════════════════════════════════════════
+function PanelProveedoresSemana({ items, total, tv }) {
+  const fz = (n) => tv ? `${n}vw` : `${n * 13}px`
+  const max = items && items.length > 0 ? items[0].total : 1
+  return (
+    <div className={tv ? 'dej-in hud' : 'hud'} style={{ ...glass, padding: tv ? '1.1vw 1.6vw' : 18 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+        <span style={{ fontSize: fz(0.85), letterSpacing: 3, color: NEON.cian, fontWeight: 800 }}>🏭 COMPRADO ESTA SEMANA</span>
+        <span style={{ marginLeft: 'auto', fontFamily: "'Bebas Neue',cursive", fontSize: fz(1.2), color: NEON.ambar }}>{fmtArs(total || 0)}</span>
+      </div>
+      {(!items || items.length === 0) ? (
+        <div style={{ color: NEON.muted, fontSize: fz(0.8), marginTop: 6 }}>Sin compras esta semana todavía.</div>
+      ) : (
+        <div style={{ marginTop: tv ? '0.5vw' : 8 }}>
+          {items.map((p, i) => (
+            <div key={p.nombre} style={{ marginBottom: tv ? '0.4vw' : 6 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fz(0.78), marginBottom: 2 }}>
+                <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nombre}</span>
+                <span style={{ color: NEON.ambar, fontWeight: 700, marginLeft: 8 }}>{fmtArs(p.total)}</span>
+              </div>
+              <Barra pct={(p.total / max) * 100} color={i === 0 ? NEON.ambar : NEON.cian} alto={tv ? 3 : 4} />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════
+// 🎬 TICKER DE ÚLTIMAS VENTAS (Modo TV) — cinta tipo bolsa
+// ════════════════════════════════════════════════════════════
+function TickerVentas({ ventas }) {
+  if (!ventas || ventas.length === 0) return null
+  const items = ventas.map((v, i) => (
+    <span key={i} style={{ display: 'inline-flex', alignItems: 'baseline', gap: '0.5vw', marginRight: '3.2vw' }}>
+      <span style={{ color: NEON.muted, fontSize: '0.85vw' }}>{v.tipo === 'mayorista' ? '🚚' : '🕐'} {v.hora}</span>
+      {v.tipo === 'mayorista' && (
+        <span style={{ fontSize: '0.7vw', fontWeight: 800, letterSpacing: 1.5, color: NEON.ambar, border: '1px solid rgba(255,179,92,0.4)', borderRadius: 3, padding: '0 0.35vw' }}>
+          MAYORISTA
+        </span>
+      )}
+      <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '1.25vw', color: v.tipo === 'mayorista' ? NEON.ambar : NEON.cianHi }}>{fmtArs(v.total)}</span>
+      <span style={{ color: NEON.muted, fontSize: '0.8vw', maxWidth: '12vw', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.detalle}</span>
+      <span style={{ color: 'rgba(0,212,255,0.3)', fontSize: '1vw' }}>◆</span>
+    </span>
+  ))
+  return (
+    <div style={{ overflow: 'hidden', marginTop: '0.8vw', padding: '0.35vw 0', borderTop: '1px solid rgba(0,212,255,0.15)', borderBottom: '1px solid rgba(0,212,255,0.15)' }}>
+      {/* contenido duplicado para el loop infinito sin salto */}
+      <div className="dej-ticker-pista">
+        <span>{items}</span>
+        <span aria-hidden="true">{items}</span>
       </div>
     </div>
   )
@@ -892,6 +1140,17 @@ function ModoTV({ onSalir }) {
   const { data, loading, ultimaAct } = useDashboardData(60000)
   const { hora, segundos, fecha } = useRelojARG()
 
+  // 🔔 Destello cuando entra una venta: si el facturado de hoy SUBE entre
+  // recargas, replay de la animación dejFlash (la key fuerza el remount).
+  const [flashVenta, setFlashVenta] = useState(0)
+  const prevTotalRef = useRef(null)
+  useEffect(() => {
+    const t = data?.totalHoy
+    if (t == null) return
+    if (prevTotalRef.current != null && t > prevTotalRef.current) setFlashVenta(f => f + 1)
+    prevTotalRef.current = t
+  }, [data?.totalHoy])
+
   // ESC sale del modo TV (además del exit nativo de fullscreen)
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onSalir() }
@@ -954,7 +1213,9 @@ function ModoTV({ onSalir }) {
               <div className="dej-in hud" style={{ ...glass, border: '1px solid rgba(0,212,255,0.45)', padding: '1.8vw 2.2vw', overflow: 'hidden' }}>
                 <div style={{ position: 'absolute', top: '-8vw', right: '-8vw', width: '22vw', height: '22vw', borderRadius: '50%', background: 'radial-gradient(circle, rgba(0,212,255,0.15), transparent 70%)' }} />
                 <div style={{ fontSize: '0.95vw', letterSpacing: 4, color: NEON.cian, fontWeight: 800 }}>FACTURADO HOY</div>
-                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '7.2vw', lineHeight: 1, color: NEON.cianHi, animation: 'dejGlow 3s ease-in-out infinite' }}>
+                <div key={flashVenta}
+                  style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '7.2vw', lineHeight: 1, color: NEON.cianHi,
+                    animation: flashVenta > 0 ? 'dejFlash 2.2s ease, dejGlow 3s ease-in-out 2.2s infinite' : 'dejGlow 3s ease-in-out infinite' }}>
                   {fmtArs(data.totalHoy)}
                 </div>
                 <div style={{ display: 'flex', gap: '2.4vw', marginTop: '0.9vw', fontSize: '1.05vw' }}>
@@ -982,40 +1243,8 @@ function ModoTV({ onSalir }) {
                   sub="mismo período" color={colorVar(data.panelControl.variacionAnioPasado)} />
               </div>
 
-              {/* Cierre de la semana anterior — parámetro cerrado, siempre visible */}
-              <div className="dej-in hud" style={{ ...glass, padding: '1.4vw 1.8vw', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-                <div style={{ fontSize: '0.95vw', letterSpacing: 4, color: NEON.cian, fontWeight: 800, marginBottom: '0.9vw' }}>
-                  🗓️ CIERRE SEMANA ANTERIOR{data.cierreSemana ? ` · ${fcCorta(data.cierreSemana.semana_inicio)} → ${fcCorta(data.cierreSemana.semana_fin)}` : ''}
-                </div>
-                {!data.cierreSemana ? (
-                  <div style={{ color: NEON.muted, fontSize: '1.1vw' }}>Todavía no hay semanas cerradas.</div>
-                ) : (
-                  <div style={{ display: 'flex', gap: '2vw', alignItems: 'center', height: '100%' }}>
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.7vw' }}>
-                      <TvMini label="VENTAS" valor={fmtArs(Number(data.cierreSemana.ventas) || 0)} color={NEON.cianHi} />
-                      <TvMini label="COMPRAS" valor={fmtArs(Number(data.cierreSemana.compras) || 0)} color={NEON.ambar} />
-                      <TvMini label="GASTOS + SUELDOS" valor={fmtArs((Number(data.cierreSemana.gastos) || 0) + (Number(data.cierreSemana.sueldos) || 0))} color={NEON.rojo} />
-                    </div>
-                    <div style={{ flex: 1, textAlign: 'center' }}>
-                      <div style={{ fontSize: '0.75vw', letterSpacing: 3, color: NEON.muted, fontWeight: 800 }}>GANANCIA</div>
-                      <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '3.4vw', lineHeight: 1,
-                        color: (Number(data.cierreSemana.ganancia) || 0) >= 0 ? NEON.verde : NEON.rojo,
-                        textShadow: `0 0 16px ${(Number(data.cierreSemana.ganancia) || 0) >= 0 ? 'rgba(81,255,176,0.45)' : 'rgba(255,92,108,0.45)'}` }}>
-                        {fmtArs(Number(data.cierreSemana.ganancia) || 0)}
-                      </div>
-                      <div style={{ display: 'flex', gap: '0.6vw', justifyContent: 'center', marginTop: '0.7vw', flexWrap: 'wrap' }}>
-                        {[['🥩', data.cierreSemana.kg_carne], ['🍗', data.cierreSemana.kg_pollo], ['🐷', data.cierreSemana.kg_cerdo]].map(([icono, kg], i) => (
-                          (Number(kg) || 0) > 0 && (
-                            <span key={i} style={{ fontSize: '0.8vw', color: NEON.muted, background: 'rgba(0,212,255,0.06)', border: '1px solid rgba(0,212,255,0.18)', borderRadius: 4, padding: '0.2vw 0.6vw' }}>
-                              {icono} {fmtKg(Number(kg) || 0)}
-                            </span>
-                          )
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
+              {/* Curva del día en vivo: hoy vs ayer */}
+              <CurvaDia hoy={data.curvaHoy} ayer={data.curvaAyer} tv />
             </div>
 
             {/* Columna derecha */}
@@ -1042,6 +1271,29 @@ function ModoTV({ onSalir }) {
                 </div>
               </div>
 
+              {/* Cierre semana anterior — compacto, con tendencia de 8 semanas */}
+              <div className="dej-in hud" style={{ ...glass, padding: '1.1vw 1.6vw' }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.8vw', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.85vw', letterSpacing: 3, color: NEON.cian, fontWeight: 800 }}>
+                    🗓️ SEMANA ANT.{data.cierreSemana ? ` ${fcCorta(data.cierreSemana.semana_inicio)}→${fcCorta(data.cierreSemana.semana_fin)}` : ''}
+                  </span>
+                  {data.cierreSemana && (
+                    <>
+                      <span style={{ fontSize: '0.75vw', color: NEON.muted }}>
+                        V {fmtArs(Number(data.cierreSemana.ventas) || 0)} · C {fmtArs(Number(data.cierreSemana.compras) || 0)} · G {fmtArs((Number(data.cierreSemana.gastos) || 0) + (Number(data.cierreSemana.sueldos) || 0))}
+                      </span>
+                      <span style={{ marginLeft: 'auto', fontFamily: "'Bebas Neue',cursive", fontSize: '1.8vw', lineHeight: 1,
+                        color: (Number(data.cierreSemana.ganancia) || 0) >= 0 ? NEON.verde : NEON.rojo,
+                        textShadow: `0 0 12px ${(Number(data.cierreSemana.ganancia) || 0) >= 0 ? 'rgba(81,255,176,0.4)' : 'rgba(255,92,108,0.4)'}` }}>
+                        {fmtArs(Number(data.cierreSemana.ganancia) || 0)}
+                      </span>
+                    </>
+                  )}
+                  {!data.cierreSemana && <span style={{ color: NEON.muted, fontSize: '0.85vw' }}>Sin semanas cerradas aún</span>}
+                </div>
+                <BarrasCierres cierres={data.cierresHistorial} tv />
+              </div>
+
               {/* Alertas */}
               <div className="dej-in hud" style={{ ...glass, padding: '1.4vw 1.8vw', flex: 1, minHeight: 0, overflow: 'hidden',
                 borderColor: alertas.some(a => a.tipo === 'danger') ? 'rgba(255,92,108,0.4)' : alertas.length ? 'rgba(255,179,92,0.35)' : 'rgba(81,255,176,0.3)' }}>
@@ -1065,28 +1317,16 @@ function ModoTV({ onSalir }) {
                 )}
               </div>
 
-              {/* Stock crítico compacto */}
-              <div className="dej-in" style={{ ...glass, padding: '1.2vw 1.8vw' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1vw', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: '0.95vw', letterSpacing: 4, fontWeight: 800, color: data.stockCritico.length ? NEON.rojo : NEON.verde }}>
-                    {data.stockCritico.length ? '⚠️ STOCK' : '✅ STOCK OK'}
-                  </span>
-                  {data.stockCritico.length === 0 ? (
-                    <span style={{ color: NEON.muted, fontSize: '0.9vw' }}>Todo por encima del mínimo</span>
-                  ) : (
-                    data.stockCritico.map(s => (
-                      <span key={s.tipo} style={{ padding: '0.3vw 0.8vw', borderRadius: 999, background: 'rgba(255,107,129,0.1)', border: '1px solid rgba(255,107,129,0.3)', fontSize: '0.9vw', color: NEON.rojo, fontWeight: 700 }}>
-                        {s.label} {fmtKg(s.kg)}
-                      </span>
-                    ))
-                  )}
-                </div>
-              </div>
+              {/* Compras de la semana por proveedor */}
+              <PanelProveedoresSemana items={data.comprasSemanaProv} total={data.comprasSemanaTotal} tv />
             </div>
           </div>
 
+          {/* 🎬 Ticker de últimas ventas */}
+          <TickerVentas ventas={data.ultimasVentas} />
+
           {/* ── FOOTER ── */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '2.4vw', marginTop: '1.1vw', padding: '0.7vw 1.4vw', borderRadius: 6, background: 'rgba(0,212,255,0.035)', border: '1px solid rgba(0,212,255,0.15)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '2.4vw', marginTop: '0.6vw', padding: '0.7vw 1.4vw', borderRadius: 6, background: 'rgba(0,212,255,0.035)', border: '1px solid rgba(0,212,255,0.15)' }}>
             <TvMini label="CAJAS DISP." valor={`${data.panelControl.cajasInfo.total} · ${fmtKg(data.panelControl.cajasInfo.kg)}`}
               color={data.panelControl.cajasInfo.viejasCount > 0 ? NEON.ambar : NEON.cian} chico />
             <TvMini label="CHEQUES 15D" valor={`${data.cheques.length}`} color={NEON.cianHi} chico />
