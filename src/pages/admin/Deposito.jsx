@@ -1974,10 +1974,11 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
         productoId: form.cajaProductoId,
       })
       if (errCajas) { showAlert({ type: 'error', msg: 'Cajas no se cargaron: ' + errCajas }); return }
-      // 3) Registrar en compras_proveedores
+      // 3) Registrar en compras_proveedores (entrada_id = vínculo exacto, mig 57)
       await supabase.from('compras_proveedores').insert({
         fecha: form.fecha, proveedor_nombre: form.proveedor,
         producto: descripcionCajas, kg: kgTotalCajas, importe: importeCajas,
+        entrada_id: entradaIns?.id || null,
       })
       // Si el proveedor tiene cuenta corriente inicializada, la compra de
       // cajas va sola a su cuenta corriente (debe).
@@ -2106,7 +2107,8 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     await supabase.from('compras_proveedores').insert({
       fecha: form.fecha, proveedor_nombre: form.proveedor,
       producto: descripcionFinal,
-      kg: kgTotal, importe
+      kg: kgTotal, importe,
+      entrada_id: entradaInsertada?.id || null,  // vínculo exacto compra↔entrada (mig 57)
     })
     // Si el proveedor tiene cuenta corriente inicializada, esta compra
     // va sola a su cuenta corriente (debe). Si no está inicializada, no
@@ -2155,11 +2157,32 @@ async function eliminar(entrada) {
   }
   // Marcar la compra del proveedor como anulada (queda en "Buscar remitos de
   // ingreso" marcada, sin sumar a los totales) en vez de borrarla.
-  await supabase.from('compras_proveedores')
+  // Match EXACTO por entrada_id (mig 57). NUNCA update masivo por
+  // fecha+proveedor+kg: con cargas duplicadas gemelas marcaba TODAS las
+  // coincidencias — bug del 11/06 que anuló también las 7 compras reales
+  // de PRETTO al anular sus duplicadas.
+  const { data: compraPorEntrada } = await supabase.from('compras_proveedores')
     .update({ anulado: true, anulado_por: anuladoPor, anulado_en: ahora })
-    .eq('fecha', entrada.fecha)
-    .eq('proveedor_nombre', entrada.proveedor_nombre)
-    .eq('kg', entrada.kg)
+    .eq('entrada_id', entrada.id)
+    .select('id')
+  if (!compraPorEntrada || compraPorEntrada.length === 0) {
+    // Fallback para compras viejas sin entrada_id: UNA sola fila candidata
+    // (la más vieja no-anulada que coincida), nunca todas.
+    const { data: candidata } = await supabase.from('compras_proveedores')
+      .select('id')
+      .eq('fecha', entrada.fecha)
+      .eq('proveedor_nombre', entrada.proveedor_nombre)
+      .eq('kg', entrada.kg)
+      .eq('anulado', false)
+      .is('entrada_id', null)
+      .order('created_at', { ascending: true })
+      .limit(1)
+    if (candidata?.[0]) {
+      await supabase.from('compras_proveedores')
+        .update({ anulado: true, anulado_por: anuladoPor, anulado_en: ahora })
+        .eq('id', candidata[0].id)
+    }
+  }
   // Cuenta corriente del proveedor: la compra se ANULA (queda visible marcada
   // en el extracto, deja de sumar a la deuda) en vez de borrarse.
   await revertirCompraDeEntrada(entrada.id, anuladoPor)
