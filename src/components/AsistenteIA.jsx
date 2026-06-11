@@ -1,4 +1,4 @@
-// ═══════════════════════════════════════════════════════════
+﻿// ═══════════════════════════════════════════════════════════
 // ASISTENTE IA — Componente flotante de chat — v2
 // ═══════════════════════════════════════════════════════════
 // Cambios v2:
@@ -7,6 +7,7 @@
 // ═══════════════════════════════════════════════════════════
 
 import { useState, useRef, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   llamarGemini,
   construirMensajeUsuario,
@@ -17,6 +18,83 @@ import {
 import { DEFINICIONES_TOOLS, ejecutarFuncion } from '../lib/asistenteTools'
 
 // ═══════════════════════════════════════════════════════════
+// 🎤 VOZ — reconocimiento (Web Speech API) + lectura en voz alta
+// ═══════════════════════════════════════════════════════════
+// Gratis y sin servicios externos: usa el reconocimiento del navegador
+// (Chrome PC/Android) en español. Si el navegador no lo soporta, el
+// botón de micrófono directamente no se muestra.
+const SpeechRecognitionAPI =
+  typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null
+
+// Limpia un texto para que el lector de voz no diga "asterisco emoji"
+function limpiarParaVoz(t) {
+  return String(t || '')
+    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu, '')
+    .replace(/[*_#`>~|]/g, '')
+    .replace(/\$\s?([\d.,]+)/g, '$1 pesos')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function hablar(texto) {
+  try {
+    if (!('speechSynthesis' in window)) return
+    const limpio = limpiarParaVoz(texto)
+    if (!limpio) return
+    window.speechSynthesis.cancel()
+    const u = new SpeechSynthesisUtterance(limpio)
+    u.lang = 'es-AR'
+    u.rate = 1.05
+    const voces = window.speechSynthesis.getVoices()
+    const vozEs = voces.find(v => v.lang === 'es-AR') || voces.find(v => v.lang?.startsWith('es'))
+    if (vozEs) u.voice = vozEs
+    window.speechSynthesis.speak(u)
+  } catch { /* la voz nunca debe romper el chat */ }
+}
+
+// ── Comandos de navegación por voz/texto (no pasan por la IA) ──
+const RUTAS_VOZ = [
+  { claves: ['modo tv', 'fabri', 'pantalla de la tele', 'modo tele'], ruta: '/admin/ejecutivo?tv=1', nombre: 'F.A.B.R.I.' },
+  { claves: ['dashboard ejecutivo', 'ejecutivo', 'panel del dueno'], ruta: '/admin/ejecutivo', nombre: 'el Dashboard Ejecutivo' },
+  { claves: ['deposito'], ruta: '/admin/deposito', nombre: 'Depósito' },
+  { claves: ['caja'], ruta: '/admin/caja', nombre: 'la Caja' },
+  { claves: ['precios', 'ofertas'], ruta: '/admin/precios', nombre: 'Precios' },
+  { claves: ['clientes'], ruta: '/admin/clientes', nombre: 'Clientes' },
+  { claves: ['pedidos'], ruta: '/admin/pedidos', nombre: 'Pedidos' },
+  { claves: ['cheques'], ruta: '/admin/cheques', nombre: 'Cheques' },
+  { claves: ['sueldos'], ruta: '/admin/sueldos', nombre: 'Sueldos' },
+  { claves: ['gastos'], ruta: '/admin/gastos', nombre: 'Gastos' },
+  { claves: ['cierre'], ruta: '/admin/cierre', nombre: 'el Cierre' },
+  { claves: ['franquicias'], ruta: '/admin/franquicias', nombre: 'Franquicias' },
+  { claves: ['mayorista', 'ventas'], ruta: '/admin/ventas', nombre: 'Mayorista' },
+  { claves: ['etiquetas'], ruta: '/admin/etiquetas', nombre: 'Etiquetas' },
+  { claves: ['facturacion'], ruta: '/admin/facturacion', nombre: 'Facturación' },
+  { claves: ['auditoria'], ruta: '/admin/auditoria', nombre: 'Auditoría' },
+  { claves: ['dashboard', 'inicio'], ruta: '/admin/dashboard', nombre: 'el Dashboard' },
+]
+const VERBOS_NAV = /\b(abri|abrir|abre|anda|andá|vamos|llevame|llevarme|mostrame|mostra|ir|entra|entrar|pone|poné|prende|prendé)\b/
+
+function normalizarVoz(t) {
+  return String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ̀-ͯ]/g, '').trim()
+}
+
+// Devuelve la ruta si el texto es un comando de navegación.
+// Requiere un verbo de navegación (o que el texto sea CORTO y solo el nombre
+// de la pantalla) para no robarse preguntas como "¿cuánto hay en depósito?".
+function detectarNavegacion(texto) {
+  const t = normalizarVoz(texto)
+  const esCorto = t.split(/\s+/).length <= 3
+  const tieneVerbo = VERBOS_NAV.test(t)
+  if (!tieneVerbo && !esCorto) return null
+  for (const r of RUTAS_VOZ) {
+    if (r.claves.some(c => t.includes(c))) {
+      if (tieneVerbo || r.claves.some(c => t === c || t === `la ${c}` || t === `el ${c}`)) return r
+    }
+  }
+  return null
+}
+
+// ═══════════════════════════════════════════════════════════
 // SYSTEM PROMPT — Instrucciones para la IA
 // ═══════════════════════════════════════════════════════════
 const SYSTEM_PROMPT = `Sos el asistente de IA de Carnicerías Fabricius, en Río Primero, Córdoba, Argentina.
@@ -25,7 +103,7 @@ Tu trabajo es ayudar a Fabricio Lenardon y Ariel Garrone (los dos socios) a mane
 
 REGLAS DE COMUNICACIÓN:
 1. Hablás en español rioplatense argentino, casual pero profesional. Tuteo ("vos").
-2. Sos breve y directo. Sin explicaciones largas innecesarias.
+2. Sos breve y directo. Sin explicaciones largas innecesarias. El usuario puede estar usándote POR VOZ (micrófono + respuestas leídas en voz alta): respuestas de 1-3 oraciones, sin tablas ni listas largas, números redondeados al hablar.
 3. Montos en pesos argentinos. Formato: $15.000 (sin decimales).
 4. Fechas a la base de datos en formato YYYY-MM-DD. Al usuario, en formato DD/MM/YYYY.
 
@@ -73,9 +151,10 @@ PAGOS DE CLIENTES:
 `
 
 export default function AsistenteIA() {
+  const navigate = useNavigate()
   const [abierto, setAbierto] = useState(false)
   const [mensajes, setMensajes] = useState([
-    { rol: 'asistente', texto: '¡Hola! Soy tu asistente. Pedime lo que necesites: cargar gastos, entradas al depósito, registrar pagos, ver deudas, stock, o subí la foto de un remito/ticket. ☕' }
+    { rol: 'asistente', texto: '¡Hola! Soy tu asistente. Pedime lo que necesites: cargar gastos, entradas al depósito, registrar pagos, ver deudas, stock, o subí la foto de un remito/ticket. 🎤 También podés hablarme con el micrófono.' }
   ])
   const [input, setInput] = useState('')
   const [imagenSeleccionada, setImagenSeleccionada] = useState(null)
@@ -84,18 +163,92 @@ export default function AsistenteIA() {
   const fileInputRef = useRef(null)
   const mensajesRef = useRef(null)
 
+  // 🎤 Estado de voz
+  const [escuchando, setEscuchando] = useState(false)
+  const [vozActiva, setVozActiva] = useState(() => localStorage.getItem('fabri_voz') === '1') // 🔊 leer respuestas siempre
+  const recognitionRef = useRef(null)
+  const turnoDeVozRef = useRef(false) // el último mensaje entró por micrófono → responder hablando
+
+  function toggleVoz() {
+    setVozActiva(v => {
+      const nuevo = !v
+      localStorage.setItem('fabri_voz', nuevo ? '1' : '0')
+      if (!nuevo) window.speechSynthesis?.cancel()
+      return nuevo
+    })
+  }
+
+  // Responder en voz alta si corresponde (toggle global O el turno vino por mic)
+  function hablarSiCorresponde(texto) {
+    if (vozActiva || turnoDeVozRef.current) hablar(texto)
+  }
+
+  function iniciarEscucha() {
+    if (!SpeechRecognitionAPI || escuchando || cargando) return
+    try {
+      const rec = new SpeechRecognitionAPI()
+      recognitionRef.current = rec
+      rec.lang = 'es-AR'
+      rec.interimResults = true
+      rec.continuous = false
+      rec.onresult = (e) => {
+        let parcial = ''
+        let final = ''
+        for (const res of e.results) {
+          if (res.isFinal) final += res[0].transcript
+          else parcial += res[0].transcript
+        }
+        setInput(final || parcial)
+        if (final.trim()) {
+          setEscuchando(false)
+          rec.stop()
+          enviar(final.trim(), { vozEntrada: true })
+        }
+      }
+      rec.onerror = () => setEscuchando(false)
+      rec.onend = () => setEscuchando(false)
+      setEscuchando(true)
+      window.speechSynthesis?.cancel() // si estaba hablando, que se calle para escuchar
+      rec.start()
+    } catch {
+      setEscuchando(false)
+    }
+  }
+
+  function detenerEscucha() {
+    try { recognitionRef.current?.stop() } catch { /* ya detenido */ }
+    setEscuchando(false)
+  }
+
   useEffect(() => {
     if (mensajesRef.current) mensajesRef.current.scrollTop = mensajesRef.current.scrollHeight
   }, [mensajes, cargando])
 
-  async function enviar() {
-    if (!input.trim() && !imagenSeleccionada) return
+  async function enviar(textoVoz = null, { vozEntrada = false } = {}) {
+    // textoVoz solo es string cuando viene del micrófono (el onClick del
+    // botón pasa el evento — se ignora)
+    const textoDirecto = typeof textoVoz === 'string' ? textoVoz : null
+    if (!textoDirecto && !input.trim() && !imagenSeleccionada) return
     if (cargando) return
 
-    const textoUsuario = input.trim()
-    const imagen = imagenSeleccionada
+    const textoUsuario = (textoDirecto ?? input).trim()
+    const imagen = textoDirecto ? null : imagenSeleccionada
+    turnoDeVozRef.current = vozEntrada
     setInput('')
-    setImagenSeleccionada(null)
+    if (!textoDirecto) setImagenSeleccionada(null)
+
+    // 🧭 Comandos de navegación: no gastan IA, responden al instante
+    const nav = !imagen && detectarNavegacion(textoUsuario)
+    if (nav) {
+      setMensajes(prev => [...prev,
+        { rol: 'usuario', texto: textoUsuario },
+        { rol: 'asistente', texto: `🧭 Te llevo a ${nav.nombre}` },
+      ])
+      hablarSiCorresponde(`Te llevo a ${nav.nombre}`)
+      navigate(nav.ruta)
+      return
+    }
+
     setCargando(true)
 
     setMensajes(prev => [...prev, {
@@ -127,6 +280,7 @@ export default function AsistenteIA() {
 
         if (respuesta.texto) {
           setMensajes(prev => [...prev, { rol: 'asistente', texto: respuesta.texto }])
+          hablarSiCorresponde(respuesta.texto)
         }
 
         if (respuesta.llamadaFuncion) {
@@ -185,9 +339,13 @@ export default function AsistenteIA() {
           <div style={estilos.header}>
             <div>
               <div style={estilos.headerTitulo}>🤖 Asistente Fabricius</div>
-              <div style={estilos.headerSubtitulo}>IA · Gemini 2.5 Flash</div>
+              <div style={estilos.headerSubtitulo}>IA · Gemini 2.5 Flash{SpeechRecognitionAPI ? ' · 🎤 voz' : ''}</div>
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={toggleVoz} style={{ ...estilos.botonHeader, ...(vozActiva ? estilos.botonVozActiva : {}) }}
+                title={vozActiva ? 'Respuestas habladas: SÍ (click para silenciar)' : 'Respuestas habladas: NO (click para activar)'}>
+                {vozActiva ? '🔊' : '🔇'}
+              </button>
               <button onClick={nuevaConversacion} style={estilos.botonHeader} title="Nueva conversación">🗑️</button>
               <button onClick={() => setAbierto(false)} style={estilos.botonHeader} title="Cerrar">✕</button>
             </div>
@@ -226,16 +384,23 @@ export default function AsistenteIA() {
           <div style={estilos.inputBox}>
             <input type="file" accept="image/*" ref={fileInputRef} onChange={manejarImagen} style={{ display: 'none' }} />
             <button onClick={() => fileInputRef.current?.click()} style={estilos.botonAdjuntar} title="Subir foto">📎</button>
+            {SpeechRecognitionAPI && (
+              <button onClick={escuchando ? detenerEscucha : iniciarEscucha}
+                style={{ ...estilos.botonAdjuntar, ...(escuchando ? estilos.botonMicEscuchando : {}) }}
+                title={escuchando ? 'Escuchando… (click para cortar)' : 'Hablarle al asistente'}>
+                🎤
+              </button>
+            )}
             <textarea
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={manejarEnter}
-              placeholder="Pedime algo..."
+              placeholder={escuchando ? '🎤 Escuchando…' : 'Pedime algo...'}
               rows={1}
-              style={estilos.textarea}
+              style={{ ...estilos.textarea, ...(escuchando ? { borderColor: '#e74c3c' } : {}) }}
               disabled={cargando}
             />
-            <button onClick={enviar} disabled={cargando || (!input.trim() && !imagenSeleccionada)} style={estilos.botonEnviar}>
+            <button onClick={() => enviar()} disabled={cargando || (!input.trim() && !imagenSeleccionada)} style={estilos.botonEnviar}>
               ➤
             </button>
           </div>
@@ -246,6 +411,10 @@ export default function AsistenteIA() {
         @keyframes blink {
           0%, 80%, 100% { opacity: 0.2; }
           40% { opacity: 1; }
+        }
+        @keyframes micPulso {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(231,76,60,0.5); }
+          50% { box-shadow: 0 0 0 8px rgba(231,76,60,0); }
         }
       `}</style>
     </>
@@ -302,6 +471,13 @@ const estilos = {
     background: '#1c1c18', border: '1px solid #28281e', borderRadius: 10,
     color: '#c9a84c', width: 38, height: 38, cursor: 'pointer', fontSize: 16,
     flexShrink: 0,
+  },
+  botonMicEscuchando: {
+    background: '#3a1a1a', border: '1px solid #e74c3c',
+    animation: 'micPulso 1.2s ease-in-out infinite',
+  },
+  botonVozActiva: {
+    border: '1px solid #c9a84c', color: '#c9a84c', background: 'rgba(201,168,76,0.12)',
   },
   textarea: {
     flex: 1, background: '#1c1c18', border: '1px solid #28281e', borderRadius: 10,

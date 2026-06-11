@@ -11,6 +11,7 @@
 // reportes avanzados siguen disponibles.
 // ============================================================
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useLocation } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { enviarWhatsapp, fmtArs } from '../../lib/whatsapp'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
@@ -448,7 +449,18 @@ function useRelojARG() {
 // ════════════════════════════════════════════════════════════
 export default function DashboardEjecutivo() {
   const [subTab, setSubTab] = useState('resumen')
-  const [modoTV, setModoTV] = useState(false)
+  // ?tv=1 en la URL arranca directo en F.A.B.R.I. — lo usa el comando de
+  // voz "modo tv"/"fabri" del asistente (sin gesto no hay fullscreen real,
+  // pero el overlay se ve igual; el fullscreen se logra con el botón).
+  const [modoTV, setModoTV] = useState(() => {
+    try { return new URLSearchParams(window.location.search).get('tv') === '1' } catch { return false }
+  })
+  // Si la URL cambia a ?tv=1 estando ya en esta pantalla (comando de voz),
+  // también entra a F.A.B.R.I.
+  const location = useLocation()
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get('tv') === '1') setModoTV(true)
+  }, [location.search])
 
   function entrarModoTV() {
     setModoTV(true)
