@@ -53,31 +53,75 @@ const finMesAnterior = () => {
   inicio.setDate(inicio.getDate() - 1)
   return fechaHoyARG(inicio)
 }
+// Mismo día del mes anterior (para comparar período contra período).
+// Regla de Fabricio: NO comparar el mes en curso contra el mes anterior
+// COMPLETO — eso no es parámetro. Se compara 01→hoy vs 01→mismo día del
+// mes pasado. Si el mes anterior es más corto (ej. 31 vs 30), se recorta.
+const mismoDiaMesAnterior = () => {
+  const hoy = fechaHoyARG()
+  const y = Number(hoy.slice(0, 4))
+  const m = Number(hoy.slice(5, 7))
+  const d = Number(hoy.slice(8, 10))
+  const yPrev = m === 1 ? y - 1 : y
+  const mPrev = m === 1 ? 12 : m - 1
+  const ultimoDiaPrev = new Date(yPrev, mPrev, 0).getDate()
+  return `${yPrev}-${String(mPrev).padStart(2, '0')}-${String(Math.min(d, ultimoDiaPrev)).padStart(2, '0')}`
+}
 
-// ── Estética compartida ─────────────────────────────────────
+// ── Estética compartida: HUD holográfico (estilo laboratorio de Stark) ──
+// Cian translúcido dominante, paneles de "cristal" con esquinas marcadas,
+// rejilla de fondo, líneas finas brillantes. El dorado queda solo para la
+// marca FABRICIUS y el #1 del ranking.
 const NEON = {
   oro:    '#ffd17a',
-  verde:  '#5dffa0',
-  rojo:   '#ff6b81',
-  cian:   '#6be5ff',
-  azul:   '#7a9dff',
-  ambar:  '#ffb86b',
-  texto:  '#e8e6e0',
-  muted:  'rgba(232,230,224,0.45)',
+  verde:  '#51ffb0',
+  rojo:   '#ff5c6c',
+  cian:   '#00d4ff',
+  cianHi: '#9beaff',   // cian claro para números grandes
+  azul:   '#5fa8ff',
+  ambar:  '#ffb35c',
+  texto:  '#d9f3ff',
+  muted:  'rgba(155,214,255,0.45)',
 }
 const glass = {
-  background: 'linear-gradient(160deg, rgba(255,255,255,0.045) 0%, rgba(255,255,255,0.015) 100%)',
-  border: '1px solid rgba(255,255,255,0.09)',
-  borderRadius: 16,
+  background: 'linear-gradient(160deg, rgba(0,170,255,0.07) 0%, rgba(0,60,110,0.04) 55%, rgba(0,20,40,0.05) 100%)',
+  border: '1px solid rgba(0,212,255,0.22)',
+  borderRadius: 6,
   backdropFilter: 'blur(14px)',
+  boxShadow: 'inset 0 0 26px rgba(0,212,255,0.05), 0 0 14px rgba(0,212,255,0.06)',
 }
 
-// Animaciones globales del dashboard (pulso EN VIVO, glow, entrada suave)
+// Animaciones + clases HUD (esquinas tipo holograma, rejilla, scanline)
 const ESTILOS_GLOBALES = `
 @keyframes dejPulso { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.8); } }
-@keyframes dejGlow  { 0%,100% { text-shadow: 0 0 18px rgba(255,209,122,0.35); } 50% { text-shadow: 0 0 34px rgba(255,209,122,0.6); } }
+@keyframes dejGlow  { 0%,100% { text-shadow: 0 0 16px rgba(0,212,255,0.45); } 50% { text-shadow: 0 0 36px rgba(0,212,255,0.8); } }
 @keyframes dejIn    { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes hudScan  { from { top: -10%; } to { top: 110%; } }
+@keyframes hudGiro  { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .dej-in { animation: dejIn .5s ease both; }
+/* Esquinas holográficas: dos escuadras cian en TL y BR */
+.hud { position: relative; }
+.hud::before, .hud::after {
+  content: ''; position: absolute; width: 16px; height: 16px; pointer-events: none;
+}
+.hud::before { top: -1px; left: -1px; border-top: 2px solid rgba(0,212,255,0.8); border-left: 2px solid rgba(0,212,255,0.8); }
+.hud::after  { bottom: -1px; right: -1px; border-bottom: 2px solid rgba(0,212,255,0.8); border-right: 2px solid rgba(0,212,255,0.8); }
+/* Rejilla de fondo del Modo TV (holograma de mesa de Stark) */
+.hud-rejilla {
+  position: absolute; inset: 0; pointer-events: none; opacity: 0.5;
+  background-image:
+    linear-gradient(rgba(0,212,255,0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,212,255,0.05) 1px, transparent 1px);
+  background-size: 46px 46px;
+  mask-image: radial-gradient(ellipse at 50% 40%, black 0%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 40%, black 0%, transparent 75%);
+}
+/* Línea de escaneo que recorre la pantalla de la tele */
+.hud-scan {
+  position: absolute; left: 0; right: 0; height: 2px; pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(0,212,255,0.25), transparent);
+  animation: hudScan 9s linear infinite;
+}
 `
 
 // ════════════════════════════════════════════════════════════
@@ -102,19 +146,21 @@ function useDashboardData(refreshMs = 120000) {
     const hace7 = fechaHaceDias(6)
     const mesIni = inicioMes()
     const mesAntIni = inicioMesAnterior()
-    const mesAntFin = finMesAnterior()
+    const mesAntMismoDia = mismoDiaMesAnterior() // período comparable: 01→mismo día
     const hoyDt = new Date(hoy + 'T12:00')
     const anioPasadoMesIni = `${hoyDt.getFullYear() - 1}-${String(hoyDt.getMonth() + 1).padStart(2, '0')}-01`
     const anioPasadoHoy    = `${hoyDt.getFullYear() - 1}-${String(hoyDt.getMonth() + 1).padStart(2, '0')}-${String(hoyDt.getDate()).padStart(2, '0')}`
 
     const [ventasHoy, ventasAyer, ventasSemana, ventasMes, ventasMesAnt, ventasAnioPasado,
            salidasMes, pedidosMes, cuentas, facturas12m, stock, cheques, clientes,
-           gastosMes, sueldosMes, pagosProvMes, movCtacteMes, todasCajas, todosDeudores, promoCfg] = await Promise.all([
+           gastosMes, sueldosMes, pagosProvMes, movCtacteMes, todasCajas, todosDeudores, promoCfg,
+           comprasMesQ, cierreSemQ] = await Promise.all([
       supabase.from('ventas_minoristas').select('total, efectivo, debito, transferencia, items, fecha, hora').eq('origen', 'caja').eq('fecha', hoy),
       supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').eq('fecha', ayer),
       supabase.from('ventas_minoristas').select('total, fecha').eq('origen', 'caja').gte('fecha', hace7).lte('fecha', hoy),
       supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').gte('fecha', mesIni).lte('fecha', hoy),
-      supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').gte('fecha', mesAntIni).lte('fecha', mesAntFin),
+      // Mes anterior recortado al MISMO período (01 → mismo día), no el mes completo
+      supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').gte('fecha', mesAntIni).lte('fecha', mesAntMismoDia),
       supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').gte('fecha', anioPasadoMesIni).lte('fecha', anioPasadoHoy),
       // Mayorista del mes (con filtro de flujos internos)
       supabase.from('salidas_deposito').select('total, cobro').gte('fecha', mesIni).lte('fecha', hoy),
@@ -132,6 +178,11 @@ function useDashboardData(refreshMs = 120000) {
       supabase.from('cajas_stock').select('id, tipo_caja, kg, fecha_ingreso').eq('estado', 'disponible'),
       supabase.from('clientes').select('saldo').gt('saldo', 0),
       supabase.from('config_sistema').select('valor').eq('clave', 'promo_mundial').maybeSingle(),
+      // COMPRAS del mes: ingresos de mercadería al depósito con importe real
+      // (las entradas generadas por desposte tienen importe 0 y quedan afuera)
+      supabase.from('entradas_deposito').select('importe').gte('fecha', mesIni).lte('fecha', hoy).gt('importe', 0).eq('eliminado', false),
+      // Cierre de la SEMANA ANTERIOR (la última semana ya cerrada)
+      supabase.from('cierres_semanales').select('*').lt('semana_fin', hoy).order('semana_inicio', { ascending: false }).limit(1).maybeSingle(),
     ])
 
     const totalHoy  = (ventasHoy.data || []).reduce((s, v) => s + (Number(v.total) || 0), 0)
@@ -178,6 +229,20 @@ function useDashboardData(refreshMs = 120000) {
     const egresosTotalesMes = gastosFijos + gastosVariables + gastosSocios + sueldosTotalMes + pagosProvTotal
     const saldoNetoMes = ingresosTotalesMes - egresosTotalesMes
     const pctSueldosFact = facturadoMes > 0 ? (sueldosTotalMes / facturadoMes) * 100 : 0
+
+    // ── MENSUAL EN VIVO (regla de Fabricio): VENTAS − COMPRAS − GASTOS ──
+    // Los tres parámetros del mes corriente (01 → hoy), actualizados en vivo.
+    // COMPRAS = mercadería ingresada al depósito (importe real de cada entrada).
+    // GASTOS = gastos operativos + sueldos. Los pagos a proveedores NO van acá:
+    // son la cancelación de las compras, sumarían doble.
+    const comprasMes = (comprasMesQ.data || []).reduce((s, e) => s + (Number(e.importe) || 0), 0)
+    const gastosOperativosMes = gastosFijos + gastosVariables + gastosSocios + sueldosTotalMes
+    const mensualVivo = {
+      ventas: facturadoMes,
+      compras: comprasMes,
+      gastos: gastosOperativosMes,
+      saldo: facturadoMes - comprasMes - gastosOperativosMes,
+    }
 
     // ── CAJAS DISPONIBLES (count + envejecidas) ──
     const cajasDisp = todasCajas.data || []
@@ -235,6 +300,8 @@ function useDashboardData(refreshMs = 120000) {
       totalMesAnt, variacion,
       topProductosHoy, cuentasConPct, stockCritico,
       ultimaVentaHora,
+      mensualVivo,
+      cierreSemana: cierreSemQ?.data || null,
       promoMundial: promoCfg?.data?.valor || { activa: false },
       // Solo recibidos: los emitidos propios son plata que SALE, no que entra
       cheques: (cheques.data || []).filter(c => c.origen !== 'emitido'),
@@ -324,14 +391,14 @@ export default function DashboardEjecutivo() {
               : 'Reportes avanzados · Solo visible para vos'}
           </div>
         </div>
-        <button onClick={entrarModoTV}
+        <button onClick={entrarModoTV} className="hud"
           style={{
-            padding: '12px 22px', borderRadius: 12, cursor: 'pointer',
-            background: 'linear-gradient(135deg, rgba(255,209,122,0.16), rgba(255,209,122,0.05))',
-            border: '1px solid rgba(255,209,122,0.45)', color: NEON.oro,
+            padding: '12px 22px', borderRadius: 6, cursor: 'pointer',
+            background: 'linear-gradient(135deg, rgba(0,212,255,0.16), rgba(0,212,255,0.04))',
+            border: '1px solid rgba(0,212,255,0.5)', color: NEON.cian,
             fontWeight: 800, fontSize: 13, letterSpacing: 1.5,
             fontFamily: "'DM Sans',sans-serif",
-            boxShadow: '0 0 24px rgba(255,209,122,0.12)',
+            boxShadow: '0 0 24px rgba(0,212,255,0.15)',
           }}>
           📺 MODO TV — EN VIVO
         </button>
@@ -343,9 +410,9 @@ export default function DashboardEjecutivo() {
           <button key={t.id} onClick={() => setSubTab(t.id)}
             style={{
               padding: '8px 16px', borderRadius: 999, cursor: 'pointer',
-              border: subTab === t.id ? '1px solid rgba(255,209,122,0.5)' : '1px solid rgba(255,255,255,0.08)',
-              background: subTab === t.id ? 'rgba(255,209,122,0.12)' : 'rgba(255,255,255,0.02)',
-              color: subTab === t.id ? NEON.oro : NEON.muted,
+              border: subTab === t.id ? '1px solid rgba(0,212,255,0.55)' : '1px solid rgba(0,212,255,0.1)',
+              background: subTab === t.id ? 'rgba(0,212,255,0.12)' : 'rgba(0,212,255,0.02)',
+              color: subTab === t.id ? NEON.cian : NEON.muted,
               fontWeight: 700, fontSize: 12, letterSpacing: 0.5,
               fontFamily: "'DM Sans',sans-serif", transition: 'all .2s',
             }}>
@@ -419,7 +486,7 @@ function ResumenEjecutivo() {
     msg += `*📅 Mes:* ${fmtArs(data.totalMes)}`
     if (data.totalMesAnt > 0) {
       const signo = data.variacion >= 0 ? '+' : ''
-      msg += ` (${signo}${data.variacion.toFixed(1)}% vs mes anterior)`
+      msg += ` (${signo}${data.variacion.toFixed(1)}% vs mismo período del mes anterior)`
     }
     msg += `\n\n`
     if (data.topProductosHoy.length > 0) {
@@ -459,10 +526,10 @@ function ResumenEjecutivo() {
     <div className="dej-in">
       {/* ── HERO: hoy + los 3 números madre ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 12 }}>
-        <div style={{ ...glass, padding: 22, gridColumn: 'span 1', position: 'relative', overflow: 'hidden', border: '1px solid rgba(255,209,122,0.35)' }}>
-          <div style={{ position: 'absolute', top: -60, right: -60, width: 180, height: 180, borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,209,122,0.14), transparent 70%)' }} />
+        <div className="hud" style={{ ...glass, padding: 22, gridColumn: 'span 1', overflow: 'hidden', border: '1px solid rgba(0,212,255,0.4)' }}>
+          <div style={{ position: 'absolute', top: -60, right: -60, width: 180, height: 180, borderRadius: '50%', background: 'radial-gradient(circle, rgba(0,212,255,0.16), transparent 70%)' }} />
           <Etiqueta texto="FACTURADO HOY" extra={<PuntoVivo />} />
-          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 52, color: NEON.oro, lineHeight: 1, animation: 'dejGlow 3s ease-in-out infinite' }}>
+          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 52, color: NEON.cianHi, lineHeight: 1, animation: 'dejGlow 3s ease-in-out infinite' }}>
             {fmtArs(data.totalHoy)}
           </div>
           <div style={{ fontSize: 12, color: NEON.muted, marginTop: 6 }}>
@@ -483,9 +550,29 @@ function ResumenEjecutivo() {
         <CardKPI label="ÚLTIMOS 7 DÍAS" valor={fmtArs(data.totalSemana)} color={NEON.azul}
           sub={`Promedio ${fmtArs(data.totalSemana / 7)}/día`} />
         <CardKPI label="ESTE MES (CAJA)" valor={fmtArs(data.totalMes)} color={colorVar(data.variacion)}
-          sub={data.totalMesAnt > 0 ? `${flecha(data.variacion)} ${signo(data.variacion)}${data.variacion.toFixed(1)}% vs mes anterior` : 'Sin datos del mes anterior'} />
-        <CardKPI label="SALDO NETO MES" valor={fmtArs(pc.saldoNetoMes)} color={pc.saldoNetoMes >= 0 ? NEON.verde : NEON.rojo}
-          sub={`Ingresos ${fmtArs(pc.ingresosTotalesMes)} − Egresos ${fmtArs(pc.egresosTotalesMes)}`} />
+          sub={data.totalMesAnt > 0
+            ? `${flecha(data.variacion)} ${signo(data.variacion)}${data.variacion.toFixed(1)}% vs mismo período mes ant. (01→${fechaHoyARG().slice(8, 10)})`
+            : 'Sin datos del mismo período del mes anterior'} />
+        {/* MENSUAL EN VIVO — los 3 parámetros que pidió Fabricio: V − C − G */}
+        <div className="hud" style={{ ...glass, padding: 18 }}>
+          <Etiqueta texto={`MENSUAL EN VIVO · 01→${fechaHoyARG().slice(8, 10)}`} extra={<PuntoVivo />} />
+          {[
+            { l: 'VENTAS',  v: data.mensualVivo.ventas,  c: NEON.cianHi },
+            { l: 'COMPRAS', v: data.mensualVivo.compras, c: NEON.ambar },
+            { l: 'GASTOS',  v: data.mensualVivo.gastos,  c: NEON.rojo },
+          ].map(x => (
+            <div key={x.l} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 2 }}>
+              <span style={{ fontSize: 10, letterSpacing: 2, color: NEON.muted, fontWeight: 800 }}>{x.l}</span>
+              <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 21, color: x.c }}>{fmtArs(x.v)}</span>
+            </div>
+          ))}
+          <div style={{ borderTop: '1px solid rgba(0,212,255,0.25)', marginTop: 6, paddingTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <span style={{ fontSize: 10, letterSpacing: 2, color: NEON.muted, fontWeight: 800 }}>SALDO</span>
+            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 26, color: data.mensualVivo.saldo >= 0 ? NEON.verde : NEON.rojo }}>
+              {fmtArs(data.mensualVivo.saldo)}
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* ── Cinta de métricas secundarias ── */}
@@ -509,17 +596,7 @@ function ResumenEjecutivo() {
 
       {/* ── Top productos + Stock + Monos ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 12, marginTop: 12 }}>
-        <div style={{ ...glass, padding: 18 }}>
-          <Etiqueta texto="🏆 TOP PRODUCTOS HOY" />
-          {data.topProductosHoy.length === 0 ? (
-            <p style={{ color: NEON.muted, fontSize: 13 }}>Sin ventas hoy todavía.</p>
-          ) : (
-            data.topProductosHoy.map((p, i) => (
-              <FilaRanking key={i} pos={i + 1} nombre={p.nombre} der1={fmtKg(p.kg)} der2={fmtArs(p.importe)}
-                pct={data.topProductosHoy[0].importe > 0 ? (p.importe / data.topProductosHoy[0].importe) * 100 : 0} />
-            ))
-          )}
-        </div>
+        <CierreSemanaAnterior cierre={data.cierreSemana} />
 
         <div style={{ ...glass, padding: 18 }}>
           <Etiqueta texto={data.stockCritico.length > 0 ? '⚠️ STOCK CRÍTICO' : '✅ STOCK OK'}
@@ -624,17 +701,17 @@ function Etiqueta({ texto, color, extra }) {
 function PuntoVivo({ size = 7 }) {
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginLeft: 'auto' }}>
-      <span style={{ width: size, height: size, borderRadius: '50%', background: NEON.verde, boxShadow: `0 0 10px ${NEON.verde}`, animation: 'dejPulso 1.6s ease-in-out infinite' }} />
-      <span style={{ fontSize: 9, color: NEON.verde, letterSpacing: 1.5 }}>EN VIVO</span>
+      <span style={{ width: size, height: size, borderRadius: '50%', background: NEON.cian, boxShadow: `0 0 10px ${NEON.cian}`, animation: 'dejPulso 1.6s ease-in-out infinite' }} />
+      <span style={{ fontSize: 9, color: NEON.cian, letterSpacing: 1.5 }}>EN VIVO</span>
     </span>
   )
 }
 
 function CardKPI({ label, valor, sub, color }) {
   return (
-    <div style={{ ...glass, padding: 22 }}>
+    <div className="hud" style={{ ...glass, padding: 22 }}>
       <Etiqueta texto={label} />
-      <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 40, color: color || NEON.oro, lineHeight: 1 }}>{valor}</div>
+      <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 40, color: color || NEON.cianHi, lineHeight: 1 }}>{valor}</div>
       {sub && <div style={{ fontSize: 11, color: NEON.muted, marginTop: 6 }}>{sub}</div>}
     </div>
   )
@@ -659,17 +736,49 @@ function Barra({ pct, color, alto = 5 }) {
   )
 }
 
-function FilaRanking({ pos, nombre, der1, der2, pct }) {
-  return (
-    <div style={{ marginBottom: 9 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 13 }}>
-        <span style={{ color: pos === 1 ? NEON.oro : NEON.muted, fontWeight: 800, width: 16 }}>{pos}</span>
-        <span style={{ flex: 1, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nombre}</span>
-        <span style={{ color: NEON.muted, fontSize: 11 }}>{der1}</span>
-        <span style={{ color: NEON.oro, fontWeight: 700 }}>{der2}</span>
+// Fecha corta DD/MM a partir de un date ISO
+const fcCorta = (s) => s ? `${String(s).slice(8, 10)}/${String(s).slice(5, 7)}` : '—'
+
+// ── Cierre de la SEMANA ANTERIOR ────────────────────────────
+// Siempre muestra la última semana CERRADA (parámetro real, no parcial).
+// Durante la semana en curso se ve el cierre de la semana pasada.
+function CierreSemanaAnterior({ cierre }) {
+  if (!cierre) {
+    return (
+      <div className="hud" style={{ ...glass, padding: 18 }}>
+        <Etiqueta texto="🗓️ CIERRE SEMANA ANTERIOR" />
+        <p style={{ color: NEON.muted, fontSize: 13 }}>Todavía no hay semanas cerradas.</p>
       </div>
-      <div style={{ marginLeft: 24, marginTop: 3 }}>
-        <Barra pct={pct} color={pos === 1 ? NEON.oro : NEON.azul} alto={3} />
+    )
+  }
+  const ganancia = Number(cierre.ganancia) || 0
+  const filas = [
+    { l: 'VENTAS',  v: cierre.ventas,  c: NEON.cianHi },
+    { l: 'COMPRAS', v: cierre.compras, c: NEON.ambar },
+    { l: 'GASTOS',  v: cierre.gastos,  c: NEON.rojo },
+    { l: 'SUELDOS', v: cierre.sueldos, c: NEON.rojo },
+  ]
+  return (
+    <div className="hud" style={{ ...glass, padding: 18 }}>
+      <Etiqueta texto={`🗓️ CIERRE SEMANA ANTERIOR · ${fcCorta(cierre.semana_inicio)} → ${fcCorta(cierre.semana_fin)}`} />
+      {filas.map(x => (
+        <div key={x.l} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 2 }}>
+          <span style={{ fontSize: 10, letterSpacing: 2, color: NEON.muted, fontWeight: 800 }}>{x.l}</span>
+          <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 19, color: x.c }}>{fmtArs(Number(x.v) || 0)}</span>
+        </div>
+      ))}
+      <div style={{ borderTop: '1px solid rgba(0,212,255,0.25)', marginTop: 6, paddingTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <span style={{ fontSize: 10, letterSpacing: 2, color: NEON.muted, fontWeight: 800 }}>GANANCIA</span>
+        <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 25, color: ganancia >= 0 ? NEON.verde : NEON.rojo }}>{fmtArs(ganancia)}</span>
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+        {[['🥩', cierre.kg_carne], ['🍗', cierre.kg_pollo], ['🐷', cierre.kg_cerdo]].map(([icono, kg], i) => (
+          (Number(kg) || 0) > 0 && (
+            <span key={i} style={{ fontSize: 10, color: NEON.muted, background: 'rgba(0,212,255,0.06)', border: '1px solid rgba(0,212,255,0.18)', borderRadius: 4, padding: '2px 7px' }}>
+              {icono} {fmtKg(Number(kg) || 0)}
+            </span>
+          )
+        ))}
       </div>
     </div>
   )
@@ -719,11 +828,11 @@ function calcularAlertas(data) {
       detalle: 'Priorizá su venta',
     })
   }
-  if (data.panelControl.saldoNetoMes < 0) {
+  if (data.mensualVivo && data.mensualVivo.saldo < 0) {
     alertas.push({
       tipo: 'danger', icono: '⚠️',
-      titulo: 'Saldo neto del mes NEGATIVO',
-      detalle: `Egresos superan ingresos por ${fmtArs(Math.abs(data.panelControl.saldoNetoMes))}`,
+      titulo: 'Saldo del mes NEGATIVO (Ventas − Compras − Gastos)',
+      detalle: `El mes va ${fmtArs(data.mensualVivo.saldo)} · V ${fmtArs(data.mensualVivo.ventas)} − C ${fmtArs(data.mensualVivo.compras)} − G ${fmtArs(data.mensualVivo.gastos)}`,
     })
   }
   if (data.panelControl.pctSueldosFact > 60) {
@@ -799,11 +908,14 @@ function ModoTV({ onSalir }) {
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 9999, overflow: 'hidden',
-      background: 'radial-gradient(ellipse at 20% 0%, #14110a 0%, #060606 55%, #030303 100%)',
+      background: 'radial-gradient(ellipse at 50% 0%, #07182a 0%, #04101d 50%, #010509 100%)',
       color: NEON.texto, fontFamily: "'DM Sans',sans-serif",
       display: 'flex', flexDirection: 'column', padding: '1.6vw 2.2vw',
     }}>
       <style>{ESTILOS_GLOBALES}</style>
+      {/* Capa holográfica: rejilla + línea de escaneo (decorativas) */}
+      <div className="hud-rejilla" />
+      <div className="hud-scan" />
 
       {/* ── HEADER ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '1.4vw' }}>
@@ -817,7 +929,7 @@ function ModoTV({ onSalir }) {
           </span>
         )}
         <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
-          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '2.6vw', lineHeight: 1, color: NEON.texto }}>
+          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '2.6vw', lineHeight: 1, color: NEON.cianHi, textShadow: '0 0 14px rgba(0,212,255,0.5)' }}>
             {hora}<span style={{ fontSize: '1.3vw', color: NEON.muted }}>:{segundos}</span>
           </div>
           <div style={{ fontSize: '0.85vw', color: NEON.muted, textTransform: 'capitalize' }}>{fecha}</div>
@@ -839,10 +951,10 @@ function ModoTV({ onSalir }) {
             {/* Columna izquierda */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2vw', minHeight: 0 }}>
               {/* Hero del día */}
-              <div className="dej-in" style={{ ...glass, border: '1px solid rgba(255,209,122,0.35)', padding: '1.8vw 2.2vw', position: 'relative', overflow: 'hidden' }}>
-                <div style={{ position: 'absolute', top: '-8vw', right: '-8vw', width: '22vw', height: '22vw', borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,209,122,0.13), transparent 70%)' }} />
-                <div style={{ fontSize: '0.95vw', letterSpacing: 4, color: NEON.muted, fontWeight: 800 }}>FACTURADO HOY</div>
-                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '7.2vw', lineHeight: 1, color: NEON.oro, animation: 'dejGlow 3s ease-in-out infinite' }}>
+              <div className="dej-in hud" style={{ ...glass, border: '1px solid rgba(0,212,255,0.45)', padding: '1.8vw 2.2vw', overflow: 'hidden' }}>
+                <div style={{ position: 'absolute', top: '-8vw', right: '-8vw', width: '22vw', height: '22vw', borderRadius: '50%', background: 'radial-gradient(circle, rgba(0,212,255,0.15), transparent 70%)' }} />
+                <div style={{ fontSize: '0.95vw', letterSpacing: 4, color: NEON.cian, fontWeight: 800 }}>FACTURADO HOY</div>
+                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '7.2vw', lineHeight: 1, color: NEON.cianHi, animation: 'dejGlow 3s ease-in-out infinite' }}>
                   {fmtArs(data.totalHoy)}
                 </div>
                 <div style={{ display: 'flex', gap: '2.4vw', marginTop: '0.9vw', fontSize: '1.05vw' }}>
@@ -863,55 +975,76 @@ function ModoTV({ onSalir }) {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1.2vw' }}>
                 <TvKPI label="7 DÍAS" valor={fmtArs(data.totalSemana)} sub={`${fmtArs(data.totalSemana / 7)}/día`} color={NEON.azul} />
                 <TvKPI label="ESTE MES" valor={fmtArs(data.totalMes)}
-                  sub={data.totalMesAnt > 0 ? `${flecha(data.variacion)} ${signo(data.variacion)}${data.variacion.toFixed(0)}% vs mes ant.` : '—'}
+                  sub={data.totalMesAnt > 0 ? `${flecha(data.variacion)} ${signo(data.variacion)}${data.variacion.toFixed(0)}% vs mismo período mes ant.` : '—'}
                   color={colorVar(data.variacion)} />
                 <TvKPI label={`VS ${new Date().getFullYear() - 1}`}
                   valor={data.panelControl.variacionAnioPasado != null ? `${signo(data.panelControl.variacionAnioPasado)}${data.panelControl.variacionAnioPasado.toFixed(0)}%` : '—'}
                   sub="mismo período" color={colorVar(data.panelControl.variacionAnioPasado)} />
               </div>
 
-              {/* Top productos */}
-              <div className="dej-in" style={{ ...glass, padding: '1.4vw 1.8vw', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-                <div style={{ fontSize: '0.95vw', letterSpacing: 4, color: NEON.muted, fontWeight: 800, marginBottom: '0.9vw' }}>🏆 TOP PRODUCTOS HOY</div>
-                {data.topProductosHoy.length === 0 ? (
-                  <div style={{ color: NEON.muted, fontSize: '1.1vw' }}>Sin ventas hoy todavía.</div>
+              {/* Cierre de la semana anterior — parámetro cerrado, siempre visible */}
+              <div className="dej-in hud" style={{ ...glass, padding: '1.4vw 1.8vw', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+                <div style={{ fontSize: '0.95vw', letterSpacing: 4, color: NEON.cian, fontWeight: 800, marginBottom: '0.9vw' }}>
+                  🗓️ CIERRE SEMANA ANTERIOR{data.cierreSemana ? ` · ${fcCorta(data.cierreSemana.semana_inicio)} → ${fcCorta(data.cierreSemana.semana_fin)}` : ''}
+                </div>
+                {!data.cierreSemana ? (
+                  <div style={{ color: NEON.muted, fontSize: '1.1vw' }}>Todavía no hay semanas cerradas.</div>
                 ) : (
-                  data.topProductosHoy.map((p, i) => (
-                    <div key={i} style={{ marginBottom: '0.85vw' }}>
-                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.9vw', fontSize: '1.25vw' }}>
-                        <span style={{ color: i === 0 ? NEON.oro : NEON.muted, fontWeight: 800, width: '1.4vw' }}>{i + 1}</span>
-                        <span style={{ flex: 1, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nombre}</span>
-                        <span style={{ color: NEON.muted, fontSize: '0.95vw' }}>{fmtKg(p.kg)}</span>
-                        <span style={{ color: NEON.oro, fontWeight: 800 }}>{fmtArs(p.importe)}</span>
+                  <div style={{ display: 'flex', gap: '2vw', alignItems: 'center', height: '100%' }}>
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.7vw' }}>
+                      <TvMini label="VENTAS" valor={fmtArs(Number(data.cierreSemana.ventas) || 0)} color={NEON.cianHi} />
+                      <TvMini label="COMPRAS" valor={fmtArs(Number(data.cierreSemana.compras) || 0)} color={NEON.ambar} />
+                      <TvMini label="GASTOS + SUELDOS" valor={fmtArs((Number(data.cierreSemana.gastos) || 0) + (Number(data.cierreSemana.sueldos) || 0))} color={NEON.rojo} />
+                    </div>
+                    <div style={{ flex: 1, textAlign: 'center' }}>
+                      <div style={{ fontSize: '0.75vw', letterSpacing: 3, color: NEON.muted, fontWeight: 800 }}>GANANCIA</div>
+                      <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '3.4vw', lineHeight: 1,
+                        color: (Number(data.cierreSemana.ganancia) || 0) >= 0 ? NEON.verde : NEON.rojo,
+                        textShadow: `0 0 16px ${(Number(data.cierreSemana.ganancia) || 0) >= 0 ? 'rgba(81,255,176,0.45)' : 'rgba(255,92,108,0.45)'}` }}>
+                        {fmtArs(Number(data.cierreSemana.ganancia) || 0)}
                       </div>
-                      <div style={{ marginLeft: '2.3vw', marginTop: '0.25vw' }}>
-                        <Barra pct={data.topProductosHoy[0].importe > 0 ? (p.importe / data.topProductosHoy[0].importe) * 100 : 0}
-                          color={i === 0 ? NEON.oro : NEON.azul} alto={4} />
+                      <div style={{ display: 'flex', gap: '0.6vw', justifyContent: 'center', marginTop: '0.7vw', flexWrap: 'wrap' }}>
+                        {[['🥩', data.cierreSemana.kg_carne], ['🍗', data.cierreSemana.kg_pollo], ['🐷', data.cierreSemana.kg_cerdo]].map(([icono, kg], i) => (
+                          (Number(kg) || 0) > 0 && (
+                            <span key={i} style={{ fontSize: '0.8vw', color: NEON.muted, background: 'rgba(0,212,255,0.06)', border: '1px solid rgba(0,212,255,0.18)', borderRadius: 4, padding: '0.2vw 0.6vw' }}>
+                              {icono} {fmtKg(Number(kg) || 0)}
+                            </span>
+                          )
+                        ))}
                       </div>
                     </div>
-                  ))
+                  </div>
                 )}
               </div>
             </div>
 
             {/* Columna derecha */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2vw', minHeight: 0 }}>
-              {/* Salud financiera del mes */}
-              <div className="dej-in" style={{ ...glass, padding: '1.4vw 1.8vw' }}>
-                <div style={{ fontSize: '0.95vw', letterSpacing: 4, color: NEON.muted, fontWeight: 800, marginBottom: '0.9vw' }}>💼 SALUD DEL MES</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1vw 1.4vw' }}>
-                  <TvMini label="SALDO NETO" valor={fmtArs(data.panelControl.saldoNetoMes)} color={data.panelControl.saldoNetoMes >= 0 ? NEON.verde : NEON.rojo} />
-                  <TvMini label="FACTURADO TOTAL" valor={fmtArs(data.panelControl.facturadoMes)} color={NEON.texto} />
-                  <TvMini label="% COBRADO" valor={`${data.panelControl.pctCobrado.toFixed(0)}%`}
+              {/* MES EN VIVO — VENTAS − COMPRAS − GASTOS (01 → hoy) + medidores */}
+              <div className="dej-in hud" style={{ ...glass, padding: '1.4vw 1.8vw' }}>
+                <div style={{ fontSize: '0.95vw', letterSpacing: 4, color: NEON.cian, fontWeight: 800, marginBottom: '0.9vw' }}>
+                  💼 MES EN VIVO · 01→{fechaHoyARG().slice(8, 10)}
+                </div>
+                <div style={{ display: 'flex', gap: '1.4vw', alignItems: 'center' }}>
+                  <HudGauge pct={data.panelControl.pctCobrado} label="COBRADO"
                     color={data.panelControl.pctCobrado < 50 ? NEON.rojo : data.panelControl.pctCobrado < 75 ? NEON.ambar : NEON.verde} />
-                  <TvMini label="PEND. COBRAR" valor={fmtArs(data.panelControl.saldoPendienteTotal)}
-                    color={data.panelControl.saldoPendienteTotal > 500000 ? NEON.ambar : NEON.texto} />
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.55vw', minWidth: 0 }}>
+                    <TvMini label="VENTAS" valor={fmtArs(data.mensualVivo.ventas)} color={NEON.cianHi} />
+                    <TvMini label="COMPRAS" valor={fmtArs(data.mensualVivo.compras)} color={NEON.ambar} />
+                    <TvMini label="GASTOS (incl. sueldos)" valor={fmtArs(data.mensualVivo.gastos)} color={NEON.rojo} />
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '0.7vw', letterSpacing: 2, color: NEON.muted, fontWeight: 700 }}>SALDO</div>
+                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '2.6vw', lineHeight: 1, color: data.mensualVivo.saldo >= 0 ? NEON.verde : NEON.rojo, textShadow: `0 0 12px ${data.mensualVivo.saldo >= 0 ? 'rgba(81,255,176,0.4)' : 'rgba(255,92,108,0.4)'}` }}>
+                      {fmtArs(data.mensualVivo.saldo)}
+                    </div>
+                  </div>
                 </div>
               </div>
 
               {/* Alertas */}
-              <div className="dej-in" style={{ ...glass, padding: '1.4vw 1.8vw', flex: 1, minHeight: 0, overflow: 'hidden',
-                borderColor: alertas.some(a => a.tipo === 'danger') ? 'rgba(255,107,129,0.35)' : alertas.length ? 'rgba(255,184,107,0.3)' : 'rgba(93,255,160,0.25)' }}>
+              <div className="dej-in hud" style={{ ...glass, padding: '1.4vw 1.8vw', flex: 1, minHeight: 0, overflow: 'hidden',
+                borderColor: alertas.some(a => a.tipo === 'danger') ? 'rgba(255,92,108,0.4)' : alertas.length ? 'rgba(255,179,92,0.35)' : 'rgba(81,255,176,0.3)' }}>
                 <div style={{ fontSize: '0.95vw', letterSpacing: 4, fontWeight: 800, marginBottom: '0.9vw',
                   color: alertas.some(a => a.tipo === 'danger') ? NEON.rojo : alertas.length ? NEON.ambar : NEON.verde }}>
                   {alertas.length > 0 ? `🚨 ALERTAS (${alertas.length})` : '✅ TODO EN ORDEN'}
@@ -953,12 +1086,12 @@ function ModoTV({ onSalir }) {
           </div>
 
           {/* ── FOOTER ── */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '2.4vw', marginTop: '1.1vw', padding: '0.7vw 1.4vw', borderRadius: '0.9vw', background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '2.4vw', marginTop: '1.1vw', padding: '0.7vw 1.4vw', borderRadius: 6, background: 'rgba(0,212,255,0.035)', border: '1px solid rgba(0,212,255,0.15)' }}>
             <TvMini label="CAJAS DISP." valor={`${data.panelControl.cajasInfo.total} · ${fmtKg(data.panelControl.cajasInfo.kg)}`}
               color={data.panelControl.cajasInfo.viejasCount > 0 ? NEON.ambar : NEON.cian} chico />
-            <TvMini label="% SUELDOS / FACT." valor={`${data.panelControl.pctSueldosFact.toFixed(1)}%`}
-              color={data.panelControl.pctSueldosFact > 60 ? NEON.rojo : data.panelControl.pctSueldosFact > 40 ? NEON.ambar : NEON.verde} chico />
-            <TvMini label="CHEQUES 15D" valor={`${data.cheques.length}`} color={NEON.texto} chico />
+            <TvMini label="CHEQUES 15D" valor={`${data.cheques.length}`} color={NEON.cianHi} chico />
+            <TvMini label="PEND. COBRAR" valor={fmtArs(data.panelControl.saldoPendienteTotal)}
+              color={data.panelControl.saldoPendienteTotal > 500000 ? NEON.ambar : NEON.cianHi} chico />
             {data.cuentasConPct[0] && (
               <TvMini label={`MONO MÁX: ${data.cuentasConPct[0].nombre.trim().split(' ')[0]}`}
                 valor={`${data.cuentasConPct[0].pctConsumo.toFixed(0)}% tope K`}
@@ -974,11 +1107,35 @@ function ModoTV({ onSalir }) {
   )
 }
 
+// Medidor circular holográfico: arco de progreso + anillo punteado giratorio
+function HudGauge({ pct, label, color }) {
+  const p = Math.max(0, Math.min(100, Number(pct) || 0))
+  const R = 40
+  const C = 2 * Math.PI * R
+  return (
+    <div style={{ position: 'relative', width: '7vw', height: '7vw', flexShrink: 0 }}>
+      <svg viewBox="0 0 100 100" style={{ width: '100%', height: '100%', transform: 'rotate(-90deg)' }}>
+        <circle cx="50" cy="50" r={R} fill="none" stroke="rgba(0,212,255,0.12)" strokeWidth="5" />
+        <circle cx="50" cy="50" r={R} fill="none" stroke={color} strokeWidth="5"
+          strokeDasharray={`${(p / 100) * C} ${C}`} strokeLinecap="round"
+          style={{ filter: `drop-shadow(0 0 5px ${color})`, transition: 'stroke-dasharray 1s ease' }} />
+      </svg>
+      <svg viewBox="0 0 100 100" style={{ position: 'absolute', inset: 0, animation: 'hudGiro 16s linear infinite' }}>
+        <circle cx="50" cy="50" r="47" fill="none" stroke="rgba(0,212,255,0.3)" strokeWidth="0.8" strokeDasharray="3 9" />
+      </svg>
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '1.7vw', color, lineHeight: 1 }}>{p.toFixed(0)}%</div>
+        <div style={{ fontSize: '0.55vw', letterSpacing: 2, color: NEON.muted, fontWeight: 700, textAlign: 'center' }}>{label}</div>
+      </div>
+    </div>
+  )
+}
+
 function TvKPI({ label, valor, sub, color }) {
   return (
     <div className="dej-in" style={{ ...glass, padding: '1.2vw 1.5vw' }}>
       <div style={{ fontSize: '0.8vw', letterSpacing: 3, color: NEON.muted, fontWeight: 800 }}>{label}</div>
-      <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '2.6vw', lineHeight: 1.05, color: color || NEON.oro }}>{valor}</div>
+      <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '2.6vw', lineHeight: 1.05, color: color || NEON.cianHi }}>{valor}</div>
       {sub && <div style={{ fontSize: '0.8vw', color: NEON.muted, marginTop: '0.2vw' }}>{sub}</div>}
     </div>
   )
