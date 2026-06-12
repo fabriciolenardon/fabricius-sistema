@@ -195,12 +195,64 @@ function armarSaludo(usuario) {
   return `¡Hola ${trato}! 🌙 ¿Cómo estuvo tu día? Acá estoy para lo que haga falta.`
 }
 
+// ═══════════════════════════════════════════════════════════
+// 🤖 HOLOGRAMA DE CHAD — esqueleto robot holográfico giratorio
+// ═══════════════════════════════════════════════════════════
+// Reemplaza al botón flotante 🤖. Gira 360° (rotateY), parpadea como
+// holograma y cambia de color según el estado: apagado (cian tenue),
+// escuchando (verde), pensando (ámbar), hablando (cian brillante).
+// El color lo maneja la clase CSS via currentColor.
+function RobotHolograma() {
+  return (
+    <svg viewBox="0 0 64 96" width="64" height="96" fill="none" stroke="currentColor"
+      strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {/* cráneo */}
+      <path d="M22 15 a10 10 0 1 1 20 0 v5 a4 4 0 0 1 -4 4 h-12 a4 4 0 0 1 -4 -4 z" />
+      <circle cx="27" cy="14" r="2.2" fill="currentColor" stroke="none" />
+      <circle cx="37" cy="14" r="2.2" fill="currentColor" stroke="none" />
+      <path d="M28 20.5 h8" />
+      {/* cuello + columna */}
+      <path d="M32 24 v9" />
+      <path d="M32 33 v27" strokeDasharray="4 3" />
+      {/* hombros, brazos con codos */}
+      <path d="M18 35 h28" />
+      <circle cx="18" cy="35" r="2" />
+      <circle cx="46" cy="35" r="2" />
+      <path d="M17 37 l-3 13" /><circle cx="14" cy="52" r="1.8" /><path d="M14 54 l3 11" />
+      <path d="M47 37 l3 13" /><circle cx="50" cy="52" r="1.8" /><path d="M50 54 l-3 11" />
+      {/* costillas */}
+      <path d="M24 41 h16" /><path d="M25 47 h14" /><path d="M26 53 h12" />
+      {/* pelvis */}
+      <path d="M25 60 h14 l-2.5 7 h-9 z" />
+      {/* piernas con rodillas */}
+      <path d="M28 67 l-2 11" /><circle cx="26" cy="80" r="1.8" /><path d="M26 82 v8 h6" />
+      <path d="M36 67 l2 11" /><circle cx="38" cy="80" r="1.8" /><path d="M38 82 v8 h-6" />
+    </svg>
+  )
+}
+
+const ETIQUETA_HOLO = {
+  apagado: 'CHAD · CLICK Y HABLAMOS',
+  escuchando: '🟢 TE ESCUCHO',
+  pensando: '🟠 PENSANDO…',
+  hablando: '🔵 HABLANDO',
+}
+
 export default function AsistenteIA() {
   const navigate = useNavigate()
   const [abierto, setAbierto] = useState(false)
-  const [mensajes, setMensajes] = useState([
-    { rol: 'asistente', texto: '¡Hola! Soy Chad, tu asistente. Manejo todo el sistema (gastos, depósito, pagos, deudas, stock) y también te asesoro como profesional: temas laborales, decisiones de negocio, producción, marketing, ventas y finanzas. 🎤 También podés hablarme con el micrófono.' }
-  ])
+  // 🧵 EL HILO NO SE PIERDE: mensajes e historial persisten en localStorage
+  // (capados a los últimos 40). Cerrás el chat, recargás la página o pausás
+  // a Chad, y la conversación sigue donde quedó.
+  const [mensajes, setMensajes] = useState(() => {
+    try {
+      const g = JSON.parse(localStorage.getItem('chad_chat_mensajes') || 'null')
+      if (Array.isArray(g) && g.length > 0) return g
+    } catch { /* storage corrupto → arranque limpio */ }
+    return [
+      { rol: 'asistente', texto: '¡Hola! Soy Chad, tu asistente. Manejo todo el sistema (gastos, depósito, pagos, deudas, stock) y también te asesoro como profesional: temas laborales, decisiones de negocio, producción, marketing, ventas y finanzas. 🎤 También podés hablarme con el micrófono.' }
+    ]
+  })
 
   // 👤 Quién está logueado — para que FABRI te reconozca sin preguntar
   const [usuario, setUsuario] = useState(null)
@@ -224,16 +276,54 @@ export default function AsistenteIA() {
     if (localStorage.getItem(clave)) return
     localStorage.setItem(clave, '1')
     const saludo = armarSaludo(usuario)
-    setMensajes([{ rol: 'asistente', texto: saludo }])
+    // El saludo del día se AGREGA al hilo (antes lo pisaba — ahora el hilo
+    // persiste entre sesiones y no se pierde lo charlado).
+    setMensajes(prev => [...prev, { rol: 'asistente', texto: saludo }])
     if (vozActiva) hablar(saludo)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [abierto, usuario])
   const [input, setInput] = useState('')
   const [imagenSeleccionada, setImagenSeleccionada] = useState(null)
   const [cargando, setCargando] = useState(false)
-  const [historialGemini, setHistorialGemini] = useState([])
+  const [historialGemini, setHistorialGemini] = useState(() => {
+    try {
+      const g = JSON.parse(localStorage.getItem('chad_chat_historial') || 'null')
+      if (Array.isArray(g)) return g
+    } catch { /* arranque limpio */ }
+    return []
+  })
   const fileInputRef = useRef(null)
   const mensajesRef = useRef(null)
+
+  // 💾 Persistir el hilo (sin imágenes: el base64 reventaría el storage).
+  // El historial se recorta para que arranque siempre en un mensaje de
+  // usuario con texto — un functionCall/Response suelto al principio hace
+  // que Gemini rechace la conversación.
+  useEffect(() => {
+    try {
+      const compactos = mensajes.slice(-40).map(({ imagenPreview, tieneImagen, ...m }) => m)
+      localStorage.setItem('chad_chat_mensajes', JSON.stringify(compactos))
+    } catch { /* storage lleno: seguimos sin persistir */ }
+  }, [mensajes])
+  useEffect(() => {
+    try {
+      const recorte = historialGemini.slice(-40)
+        .map(m => ({ ...m, parts: (m.parts || []).filter(p => !p.inlineData) }))
+        .filter(m => (m.parts || []).length > 0)
+      while (recorte.length > 0 && !(recorte[0].role === 'user' && recorte[0].parts.some(p => p.text))) {
+        recorte.shift()
+      }
+      localStorage.setItem('chad_chat_historial', JSON.stringify(recorte))
+    } catch { /* storage lleno: seguimos sin persistir */ }
+  }, [historialGemini])
+
+  // 🗣️ ¿Chad está hablando ahora? (alimenta el estado del holograma)
+  const [hablando, setHablando] = useState(false)
+  useEffect(() => {
+    if (!('speechSynthesis' in window)) return
+    const t = setInterval(() => setHablando(!!window.speechSynthesis.speaking), 350)
+    return () => clearInterval(t)
+  }, [])
 
   // 🎤 Estado de voz
   const [escuchando, setEscuchando] = useState(false)
@@ -522,14 +612,46 @@ export default function AsistenteIA() {
     setMensajes([{ rol: 'asistente', texto: '¡Listo, empezamos de nuevo! ¿En qué te ayudo?' }])
     setHistorialGemini([])
     setImagenSeleccionada(null)
+    // Borrar también el hilo persistido
+    try {
+      localStorage.removeItem('chad_chat_mensajes')
+      localStorage.removeItem('chad_chat_historial')
+    } catch { /* sin storage no hay nada que borrar */ }
+  }
+
+  // Estado visual del holograma (prioridad: pensando > hablando > escuchando)
+  const holoEncendido = modoConversacion || hablando
+  const estadoHolo = !holoEncendido ? 'apagado'
+    : cargando ? 'pensando'
+    : hablando ? 'hablando'
+    : 'escuchando'
+
+  // Click en el holograma: prende/pausa la conversación por voz (si el
+  // navegador no soporta voz, abre el chat). Pausar corta mic y voz al
+  // instante — para cuando entra gente a la oficina — pero el hilo queda.
+  function clickHolograma() {
+    if (!SpeechRecognitionAPI) { setAbierto(true); return }
+    toggleConversacion()
   }
 
   return (
     <>
       {!abierto && (
-        <button onClick={() => setAbierto(true)} style={estilos.botonFlotante} aria-label="Abrir asistente">
-          🤖
-        </button>
+        <div style={estilos.holoZona}>
+          <div onClick={clickHolograma} role="button" aria-label="Prender o pausar a Chad"
+            title={holoEncendido ? 'Chad está ACTIVO — click para pausarlo' : 'Click para hablar con Chad (conversación por voz)'}
+            style={estilos.holoMarco}>
+            <div className={`chad-holo ${estadoHolo}`}>
+              <RobotHolograma />
+            </div>
+            <div className={`chad-holo-base ${estadoHolo}`} />
+            <div style={estilos.holoEstado}>{ETIQUETA_HOLO[estadoHolo]}</div>
+          </div>
+          <button onClick={() => setAbierto(true)} style={estilos.holoBotonChat}
+            title="Abrir el chat (historial y configuración)" aria-label="Abrir chat">
+            💬
+          </button>
+        </div>
       )}
 
       {abierto && (
@@ -548,7 +670,9 @@ export default function AsistenteIA() {
                 style={{ ...estilos.botonHeader, ...(mostrarConfigVoz ? estilos.botonVozActiva : {}) }}
                 title="Elegir la voz del asistente">⚙️</button>
               <button onClick={nuevaConversacion} style={estilos.botonHeader} title="Nueva conversación">🗑️</button>
-              <button onClick={() => { if (modoConvRef.current) toggleConversacion(); setAbierto(false) }} style={estilos.botonHeader} title="Cerrar">✕</button>
+              {/* Cerrar el panel NO corta la conversación: el holograma queda
+                  mostrando el estado y un click sobre él la pausa. */}
+              <button onClick={() => setAbierto(false)} style={estilos.botonHeader} title="Cerrar el chat (la conversación de voz sigue si estaba activa)">✕</button>
             </div>
           </div>
 
@@ -662,12 +786,75 @@ export default function AsistenteIA() {
           0%, 100% { box-shadow: 0 0 0 0 rgba(46,204,113,0.5); }
           50% { box-shadow: 0 0 0 8px rgba(46,204,113,0); }
         }
+        /* ── 🤖 Holograma de Chad ── */
+        @keyframes chadSpin { from { transform: rotateY(0deg); } to { transform: rotateY(360deg); } }
+        @keyframes chadFlicker {
+          0%, 91%, 100% { opacity: 1; }
+          92% { opacity: 0.5; } 93% { opacity: 0.95; }
+          96% { opacity: 0.65; } 97% { opacity: 1; }
+        }
+        @keyframes chadFlotar { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+        @keyframes chadBasePulso {
+          0%, 100% { transform: scaleX(1); opacity: 0.7; }
+          50% { transform: scaleX(1.18); opacity: 1; }
+        }
+        .chad-holo {
+          position: relative; width: 64px; height: 96px;
+          perspective: 320px; animation: chadFlotar 3.2s ease-in-out infinite;
+        }
+        .chad-holo svg {
+          animation: chadSpin 7s linear infinite, chadFlicker 5s steps(1) infinite;
+          transform-style: preserve-3d;
+        }
+        /* líneas de escaneo del holograma */
+        .chad-holo::after {
+          content: ''; position: absolute; inset: 0; pointer-events: none;
+          background: repeating-linear-gradient(0deg, rgba(0,212,255,0.10) 0 1px, transparent 1px 3px);
+          mix-blend-mode: screen;
+        }
+        .chad-holo.apagado    { color: #2e7d96; opacity: 0.55; }
+        .chad-holo.apagado svg    { animation-duration: 11s, 7s; filter: drop-shadow(0 0 4px rgba(0,212,255,0.35)); }
+        .chad-holo.escuchando { color: #51ffb0; }
+        .chad-holo.escuchando svg { animation-duration: 4s, 5s; filter: drop-shadow(0 0 8px rgba(81,255,176,0.9)); }
+        .chad-holo.pensando   { color: #ffb35c; }
+        .chad-holo.pensando svg   { animation-duration: 1.4s, 5s; filter: drop-shadow(0 0 8px rgba(255,179,92,0.9)); }
+        .chad-holo.hablando   { color: #9beaff; }
+        .chad-holo.hablando svg   { animation-duration: 6s, 5s; filter: drop-shadow(0 0 10px rgba(155,234,255,1)); }
+        /* base proyectora */
+        .chad-holo-base {
+          width: 66px; height: 11px; border-radius: 50%; margin-top: -5px;
+          background: radial-gradient(ellipse at center, rgba(0,212,255,0.75), rgba(0,212,255,0.15) 60%, transparent 75%);
+          animation: chadBasePulso 2.2s ease-in-out infinite;
+        }
+        .chad-holo-base.apagado    { opacity: 0.4; }
+        .chad-holo-base.escuchando { background: radial-gradient(ellipse at center, rgba(81,255,176,0.8), rgba(81,255,176,0.15) 60%, transparent 75%); }
+        .chad-holo-base.pensando   { background: radial-gradient(ellipse at center, rgba(255,179,92,0.8), rgba(255,179,92,0.15) 60%, transparent 75%); }
       `}</style>
     </>
   )
 }
 
 const estilos = {
+  // ── Holograma flotante de Chad ──
+  holoZona: {
+    position: 'fixed', bottom: 16, right: 22, zIndex: 9999,
+    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
+  },
+  holoMarco: {
+    cursor: 'pointer', display: 'flex', flexDirection: 'column',
+    alignItems: 'center', userSelect: 'none', WebkitTapHighlightColor: 'transparent',
+  },
+  holoEstado: {
+    fontSize: 8.5, letterSpacing: 1.6, color: '#9bd6ff', fontWeight: 800,
+    fontFamily: "'DM Sans', sans-serif", textTransform: 'uppercase',
+    textShadow: '0 0 8px rgba(0,212,255,0.6)', marginTop: 3, whiteSpace: 'nowrap',
+  },
+  holoBotonChat: {
+    width: 32, height: 32, borderRadius: '50%',
+    border: '1px solid rgba(0,212,255,0.45)', background: 'rgba(7,24,42,0.85)',
+    color: '#9beaff', fontSize: 14, cursor: 'pointer',
+    boxShadow: '0 0 12px rgba(0,212,255,0.25)',
+  },
   botonFlotante: {
     position: 'fixed', bottom: 24, right: 24, width: 60, height: 60,
     borderRadius: '50%', border: '2px solid #c9a84c',
