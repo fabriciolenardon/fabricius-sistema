@@ -46,11 +46,17 @@ function hablar(texto) {
     u.lang = 'es-AR'
     u.rate = 1.05
     const voces = window.speechSynthesis.getVoices()
-    const vozEs = voces.find(v => v.lang === 'es-AR') || voces.find(v => v.lang?.startsWith('es'))
+    // Voz elegida por el usuario (selector ⚙️ del chat) → si no, automática es-AR
+    const elegidaNombre = localStorage.getItem('fabri_voz_nombre')
+    const elegida = elegidaNombre ? voces.find(v => v.name === elegidaNombre) : null
+    const vozEs = elegida || voces.find(v => v.lang === 'es-AR') || voces.find(v => v.lang?.startsWith('es'))
     if (vozEs) u.voice = vozEs
     window.speechSynthesis.speak(u)
   } catch { /* la voz nunca debe romper el chat */ }
 }
+
+// Frase de prueba del selector de voz — para elegir "la más Stark" 🦾
+const FRASE_PRUEBA_VOZ = 'A sus órdenes, señor. Los sistemas de Carnicerías Fabricius están operativos. Hoy facturamos un 30 por ciento más que ayer.'
 
 // ── Comandos de navegación por voz/texto (no pasan por la IA) ──
 const RUTAS_VOZ = [
@@ -168,6 +174,27 @@ export default function AsistenteIA() {
   const [vozActiva, setVozActiva] = useState(() => localStorage.getItem('fabri_voz') === '1') // 🔊 leer respuestas siempre
   const recognitionRef = useRef(null)
   const turnoDeVozRef = useRef(false) // el último mensaje entró por micrófono → responder hablando
+
+  // ⚙️ Selector de voz: las voces las pone el navegador/Windows (getVoices
+  // carga async → escuchamos voiceschanged). La elegida persiste en localStorage.
+  const [mostrarConfigVoz, setMostrarConfigVoz] = useState(false)
+  const [vocesES, setVocesES] = useState([])
+  const [vozElegida, setVozElegida] = useState(() => localStorage.getItem('fabri_voz_nombre') || '')
+  useEffect(() => {
+    if (!('speechSynthesis' in window)) return
+    const cargarVoces = () => {
+      const todas = window.speechSynthesis.getVoices()
+      setVocesES(todas.filter(v => v.lang?.toLowerCase().startsWith('es')))
+    }
+    cargarVoces()
+    window.speechSynthesis.addEventListener?.('voiceschanged', cargarVoces)
+    return () => window.speechSynthesis.removeEventListener?.('voiceschanged', cargarVoces)
+  }, [])
+  function elegirVoz(nombre) {
+    setVozElegida(nombre)
+    if (nombre) localStorage.setItem('fabri_voz_nombre', nombre)
+    else localStorage.removeItem('fabri_voz_nombre')
+  }
 
   function toggleVoz() {
     setVozActiva(v => {
@@ -346,10 +373,41 @@ export default function AsistenteIA() {
                 title={vozActiva ? 'Respuestas habladas: SÍ (click para silenciar)' : 'Respuestas habladas: NO (click para activar)'}>
                 {vozActiva ? '🔊' : '🔇'}
               </button>
+              <button onClick={() => setMostrarConfigVoz(v => !v)}
+                style={{ ...estilos.botonHeader, ...(mostrarConfigVoz ? estilos.botonVozActiva : {}) }}
+                title="Elegir la voz del asistente">⚙️</button>
               <button onClick={nuevaConversacion} style={estilos.botonHeader} title="Nueva conversación">🗑️</button>
               <button onClick={() => setAbierto(false)} style={estilos.botonHeader} title="Cerrar">✕</button>
             </div>
           </div>
+
+          {mostrarConfigVoz && (
+            <div style={estilos.configVoz}>
+              <div style={{ fontSize: 11, color: '#c9a84c', fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>
+                🗣️ VOZ DEL ASISTENTE
+              </div>
+              {vocesES.length === 0 ? (
+                <div style={{ fontSize: 11, color: '#6a6a50' }}>
+                  Este navegador no tiene voces en español instaladas.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <select value={vozElegida} onChange={e => elegirVoz(e.target.value)} style={estilos.selectVoz}>
+                    <option value="">Automática (es-AR)</option>
+                    {vocesES.map(v => (
+                      <option key={v.name} value={v.name}>{v.name.replace(/^Microsoft |^Google /, '')} · {v.lang}</option>
+                    ))}
+                  </select>
+                  <button onClick={() => hablar(FRASE_PRUEBA_VOZ)} style={estilos.botonProbarVoz} title="Escuchar esta voz">
+                    ▶ Probar
+                  </button>
+                </div>
+              )}
+              <div style={{ fontSize: 10, color: '#6a6a50', marginTop: 6, lineHeight: 1.4 }}>
+                💡 Para más voces (graves estilo mayordomo 🦾): Windows → Configuración → Hora e idioma → Voz → Agregar voces → Español. Las nuevas aparecen acá tras reiniciar Chrome.
+              </div>
+            </div>
+          )}
 
           <div style={estilos.mensajes} ref={mensajesRef}>
             {mensajes.map((m, i) => (
@@ -475,6 +533,17 @@ const estilos = {
   botonMicEscuchando: {
     background: '#3a1a1a', border: '1px solid #e74c3c',
     animation: 'micPulso 1.2s ease-in-out infinite',
+  },
+  configVoz: {
+    padding: '10px 14px', background: '#181814', borderBottom: '1px solid #28281e',
+  },
+  selectVoz: {
+    flex: 1, background: '#1c1c18', border: '1px solid #28281e', borderRadius: 8,
+    color: '#f0ece0', fontSize: 12, padding: '7px 8px', fontFamily: "'DM Sans', sans-serif",
+  },
+  botonProbarVoz: {
+    background: '#c9a84c', border: 'none', borderRadius: 8, color: '#0a0a08',
+    padding: '7px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700, flexShrink: 0,
   },
   botonVozActiva: {
     border: '1px solid #c9a84c', color: '#c9a84c', background: 'rgba(201,168,76,0.12)',
