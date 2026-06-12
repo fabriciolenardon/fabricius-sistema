@@ -1027,7 +1027,7 @@ function BarrasCierres({ cierres, tv }) {
       <div style={{ fontSize: fz(0.6), letterSpacing: 2, color: NEON.muted, fontWeight: 700, marginBottom: tv ? '0.3vw' : 4 }}>
         GANANCIA ÚLTIMAS {cierres.length} SEMANAS
       </div>
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: tv ? '0.45vw' : 5, height: tv ? '3.4vw' : 44 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: tv ? '0.45vw' : 5, height: tv ? '2.6vw' : 44 }}>
         {cierres.map((c, i) => {
           const g = Number(c.ganancia) || 0
           const hPct = Math.max(8, (Math.abs(g) / maxAbs) * 100)
@@ -1058,9 +1058,9 @@ function PanelProveedoresSemana({ items, total, tv }) {
   const fz = (n) => tv ? `${n}vw` : `${n * 13}px`
   const max = items && items.length > 0 ? items[0].total : 1
   return (
-    <div className={tv ? 'dej-in hud' : 'hud'} style={{ ...glass, padding: tv ? '1.1vw 1.6vw' : 18 }}>
+    <div className={tv ? 'dej-in hud' : 'hud'} style={{ ...glass, padding: tv ? '0.7vw 1.3vw' : 18 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-        <span style={{ fontSize: fz(0.85), letterSpacing: 3, color: NEON.cian, fontWeight: 800 }}>🏭 COMPRADO ESTA SEMANA</span>
+        <span style={{ fontSize: fz(0.8), letterSpacing: 3, color: NEON.cian, fontWeight: 800 }}>🏭 COMPRADO ESTA SEMANA</span>
         <span style={{ marginLeft: 'auto', fontFamily: "'Bebas Neue',cursive", fontSize: fz(1.2), color: NEON.ambar }}>{fmtArs(total || 0)}</span>
       </div>
       {(!items || items.length === 0) ? (
@@ -1101,7 +1101,7 @@ function TickerVentas({ ventas }) {
     </span>
   ))
   return (
-    <div style={{ overflow: 'hidden', marginTop: '0.8vw', padding: '0.35vw 0', borderTop: '1px solid rgba(0,212,255,0.15)', borderBottom: '1px solid rgba(0,212,255,0.15)' }}>
+    <div style={{ overflow: 'hidden', marginTop: '0.55vw', padding: '0.3vw 0', borderTop: '1px solid rgba(0,212,255,0.15)', borderBottom: '1px solid rgba(0,212,255,0.15)' }}>
       {/* contenido duplicado para el loop infinito sin salto */}
       <div className="dej-ticker-pista">
         <span>{items}</span>
@@ -1373,7 +1373,7 @@ function ModoTV({ onSalir }) {
       position: 'fixed', inset: 0, zIndex: 9999, overflow: 'hidden',
       background: 'radial-gradient(ellipse at 50% 0%, #07182a 0%, #04101d 50%, #010509 100%)',
       color: NEON.texto, fontFamily: "'DM Sans',sans-serif",
-      display: 'flex', flexDirection: 'column', padding: '1.6vw 2.2vw',
+      display: 'flex', flexDirection: 'column', padding: '0.9vw 1.6vw',
     }}>
       <style>{ESTILOS_GLOBALES}</style>
       {/* Capa holográfica: rejilla + línea de escaneo (decorativas) */}
@@ -1382,30 +1382,28 @@ function ModoTV({ onSalir }) {
       {/* 🎬 Anuncio cinematográfico (récord / stock / cheques) */}
       <AnuncioTV anuncio={anuncio} />
 
-      {/* ── HEADER ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '1.4vw' }}>
-        <div>
-          <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '2.6vw', letterSpacing: 6, color: NEON.oro, lineHeight: 1, textShadow: '0 0 18px rgba(255,209,122,0.35)' }}>
-            F.A.B.R.I.
-          </span>
-          <div style={{ fontSize: '0.58vw', letterSpacing: 2.5, color: NEON.muted, fontWeight: 700, marginTop: '0.1vw' }}>
-            FACTURACIÓN · ALERTAS · BALANCE · RESULTADOS INSTANTÁNEOS — CARNICERÍAS FABRICIUS
-          </div>
-        </div>
-        <PuntoVivo size={10} />
+      {/* ── HEADER (compacto: la pantalla es para los números) ── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '1.2vw' }}>
+        <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '1.7vw', letterSpacing: 4, color: NEON.oro, lineHeight: 1, textShadow: '0 0 14px rgba(255,209,122,0.35)' }}>
+          F.A.B.R.I.
+        </span>
+        <span style={{ fontSize: '0.55vw', letterSpacing: 2, color: NEON.muted, fontWeight: 700 }}>
+          FACTURACIÓN · ALERTAS · BALANCE · RESULTADOS INSTANTÁNEOS
+        </span>
+        <PuntoVivo size={8} />
         {data?.promoMundial?.activa && (
-          <span style={{ padding: '0.4vw 1vw', borderRadius: 999, background: 'rgba(107,229,255,0.1)', border: '1px solid rgba(107,229,255,0.4)', color: NEON.cian, fontSize: '0.95vw', fontWeight: 800, letterSpacing: 1 }}>
+          <span style={{ padding: '0.25vw 0.8vw', borderRadius: 999, background: 'rgba(107,229,255,0.1)', border: '1px solid rgba(107,229,255,0.4)', color: NEON.cian, fontSize: '0.8vw', fontWeight: 800, letterSpacing: 1 }}>
             ⚽ PROMO MUNDIAL −{data.promoMundial.descuento_pct || 10}%
           </span>
         )}
-        <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
-          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '2.6vw', lineHeight: 1, color: NEON.cianHi, textShadow: '0 0 14px rgba(0,212,255,0.5)' }}>
-            {hora}<span style={{ fontSize: '1.3vw', color: NEON.muted }}>:{segundos}</span>
-          </div>
-          <div style={{ fontSize: '0.85vw', color: NEON.muted, textTransform: 'capitalize' }}>{fecha}</div>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'baseline', gap: '0.8vw' }}>
+          <span style={{ fontSize: '0.75vw', color: NEON.muted, textTransform: 'capitalize' }}>{fecha}</span>
+          <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '1.7vw', lineHeight: 1, color: NEON.cianHi, textShadow: '0 0 14px rgba(0,212,255,0.5)' }}>
+            {hora}<span style={{ fontSize: '0.95vw', color: NEON.muted }}>:{segundos}</span>
+          </span>
         </div>
         <button onClick={onSalir} title="Salir (ESC)"
-          style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', color: NEON.muted, borderRadius: 10, padding: '0.5vw 0.9vw', cursor: 'pointer', fontSize: '0.85vw' }}>
+          style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', color: NEON.muted, borderRadius: 8, padding: '0.35vw 0.7vw', cursor: 'pointer', fontSize: '0.75vw' }}>
           ✕
         </button>
       </div>
@@ -1417,19 +1415,19 @@ function ModoTV({ onSalir }) {
       ) : (
         <>
           {/* ── CUERPO ── */}
-          <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1.45fr 1fr', gap: '1.2vw', marginTop: '1.2vw', minHeight: 0 }}>
+          <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1.45fr 1fr', gap: '0.9vw', marginTop: '0.8vw', minHeight: 0 }}>
             {/* Columna izquierda */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2vw', minHeight: 0 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9vw', minHeight: 0 }}>
               {/* Hero del día */}
-              <div className="dej-in hud" style={{ ...glass, border: '1px solid rgba(0,212,255,0.45)', padding: '1.8vw 2.2vw', overflow: 'hidden' }}>
+              <div className="dej-in hud" style={{ ...glass, border: '1px solid rgba(0,212,255,0.45)', padding: '1.1vw 1.8vw', overflow: 'hidden' }}>
                 <div style={{ position: 'absolute', top: '-8vw', right: '-8vw', width: '22vw', height: '22vw', borderRadius: '50%', background: 'radial-gradient(circle, rgba(0,212,255,0.15), transparent 70%)' }} />
-                <div style={{ fontSize: '0.95vw', letterSpacing: 4, color: NEON.cian, fontWeight: 800 }}>FACTURADO HOY</div>
+                <div style={{ fontSize: '0.85vw', letterSpacing: 4, color: NEON.cian, fontWeight: 800 }}>FACTURADO HOY</div>
                 <div key={flashVenta}
-                  style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '7.2vw', lineHeight: 1, color: NEON.cianHi,
+                  style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '6vw', lineHeight: 1, color: NEON.cianHi,
                     animation: flashVenta > 0 ? 'dejFlash 2.2s ease, dejGlow 3s ease-in-out 2.2s infinite' : 'dejGlow 3s ease-in-out infinite' }}>
                   {fmtArs(data.totalHoy)}
                 </div>
-                <div style={{ display: 'flex', gap: '2.4vw', marginTop: '0.9vw', fontSize: '1.05vw' }}>
+                <div style={{ display: 'flex', gap: '2.2vw', marginTop: '0.6vw', fontSize: '0.95vw' }}>
                   <span><strong style={{ color: NEON.texto }}>{data.cantHoy}</strong> <span style={{ color: NEON.muted }}>ventas</span></span>
                   <span><span style={{ color: NEON.muted }}>ticket</span> <strong style={{ color: NEON.texto }}>{fmtArs(data.ticketProm)}</strong></span>
                   {data.panelControl.variacionHoyVsAyer != null && (
@@ -1444,7 +1442,7 @@ function ModoTV({ onSalir }) {
               </div>
 
               {/* Semana / Mes / Año pasado */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1.2vw' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.9vw' }}>
                 <TvKPI label="7 DÍAS" valor={fmtArs(data.totalSemana)} sub={`${fmtArs(data.totalSemana / 7)}/día`} color={NEON.azul} />
                 <TvKPI label="ESTE MES" valor={fmtArs(data.totalMes)}
                   sub={data.totalMesAnt > 0 ? `${flecha(data.variacion)} ${signo(data.variacion)}${data.variacion.toFixed(0)}% vs mismo período mes ant.` : '—'}
@@ -1462,23 +1460,23 @@ function ModoTV({ onSalir }) {
             </div>
 
             {/* Columna derecha */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2vw', minHeight: 0 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9vw', minHeight: 0, overflow: 'hidden' }}>
               {/* MES EN VIVO — VENTAS − COMPRAS − GASTOS (01 → hoy) + medidores */}
-              <div className="dej-in hud" style={{ ...glass, padding: '1.4vw 1.8vw' }}>
-                <div style={{ fontSize: '0.95vw', letterSpacing: 4, color: NEON.cian, fontWeight: 800, marginBottom: '0.9vw' }}>
+              <div className="dej-in hud" style={{ ...glass, padding: '0.9vw 1.4vw' }}>
+                <div style={{ fontSize: '0.85vw', letterSpacing: 4, color: NEON.cian, fontWeight: 800, marginBottom: '0.5vw' }}>
                   💼 MES EN VIVO · 01→{fechaHoyARG().slice(8, 10)}
                 </div>
-                <div style={{ display: 'flex', gap: '1.4vw', alignItems: 'center' }}>
-                  <HudGauge pct={data.panelControl.pctCobrado} label="COBRADO"
+                <div style={{ display: 'flex', gap: '1.2vw', alignItems: 'center' }}>
+                  <HudGauge pct={data.panelControl.pctCobrado} label="COBRADO" size="5.6vw" fsValor="1.4vw" fsLabel="0.5vw"
                     color={data.panelControl.pctCobrado < 50 ? NEON.rojo : data.panelControl.pctCobrado < 75 ? NEON.ambar : NEON.verde} />
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.55vw', minWidth: 0 }}>
-                    <TvMini label="VENTAS" valor={fmtArs(data.mensualVivo.ventas)} color={NEON.cianHi} />
-                    <TvMini label="COMPRAS" valor={fmtArs(data.mensualVivo.compras)} color={NEON.ambar} />
-                    <TvMini label="GASTOS (incl. sueldos)" valor={fmtArs(data.mensualVivo.gastos)} color={NEON.rojo} />
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.4vw', minWidth: 0 }}>
+                    <TvMini label="VENTAS" valor={fmtArs(data.mensualVivo.ventas)} color={NEON.cianHi} chico />
+                    <TvMini label="COMPRAS" valor={fmtArs(data.mensualVivo.compras)} color={NEON.ambar} chico />
+                    <TvMini label="GASTOS (incl. sueldos)" valor={fmtArs(data.mensualVivo.gastos)} color={NEON.rojo} chico />
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: '0.7vw', letterSpacing: 2, color: NEON.muted, fontWeight: 700 }}>SALDO</div>
-                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '2.6vw', lineHeight: 1, color: data.mensualVivo.saldo >= 0 ? NEON.verde : NEON.rojo, textShadow: `0 0 12px ${data.mensualVivo.saldo >= 0 ? 'rgba(81,255,176,0.4)' : 'rgba(255,92,108,0.4)'}` }}>
+                    <div style={{ fontSize: '0.65vw', letterSpacing: 2, color: NEON.muted, fontWeight: 700 }}>SALDO</div>
+                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '2.2vw', lineHeight: 1, color: data.mensualVivo.saldo >= 0 ? NEON.verde : NEON.rojo, textShadow: `0 0 12px ${data.mensualVivo.saldo >= 0 ? 'rgba(81,255,176,0.4)' : 'rgba(255,92,108,0.4)'}` }}>
                       {fmtArs(data.mensualVivo.saldo)}
                     </div>
                   </div>
@@ -1486,7 +1484,7 @@ function ModoTV({ onSalir }) {
               </div>
 
               {/* Cierre semana anterior — compacto, con tendencia de 8 semanas */}
-              <div className="dej-in hud" style={{ ...glass, padding: '1.1vw 1.6vw' }}>
+              <div className="dej-in hud" style={{ ...glass, padding: '0.8vw 1.3vw' }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.8vw', flexWrap: 'wrap' }}>
                   <span style={{ fontSize: '0.85vw', letterSpacing: 3, color: NEON.cian, fontWeight: 800 }}>
                     🗓️ SEMANA ANT.{data.cierreSemana ? ` ${fcCorta(data.cierreSemana.semana_inicio)}→${fcCorta(data.cierreSemana.semana_fin)}` : ''}
@@ -1512,9 +1510,9 @@ function ModoTV({ onSalir }) {
               <PodioClientes clientes={data.topClientesMes} />
 
               {/* Alertas */}
-              <div className="dej-in hud" style={{ ...glass, padding: '1.4vw 1.8vw', flex: 1, minHeight: 0, overflow: 'hidden',
+              <div className="dej-in hud" style={{ ...glass, padding: '0.9vw 1.4vw', flex: 1, minHeight: 0, overflow: 'hidden',
                 borderColor: alertas.some(a => a.tipo === 'danger') ? 'rgba(255,92,108,0.4)' : alertas.length ? 'rgba(255,179,92,0.35)' : 'rgba(81,255,176,0.3)' }}>
-                <div style={{ fontSize: '0.95vw', letterSpacing: 4, fontWeight: 800, marginBottom: '0.9vw',
+                <div style={{ fontSize: '0.85vw', letterSpacing: 4, fontWeight: 800, marginBottom: '0.5vw',
                   color: alertas.some(a => a.tipo === 'danger') ? NEON.rojo : alertas.length ? NEON.ambar : NEON.verde }}>
                   {alertas.length > 0 ? `🚨 ALERTAS (${alertas.length})` : '✅ TODO EN ORDEN'}
                 </div>
@@ -1543,7 +1541,7 @@ function ModoTV({ onSalir }) {
           <TickerVentas ventas={data.ultimasVentas} />
 
           {/* ── FOOTER ── */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '2.4vw', marginTop: '0.6vw', padding: '0.7vw 1.4vw', borderRadius: 6, background: 'rgba(0,212,255,0.035)', border: '1px solid rgba(0,212,255,0.15)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '2.2vw', marginTop: '0.5vw', padding: '0.5vw 1.2vw', borderRadius: 6, background: 'rgba(0,212,255,0.035)', border: '1px solid rgba(0,212,255,0.15)' }}>
             <TvMini label="CAJAS DISP." valor={`${data.panelControl.cajasInfo.total} · ${fmtKg(data.panelControl.cajasInfo.kg)}`}
               color={data.panelControl.cajasInfo.viejasCount > 0 ? NEON.ambar : NEON.cian} chico />
             <TvMini label="CHEQUES 15D" valor={`${data.cheques.length}`} color={NEON.cianHi} chico />
@@ -1606,7 +1604,7 @@ function CanalesEnVivo({ canales }) {
   const total = items.reduce((s, x) => s + x.v, 0)
   const maxV = Math.max(...items.map(x => x.v))
   return (
-    <div className="dej-in hud" style={{ ...glass, padding: '0.8vw 1.4vw', display: 'flex', alignItems: 'center', gap: '1vw' }}>
+    <div className="dej-in hud" style={{ ...glass, padding: '0.6vw 1.3vw', display: 'flex', alignItems: 'center', gap: '1vw' }}>
       <div style={{ fontSize: '0.8vw', letterSpacing: 3, color: NEON.cian, fontWeight: 800, lineHeight: 1.3, flexShrink: 0 }}>
         ⚔️ CANALES<br /><span style={{ color: NEON.muted, fontSize: '0.6vw', letterSpacing: 2 }}>DEL MES</span>
       </div>
@@ -1615,7 +1613,7 @@ function CanalesEnVivo({ canales }) {
         return (
           <div key={x.k} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.7vw', minWidth: 0 }}>
             <HudGauge pct={total > 0 ? (x.v / total) * 100 : 0} label={x.icono}
-              color={lider ? NEON.oro : x.c} size="4.6vw" fsValor="1.15vw" fsLabel="0.9vw" />
+              color={lider ? NEON.oro : x.c} size="4.2vw" fsValor="1.05vw" fsLabel="0.85vw" />
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: '0.65vw', letterSpacing: 2, color: NEON.muted, fontWeight: 800, whiteSpace: 'nowrap' }}>
                 {lider && '👑 '}{x.label}
@@ -1639,13 +1637,13 @@ function PodioClientes({ clientes }) {
   if (!clientes || clientes.length === 0) return null
   const [p1, p2, p3] = clientes
   const podio = [
-    { c: p2, pos: '2º', color: NEON.cian,  alto: '2.1vw', fs: '1.05vw' },
-    { c: p1, pos: '1º', color: NEON.oro,   alto: '3.1vw', fs: '1.5vw' },
-    { c: p3, pos: '3º', color: NEON.azul,  alto: '1.5vw', fs: '0.95vw' },
+    { c: p2, pos: '2º', color: NEON.cian,  alto: '1.5vw', fs: '0.95vw' },
+    { c: p1, pos: '1º', color: NEON.oro,   alto: '2.3vw', fs: '1.3vw' },
+    { c: p3, pos: '3º', color: NEON.azul,  alto: '1.1vw', fs: '0.85vw' },
   ]
   return (
-    <div className="dej-in hud" style={{ ...glass, padding: '0.9vw 1.6vw' }}>
-      <div style={{ fontSize: '0.85vw', letterSpacing: 3, color: NEON.cian, fontWeight: 800, marginBottom: '0.5vw' }}>
+    <div className="dej-in hud" style={{ ...glass, padding: '0.7vw 1.3vw' }}>
+      <div style={{ fontSize: '0.8vw', letterSpacing: 3, color: NEON.cian, fontWeight: 800, marginBottom: '0.35vw' }}>
         🏆 TOP CLIENTES MAYORISTAS · MES
       </div>
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.8vw' }}>
@@ -1683,10 +1681,10 @@ function PodioClientes({ clientes }) {
 
 function TvKPI({ label, valor, sub, color }) {
   return (
-    <div className="dej-in" style={{ ...glass, padding: '1.2vw 1.5vw' }}>
-      <div style={{ fontSize: '0.8vw', letterSpacing: 3, color: NEON.muted, fontWeight: 800 }}>{label}</div>
-      <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '2.6vw', lineHeight: 1.05, color: color || NEON.cianHi }}>{valor}</div>
-      {sub && <div style={{ fontSize: '0.8vw', color: NEON.muted, marginTop: '0.2vw' }}>{sub}</div>}
+    <div className="dej-in" style={{ ...glass, padding: '0.85vw 1.2vw' }}>
+      <div style={{ fontSize: '0.75vw', letterSpacing: 3, color: NEON.muted, fontWeight: 800 }}>{label}</div>
+      <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '2.2vw', lineHeight: 1.05, color: color || NEON.cianHi }}>{valor}</div>
+      {sub && <div style={{ fontSize: '0.75vw', color: NEON.muted, marginTop: '0.15vw' }}>{sub}</div>}
     </div>
   )
 }
