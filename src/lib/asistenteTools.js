@@ -16,6 +16,8 @@
 
 import { supabase } from './supabase.js'
 import { fechaHoyARG, fechaRelativaARG } from './fechas.js'
+import { buscarConGoogle } from './gemini.js'
+import { enviarWhatsapp } from './whatsapp.js'
 
 // ═══════════════════════════════════════════════════════════
 // CONSTANTES — Valores válidos en la base de datos
@@ -392,6 +394,50 @@ El saldo del cliente se actualiza AUTOMÁTICAMENTE por un trigger en la base de 
     name: 'consultar_arqueos',
     description: 'Últimos arqueos de caja: fecha, cajero, total contado y diferencia contra lo esperado. Usar para "cómo dieron los arqueos", "faltó plata en caja".',
     parameters: { type: 'object', properties: { limite: { type: 'number', description: 'Cantidad (default 5)' } } }
+  },
+
+  // ─── MUNDO EXTERIOR (v4): internet, clima, mail, whatsapp ──
+  {
+    name: 'buscar_en_internet',
+    description: 'Busca información ACTUAL en Google y devuelve un resumen con fuentes. Usar cuando pregunten algo que NO está en el sistema y necesita datos frescos: precio del dólar o de la hacienda, noticias, feriados, leyes nuevas, datos de un proveedor/empresa, resultados deportivos, etc. NO usar para datos del negocio (eso está en las otras funciones).',
+    parameters: {
+      type: 'object',
+      properties: { consulta: { type: 'string', description: 'Qué buscar, redactado como pregunta completa con contexto. Ej: "precio del novillo en el mercado de Cañuelas hoy"' } },
+      required: ['consulta']
+    }
+  },
+  {
+    name: 'consultar_pronostico',
+    description: 'Pronóstico del tiempo REAL para Río Primero, Córdoba: ahora + próximos días (temperatura, lluvia, viento). Usar cuando pregunten por el clima, si llueve, el finde, etc. (Importante para planificar ventas de parrilla: finde lindo = más venta.)',
+    parameters: {
+      type: 'object',
+      properties: { dias: { type: 'number', description: 'Cantidad de días de pronóstico (1 a 7, default 3)' } }
+    }
+  },
+  {
+    name: 'enviar_email',
+    description: 'Abre el programa de correo del usuario con un email YA REDACTADO (destinatario, asunto y cuerpo precargados) — el usuario solo aprieta Enviar. Usar cuando pidan "mandale un mail a...", "escribile a...". Redactá vos el cuerpo de forma profesional según lo que pida el usuario, mostraselo antes y abrí el borrador.',
+    parameters: {
+      type: 'object',
+      properties: {
+        para: { type: 'string', description: 'Email del destinatario. Si el usuario no lo dio, podés dejarlo vacío (lo completa él) o preguntarle.' },
+        asunto: { type: 'string', description: 'Asunto del email' },
+        cuerpo: { type: 'string', description: 'Cuerpo completo del email, redactado y listo para enviar' }
+      },
+      required: ['asunto', 'cuerpo']
+    }
+  },
+  {
+    name: 'enviar_whatsapp',
+    description: 'Abre WhatsApp con un mensaje YA ESCRITO (y el número si se dio) — el usuario solo aprieta Enviar. Usar cuando pidan "mandale un whatsapp a...", "pasale por whats...". Redactá el mensaje según lo que pida y abrí el borrador.',
+    parameters: {
+      type: 'object',
+      properties: {
+        telefono: { type: 'string', description: 'Número del destinatario (formato argentino, ej 3515551234). Vacío = el usuario elige el contacto en WhatsApp.' },
+        mensaje: { type: 'string', description: 'Mensaje completo, redactado y listo' }
+      },
+      required: ['mensaje']
+    }
   }
 ]
 
@@ -962,6 +1008,66 @@ export async function ejecutarFuncion(nombre, args) {
           return `${icono} ${formatearFecha(a.fecha)}${a.cajero ? ` · ${a.cajero}` : ''} · contado ${formatearPesos(a.total_contado)} · dif. ${dif >= 0 ? '+' : ''}${formatearPesos(dif)}`
         }).join('\n')
         return { resultado: `Últimos arqueos de caja:\n${lista}` }
+      }
+
+      // ─── MUNDO EXTERIOR (v4) ───────────────────────────────
+      case 'buscar_en_internet': {
+        const consulta = String(args.consulta || '').trim()
+        if (!consulta) return { resultado: 'Decime qué querés que busque.' }
+        const { texto, fuentes } = await buscarConGoogle(consulta)
+        return { resultado: `🌐 Resultado de la búsqueda:\n${texto}${fuentes.length ? `\n\nFuentes: ${fuentes.join(' · ')}` : ''}` }
+      }
+
+      case 'consultar_pronostico': {
+        // Open-Meteo: gratuito, sin API key, con CORS. Coordenadas de
+        // Río Primero, Córdoba. Timezone ARG explícita.
+        const dias = Math.min(7, Math.max(1, Number(args?.dias) || 3))
+        const url = 'https://api.open-meteo.com/v1/forecast?latitude=-31.34&longitude=-63.62'
+          + '&current=temperature_2m,apparent_temperature,precipitation,wind_speed_10m,weather_code'
+          + '&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code'
+          + `&timezone=America%2FArgentina%2FCordoba&forecast_days=${dias}`
+        const resp = await fetch(url)
+        if (!resp.ok) throw new Error('No pude consultar el servicio meteorológico.')
+        const met = await resp.json()
+        const CLIMA = (c) => {
+          if (c === 0) return '☀️ despejado'
+          if (c <= 2) return '🌤️ algo nublado'
+          if (c === 3) return '☁️ nublado'
+          if (c <= 48) return '🌫️ niebla'
+          if (c <= 57) return '🌦️ llovizna'
+          if (c <= 67) return '🌧️ lluvia'
+          if (c <= 77) return '❄️ nieve'
+          if (c <= 82) return '🌧️ chaparrones'
+          return '⛈️ tormenta'
+        }
+        const cur = met.current || {}
+        let r = `Clima en Río Primero AHORA: ${CLIMA(cur.weather_code)} · ${Math.round(cur.temperature_2m)}°C (térmica ${Math.round(cur.apparent_temperature)}°C) · viento ${Math.round(cur.wind_speed_10m)} km/h\n`
+        const d = met.daily || {}
+        const dows = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb']
+        ;(d.time || []).forEach((f, i) => {
+          const dow = dows[new Date(f + 'T12:00').getDay()]
+          r += `• ${dow} ${f.slice(8, 10)}/${f.slice(5, 7)}: ${CLIMA(d.weather_code[i])} · ${Math.round(d.temperature_2m_min[i])}° a ${Math.round(d.temperature_2m_max[i])}° · lluvia ${d.precipitation_probability_max[i] ?? 0}%\n`
+        })
+        return { resultado: r.trim() }
+      }
+
+      case 'enviar_email': {
+        const para = String(args.para || '').trim()
+        const asunto = String(args.asunto || '').trim()
+        const cuerpo = String(args.cuerpo || '').trim()
+        if (!asunto && !cuerpo) return { resultado: 'Necesito al menos el asunto y el cuerpo del mail.' }
+        const href = `mailto:${encodeURIComponent(para)}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`
+        // mailto vía location.href no navega la página y no lo frenan los
+        // bloqueadores de popups (window.open sí suele bloquearse acá).
+        window.location.href = href
+        return { resultado: `📧 Listo: te abrí el borrador del mail${para ? ` para ${para}` : ''} con asunto "${asunto}". Revisalo y dale Enviar.` }
+      }
+
+      case 'enviar_whatsapp': {
+        const mensaje = String(args.mensaje || '').trim()
+        if (!mensaje) return { resultado: 'Necesito el mensaje para abrir WhatsApp.' }
+        enviarWhatsapp(args.telefono || '', mensaje)
+        return { resultado: `💬 Te abrí WhatsApp con el mensaje listo${args.telefono ? '' : ' (elegí el contacto)'}. Si el navegador bloqueó la ventana, habilitá los popups del sistema y volvé a pedírmelo.` }
       }
 
       default:

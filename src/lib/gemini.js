@@ -60,6 +60,39 @@ export async function llamarGemini({ historial, systemPrompt, tools }) {
   return parsearRespuesta(data)
 }
 
+// ─────────────────────────────────────────────────────────────
+// 🌐 BÚSQUEDA EN INTERNET — Gemini con grounding de Google Search
+// ─────────────────────────────────────────────────────────────
+// Gemini NO permite mezclar google_search con functionDeclarations en
+// la misma llamada, así que la búsqueda es una llamada SEPARADA: la
+// tool buscar_en_internet de Chad delega acá y devuelve el resultado
+// al loop principal como cualquier otra función.
+export async function buscarConGoogle(consulta) {
+  if (!GEMINI_API_KEY) throw new Error('Falta la API key de Gemini.')
+  const body = {
+    contents: [{ role: 'user', parts: [{ text: consulta }] }],
+    systemInstruction: { parts: [{ text: 'Respondé en español argentino, breve y concreto, usando la información MÁS ACTUAL de la búsqueda. Incluí números, fechas y datos puntuales. Sin preámbulos.' }] },
+    tools: [{ google_search: {} }],
+    generationConfig: { temperature: 0.2, maxOutputTokens: 1024 },
+  }
+  const response = await fetch(`${API_URL}?key=${GEMINI_API_KEY}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  })
+  if (!response.ok) {
+    const errorText = await response.text()
+    console.error('Error Gemini (búsqueda):', errorText)
+    throw new Error(`Error ${response.status} buscando en internet`)
+  }
+  const data = await response.json()
+  const cand = data.candidates?.[0]
+  const texto = (cand?.content?.parts || []).map(p => p.text || '').join('').trim()
+  const fuentes = (cand?.groundingMetadata?.groundingChunks || [])
+    .map(c => c.web?.title).filter(Boolean)
+  return { texto: texto || 'La búsqueda no devolvió resultados.', fuentes: [...new Set(fuentes)].slice(0, 3) }
+}
+
 // Parsea la respuesta de Gemini y devuelve { texto, llamadaFuncion }
 function parsearRespuesta(data) {
   const candidato = data.candidates?.[0]
