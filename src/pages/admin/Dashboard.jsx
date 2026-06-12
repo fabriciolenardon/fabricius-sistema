@@ -202,7 +202,15 @@ export default function Dashboard() {
   )
   const stockPollo = Math.max(0, stock.pollo || 0)
   const stockBrosas = Math.max(0, stock.bovino_brosa || 0)
-  const stockEmbutido = Math.max(0, stock.embutido || 0)
+  // Embutidos = bucket legacy 'embutido' (comprados/sin clasificar) + los
+  // buckets por producto de elaboración propia (emb_*, mig 60)
+  const stockEmbutido = Math.max(0,
+    (stock.embutido || 0) +
+    (stock.emb_chorizo_parrillero || 0) +
+    (stock.emb_chorizo_saborizado || 0) +
+    (stock.emb_salchicha_parrillera || 0) +
+    (stock.emb_salame || 0)
+  )
   const stockRebozado = Math.max(0, stock.rebozado || 0)
   const stockAlmacen = Math.max(0, stock.almacen || 0)
   const stockBebidas = Math.max(0, stock.bebidas || 0)
@@ -406,7 +414,7 @@ export default function Dashboard() {
             { label: '🐷 Cerdo Piezas', valor: fmtKg(stockCerdoPiezas), color: 'var(--amber)', aprox: 'al peso', bajo: stockCerdoPiezas < 20, stockKg: stockCerdoPiezas, tiposEntradas: ['cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza','cerdo_huesos'], tiposSalidas: ['cerdo_pieza','cerdo_corte','cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza','cerdo_huesos'] },
             { label: '🍗 Pollo', valor: fmtKg(stockPollo), color: 'var(--blue)', aprox: Math.round(stockPollo / 20) + ' cajones', bajo: stockPollo < 50, stockKg: stockPollo, tiposEntradas: ['pollo'], tiposSalidas: ['pollo'] },
             { label: '🫀 Brosas', valor: fmtKg(stockBrosas), color: 'var(--amber)', aprox: 'al peso', bajo: stockBrosas < 20, stockKg: stockBrosas, tiposEntradas: ['bovino_brosa'], tiposSalidas: ['bovino_brosa'] },
-            { label: '🌭 Embutidos', valor: fmtKg(stockEmbutido), color: 'var(--purple)', aprox: 'al peso', bajo: stockEmbutido < 20, stockKg: stockEmbutido, tiposEntradas: ['embutido'], tiposSalidas: ['embutido'] },
+            { label: '🌭 Embutidos', valor: fmtKg(stockEmbutido), color: 'var(--purple)', aprox: 'al peso', bajo: stockEmbutido < 20, stockKg: stockEmbutido, tiposEntradas: ['embutido', 'emb_chorizo_parrillero', 'emb_chorizo_saborizado', 'emb_salchicha_parrillera', 'emb_salame'], tiposSalidas: ['embutido', 'emb_chorizo_parrillero', 'emb_chorizo_saborizado', 'emb_salchicha_parrillera', 'emb_salame'] },
             { label: '🧊 Rebozados/Congelados', valor: fmtKg(stockRebozado), color: 'var(--blue)', aprox: 'al peso', bajo: stockRebozado < 20, stockKg: stockRebozado, tiposEntradas: ['rebozado'], tiposSalidas: ['rebozado'] },
             { label: '🛒 Almacén', valor: Math.round(stockAlmacen) + ' u', color: 'var(--gold)', aprox: cantAlmacen + ' productos cargados', bajo: stockAlmacen < 10, stockKg: stockAlmacen, tiposEntradas: ['almacen'], tiposSalidas: ['almacen'] },
             { label: '🥤 Bebidas', valor: Math.round(stockBebidas) + ' u', color: 'var(--blue)', aprox: cantBebidas + ' productos cargados', bajo: stockBebidas < 10, stockKg: stockBebidas, tiposEntradas: ['bebidas'], tiposSalidas: ['bebidas'] },

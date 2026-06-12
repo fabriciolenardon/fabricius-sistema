@@ -26,6 +26,28 @@ const NOMBRE_EMBUTIDO = {
   salame_holanda: 'Salame Holanda',
 }
 
+// Bucket de stock PROPIO de cada embutido elaborado (mig 60, modelo "cerdo
+// piezas"): la elaboración suma acá y la venta descuenta de acá (vía
+// precios.stock_origen — la caja y las salidas lo priorizan sobre la
+// categoría). El bucket 'embutido' queda para comprados / sin clasificar
+// (morcilla, jamón, etc.). Los 3 salames comparten bucket porque a la
+// venta son un único producto ("Salame Casero").
+const BUCKET_EMBUTIDO = {
+  chorizo_parrillero: 'emb_chorizo_parrillero',
+  chorizo_saborizado: 'emb_chorizo_saborizado',
+  salchicha_parrillera: 'emb_salchicha_parrillera',
+  salame_comun: 'emb_salame',
+  salame_rockeford: 'emb_salame',
+  salame_holanda: 'emb_salame',
+}
+const LABEL_BUCKET_EMB = {
+  emb_chorizo_parrillero: '🌭 Chorizo Parrillero',
+  emb_chorizo_saborizado: '🌭 Chorizo Saborizado',
+  emb_salchicha_parrillera: '🌭 Salchicha Parrillera',
+  emb_salame: '🥩 Salame Casero',
+  embutido: '📦 Otros (comprados / sin clasificar)',
+}
+
 // Etiqueta/estilo de la forma de cobro de un remito. Solo 'cta_cte' es a
 // crédito (deuda); el resto es contado = pagado en el acto.
 const COBRO_LABEL = {
@@ -137,6 +159,20 @@ async function actualizarStock(tipo, kg) {
   }
   const { error } = await supabase.from('stock_actual').insert({ tipo, kg_disponible: kg })
   return { error: error || null }
+}
+
+// Suma kg a un bucket y VERIFICA con un re-read que efectivamente subió
+// (patrón anti-error de la elaboración de embutidos: si algo falla se ve
+// al instante en vez de tener que cuadrar el stock a mano). Tira Error.
+async function sumarStockVerificado(tipo, kg) {
+  const { data: antes } = await supabase.from('stock_actual').select('kg_disponible').eq('tipo', tipo).maybeSingle()
+  const esperado = (Number(antes?.kg_disponible) || 0) + kg
+  const { error } = await actualizarStock(tipo, kg)
+  if (error) throw new Error(`No se sumó al stock ${tipo}: ${error.message}`)
+  const { data: despues } = await supabase.from('stock_actual').select('kg_disponible').eq('tipo', tipo).maybeSingle()
+  if (Math.abs((Number(despues?.kg_disponible) || 0) - esperado) > 0.01) {
+    throw new Error(`El stock ${tipo} no se actualizó correctamente. Esperado: ${esperado.toFixed(2)} kg. Revisá Ajuste Stock.`)
+  }
 }
 
 // Helper: format de hora desde un timestamp de Postgres.
@@ -323,8 +359,9 @@ const [kgCarneBovinaEmbutido, setKgCarneBovinaEmbutido] = useState('')
 const [kgQuesoEmbutido, setKgQuesoEmbutido] = useState('')
 const [pctAumentoEmbutido, setPctAumentoEmbutido] = useState(10)
 // Peso real embutido por variedad (parrilleros). Si se carga, la merma sale sola.
-const [kgComunes, setKgComunes] = useState('')
-const [kgSaborizados, setKgSaborizados] = useState('')
+// Peso real por PRODUCTO terminado: una misma elaboración puede producir
+// chorizos comunes, saborizados Y salchichas (cada uno va a su stock).
+const [pesoRealEmb, setPesoRealEmb] = useState({ chorizo_parrillero: '', chorizo_saborizado: '', salchicha_parrillera: '' })
 const [elaboraciones, setElaboraciones] = useState([])
 const [piezasIndividuales, setPiezasIndividuales] = useState([])
 // Historial completo de medias_stock (todos los estados) para la pestana
@@ -569,14 +606,18 @@ async function confirmarElaboracionEmbutido() {
   setLoading(true)
   try {
     const kgTotal = kgCerdo + (parseNumero(kgCarneBovinaEmbutido))
-    const comunes = parseNumero(kgComunes)
-    const saborizados = parseNumero(kgSaborizados)
-    const totalElab = comunes + saborizados
-    // Si se cargó el peso real embutido (comunes + saborizados), ese es el kg final
-    // y la merma sale de ahí; si no, se usa el % manual.
+    // Peso real por producto terminado (chorizo común / saborizado / salchicha).
+    // Si se cargó al menos uno, ese total es el kg final y la merma sale de ahí;
+    // si no, se usa el % manual y todo el lote va al tipo elegido en el select.
+    const productosFinales = Object.entries(pesoRealEmb)
+      .map(([tipo, v]) => ({ tipo, kg: parseNumero(v) }))
+      .filter(p => p.kg > 0)
+    const totalElab = productosFinales.reduce((s, p) => s + p.kg, 0)
     const usaReal = totalElab > 0
     const kgFinal = parseFloat((usaReal ? totalElab : kgTotal * (1 + pctAumentoEmbutido / 100)).toFixed(2))
     const pctFinal = kgTotal > 0 ? parseFloat(((kgFinal / kgTotal - 1) * 100).toFixed(2)) : pctAumentoEmbutido
+    // A qué bucket de stock va cada kg elaborado
+    const destinosStock = usaReal ? productosFinales : [{ tipo: tipoEmbutido, kg: kgFinal }]
     const piezasUsadas = Object.entries(piezasEmbutido)
       .filter(([, v]) => parseFloat(v) > 0)
       .map(([tipo, v]) => ({ tipo, kg: parseFloat(v) }))
@@ -586,8 +627,10 @@ async function confirmarElaboracionEmbutido() {
       kg_carne_cerdo: kgCerdo,
       kg_carne_bovina: parseNumero(kgCarneBovinaEmbutido),
       kg_elaborado: kgTotal, pct_aumento: pctFinal,
-      kg_comunes: usaReal ? comunes : null,
-      kg_saborizados: usaReal ? saborizados : null,
+      // legacy: comunes/saborizados se siguen llenando para los reportes viejos
+      kg_comunes: usaReal ? parseNumero(pesoRealEmb.chorizo_parrillero) : null,
+      kg_saborizados: usaReal ? parseNumero(pesoRealEmb.chorizo_saborizado) : null,
+      productos_finales: destinosStock,
       kg_final: kgFinal, maduracion_completa: true, notas
     })
     for (const [tipo, v] of Object.entries(piezasEmbutido)) {
@@ -601,17 +644,11 @@ async function confirmarElaboracionEmbutido() {
       const { error } = await actualizarStock('cerdo_cabeza', -parseNumero(kgCarneBovinaEmbutido))
       if (error) throw new Error(`No se descontó retazos cerdo (cabezas): ${error.message}`)
     }
-    // Suma al stock 'embutido' — paso crítico que antes fallaba en silencio.
-    // Verificamos con un re-read que efectivamente subió, así si algo se
-    // rompe lo vemos al instante en vez de tener que cuadrarlo a mano.
-    const { data: stockAntes } = await supabase.from('stock_actual').select('kg_disponible').eq('tipo', 'embutido').maybeSingle()
-    const kgEsperado = (Number(stockAntes?.kg_disponible) || 0) + kgFinal
-    const { error: errEmb } = await actualizarStock('embutido', kgFinal)
-    if (errEmb) throw new Error(`No se sumó al stock de embutidos: ${errEmb.message}`)
-    const { data: stockDespues } = await supabase.from('stock_actual').select('kg_disponible').eq('tipo', 'embutido').maybeSingle()
-    const kgReal = Number(stockDespues?.kg_disponible) || 0
-    if (Math.abs(kgReal - kgEsperado) > 0.01) {
-      throw new Error(`El stock de embutidos no se actualizó correctamente. Esperado: ${kgEsperado.toFixed(2)} kg, real: ${kgReal.toFixed(2)} kg. Revisá el ajuste manual.`)
+    // Suma al stock PROPIO de cada producto terminado (mig 60) — paso
+    // crítico que antes fallaba en silencio; sumarStockVerificado re-lee
+    // y verifica cada bucket.
+    for (const p of destinosStock) {
+      await sumarStockVerificado(BUCKET_EMBUTIDO[p.tipo] || 'embutido', p.kg)
     }
     // Registrar la elaboración como entrada informativa, así aparece junto a
     // las compras en "Entradas registradas" y en el historial del Dashboard.
@@ -622,7 +659,7 @@ async function confirmarElaboracionEmbutido() {
       fecha,
       tipo: 'embutido',
       proveedor_nombre: 'Elaboración propia',
-      descripcion: `${NOMBRE_EMBUTIDO[tipoEmbutido] || 'Embutido'} elaborado (${kgCerdo.toFixed(1)} kg cerdo${kgBovinaEmb > 0 ? ` + ${kgBovinaEmb.toFixed(1)} kg bovino` : ''})`,
+      descripcion: `${destinosStock.map(p => `${NOMBRE_EMBUTIDO[p.tipo] || p.tipo} ${p.kg.toFixed(1)} kg`).join(' + ')} elaborado (${kgCerdo.toFixed(1)} kg cerdo${kgBovinaEmb > 0 ? ` + ${kgBovinaEmb.toFixed(1)} kg retazos` : ''})`,
       kg: kgFinal,
       kg_real: kgFinal,
       merma_pct: 0,
@@ -632,10 +669,10 @@ async function confirmarElaboracionEmbutido() {
       cantidad: 1,
     })
     if (errEntrada) console.warn('No se pudo registrar la entrada de la elaboración:', errEntrada.message)
-    showAlert(`✅ ${kgFinal.toFixed(1)} kg de embutidos elaborados al stock`)
+    showAlert(`✅ ${kgFinal.toFixed(1)} kg elaborados — ${destinosStock.map(p => `${NOMBRE_EMBUTIDO[p.tipo] || p.tipo}: ${p.kg.toFixed(1)} kg`).join(' · ')} (cada uno a su stock)`)
     setPiezasEmbutido({ cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '', cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: '' })
     setKgCarneBovinaEmbutido(''); setKgQuesoEmbutido(''); setNotas('')
-    setKgComunes(''); setKgSaborizados('')
+    setPesoRealEmb({ chorizo_parrillero: '', chorizo_saborizado: '', salchicha_parrillera: '' })
     await cargarDatos(); onSaved()
   } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
   setLoading(false)
@@ -692,16 +729,9 @@ async function confirmarElaboracionSalame() {
     if (!(kgFinales > 0)) { showAlert('Ingresá los kg finales pesados después del secado', 'error'); return }
     setLoading(true)
     try {
-      // Sumar al stock 'embutido' con verificación (mismo patrón anti-error
-      // que la elaboración de embutidos).
-      const { data: stockAntes } = await supabase.from('stock_actual').select('kg_disponible').eq('tipo', 'embutido').maybeSingle()
-      const kgEsperado = (Number(stockAntes?.kg_disponible) || 0) + kgFinales
-      const { error: errStock } = await actualizarStock('embutido', kgFinales)
-      if (errStock) throw new Error(`No se sumó al stock de embutidos: ${errStock.message}`)
-      const { data: stockDespues } = await supabase.from('stock_actual').select('kg_disponible').eq('tipo', 'embutido').maybeSingle()
-      if (Math.abs((Number(stockDespues?.kg_disponible) || 0) - kgEsperado) > 0.01) {
-        throw new Error('El stock de embutidos no se actualizó correctamente. Revisá el ajuste manual.')
-      }
+      // Sumar al bucket de salames (mig 60) con verificación (mismo patrón
+      // anti-error que la elaboración de embutidos).
+      await sumarStockVerificado(BUCKET_EMBUTIDO[elab.tipo_embutido] || 'emb_salame', kgFinales)
       // Marcar la elaboración como completa guardando el peso final seco.
       // pct_aumento = merma real (negativa) calculada con el peso exacto.
       const pct = elab.kg_elaborado > 0 ? parseFloat(((kgFinales / elab.kg_elaborado - 1) * 100).toFixed(2)) : 0
@@ -725,7 +755,7 @@ async function confirmarElaboracionSalame() {
         cantidad: 1,
       })
       if (errEnt) console.warn('No se registró la entrada del salame finalizado:', errEnt.message)
-      showAlert(`✅ Salame seco finalizado — ${kgFinales.toFixed(1)} kg al stock de embutidos`)
+      showAlert(`✅ Salame seco finalizado — ${kgFinales.toFixed(1)} kg al stock de Salame Casero`)
       await cargarDatos(); onSaved()
     } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
     setLoading(false)
@@ -1348,6 +1378,25 @@ async function confirmarDesposteCerdo() {
           </div>
         ))}
       </div>
+      {/* Stock de embutidos por producto (mig 60): cada elaborado tiene su
+          bucket propio; 'embutido' queda para comprados/sin clasificar */}
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="card-title">🌭 Stock embutidos por producto</div>
+        {Object.entries(LABEL_BUCKET_EMB).map(([tipo, label]) => (
+          <div key={tipo} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+            <span style={{ fontSize: 12, fontWeight: 600 }}>{label}</span>
+            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: (piezasStock[tipo] || 0) > 0 ? 'var(--green)' : 'var(--muted)' }}>
+              {fmtKg(piezasStock[tipo] || 0, { decimales: 2 })}
+            </span>
+          </div>
+        ))}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0 2px' }}>
+          <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--gold)' }}>TOTAL EMBUTIDOS</span>
+          <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>
+            {fmtKg(Object.keys(LABEL_BUCKET_EMB).reduce((s, t) => s + (piezasStock[t] || 0), 0), { decimales: 2 })}
+          </span>
+        </div>
+      </div>
     </div>
     <div className="card">
       <div className="card-title">🌭 {tipoElaboracion === 'embutido' ? 'Elaborar embutidos' : 'Elaborar salames'}</div>
@@ -1378,20 +1427,23 @@ async function confirmarDesposteCerdo() {
       {tipoElaboracion === 'embutido' && (() => {
         const kgCerdoB = Object.values(piezasEmbutido).reduce((s, v) => s + (parseFloat(v) || 0), 0)
         const kgTotB = kgCerdoB + parseNumero(kgCarneBovinaEmbutido)
-        const totalElab = parseNumero(kgComunes) + parseNumero(kgSaborizados)
+        const totalElab = Object.values(pesoRealEmb).reduce((s, v) => s + parseNumero(v), 0)
         const mermaCalc = (kgTotB > 0 && totalElab > 0) ? ((totalElab / kgTotB - 1) * 100) : null
         return (
           <div style={{ background: '#1a1a2a', border: '1px solid #2a2a5a', borderRadius: 10, padding: '12px 14px', marginBottom: 10 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#7db5ff', marginBottom: 8 }}>🌭 Peso real embutido (chorizos terminados)</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-              <div>
-                <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Parrilleros Comunes (kg)</label>
-                <input type="number" step="0.1" placeholder="0" value={kgComunes} onChange={e => setKgComunes(e.target.value)} style={{ ...inp, borderColor: kgComunes ? 'var(--gold)' : 'var(--border)' }} />
-              </div>
-              <div>
-                <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Parrilleros Saborizados (kg)</label>
-                <input type="number" step="0.1" placeholder="0" value={kgSaborizados} onChange={e => setKgSaborizados(e.target.value)} style={{ ...inp, borderColor: kgSaborizados ? 'var(--gold)' : 'var(--border)' }} />
-              </div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#7db5ff', marginBottom: 4 }}>🌭 Peso real embutido (productos terminados)</div>
+            <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 8 }}>Una misma elaboración puede producir varios: cargá los kg de cada uno y cada producto suma a su propio stock.</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
+              {[
+                { id: 'chorizo_parrillero', label: '🌭 Chorizo Parrillero (kg)' },
+                { id: 'chorizo_saborizado', label: '🌭 Chorizo Saborizado (kg)' },
+                { id: 'salchicha_parrillera', label: '🌭 Salchicha Parrillera (kg)' },
+              ].map(p => (
+                <div key={p.id}>
+                  <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>{p.label}</label>
+                  <input type="number" step="0.1" placeholder="0" value={pesoRealEmb[p.id]} onChange={e => setPesoRealEmb(prev => ({ ...prev, [p.id]: e.target.value }))} style={{ ...inp, borderColor: pesoRealEmb[p.id] ? 'var(--gold)' : 'var(--border)' }} />
+                </div>
+              ))}
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px dashed var(--border)', paddingTop: 8 }}>
               <div>
@@ -1405,7 +1457,7 @@ async function confirmarDesposteCerdo() {
                 </div>
               )}
             </div>
-            {totalElab > 0 && <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 6 }}>Al cargar el peso real, la merma se calcula sola y reemplaza al % de arriba.</div>}
+            {totalElab > 0 && <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 6 }}>Al cargar el peso real, la merma se calcula sola y reemplaza al % de arriba. Si no cargás nada, todo el lote va al stock del tipo elegido arriba.</div>}
           </div>
         )
       })()}
@@ -1434,7 +1486,7 @@ async function confirmarDesposteCerdo() {
           }
           // EMBUTIDO: si se cargó el peso real (comunes + saborizados), ese es el
           // final y la merma sale de ahí; si no, se usa el % manual.
-          const totalElabBox = parseNumero(kgComunes) + parseNumero(kgSaborizados)
+          const totalElabBox = Object.values(pesoRealEmb).reduce((s, v) => s + parseNumero(v), 0)
           const usaReal = totalElabBox > 0
           const kgFinal = usaReal ? totalElabBox : kgTotal * (1 + pctAumentoEmbutido / 100)
           const pctMostrar = kgTotal > 0 ? ((kgFinal / kgTotal - 1) * 100) : 0
@@ -1519,6 +1571,15 @@ async function confirmarDesposteCerdo() {
                 {e.fecha} · {(e.kg_carne_cerdo || 0).toFixed(1)} kg cerdo + {(e.kg_carne_bovina || 0).toFixed(1)} kg bovino
                 {e.kg_queso > 0 ? ` + ${e.kg_queso.toFixed(1)} kg queso` : ''}
               </div>
+              {Array.isArray(e.productos_finales) && e.productos_finales.length > 0 && (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+                  {e.productos_finales.map((p, i) => (
+                    <span key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, padding: '2px 8px', fontSize: 11, color: 'var(--text2)' }}>
+                      {NOMBRE_EMBUTIDO[p.tipo] || p.tipo}: {(Number(p.kg) || 0).toFixed(1)} kg
+                    </span>
+                  ))}
+                </div>
+              )}
               {e.tipo === 'salame' && !e.maduracion_completa && (
                 <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 2 }}>⏳ En maduración hasta: {e.fecha_fin_maduracion}</div>
               )}
@@ -1711,6 +1772,15 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, loading }) {
                   {e.fecha}{e.created_at ? ` · ${fmtHora(e.created_at)}` : ''} · {(e.kg_carne_cerdo || 0).toFixed(1)} kg cerdo + {(e.kg_carne_bovina || 0).toFixed(1)} kg bovino
                   {e.kg_queso > 0 ? ` + ${e.kg_queso.toFixed(1)} kg queso` : ''}
                 </div>
+                {Array.isArray(e.productos_finales) && e.productos_finales.length > 0 && (
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+                    {e.productos_finales.map((p, i) => (
+                      <span key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, padding: '2px 8px', fontSize: 11, color: 'var(--text2)' }}>
+                        {NOMBRE_EMBUTIDO[p.tipo] || p.tipo}: {(Number(p.kg) || 0).toFixed(1)} kg
+                      </span>
+                    ))}
+                  </div>
+                )}
                 {e.tipo === 'salame' && !e.maduracion_completa && (
                   <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 2 }}>🔒 En proceso de secado · {(e.kg_elaborado || 0).toFixed(1)} kg netos (no suma al stock todavía)</div>
                 )}
