@@ -1,14 +1,21 @@
 // ═══════════════════════════════════════════════════════════
-// HERRAMIENTAS DEL ASISTENTE (TOOLS) — v2
+// HERRAMIENTAS DEL ASISTENTE (TOOLS) — v3 "ACCESO TOTAL"
 // ═══════════════════════════════════════════════════════════
 // Cambios v2:
 //   + Función cargar_entrada_deposito (compra de carne / pollo / embutidos)
 //   + Función cargar_pago_cliente (registro de pagos en cta cte)
 //   + Función buscar_cliente (para resolver cliente_id antes de pagar)
 //   + Función consultar_entradas_recientes
+// Cambios v3 (acceso de CONSULTA a todo el sistema):
+//   + ventas del día, resumen mensual en vivo (reglas KPI de Fabricio),
+//     cierres semanales, gastos, cheques, remitos, pedidos, ofertas,
+//     monotributo, sueldos, compras de la semana, extractos de cta cte
+//     (cliente y proveedor), medias, cajas, elaboraciones, promo, arqueos
+//   + todas las fechas con reloj ARG (lib/fechas), nunca UTC
 // ═══════════════════════════════════════════════════════════
 
 import { supabase } from './supabase.js'
+import { fechaHoyARG, fechaRelativaARG } from './fechas.js'
 
 // ═══════════════════════════════════════════════════════════
 // CONSTANTES — Valores válidos en la base de datos
@@ -17,6 +24,31 @@ const TIPOS_DEPOSITO = ['bovino_mr', 'cerdo', 'pollo', 'cajon_bovino', 'embutido
 const TIPOS_ANIMAL_BOVINO = ['novillito', 'vaquillona', 'overo_grande', 'overo_chico', 'bubalino']
 const TIPOS_ANIMAL_CERDO = ['capon']
 const TIPOS_MOVIMIENTO = ['remito', 'pago', 'nota_debito', 'nota_credito']
+const TOPE_MONO_K = 108357084.05 // tope monotributo categoría K 2026
+
+// Helpers de fecha — siempre reloj ARG (regla de la casa, ver lib/fechas.js)
+const inicioMes = () => fechaHoyARG().slice(0, 8) + '01'
+const inicioMesAnterior = () => {
+  const hoy = fechaHoyARG()
+  const y = Number(hoy.slice(0, 4)), m = Number(hoy.slice(5, 7))
+  return `${m === 1 ? y - 1 : y}-${String(m === 1 ? 12 : m - 1).padStart(2, '0')}-01`
+}
+// Regla KPI de Fabricio: el mes en curso se compara 01→hoy contra
+// 01→MISMO DÍA del mes anterior (nunca contra el mes completo).
+const mismoDiaMesAnterior = () => {
+  const hoy = fechaHoyARG()
+  const y = Number(hoy.slice(0, 4)), m = Number(hoy.slice(5, 7)), d = Number(hoy.slice(8, 10))
+  const yPrev = m === 1 ? y - 1 : y, mPrev = m === 1 ? 12 : m - 1
+  const ultimo = new Date(yPrev, mPrev, 0).getDate()
+  return `${yPrev}-${String(mPrev).padStart(2, '0')}-${String(Math.min(d, ultimo)).padStart(2, '0')}`
+}
+// Lunes de la semana en curso (las compras a proveedores van por semana)
+const inicioSemanaARG = () => {
+  const d = new Date(fechaHoyARG() + 'T12:00')
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
+  return fechaHoyARG(d)
+}
+const sumar = (rows, campo) => (rows || []).reduce((s, r) => s + (Number(r?.[campo]) || 0), 0)
 
 // ═══════════════════════════════════════════════════════════
 // 1. DEFINICIONES — Le decimos a Gemini qué funciones tiene disponibles
@@ -247,6 +279,119 @@ El saldo del cliente se actualiza AUTOMÁTICAMENTE por un trigger en la base de 
       },
       required: ['cliente_id', 'monto']
     }
+  },
+
+  // ─── ACCESO TOTAL (v3): consultas de TODO el sistema ───────
+  {
+    name: 'consultar_ventas_dia',
+    description: 'Ventas de un día: caja minorista (total, cantidad, ticket promedio) + despachos mayoristas (remitos), y comparación con ayer si es hoy. Usar para "cuánto vendimos hoy/ayer/tal día", "cómo viene el día".',
+    parameters: { type: 'object', properties: { fecha: { type: 'string', description: 'YYYY-MM-DD. Default: hoy.' } } }
+  },
+  {
+    name: 'consultar_resumen_mes',
+    description: 'Resumen MENSUAL EN VIVO del negocio (01 → hoy): Ventas (caja + mayorista + pedidos), Compras de mercadería, Gastos (operativos + sueldos) y Saldo = V−C−G, más la variación de la caja contra el MISMO período del mes anterior. Usar para "cómo viene el mes", "cuánto ganamos este mes", "resumen del negocio".',
+    parameters: { type: 'object', properties: {} }
+  },
+  {
+    name: 'consultar_cierres_semanales',
+    description: 'Últimas semanas CERRADAS con ventas, compras, gastos, sueldos y ganancia de cada una. Usar para "cómo cerró la semana pasada", "ganancia de las últimas semanas".',
+    parameters: { type: 'object', properties: { limite: { type: 'number', description: 'Cantidad de semanas (default 4)' } } }
+  },
+  {
+    name: 'consultar_gastos',
+    description: 'Gastos registrados en un rango (default: el mes en curso), agrupados por tipo (fijo/variable/socio) con total. Usar para "cuánto gastamos", "gastos del mes", "gastos de combustible".',
+    parameters: {
+      type: 'object',
+      properties: {
+        desde: { type: 'string', description: 'YYYY-MM-DD. Default: 01 del mes.' },
+        hasta: { type: 'string', description: 'YYYY-MM-DD. Default: hoy.' },
+        categoria: { type: 'string', description: 'Opcional: filtrar por categoría (combustible, luz, etc.)' }
+      }
+    }
+  },
+  {
+    name: 'consultar_cheques',
+    description: 'Cheques en cartera: recibidos de clientes (por cobrar, con días al vencimiento) y emitidos propios (por pagar). Usar para "qué cheques tenemos", "cuándo vence el cheque de X".',
+    parameters: { type: 'object', properties: {} }
+  },
+  {
+    name: 'consultar_remitos_recientes',
+    description: 'Últimos remitos/despachos mayoristas (cliente, total, forma de cobro). Usar para "qué despachamos", "remitos de hoy", "qué le mandamos a X".',
+    parameters: {
+      type: 'object',
+      properties: {
+        cliente: { type: 'string', description: 'Opcional: filtrar por nombre de cliente' },
+        limite: { type: 'number', description: 'Cantidad (default 10)' }
+      }
+    }
+  },
+  {
+    name: 'consultar_pedidos',
+    description: 'Pedidos de clientes en el sistema (pendientes, confirmados, día de entrega). Usar para "qué pedidos hay", "qué hay que entregar mañana".',
+    parameters: { type: 'object', properties: {} }
+  },
+  {
+    name: 'consultar_ofertas',
+    description: 'Ofertas activas hoy (producto, precio de oferta o % de descuento, vigencia). Usar para "qué ofertas tenemos".',
+    parameters: { type: 'object', properties: {} }
+  },
+  {
+    name: 'consultar_facturacion_monotributo',
+    description: 'Estado de las cuentas de monotributo: facturado de los últimos 12 meses por cuenta y % consumido del tope categoría K. Usar para "cómo van los monotributos", "cuánto facturó Roxana", "riesgo de pasarse del tope".',
+    parameters: { type: 'object', properties: {} }
+  },
+  {
+    name: 'consultar_sueldos',
+    description: 'Últimas liquidaciones de sueldos por empleado (semana, horas, neto). Usar para "cuánto pagamos de sueldos", "liquidación de X".',
+    parameters: { type: 'object', properties: { limite: { type: 'number', description: 'Cantidad de liquidaciones (default 8)' } } }
+  },
+  {
+    name: 'consultar_compras_semana',
+    description: 'Compras a proveedores de la semana en curso (lunes → hoy) agrupadas por proveedor. Usar para "cuánto compramos esta semana", "qué le compramos a Pretto".',
+    parameters: { type: 'object', properties: {} }
+  },
+  {
+    name: 'consultar_extracto_proveedor',
+    description: 'Extracto de la cuenta corriente de UN proveedor: últimos movimientos (compras, pagos) y saldo. Usar para "movimientos de Pretto", "qué pagos le hicimos a X". Tolerante a nombres mal transcriptos por voz.',
+    parameters: {
+      type: 'object',
+      properties: { nombre: { type: 'string', description: 'Nombre o parte del nombre del proveedor' } },
+      required: ['nombre']
+    }
+  },
+  {
+    name: 'consultar_extracto_cliente',
+    description: 'Extracto de la cuenta corriente de UN cliente: últimos movimientos (remitos, pagos) y saldo. Usar para "movimientos de X", "qué pagó el cliente Y".',
+    parameters: {
+      type: 'object',
+      properties: { nombre: { type: 'string', description: 'Nombre o parte del nombre del cliente' } },
+      required: ['nombre']
+    }
+  },
+  {
+    name: 'consultar_medias_disponibles',
+    description: 'Medias reses físicas disponibles en cámara: cantidad, kg totales y códigos MR-XXX. Usar para "cuántas medias tenemos", "qué medias hay para despostar".',
+    parameters: { type: 'object', properties: {} }
+  },
+  {
+    name: 'consultar_cajas_disponibles',
+    description: 'Cajas bovinas (CB/PT) disponibles: cantidad y kg por tipo. Usar para "cuántas cajas hay".',
+    parameters: { type: 'object', properties: {} }
+  },
+  {
+    name: 'consultar_elaboraciones_recientes',
+    description: 'Últimas elaboraciones de embutidos y salames (qué se hizo, kg finales, desglose por producto). Usar para "qué embutidos hicimos", "cuándo elaboramos chorizos".',
+    parameters: { type: 'object', properties: { limite: { type: 'number', description: 'Cantidad (default 5)' } } }
+  },
+  {
+    name: 'consultar_promo_mundial',
+    description: 'Estado de la Promo Mundial (descuento en efectivo/transferencia de la caja): activa o no y % de descuento.',
+    parameters: { type: 'object', properties: {} }
+  },
+  {
+    name: 'consultar_arqueos',
+    description: 'Últimos arqueos de caja: fecha, cajero, total contado y diferencia contra lo esperado. Usar para "cómo dieron los arqueos", "faltó plata en caja".',
+    parameters: { type: 'object', properties: { limite: { type: 'number', description: 'Cantidad (default 5)' } } }
   }
 ]
 
@@ -409,7 +554,7 @@ export async function ejecutarFuncion(nombre, args) {
         const gasto = {
           tipo, descripcion: args.descripcion, monto: Number(args.monto),
           categoria: args.categoria || null,
-          fecha: args.fecha || new Date().toISOString().slice(0, 10),
+          fecha: args.fecha || fechaHoyARG(), // hora ARG, no UTC (después de las 21 cambia el día)
           socio, forma: args.forma || null, notas: args.notas || null,
           creado_por: 'asistente_ia'
         }
@@ -461,7 +606,7 @@ export async function ejecutarFuncion(nombre, args) {
           precio_kg: args.precio_kg ? Number(args.precio_kg) : null,
           importe,
           cantidad: args.cantidad ? Number(args.cantidad) : null,
-          fecha: args.fecha || new Date().toISOString().slice(0, 10),
+          fecha: args.fecha || fechaHoyARG(), // hora ARG, no UTC (después de las 21 cambia el día)
           despostada: false,
           reservada: false
         }
@@ -525,7 +670,7 @@ export async function ejecutarFuncion(nombre, args) {
 
         const movimiento = {
           cliente_id: args.cliente_id,
-          fecha: args.fecha || new Date().toISOString().slice(0, 10),
+          fecha: args.fecha || fechaHoyARG(), // hora ARG, no UTC (después de las 21 cambia el día)
           tipo: 'pago',
           descripcion: args.descripcion || 'Pago registrado desde asistente IA',
           debe: 0,
@@ -552,6 +697,271 @@ export async function ejecutarFuncion(nombre, args) {
         r += `• Saldo anterior: ${formatearPesos(cliente.saldo)}\n`
         r += `• Saldo actualizado: ${formatearPesos(clienteAct?.saldo || 0)}`
         return { resultado: r, id: data[0]?.id }
+      }
+
+      // ─── ACCESO TOTAL (v3) ─────────────────────────────────
+      case 'consultar_ventas_dia': {
+        const fecha = args?.fecha || fechaHoyARG()
+        const esHoy = fecha === fechaHoyARG()
+        const [caja, remitos, cajaAyer] = await Promise.all([
+          supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').eq('fecha', fecha),
+          supabase.from('remitos').select('total, cliente_nombre').eq('fecha', fecha).eq('eliminado', false).neq('cobro', 'interno'),
+          esHoy ? supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').eq('fecha', fechaRelativaARG(-1)) : Promise.resolve({ data: null }),
+        ])
+        const totCaja = sumar(caja.data, 'total'), nCaja = (caja.data || []).length
+        const totMay = sumar(remitos.data, 'total'), nMay = (remitos.data || []).length
+        let r = `Ventas del ${formatearFecha(fecha)}:\n`
+        r += `• Caja minorista: ${formatearPesos(totCaja)} (${nCaja} ventas${nCaja > 0 ? `, ticket prom. ${formatearPesos(totCaja / nCaja)}` : ''})\n`
+        r += `• Mayorista (remitos): ${formatearPesos(totMay)} (${nMay} despachos)\n`
+        r += `• TOTAL DEL DÍA: ${formatearPesos(totCaja + totMay)}`
+        if (esHoy && cajaAyer.data) {
+          const totAyer = sumar(cajaAyer.data, 'total')
+          if (totAyer > 0) r += `\n(Ayer la caja cerró en ${formatearPesos(totAyer)} — hoy ${totCaja >= totAyer ? 'va arriba' : 'viene abajo'} ${Math.abs(((totCaja - totAyer) / totAyer) * 100).toFixed(0)}%)`
+        }
+        return { resultado: r }
+      }
+
+      case 'consultar_resumen_mes': {
+        const hoy = fechaHoyARG(), mIni = inicioMes()
+        const [cajaMes, cajaMesAnt, salidasMes, pedidosMes, comprasMes, gastosMes, sueldosMes] = await Promise.all([
+          supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').gte('fecha', mIni).lte('fecha', hoy),
+          supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').gte('fecha', inicioMesAnterior()).lte('fecha', mismoDiaMesAnterior()),
+          supabase.from('salidas_deposito').select('total, cobro').gte('fecha', mIni).lte('fecha', hoy),
+          supabase.from('pedidos').select('total_estimado').eq('estado', 'confirmado').gte('dia_entrega', mIni).lte('dia_entrega', hoy),
+          supabase.from('entradas_deposito').select('importe').gte('fecha', mIni).lte('fecha', hoy).gt('importe', 0).eq('eliminado', false),
+          supabase.from('gastos').select('monto, tipo, solo_balance').gte('fecha', mIni).lte('fecha', hoy),
+          supabase.from('liquidaciones_sueldos').select('neto').gte('semana_inicio', mIni).lte('semana_fin', hoy),
+        ])
+        const totCaja = sumar(cajaMes.data, 'total')
+        const totCajaAnt = sumar(cajaMesAnt.data, 'total')
+        const totMay = sumar((salidasMes.data || []).filter(s => s.cobro !== 'interno'), 'total')
+        const totPed = sumar(pedidosMes.data, 'total_estimado')
+        const ventas = totCaja + totMay + totPed
+        const compras = sumar(comprasMes.data, 'importe')
+        const gastosOp = sumar((gastosMes.data || []).filter(g => !g.solo_balance && g.tipo !== 'ingreso'), 'monto')
+        const sueldos = sumar(sueldosMes.data, 'neto')
+        const gastos = gastosOp + sueldos
+        const saldo = ventas - compras - gastos
+        const dia = hoy.slice(8, 10)
+        let r = `Mes en vivo (01→${dia}):\n`
+        r += `• VENTAS: ${formatearPesos(ventas)} (caja ${formatearPesos(totCaja)} + mayorista ${formatearPesos(totMay)}${totPed > 0 ? ` + pedidos ${formatearPesos(totPed)}` : ''})\n`
+        r += `• COMPRAS: ${formatearPesos(compras)}\n`
+        r += `• GASTOS (incl. sueldos): ${formatearPesos(gastos)}\n`
+        r += `• SALDO DEL MES: ${formatearPesos(saldo)} ${saldo >= 0 ? '✅' : '🚨 NEGATIVO'}`
+        if (totCajaAnt > 0) {
+          const v = ((totCaja - totCajaAnt) / totCajaAnt) * 100
+          r += `\n• La caja va ${v >= 0 ? '+' : ''}${v.toFixed(1)}% vs el mismo período del mes pasado (01→${dia})`
+        }
+        return { resultado: r }
+      }
+
+      case 'consultar_cierres_semanales': {
+        const { data, error } = await supabase.from('cierres_semanales').select('*')
+          .lt('semana_fin', fechaHoyARG()).order('semana_inicio', { ascending: false })
+          .limit(args?.limite || 4)
+        if (error) throw error
+        if (!data || data.length === 0) return { resultado: 'Todavía no hay semanas cerradas.' }
+        const lista = data.map(c =>
+          `• ${formatearFecha(c.semana_inicio)}→${formatearFecha(c.semana_fin)}: ganancia ${formatearPesos(c.ganancia)} (V ${formatearPesos(c.ventas)} − C ${formatearPesos(c.compras)} − G ${formatearPesos((Number(c.gastos) || 0) + (Number(c.sueldos) || 0))})`
+        ).join('\n')
+        return { resultado: `Últimas semanas cerradas:\n${lista}` }
+      }
+
+      case 'consultar_gastos': {
+        const desde = args?.desde || inicioMes(), hasta = args?.hasta || fechaHoyARG()
+        let query = supabase.from('gastos').select('tipo, monto, categoria, descripcion, solo_balance').gte('fecha', desde).lte('fecha', hasta)
+        if (args?.categoria) query = query.ilike('categoria', `%${args.categoria}%`)
+        const { data, error } = await query
+        if (error) throw error
+        const reales = (data || []).filter(g => !g.solo_balance && g.tipo !== 'ingreso')
+        if (reales.length === 0) return { resultado: `Sin gastos registrados entre ${formatearFecha(desde)} y ${formatearFecha(hasta)}.` }
+        const porTipo = {}
+        reales.forEach(g => { porTipo[g.tipo || 'otros'] = (porTipo[g.tipo || 'otros'] || 0) + (Number(g.monto) || 0) })
+        const lineas = Object.entries(porTipo).sort((a, b) => b[1] - a[1])
+          .map(([t, m]) => `• ${t}: ${formatearPesos(m)}`).join('\n')
+        return { resultado: `Gastos ${formatearFecha(desde)} → ${formatearFecha(hasta)} (${reales.length} registros):\n${lineas}\n\nTOTAL: ${formatearPesos(sumar(reales, 'monto'))}` }
+      }
+
+      case 'consultar_cheques': {
+        const { data, error } = await supabase.from('cheques').select('*').neq('estado', 'imputado').order('fecha_pago')
+        if (error) throw error
+        if (!data || data.length === 0) return { resultado: 'No hay cheques pendientes en cartera.' }
+        const hoyD = new Date(fechaHoyARG() + 'T12:00')
+        const dias = (f) => f ? Math.ceil((new Date(f + 'T12:00') - hoyD) / 86400000) : null
+        const fmt = (c) => {
+          const d = dias(c.fecha_pago)
+          const venc = d == null ? 'sin fecha' : d < 0 ? `vencido hace ${-d}d` : d === 0 ? 'vence HOY' : `vence en ${d}d`
+          return `• #${c.numero} · ${c.cliente_nombre || c.proveedor_nombre || '—'} · ${formatearPesos(c.monto)} · ${venc}`
+        }
+        const recibidos = data.filter(c => c.origen !== 'emitido')
+        const emitidos = data.filter(c => c.origen === 'emitido')
+        let r = ''
+        if (recibidos.length) r += `Cheques POR COBRAR (${recibidos.length}, total ${formatearPesos(sumar(recibidos, 'monto'))}):\n${recibidos.map(fmt).join('\n')}`
+        if (emitidos.length) r += `${r ? '\n\n' : ''}Cheques EMITIDOS por pagar (${emitidos.length}, total ${formatearPesos(sumar(emitidos, 'monto'))}):\n${emitidos.map(fmt).join('\n')}`
+        return { resultado: r }
+      }
+
+      case 'consultar_remitos_recientes': {
+        let query = supabase.from('remitos').select('numero, fecha, cliente_nombre, total, cobro')
+          .eq('eliminado', false).order('fecha', { ascending: false }).order('created_at', { ascending: false })
+          .limit(args?.limite || 10)
+        if (args?.cliente) query = query.ilike('cliente_nombre', `%${args.cliente}%`)
+        const { data, error } = await query
+        if (error) throw error
+        if (!data || data.length === 0) return { resultado: 'No encontré remitos con ese criterio.' }
+        const lista = data.map(rm =>
+          `• ${formatearFecha(rm.fecha)} · #${rm.numero} · ${rm.cliente_nombre} · ${formatearPesos(rm.total)} · ${rm.cobro === 'cta_cte' ? 'CTA CTE' : 'pagado'}`
+        ).join('\n')
+        return { resultado: `Últimos remitos:\n${lista}` }
+      }
+
+      case 'consultar_pedidos': {
+        const { data, error } = await supabase.from('pedidos').select('cliente_nombre, estado, dia_entrega, horario_entrega, total_estimado')
+          .not('estado', 'in', '(rechazado,cancelado)')
+          .gte('dia_entrega', fechaRelativaARG(-7)).order('dia_entrega')
+        if (error) throw error
+        if (!data || data.length === 0) return { resultado: 'No hay pedidos activos en el sistema.' }
+        const lista = data.map(p =>
+          `• ${formatearFecha(p.dia_entrega)}${p.horario_entrega ? ` ${p.horario_entrega}` : ''} · ${p.cliente_nombre} · ${formatearPesos(p.total_estimado)} · ${(p.estado || '').toUpperCase()}`
+        ).join('\n')
+        return { resultado: `Pedidos:\n${lista}` }
+      }
+
+      case 'consultar_ofertas': {
+        const hoy = fechaHoyARG()
+        const { data, error } = await supabase.from('ofertas').select('*').eq('activa', true)
+          .lte('fecha_inicio', hoy).or(`fecha_fin.is.null,fecha_fin.gte.${hoy}`)
+        if (error) throw error
+        if (!data || data.length === 0) return { resultado: 'No hay ofertas activas hoy.' }
+        const lista = data.map(o =>
+          `• ${o.producto_nombre}: ${o.descuento_pct ? `−${o.descuento_pct}%` : formatearPesos(o.precio_oferta)}${o.fecha_fin ? ` (hasta ${formatearFecha(o.fecha_fin)})` : ''}`
+        ).join('\n')
+        return { resultado: `Ofertas activas:\n${lista}` }
+      }
+
+      case 'consultar_facturacion_monotributo': {
+        const [cuentas, facturas] = await Promise.all([
+          supabase.from('cuentas_fiscales').select('id, nombre, tipo').eq('activa', true),
+          supabase.from('facturas').select('cuenta_id, monto_total').eq('tipo', 'emitida').gte('fecha', fechaRelativaARG(-365)),
+        ])
+        if (cuentas.error) throw cuentas.error
+        const monos = (cuentas.data || []).filter(c => c.tipo === 'monotributo')
+        if (monos.length === 0) return { resultado: 'No hay cuentas de monotributo activas.' }
+        const lista = monos.map(c => {
+          const fact = sumar((facturas.data || []).filter(f => f.cuenta_id === c.id), 'monto_total')
+          const pct = (fact / TOPE_MONO_K) * 100
+          const icono = pct >= 95 ? '🚨' : pct >= 70 ? '⚠️' : '✅'
+          return `${icono} ${c.nombre}: ${formatearPesos(fact)} en 12 meses → ${pct.toFixed(1)}% del tope K`
+        }).join('\n')
+        return { resultado: `Monotributos (tope cat. K: ${formatearPesos(TOPE_MONO_K)}):\n${lista}` }
+      }
+
+      case 'consultar_sueldos': {
+        const { data, error } = await supabase.from('liquidaciones_sueldos').select('*')
+          .order('semana_fin', { ascending: false }).limit(args?.limite || 8)
+        if (error) throw error
+        if (!data || data.length === 0) return { resultado: 'No hay liquidaciones de sueldos cargadas.' }
+        const lista = data.map(l =>
+          `• ${l.empleado_nombre} · sem. ${formatearFecha(l.semana_inicio)}→${formatearFecha(l.semana_fin)} · ${l.horas ? `${l.horas} hs · ` : ''}neto ${formatearPesos(l.neto)}`
+        ).join('\n')
+        return { resultado: `Últimas liquidaciones:\n${lista}` }
+      }
+
+      case 'consultar_compras_semana': {
+        const { data, error } = await supabase.from('compras_proveedores')
+          .select('proveedor_nombre, importe, anulado').gte('fecha', inicioSemanaARG()).lte('fecha', fechaHoyARG())
+        if (error) throw error
+        const validas = (data || []).filter(c => !c.anulado)
+        if (validas.length === 0) return { resultado: 'Sin compras registradas esta semana todavía.' }
+        const acc = {}
+        validas.forEach(c => { const k = (c.proveedor_nombre || '—').trim().toUpperCase(); acc[k] = (acc[k] || 0) + (Number(c.importe) || 0) })
+        const lista = Object.entries(acc).sort((a, b) => b[1] - a[1])
+          .map(([n, t]) => `• ${n}: ${formatearPesos(t)}`).join('\n')
+        return { resultado: `Comprado esta semana (lunes → hoy):\n${lista}\n\nTOTAL: ${formatearPesos(Object.values(acc).reduce((s, v) => s + v, 0))}` }
+      }
+
+      case 'consultar_extracto_proveedor': {
+        const sinAcentos2 = (s) => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+        const { data, error } = await supabase.from('movimientos_proveedores').select('*').order('fecha', { ascending: false }).order('id', { ascending: false })
+        if (error) throw error
+        const buscado = sinAcentos2(args.nombre || '')
+        const movs = (data || []).filter(m => sinAcentos2(m.proveedor_nombre || '').includes(buscado))
+        if (movs.length === 0) return { resultado: `No encontré movimientos del proveedor "${args.nombre}". Probá con consultar_deuda_proveedores para ver todos.` }
+        const saldo = movs.reduce((s, m) => m.anulado ? s : s + (Number(m.debe) || 0) - (Number(m.haber) || 0), 0)
+        const lista = movs.slice(0, 10).map(m =>
+          `• ${formatearFecha(m.fecha)} · ${m.tipo} · ${m.descripcion || ''}${Number(m.debe) > 0 ? ` · DEBE ${formatearPesos(m.debe)}` : ''}${Number(m.haber) > 0 ? ` · HABER ${formatearPesos(m.haber)}` : ''}${m.anulado ? ' (ANULADO)' : ''}`
+        ).join('\n')
+        return { resultado: `Cta cte de ${movs[0].proveedor_nombre} — saldo: ${saldo > 0 ? 'le debemos ' + formatearPesos(saldo) : saldo < 0 ? 'a favor nuestro ' + formatearPesos(-saldo) : 'al día'}\nÚltimos movimientos:\n${lista}` }
+      }
+
+      case 'consultar_extracto_cliente': {
+        const { data: clis, error: errCli } = await supabase.from('clientes').select('id, nombre, saldo')
+          .ilike('nombre', `%${args.nombre}%`).limit(3)
+        if (errCli) throw errCli
+        if (!clis || clis.length === 0) return { resultado: `No encontré ningún cliente con "${args.nombre}".` }
+        const cli = clis[0]
+        const { data: movs, error } = await supabase.from('movimientos_ctacte').select('*')
+          .eq('cliente_id', cli.id).order('fecha', { ascending: false }).limit(10)
+        if (error) throw error
+        const lista = (movs || []).map(m =>
+          `• ${formatearFecha(m.fecha)} · ${m.tipo} · ${m.descripcion || ''}${Number(m.debe) > 0 ? ` · DEBE ${formatearPesos(m.debe)}` : ''}${Number(m.haber) > 0 ? ` · HABER ${formatearPesos(m.haber)}` : ''}`
+        ).join('\n') || 'Sin movimientos.'
+        const extra = clis.length > 1 ? `\n(También matchean: ${clis.slice(1).map(c => c.nombre).join(', ')} — avisame si era otro)` : ''
+        return { resultado: `Cta cte de ${cli.nombre} — saldo: ${formatearPesos(cli.saldo)}\nÚltimos movimientos:\n${lista}${extra}` }
+      }
+
+      case 'consultar_medias_disponibles': {
+        const { data, error } = await supabase.from('medias_stock').select('codigo, kg, proveedor_origen, fecha_ingreso').eq('estado', 'disponible').order('fecha_ingreso')
+        if (error) throw error
+        if (!data || data.length === 0) return { resultado: 'No hay medias reses disponibles en cámara.' }
+        const kg = sumar(data, 'kg')
+        const lista = data.slice(0, 15).map(m => `• ${m.codigo} · ${Number(m.kg).toFixed(1)} kg · ${m.proveedor_origen || ''} (${formatearFecha(m.fecha_ingreso)})`).join('\n')
+        return { resultado: `Medias reses disponibles: ${data.length} (${kg.toFixed(0)} kg en total)\n${lista}${data.length > 15 ? `\n…y ${data.length - 15} más` : ''}` }
+      }
+
+      case 'consultar_cajas_disponibles': {
+        const { data, error } = await supabase.from('cajas_stock').select('tipo_caja, kg').eq('estado', 'disponible')
+        if (error) throw error
+        if (!data || data.length === 0) return { resultado: 'No hay cajas bovinas disponibles.' }
+        const acc = {}
+        data.forEach(c => { const k = c.tipo_caja || '—'; acc[k] = acc[k] || { n: 0, kg: 0 }; acc[k].n++; acc[k].kg += Number(c.kg) || 0 })
+        const lista = Object.entries(acc).map(([t, v]) => `• ${t.toUpperCase()}: ${v.n} cajas · ${v.kg.toFixed(1)} kg`).join('\n')
+        return { resultado: `Cajas disponibles:\n${lista}` }
+      }
+
+      case 'consultar_elaboraciones_recientes': {
+        const { data, error } = await supabase.from('elaboraciones_embutidos').select('*')
+          .order('fecha', { ascending: false }).order('created_at', { ascending: false }).limit(args?.limite || 5)
+        if (error) throw error
+        if (!data || data.length === 0) return { resultado: 'No hay elaboraciones registradas.' }
+        const lista = data.map(e => {
+          const prods = Array.isArray(e.productos_finales) && e.productos_finales.length > 0
+            ? e.productos_finales.map(p => `${(p.tipo || '').replace(/_/g, ' ')} ${Number(p.kg).toFixed(1)} kg`).join(' + ')
+            : (e.tipo_embutido || '').replace(/_/g, ' ')
+          const estado = e.tipo === 'salame' && !e.maduracion_completa ? ' · 🔒 en secado' : ''
+          return `• ${formatearFecha(e.fecha)} · ${prods} · ${Number(e.kg_final || e.kg_elaborado || 0).toFixed(1)} kg${estado}`
+        }).join('\n')
+        return { resultado: `Últimas elaboraciones:\n${lista}` }
+      }
+
+      case 'consultar_promo_mundial': {
+        const { data, error } = await supabase.from('config_sistema').select('valor').eq('clave', 'promo_mundial').maybeSingle()
+        if (error) throw error
+        const v = data?.valor || {}
+        return { resultado: v.activa ? `⚽ Promo Mundial ACTIVA: −${v.descuento_pct || 10}% en efectivo/transferencia en la caja.` : 'La Promo Mundial está APAGADA.' }
+      }
+
+      case 'consultar_arqueos': {
+        const { data, error } = await supabase.from('arqueos_caja').select('fecha, hora, cajero, total_contado, efectivo_esperado, diferencia')
+          .order('fecha', { ascending: false }).order('created_at', { ascending: false }).limit(args?.limite || 5)
+        if (error) throw error
+        if (!data || data.length === 0) return { resultado: 'No hay arqueos de caja registrados.' }
+        const lista = data.map(a => {
+          const dif = Number(a.diferencia) || 0
+          const icono = Math.abs(dif) < 1000 ? '✅' : '⚠️'
+          return `${icono} ${formatearFecha(a.fecha)}${a.cajero ? ` · ${a.cajero}` : ''} · contado ${formatearPesos(a.total_contado)} · dif. ${dif >= 0 ? '+' : ''}${formatearPesos(dif)}`
+        }).join('\n')
+        return { resultado: `Últimos arqueos de caja:\n${lista}` }
       }
 
       default:
