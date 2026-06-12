@@ -55,6 +55,17 @@ export const DEFINICIONES_TOOLS = [
     parameters: { type: 'object', properties: {} }
   },
   {
+    name: 'consultar_deuda_proveedores',
+    description: `Consulta cuánto LE DEBEMOS NOSOTROS a los proveedores (cuenta corriente de proveedores: PRETTO, CEIBA, etc.). Usar cuando pregunten "cuánto le debemos a X", "cuánto debo a los proveedores", "saldo de Pretto", etc.
+NOTA: el usuario puede estar hablando por micrófono y los nombres llegan mal transcriptos (ej: "apretó" o "preto" = PRETTO). Si el nombre no matchea, la función devuelve TODOS los proveedores con su saldo — deducí cuál quiso decir y confirmáselo.`,
+    parameters: {
+      type: 'object',
+      properties: {
+        nombre: { type: 'string', description: 'Opcional. Nombre o parte del nombre del proveedor. Sin nombre, lista todos.' }
+      }
+    }
+  },
+  {
     name: 'consultar_entradas_recientes',
     description: 'Lista las últimas entradas cargadas en el depósito. Opcionalmente filtra por tipo.',
     parameters: {
@@ -270,6 +281,40 @@ export async function ejecutarFuncion(nombre, args) {
         const lista = data.map(c => `${c.nombre}: ${formatearPesos(c.saldo)}`).join('\n')
         const total = data.reduce((s, c) => s + Number(c.saldo || 0), 0)
         return { resultado: `Clientes con deuda:\n${lista}\n\nTotal adeudado: ${formatearPesos(total)}` }
+      }
+
+      case 'consultar_deuda_proveedores': {
+        // Saldo real por proveedor = Σ debe − Σ haber de movimientos NO anulados
+        // (misma fórmula que la pantalla de Proveedores)
+        const { data, error } = await supabase
+          .from('movimientos_proveedores')
+          .select('proveedor_nombre, debe, haber, anulado')
+        if (error) throw error
+        const tot = {}
+        ;(data || []).forEach(m => {
+          if (m.anulado) return
+          const k = (m.proveedor_nombre || '—').trim().toUpperCase()
+          tot[k] = (tot[k] || 0) + (Number(m.debe) || 0) - (Number(m.haber) || 0)
+        })
+        const sinAcentos = (s) => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+        let lista = Object.entries(tot).map(([nombre, saldo]) => ({ nombre, saldo }))
+          .sort((a, b) => b.saldo - a.saldo)
+        let nota = ''
+        if (args?.nombre) {
+          const buscado = sinAcentos(args.nombre)
+          const filtrada = lista.filter(p => sinAcentos(p.nombre).includes(buscado))
+          if (filtrada.length > 0) {
+            lista = filtrada
+          } else {
+            nota = `\n(No encontré "${args.nombre}" — te muestro todos los proveedores por si la voz transcribió mal el nombre.)`
+          }
+        }
+        if (lista.length === 0) return { resultado: 'No hay cuentas corrientes de proveedores cargadas.' }
+        const texto = lista.map(p =>
+          `${p.nombre}: ${p.saldo > 0 ? 'le debemos ' + formatearPesos(p.saldo) : p.saldo < 0 ? 'saldo a favor nuestro de ' + formatearPesos(-p.saldo) : 'al día'}`
+        ).join('\n')
+        const total = lista.reduce((s, p) => s + Math.max(0, p.saldo), 0)
+        return { resultado: `Cuenta corriente de proveedores:\n${texto}\n\nTotal que les debemos: ${formatearPesos(total)}${nota}` }
       }
 
       case 'consultar_entradas_recientes': {
