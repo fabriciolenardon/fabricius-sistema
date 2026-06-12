@@ -46,3 +46,11 @@ export function fechaRelativaARG(diasOffset, base = new Date()) {
   d.setDate(d.getDate() + diasOffset)
   return fechaHoyARG(d)
 }
+
+// True si una fecha 'YYYY-MM-DD' es posterior a hoy (reloj ARG).
+// Para validar formularios de carga manual: una compra/venta con fecha
+// futura es siempre un error de tipeo (ej: remito cargado el 4/6 con
+// fecha 25/6). Comparación lexicográfica, válida para el formato ISO.
+export function esFechaFutura(fecha) {
+  return !!fecha && fecha > fechaHoyARG()
+}
