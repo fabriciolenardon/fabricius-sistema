@@ -20,6 +20,7 @@ import PolloCajonesTab from './PolloCajonesTab'
 const NOMBRE_EMBUTIDO = {
   chorizo_parrillero: 'Chorizo Parrillero',
   chorizo_saborizado: 'Chorizo Saborizado',
+  chorizo_colorado: 'Chorizo Colorado',
   salchicha_parrillera: 'Salchicha Parrillera',
   morcilla: 'Morcilla',
   salame_comun: 'Salame Común',
@@ -36,6 +37,7 @@ const NOMBRE_EMBUTIDO = {
 const BUCKET_EMBUTIDO = {
   chorizo_parrillero: 'emb_chorizo_parrillero',
   chorizo_saborizado: 'emb_chorizo_saborizado',
+  chorizo_colorado: 'emb_chorizo_colorado',
   salchicha_parrillera: 'emb_salchicha_parrillera',
   morcilla: 'emb_morcilla',
   salame_comun: 'emb_salame',
@@ -45,6 +47,7 @@ const BUCKET_EMBUTIDO = {
 const LABEL_BUCKET_EMB = {
   emb_chorizo_parrillero: '🌭 Chorizo Parrillero',
   emb_chorizo_saborizado: '🌭 Chorizo Saborizado',
+  emb_chorizo_colorado: '🌶️ Chorizo Colorado',
   emb_salchicha_parrillera: '🌭 Salchicha Parrillera',
   emb_morcilla: '🖤 Morcilla',
   emb_salame: '🥩 Salame Casero',
@@ -366,7 +369,7 @@ const [pctAumentoEmbutido, setPctAumentoEmbutido] = useState(10)
 // Peso real embutido por variedad (parrilleros). Si se carga, la merma sale sola.
 // Peso real por PRODUCTO terminado: una misma elaboración puede producir
 // chorizos comunes, saborizados Y salchichas (cada uno va a su stock).
-const [pesoRealEmb, setPesoRealEmb] = useState({ chorizo_parrillero: '', chorizo_saborizado: '', salchicha_parrillera: '', morcilla: '' })
+const [pesoRealEmb, setPesoRealEmb] = useState({ chorizo_parrillero: '', chorizo_saborizado: '', chorizo_colorado: '', salchicha_parrillera: '', morcilla: '' })
 const [elaboraciones, setElaboraciones] = useState([])
 const [piezasIndividuales, setPiezasIndividuales] = useState([])
 // Historial completo de medias_stock (todos los estados) para la pestana
@@ -677,7 +680,7 @@ async function confirmarElaboracionEmbutido() {
     showAlert(`✅ ${kgFinal.toFixed(1)} kg elaborados — ${destinosStock.map(p => `${NOMBRE_EMBUTIDO[p.tipo] || p.tipo}: ${p.kg.toFixed(1)} kg`).join(' · ')} (cada uno a su stock)`)
     setPiezasEmbutido({ cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '', cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: '' })
     setKgCarneBovinaEmbutido(''); setKgQuesoEmbutido(''); setNotas('')
-    setPesoRealEmb({ chorizo_parrillero: '', chorizo_saborizado: '', salchicha_parrillera: '', morcilla: '' })
+    setPesoRealEmb({ chorizo_parrillero: '', chorizo_saborizado: '', chorizo_colorado: '', salchicha_parrillera: '', morcilla: '' })
     await cargarDatos(); onSaved()
   } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
   setLoading(false)
@@ -1339,6 +1342,7 @@ async function confirmarDesposteCerdo() {
             <select value={tipoEmbutido} onChange={e => setTipoEmbutido(e.target.value)} style={{ ...inp, marginBottom: 10 }}>
               <option value="chorizo_parrillero">🌭 Chorizo Parrillero</option>
               <option value="chorizo_saborizado">🌭 Chorizo Saborizado</option>
+              <option value="chorizo_colorado">🌶️ Chorizo Colorado</option>
               <option value="salchicha_parrillera">🌭 Salchicha Parrillera</option>
               <option value="morcilla">🖤 Morcilla</option>
             </select>
@@ -1443,6 +1447,7 @@ async function confirmarDesposteCerdo() {
               {[
                 { id: 'chorizo_parrillero', label: '🌭 Chorizo Parrillero (kg)' },
                 { id: 'chorizo_saborizado', label: '🌭 Chorizo Saborizado (kg)' },
+                { id: 'chorizo_colorado', label: '🌶️ Chorizo Colorado (kg)' },
                 { id: 'salchicha_parrillera', label: '🌭 Salchicha Parrillera (kg)' },
                 { id: 'morcilla', label: '🖤 Morcilla (kg)' },
               ].map(p => (

@@ -31,6 +31,7 @@ INSERT INTO stock_actual (tipo, kg_disponible)
 SELECT v.t, 0 FROM (VALUES
   ('emb_chorizo_parrillero'),
   ('emb_chorizo_saborizado'),
+  ('emb_chorizo_colorado'),
   ('emb_salchicha_parrillera'),
   ('emb_morcilla'),
   ('emb_salame')
@@ -43,6 +44,8 @@ UPDATE precios SET stock_origen = 'emb_chorizo_parrillero'
   WHERE categoria = 'embutido' AND nombre = 'CHORIZO';
 UPDATE precios SET stock_origen = 'emb_chorizo_saborizado'
   WHERE categoria = 'embutido' AND nombre = 'CHORIZO SABORIZADO';
+UPDATE precios SET stock_origen = 'emb_chorizo_colorado'
+  WHERE categoria = 'embutido' AND nombre = 'CHORIZO COLORADO';
 UPDATE precios SET stock_origen = 'emb_salchicha_parrillera'
   WHERE categoria = 'embutido' AND nombre ILIKE 'Salchicha Parrillera%';
 UPDATE precios SET stock_origen = 'emb_morcilla'
