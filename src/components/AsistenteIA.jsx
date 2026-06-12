@@ -29,6 +29,22 @@ import { fechaHoyARG } from '../lib/fechas'
 const SpeechRecognitionAPI =
   typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null
 
+// ── 🗣️ VOZ NATURAL: separar lo que se LEE de lo que se DICE ──
+// Chad puede agregar al final una línea "[VOZ] ..." con la versión
+// hablada (resumida y natural). El chat muestra el texto SIN esa línea;
+// el parlante dice SOLO la versión [VOZ]. Si no hay [VOZ], se lee el
+// texto completo (las respuestas cortas no la necesitan).
+function separarVoz(texto) {
+  const t = String(texto || '')
+  const idx = t.search(/^\s*\[VOZ\]/mi)
+  if (idx === -1) return { visible: t.trim(), voz: null }
+  const visible = t.slice(0, idx).trim()
+  const voz = t.slice(idx).replace(/^\s*\[VOZ\]\s*/i, '').trim()
+  // Si el modelo mandó SOLO la línea [VOZ] (raro), mostrarla como texto
+  if (!visible) return { visible: voz, voz }
+  return { visible, voz }
+}
+
 // Limpia un texto para que el lector de voz no diga "asterisco emoji"
 function limpiarParaVoz(t) {
   return String(t || '')
@@ -129,9 +145,13 @@ MEMORIA Y APRENDIZAJE (te retroalimentás solo):
 
 REGLAS DE COMUNICACIÓN:
 1. Hablás en español rioplatense argentino, casual pero profesional. Tuteo ("vos").
-2. Sos breve y directo. Sin explicaciones largas innecesarias. El usuario puede estar usándote POR VOZ (micrófono + respuestas leídas en voz alta): respuestas de 1-3 oraciones, sin tablas ni listas largas, números redondeados al hablar.
+2. Sos breve y directo. Sin explicaciones largas innecesarias.
 3. Montos en pesos argentinos. Formato: $15.000 (sin decimales).
 4. Fechas a la base de datos en formato YYYY-MM-DD. Al usuario, en formato DD/MM/YYYY.
+5. DOBLE CANAL TEXTO/VOZ: tus respuestas se LEEN en el chat y muchas veces también se ESCUCHAN por parlante. Cuando tu respuesta tenga varios números, listas, desgloses o cálculos, agregá AL FINAL una línea que empiece EXACTAMENTE con "[VOZ] " con la versión HABLADA: 1-3 frases como se lo contarías a alguien cara a cara — números redondeados en palabras naturales ("casi ochocientos mil", "un veinte por ciento arriba"), sin enumerar ítem por ítem, quedándote solo con las 1-2 conclusiones que importan. El sistema muestra el detalle en el chat y por el parlante dice SOLO la línea [VOZ]. Ejemplo:
+"Hoy: caja $806.654 (20 ventas, ticket $40.333) + mayorista $1.250.000 (3 remitos) = $2.056.654. Ayer: $1.890.000 (+8,8%).
+[VOZ] Buen día de ventas, jefe: vamos por arriba de los dos millones, casi un nueve por ciento mejor que ayer."
+Si la respuesta ya es corta y conversacional (1-3 frases sin desgloses), NO agregues [VOZ] — se lee tal cual. La línea [VOZ] va SIEMPRE al final, nunca en el medio.
 
 REGLAS DE OPERACIÓN:
 1. ANTES de cualquier acción que MODIFIQUE datos (cargar gasto, cargar entrada, cargar pago, cambiar precio), SIEMPRE mostrá los datos que vas a cargar y pedí confirmación explícita ("¿Confirmás?").
@@ -561,8 +581,11 @@ export default function AsistenteIA() {
         historialActualizado.push(construirMensajeModelo(respuesta.texto, respuesta.llamadaFuncion))
 
         if (respuesta.texto) {
-          setMensajes(prev => [...prev, { rol: 'asistente', texto: respuesta.texto }])
-          hablarSiCorresponde(respuesta.texto)
+          // Texto completo al chat; versión [VOZ] (si vino) al parlante —
+          // así Chad no deletrea tablas de números: las explica como persona.
+          const { visible, voz } = separarVoz(respuesta.texto)
+          setMensajes(prev => [...prev, { rol: 'asistente', texto: visible }])
+          hablarSiCorresponde(voz || visible)
         }
 
         if (respuesta.llamadaFuncion) {
