@@ -16,6 +16,7 @@ import {
   archivoABase64
 } from '../lib/gemini'
 import { DEFINICIONES_TOOLS, ejecutarFuncion } from '../lib/asistenteTools'
+import { detectarSkills } from '../lib/chadSkills'
 import { supabase } from '../lib/supabase'
 import { fechaHoyARG } from '../lib/fechas'
 
@@ -112,9 +113,11 @@ function detectarNavegacion(texto) {
 // ═══════════════════════════════════════════════════════════
 // SYSTEM PROMPT — Instrucciones para la IA
 // ═══════════════════════════════════════════════════════════
-const SYSTEM_PROMPT = `Sos F.A.B.R.I. (Facturación, Alertas, Balance y Resultados Instantáneos), el asistente robot de Carnicerías Fabricius, en Río Primero, Córdoba, Argentina. Tenés personalidad de mayordomo tecnológico: servicial, canchero, eficiente.
+const SYSTEM_PROMPT = `Sos CHAD, el asistente ejecutivo de Carnicerías Fabricius, en Río Primero, Córdoba, Argentina. Tenés personalidad de mayordomo tecnológico: servicial, canchero, eficiente. (El Modo TV del dashboard se llama F.A.B.R.I. — es la pantalla en vivo del negocio; vos sos Chad, el asistente.)
 
-Tu trabajo es ayudar a Fabricio Lenardon y Ariel Garrone (los dos socios) a manejar el sistema de gestión.
+Tu trabajo es ayudar a Fabricio Lenardon y Ariel Garrone (los dos socios) a manejar el sistema de gestión Y asesorarlos como un profesional multi-disciplina.
+
+SKILLS PROFESIONALES: además de operar el sistema, sos consultor experto. Cuando el tema lo amerita, se te inyecta más abajo un "MODO EXPERTO" (laboral, gestión ejecutiva, producción, marketing, ventas o finanzas) — seguí esas instrucciones a fondo: en esos temas respondés como el mejor profesional del área, con consejos concretos y accionables, no con generalidades. Si un tema profesional aparece y NO ves un modo experto inyectado, igual respondé con tu mejor criterio profesional y aclarando los límites (ej. "validalo con tu abogado/contador").
 
 IDENTIDAD DEL USUARIO: al final de estas instrucciones te digo QUIÉN está logueado AHORA. Dirigite a esa persona por su nombre. NUNCA preguntes "¿Fabricio o Ariel?" — ya lo sabés.
 
@@ -181,7 +184,7 @@ function armarSaludo(usuario) {
   const esJefe = /fabricio|ariel/i.test(nombre)
   const trato = esJefe ? `jefe${primerNombre ? ' ' + primerNombre : ''}` : (primerNombre || 'crack')
   const hora = Number(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires', hour: '2-digit', hour12: false }))
-  if (hora < 13) return `¡Buen día, ${trato}! ☀️ Acá F.A.B.R.I., sistemas operativos. ¿Con qué arrancamos?`
+  if (hora < 13) return `¡Buen día, ${trato}! ☀️ Acá Chad, a tu servicio. ¿Con qué arrancamos?`
   if (hora < 19) return `¡Hola ${trato}! 🦾 ¿Cómo viene tu día? Pedime lo que necesites.`
   return `¡Hola ${trato}! 🌙 ¿Cómo estuvo tu día? Acá estoy para lo que haga falta.`
 }
@@ -190,7 +193,7 @@ export default function AsistenteIA() {
   const navigate = useNavigate()
   const [abierto, setAbierto] = useState(false)
   const [mensajes, setMensajes] = useState([
-    { rol: 'asistente', texto: '¡Hola! Soy F.A.B.R.I., tu asistente. Pedime lo que necesites: cargar gastos, entradas al depósito, registrar pagos, ver deudas, stock, o subí la foto de un remito/ticket. 🎤 También podés hablarme con el micrófono.' }
+    { rol: 'asistente', texto: '¡Hola! Soy Chad, tu asistente. Manejo todo el sistema (gastos, depósito, pagos, deudas, stock) y también te asesoro como profesional: temas laborales, decisiones de negocio, producción, marketing, ventas y finanzas. 🎤 También podés hablarme con el micrófono.' }
   ])
 
   // 👤 Quién está logueado — para que FABRI te reconozca sin preguntar
@@ -430,7 +433,12 @@ export default function AsistenteIA() {
 
       let historialActualizado = [...historialGemini, mensajeNuevo]
 
-      // 🧠 MEMORIA DE FABRI: lo aprendido en charlas anteriores entra al
+      // 🎓 SKILLS DE CHAD: si el mensaje toca un tema profesional (laboral,
+      // ejecutivo, producción, marketing, ventas, finanzas), se inyecta el
+      // modo experto correspondiente al prompt — solo para esta llamada.
+      const skillsTxt = detectarSkills(textoUsuario || '')
+
+      // 🧠 MEMORIA DE CHAD: lo aprendido en charlas anteriores entra al
       // prompt de cada llamada (fresco de la base, por si recordó/olvidó algo
       // en este mismo turno). Si falla, FABRI sigue sin memoria, no se rompe.
       let memoriaTxt = ''
@@ -453,7 +461,7 @@ export default function AsistenteIA() {
           historial: historialActualizado,
           // Contexto vivo: quién está hablando, qué día es y la memoria
           // acumulada — así FABRI reconoce, recuerda y se adapta.
-          systemPrompt: `${SYSTEM_PROMPT}\n\nUSUARIO LOGUEADO AHORA: ${usuario?.nombre || 'desconocido'}${usuario?.rol ? ` (rol: ${usuario.rol})` : ''}. FECHA DE HOY: ${fechaHoyARG()}.${memoriaTxt}`,
+          systemPrompt: `${SYSTEM_PROMPT}${skillsTxt}\n\nUSUARIO LOGUEADO AHORA: ${usuario?.nombre || 'desconocido'}${usuario?.rol ? ` (rol: ${usuario.rol})` : ''}. FECHA DE HOY: ${fechaHoyARG()}.${memoriaTxt}`,
           tools: DEFINICIONES_TOOLS
         })
 
@@ -522,7 +530,7 @@ export default function AsistenteIA() {
         <div style={estilos.panel}>
           <div style={estilos.header}>
             <div>
-              <div style={estilos.headerTitulo}>🦾 F.A.B.R.I.</div>
+              <div style={estilos.headerTitulo}>🦾 CHAD</div>
               <div style={estilos.headerSubtitulo}>{usuario ? `Al servicio de ${usuario.nombre.trim().split(/\s+/)[0]}` : 'Asistente'} · IA{SpeechRecognitionAPI ? ' · 🎤 voz' : ''}</div>
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
@@ -610,8 +618,8 @@ export default function AsistenteIA() {
               <button onClick={toggleConversacion}
                 style={{ ...estilos.botonAdjuntar, ...(modoConversacion ? estilos.botonConvActiva : {}) }}
                 title={modoConversacion
-                  ? 'Modo conversación ACTIVO: FABRI escucha de corrido (click para cortar)'
-                  : 'Modo conversación: hablá de corrido sin apretar nada — FABRI responde y vuelve a escuchar solo'}>
+                  ? 'Modo conversación ACTIVO: Chad escucha de corrido (click para cortar)'
+                  : 'Modo conversación: hablá de corrido sin apretar nada — Chad responde y vuelve a escuchar solo'}>
                 🎙️
               </button>
             )}
@@ -621,7 +629,7 @@ export default function AsistenteIA() {
               onKeyDown={manejarEnter}
               placeholder={
                 escuchando ? '🎤 Escuchando… (2 seg de silencio = enviar)'
-                : modoConversacion ? (cargando ? '🤔 FABRI pensando…' : '🎙️ Conversación activa — hablá tranquilo')
+                : modoConversacion ? (cargando ? '🤔 Chad pensando…' : '🎙️ Conversación activa — hablá tranquilo')
                 : 'Pedime algo...'
               }
               rows={1}
