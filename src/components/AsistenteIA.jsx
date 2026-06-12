@@ -196,37 +196,41 @@ function armarSaludo(usuario) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 🤖 HOLOGRAMA DE CHAD — esqueleto robot holográfico giratorio
+// 🤖 HOLOGRAMA DE CHAD — cara holográfica giratoria
 // ═══════════════════════════════════════════════════════════
 // Reemplaza al botón flotante 🤖. Gira 360° (rotateY), parpadea como
 // holograma y cambia de color según el estado: apagado (cian tenue),
 // escuchando (verde), pensando (ámbar), hablando (cian brillante).
-// El color lo maneja la clase CSS via currentColor.
-function RobotHolograma() {
+// Si existe /chad-cara.png (foto procesada), el holograma muestra ESA
+// cara con tratamiento holográfico (duotono cian + scanlines +
+// flicker). Si no, cae a la cara robot SVG. Para cambiar la cara:
+// poner la imagen en public/chad-cara.png y listo, sin tocar código.
+function CaraHolograma() {
+  const [tieneFoto, setTieneFoto] = useState(true)
+  if (tieneFoto) {
+    return (
+      <img src="/chad-cara.png" alt="" className="chad-holo-img" draggable={false}
+        onError={() => setTieneFoto(false)} />
+    )
+  }
   return (
-    <svg viewBox="0 0 64 96" width="64" height="96" fill="none" stroke="currentColor"
+    <svg viewBox="0 0 64 64" width="70" height="70" fill="none" stroke="currentColor"
       strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      {/* cráneo */}
-      <path d="M22 15 a10 10 0 1 1 20 0 v5 a4 4 0 0 1 -4 4 h-12 a4 4 0 0 1 -4 -4 z" />
-      <circle cx="27" cy="14" r="2.2" fill="currentColor" stroke="none" />
-      <circle cx="37" cy="14" r="2.2" fill="currentColor" stroke="none" />
-      <path d="M28 20.5 h8" />
-      {/* cuello + columna */}
-      <path d="M32 24 v9" />
-      <path d="M32 33 v27" strokeDasharray="4 3" />
-      {/* hombros, brazos con codos */}
-      <path d="M18 35 h28" />
-      <circle cx="18" cy="35" r="2" />
-      <circle cx="46" cy="35" r="2" />
-      <path d="M17 37 l-3 13" /><circle cx="14" cy="52" r="1.8" /><path d="M14 54 l3 11" />
-      <path d="M47 37 l3 13" /><circle cx="50" cy="52" r="1.8" /><path d="M50 54 l-3 11" />
-      {/* costillas */}
-      <path d="M24 41 h16" /><path d="M25 47 h14" /><path d="M26 53 h12" />
-      {/* pelvis */}
-      <path d="M25 60 h14 l-2.5 7 h-9 z" />
-      {/* piernas con rodillas */}
-      <path d="M28 67 l-2 11" /><circle cx="26" cy="80" r="1.8" /><path d="M26 82 v8 h6" />
-      <path d="M36 67 l2 11" /><circle cx="38" cy="80" r="1.8" /><path d="M38 82 v8 h-6" />
+      {/* antena */}
+      <path d="M32 8 v-3" /><circle cx="32" cy="3.5" r="1.6" fill="currentColor" stroke="none" />
+      {/* cabeza/casco */}
+      <path d="M14 27 a18 19 0 1 1 36 0 v9 a8 8 0 0 1 -8 8 h-20 a8 8 0 0 1 -8 -8 z" />
+      {/* auriculares laterales */}
+      <path d="M11 26 v9" /><path d="M53 26 v9" />
+      {/* visor punteado */}
+      <path d="M21 20 h22" strokeDasharray="3 3" />
+      {/* ojos */}
+      <circle cx="24.5" cy="28" r="3.4" fill="currentColor" stroke="none" />
+      <circle cx="39.5" cy="28" r="3.4" fill="currentColor" stroke="none" />
+      {/* boca tipo parlante */}
+      <path d="M25 38 h14" /><path d="M27.5 42 h9" />
+      {/* mentón/cuello */}
+      <path d="M28 49 v4 h8 v-4" />
     </svg>
   )
 }
@@ -642,7 +646,7 @@ export default function AsistenteIA() {
             title={holoEncendido ? 'Chad está ACTIVO — click para pausarlo' : 'Click para hablar con Chad (conversación por voz)'}
             style={estilos.holoMarco}>
             <div className={`chad-holo ${estadoHolo}`}>
-              <RobotHolograma />
+              <CaraHolograma />
             </div>
             <div className={`chad-holo-base ${estadoHolo}`} />
             <div style={estilos.holoEstado}>{ETIQUETA_HOLO[estadoHolo]}</div>
@@ -799,12 +803,19 @@ export default function AsistenteIA() {
           50% { transform: scaleX(1.18); opacity: 1; }
         }
         .chad-holo {
-          position: relative; width: 64px; height: 96px;
+          position: relative; width: 70px; height: 72px;
           perspective: 320px; animation: chadFlotar 3.2s ease-in-out infinite;
+          display: flex; align-items: flex-end; justify-content: center;
         }
-        .chad-holo svg {
+        .chad-holo svg, .chad-holo .chad-holo-img {
           animation: chadSpin 7s linear infinite, chadFlicker 5s steps(1) infinite;
           transform-style: preserve-3d;
+        }
+        /* foto real procesada como holograma: duotono cian */
+        .chad-holo .chad-holo-img {
+          width: 68px; height: 68px; object-fit: cover; border-radius: 16px;
+          filter: grayscale(1) sepia(1) hue-rotate(155deg) saturate(4) brightness(1.05) contrast(1.15) drop-shadow(0 0 8px rgba(0,212,255,0.75));
+          opacity: 0.92;
         }
         /* líneas de escaneo del holograma */
         .chad-holo::after {
@@ -813,13 +824,17 @@ export default function AsistenteIA() {
           mix-blend-mode: screen;
         }
         .chad-holo.apagado    { color: #2e7d96; opacity: 0.55; }
-        .chad-holo.apagado svg    { animation-duration: 11s, 7s; filter: drop-shadow(0 0 4px rgba(0,212,255,0.35)); }
+        .chad-holo.apagado svg, .chad-holo.apagado .chad-holo-img       { animation-duration: 11s, 7s; }
+        .chad-holo.apagado svg    { filter: drop-shadow(0 0 4px rgba(0,212,255,0.35)); }
         .chad-holo.escuchando { color: #51ffb0; }
-        .chad-holo.escuchando svg { animation-duration: 4s, 5s; filter: drop-shadow(0 0 8px rgba(81,255,176,0.9)); }
+        .chad-holo.escuchando svg, .chad-holo.escuchando .chad-holo-img { animation-duration: 4s, 5s; }
+        .chad-holo.escuchando svg { filter: drop-shadow(0 0 8px rgba(81,255,176,0.9)); }
         .chad-holo.pensando   { color: #ffb35c; }
-        .chad-holo.pensando svg   { animation-duration: 1.4s, 5s; filter: drop-shadow(0 0 8px rgba(255,179,92,0.9)); }
+        .chad-holo.pensando svg, .chad-holo.pensando .chad-holo-img     { animation-duration: 1.4s, 5s; }
+        .chad-holo.pensando svg   { filter: drop-shadow(0 0 8px rgba(255,179,92,0.9)); }
         .chad-holo.hablando   { color: #9beaff; }
-        .chad-holo.hablando svg   { animation-duration: 6s, 5s; filter: drop-shadow(0 0 10px rgba(155,234,255,1)); }
+        .chad-holo.hablando svg, .chad-holo.hablando .chad-holo-img     { animation-duration: 6s, 5s; }
+        .chad-holo.hablando svg   { filter: drop-shadow(0 0 10px rgba(155,234,255,1)); }
         /* base proyectora */
         .chad-holo-base {
           width: 66px; height: 11px; border-radius: 50%; margin-top: -5px;
