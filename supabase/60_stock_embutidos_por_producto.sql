@@ -9,6 +9,7 @@
 --   emb_chorizo_parrillero  → CHORIZO (parrillero común)
 --   emb_chorizo_saborizado  → CHORIZO SABORIZADO
 --   emb_salchicha_parrillera→ Salchicha Parrillera x kg
+--   emb_morcilla            → Morcilla x kg
 --   emb_salame              → Salame Casero (env. y sin env.; los 3
 --                             tipos de elaboración comparten bucket)
 --
@@ -31,6 +32,7 @@ SELECT v.t, 0 FROM (VALUES
   ('emb_chorizo_parrillero'),
   ('emb_chorizo_saborizado'),
   ('emb_salchicha_parrillera'),
+  ('emb_morcilla'),
   ('emb_salame')
 ) AS v(t)
 WHERE NOT EXISTS (SELECT 1 FROM stock_actual s WHERE s.tipo = v.t);
@@ -43,5 +45,7 @@ UPDATE precios SET stock_origen = 'emb_chorizo_saborizado'
   WHERE categoria = 'embutido' AND nombre = 'CHORIZO SABORIZADO';
 UPDATE precios SET stock_origen = 'emb_salchicha_parrillera'
   WHERE categoria = 'embutido' AND nombre ILIKE 'Salchicha Parrillera%';
+UPDATE precios SET stock_origen = 'emb_morcilla'
+  WHERE categoria = 'embutido' AND nombre ILIKE 'Morcilla%';
 UPDATE precios SET stock_origen = 'emb_salame'
   WHERE categoria = 'embutido' AND nombre ILIKE 'Salame Casero%';

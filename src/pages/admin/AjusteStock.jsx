@@ -42,6 +42,7 @@ const LABELS = {
   emb_chorizo_parrillero: '🌭 Chorizo Parrillero (elab.)',
   emb_chorizo_saborizado: '🌭 Chorizo Saborizado (elab.)',
   emb_salchicha_parrillera: '🌭 Salchicha Parrillera (elab.)',
+  emb_morcilla: '🖤 Morcilla (elab.)',
   emb_salame: '🥩 Salame Casero (elab.)',
   rebozado: '🧊 Rebozados',
   almacen: '🛒 Almacén',

@@ -21,6 +21,7 @@ const NOMBRE_EMBUTIDO = {
   chorizo_parrillero: 'Chorizo Parrillero',
   chorizo_saborizado: 'Chorizo Saborizado',
   salchicha_parrillera: 'Salchicha Parrillera',
+  morcilla: 'Morcilla',
   salame_comun: 'Salame Común',
   salame_rockeford: 'Salame Rockeford',
   salame_holanda: 'Salame Holanda',
@@ -36,6 +37,7 @@ const BUCKET_EMBUTIDO = {
   chorizo_parrillero: 'emb_chorizo_parrillero',
   chorizo_saborizado: 'emb_chorizo_saborizado',
   salchicha_parrillera: 'emb_salchicha_parrillera',
+  morcilla: 'emb_morcilla',
   salame_comun: 'emb_salame',
   salame_rockeford: 'emb_salame',
   salame_holanda: 'emb_salame',
@@ -44,6 +46,7 @@ const LABEL_BUCKET_EMB = {
   emb_chorizo_parrillero: '🌭 Chorizo Parrillero',
   emb_chorizo_saborizado: '🌭 Chorizo Saborizado',
   emb_salchicha_parrillera: '🌭 Salchicha Parrillera',
+  emb_morcilla: '🖤 Morcilla',
   emb_salame: '🥩 Salame Casero',
   embutido: '📦 Otros (comprados / sin clasificar)',
 }
@@ -361,7 +364,7 @@ const [pctAumentoEmbutido, setPctAumentoEmbutido] = useState(10)
 // Peso real embutido por variedad (parrilleros). Si se carga, la merma sale sola.
 // Peso real por PRODUCTO terminado: una misma elaboración puede producir
 // chorizos comunes, saborizados Y salchichas (cada uno va a su stock).
-const [pesoRealEmb, setPesoRealEmb] = useState({ chorizo_parrillero: '', chorizo_saborizado: '', salchicha_parrillera: '' })
+const [pesoRealEmb, setPesoRealEmb] = useState({ chorizo_parrillero: '', chorizo_saborizado: '', salchicha_parrillera: '', morcilla: '' })
 const [elaboraciones, setElaboraciones] = useState([])
 const [piezasIndividuales, setPiezasIndividuales] = useState([])
 // Historial completo de medias_stock (todos los estados) para la pestana
@@ -672,7 +675,7 @@ async function confirmarElaboracionEmbutido() {
     showAlert(`✅ ${kgFinal.toFixed(1)} kg elaborados — ${destinosStock.map(p => `${NOMBRE_EMBUTIDO[p.tipo] || p.tipo}: ${p.kg.toFixed(1)} kg`).join(' · ')} (cada uno a su stock)`)
     setPiezasEmbutido({ cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '', cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: '' })
     setKgCarneBovinaEmbutido(''); setKgQuesoEmbutido(''); setNotas('')
-    setPesoRealEmb({ chorizo_parrillero: '', chorizo_saborizado: '', salchicha_parrillera: '' })
+    setPesoRealEmb({ chorizo_parrillero: '', chorizo_saborizado: '', salchicha_parrillera: '', morcilla: '' })
     await cargarDatos(); onSaved()
   } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
   setLoading(false)
@@ -1335,6 +1338,7 @@ async function confirmarDesposteCerdo() {
               <option value="chorizo_parrillero">🌭 Chorizo Parrillero</option>
               <option value="chorizo_saborizado">🌭 Chorizo Saborizado</option>
               <option value="salchicha_parrillera">🌭 Salchicha Parrillera</option>
+              <option value="morcilla">🖤 Morcilla</option>
             </select>
             <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>% de merma (−) o aumento (+)</label>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
@@ -1433,11 +1437,12 @@ async function confirmarDesposteCerdo() {
           <div style={{ background: '#1a1a2a', border: '1px solid #2a2a5a', borderRadius: 10, padding: '12px 14px', marginBottom: 10 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: '#7db5ff', marginBottom: 4 }}>🌭 Peso real embutido (productos terminados)</div>
             <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 8 }}>Una misma elaboración puede producir varios: cargá los kg de cada uno y cada producto suma a su propio stock.</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
               {[
                 { id: 'chorizo_parrillero', label: '🌭 Chorizo Parrillero (kg)' },
                 { id: 'chorizo_saborizado', label: '🌭 Chorizo Saborizado (kg)' },
                 { id: 'salchicha_parrillera', label: '🌭 Salchicha Parrillera (kg)' },
+                { id: 'morcilla', label: '🖤 Morcilla (kg)' },
               ].map(p => (
                 <div key={p.id}>
                   <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>{p.label}</label>
