@@ -49,3 +49,10 @@ UPDATE precios SET stock_origen = 'emb_morcilla'
   WHERE categoria = 'embutido' AND nombre ILIKE 'Morcilla%';
 UPDATE precios SET stock_origen = 'emb_salame'
   WHERE categoria = 'embutido' AND nombre ILIKE 'Salame Casero%';
+
+-- 60c: el bucket genérico 'embutido' se ELIMINA (pedido de Fabricio:
+-- el total de embutidos del Dashboard es la suma en vivo de los emb_*).
+-- Los embutidos sin stock propio (jamón crudo, arrollado, etc.) no
+-- trackean stock: mapearStock/CATEGORIA_A_STOCK devuelven null para la
+-- categoría sin stock_origen, igual que cerdo_pieza.
+DELETE FROM stock_actual WHERE tipo = 'embutido';

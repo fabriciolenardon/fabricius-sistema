@@ -48,7 +48,6 @@ const LABEL_BUCKET_EMB = {
   emb_salchicha_parrillera: '🌭 Salchicha Parrillera',
   emb_morcilla: '🖤 Morcilla',
   emb_salame: '🥩 Salame Casero',
-  embutido: '📦 Otros (comprados / sin clasificar)',
 }
 
 // Etiqueta/estilo de la forma de cobro de un remito. Solo 'cta_cte' es a
@@ -268,7 +267,10 @@ const CATEGORIA_A_STOCK = {
   //   nombre crudo de la categoría (queda visible como tipo sin mapear) en vez
   //   de resucitar el bucket buggy. NUNCA descontar de 'cerdo' (capones).
   cerdo: 'cerdo',
-  embutido: 'embutido',
+  // embutido: los de elaboración propia tienen stock_origen (emb_*, mig 60);
+  // el resto (jamón crudo, arrollado, etc.) NO trackea stock — el bucket
+  // genérico 'embutido' fue eliminado, null = no descontar (como cerdo_pieza).
+  embutido: null,
   pollo: 'pollo',
   rebozado: 'rebozado',
 }
@@ -2988,6 +2990,7 @@ for (const item of items) {
   // rebozado_cajon) que descuentan kg del producto base, multiplicando
   // unidades × kg_por_cajón (parseado del nombre, ej. "X20KG").
   const { tipoStock, cantidad } = resolverDescuentoStock(item, CATEGORIA_A_STOCK)
+  if (!tipoStock) continue  // categoría sin tracking de stock (ej. embutido sin stock_origen)
   kgPorTipo[tipoStock] = (kgPorTipo[tipoStock] || 0) + cantidad
 }
    for (const [tipo, kg] of Object.entries(kgPorTipo)) {

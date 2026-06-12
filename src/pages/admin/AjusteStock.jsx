@@ -38,7 +38,7 @@ const LABELS = {
   cerdo_cabeza: '💀 Cerdo — Cabeza',
   cerdo_huesos: '🦴 Cerdo — Huesos',
   pollo: '🍗 Pollo',
-  embutido: '🌭 Embutidos (comprados / sin clasificar)',
+  embutido: '🌭 Embutidos (legacy — bucket eliminado, no usar)',
   emb_chorizo_parrillero: '🌭 Chorizo Parrillero (elab.)',
   emb_chorizo_saborizado: '🌭 Chorizo Saborizado (elab.)',
   emb_salchicha_parrillera: '🌭 Salchicha Parrillera (elab.)',

@@ -202,8 +202,9 @@ export default function Dashboard() {
   )
   const stockPollo = Math.max(0, stock.pollo || 0)
   const stockBrosas = Math.max(0, stock.bovino_brosa || 0)
-  // Embutidos = bucket legacy 'embutido' (comprados/sin clasificar) + los
-  // buckets por producto de elaboración propia (emb_*, mig 60)
+  // Embutidos = suma EN VIVO de los buckets por producto de elaboración
+  // propia (emb_*, mig 60). El bucket genérico 'embutido' fue eliminado;
+  // se suma igual por si reaparece (ej. una compra legacy), normalmente es 0.
   const stockEmbutido = Math.max(0,
     (stock.embutido || 0) +
     (stock.emb_chorizo_parrillero || 0) +

@@ -556,7 +556,9 @@ export default function Caja() {
       if (cat === 'pollo_cajon')      return 'pollo'         // unidad × kg_por_cajón
       if (cat === 'rebozado')         return 'rebozado'
       if (cat === 'rebozado_cajon')   return 'rebozado'      // unidad × kg_por_cajón
-      if (cat === 'embutido')         return 'embutido'
+      // embutido: los de elaboración propia llegan con stock_origen (emb_*,
+      // mig 60); el resto no trackea stock — el bucket genérico se eliminó
+      if (cat === 'embutido')         return null
       if (cat === 'almacen')          return 'almacen'
       if (cat === 'bebidas')          return 'bebidas'
       if (cat === 'bovino_caja_cb')   return 'caja_cb'
