@@ -1857,7 +1857,7 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, loading }) {
 }
 
 function EntradaForm({ onSaved, showAlert, proveedores }) {
-  const [form, setForm] = useState({ tipo: '', proveedor: '', descripcion: '', fecha: fechaHoyARG(), kg: '', precioKg: '9800', merma: '', destino: 'DEPOSITO', importe: '', cantidad: '1', cajaProductoId: '', polloProductoId: '' })
+  const [form, setForm] = useState({ tipo: '', proveedor: '', descripcion: '', fecha: fechaHoyARG(), kg: '', precioKg: '9800', merma: '', destino: 'DEPOSITO', importe: '', cantidad: '1', cajaProductoId: '', polloProductoId: '', embutidoProductoId: '' })
   const [historial, setHistorial] = useState([])
   const [editando, setEditando] = useState(null)
   const [formEdit, setFormEdit] = useState({})
@@ -1876,21 +1876,26 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
   const [productosCajas, setProductosCajas] = useState([])
   const [productosPolloCajon, setProductosPolloCajon] = useState([])
   const [productosRebozadoCajon, setProductosRebozadoCajon] = useState([])
+  // Embutidos COMPRADOS elaborados (ej. morcilla): el selector solo lista los
+  // que tienen stock propio (stock_origen emb_*) — la entrada suma a ese bucket.
+  const [productosEmbutido, setProductosEmbutido] = useState([])
   useEffect(() => {
-    supabase.from('precios').select('id, nombre, categoria, kg_por_unidad')
-      .in('categoria', ['bovino_caja_cb', 'bovino_caja_pt', 'pollo_cajon', 'rebozado_cajon'])
+    supabase.from('precios').select('id, nombre, categoria, kg_por_unidad, stock_origen')
+      .in('categoria', ['bovino_caja_cb', 'bovino_caja_pt', 'pollo_cajon', 'rebozado_cajon', 'embutido'])
       .order('nombre')
       .then(({ data }) => {
         const all = data || []
         setProductosCajas(all.filter(p => p.categoria === 'bovino_caja_cb' || p.categoria === 'bovino_caja_pt'))
         setProductosPolloCajon(all.filter(p => p.categoria === 'pollo_cajon'))
         setProductosRebozadoCajon(all.filter(p => p.categoria === 'rebozado_cajon'))
+        setProductosEmbutido(all.filter(p => p.categoria === 'embutido' && String(p.stock_origen || '').startsWith('emb_')))
       })
   }, [])
 
   // Helpers para detectar si el tipo actual requiere selector de producto
   const esPolloCajon = form.tipo === 'pollo'
   const esRebozadoCajon = form.tipo === 'rebozado'
+  const esEmbutido = form.tipo === 'embutido'
   const productosFiltradosTipo = esPolloCajon ? productosPolloCajon
                                 : esRebozadoCajon ? productosRebozadoCajon
                                 : []
@@ -2090,6 +2095,14 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
       showAlert({ type: 'error', msg: `Seleccioná el producto específico (${esPolloCajon ? 'Pollo entero, Pechuga, etc.' : 'tipo de rebozado'})` })
       return
     }
+    // Embutidos comprados elaborados (ej. morcilla): producto obligatorio —
+    // define a qué stock propio (emb_*) suma la entrada. No existe más el
+    // bucket genérico 'embutido'.
+    const prodEmbutido = esEmbutido ? productosEmbutido.find(p => p.id === form.embutidoProductoId) : null
+    if (esEmbutido && !prodEmbutido) {
+      showAlert({ type: 'error', msg: 'Seleccioná qué embutido estás ingresando (Morcilla, Chorizo, Salame...) — la entrada suma a su stock propio' })
+      return
+    }
 
     const esEnUnidades = TIPOS_EN_UNIDADES.includes(form.tipo)
     const cantidad = esEnUnidades ? Math.max(1, parseInt(form.cantidad) || 1) : 1
@@ -2112,24 +2125,28 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
         : '⛔ Cargá el importe (precio total) — no se puede ingresar al depósito sin precio.' })
       return
     }
-    // Si se seleccionó un producto pollo/rebozado, usar su nombre en la descripción.
+    // Si se seleccionó un producto pollo/rebozado/embutido, usar su nombre en la descripción.
     const productoSelec = productosFiltradosTipo.find(p => p.id === form.polloProductoId)
-    const descripcionBase = productoSelec?.nombre || form.descripcion || form.tipo
+    const descripcionBase = prodEmbutido?.nombre?.trim() || productoSelec?.nombre || form.descripcion || form.tipo
     const descripcionFinal = esEnUnidades && cantidad > 1
       ? `${descripcionBase} ×${cantidad}`
       : descripcionBase
+    // Embutidos: la entrada se guarda con el tipo del BUCKET (emb_morcilla,
+    // emb_salame_comun, etc.) — así suma al stock correcto y, si se edita o
+    // elimina, la reversión también pega en el bucket correcto.
+    const tipoEntrada = prodEmbutido ? prodEmbutido.stock_origen : form.tipo
     // Para bovino_mr necesitamos el id de la entrada insertada para crear
     // la fila correspondiente en medias_stock (el codigo MR-XXX se genera
     // automaticamente desde el id de medias_stock por columna generada).
     const { data: entradaInsertada, error } = await supabase.from('entradas_deposito').insert({
-      fecha: form.fecha, tipo: form.tipo, proveedor_nombre: form.proveedor,
+      fecha: form.fecha, tipo: tipoEntrada, proveedor_nombre: form.proveedor,
       descripcion: descripcionFinal, kg: kgTotal, kg_real: kgReal,
       merma_pct: parseNumero(form.merma), precio_kg: parseNumero(form.precioKg),
       importe, destino: form.destino, cantidad
     }).select().single()
     if (error) { showAlert({ type: 'error', msg: error.message }); return }
     const kgSumar = form.tipo === 'bovino_mr' ? kgReal : kgTotal
-    await actualizarStock(form.tipo, kgSumar)
+    await actualizarStock(tipoEntrada, kgSumar)
 
     // Tracking individual de medias reses: una fila por cada media fisica
     // en medias_stock, con codigo visible MR-XXX. Si la entrada agrupa varias
@@ -2206,7 +2223,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
       ? `✅ ${cantidad} unidades de ${descripcionBase} registradas — ${kgTotal.toFixed(1)} kg al stock`
       : '✅ Entrada registrada — Stock actualizado'
     showAlert({ type: 'success', msg: msgOK })
-    setForm(f => ({ ...f, descripcion: '', kg: '', importe: '', precioKg: '9800', cantidad: '1', polloProductoId: '' }))
+    setForm(f => ({ ...f, descripcion: '', kg: '', importe: '', precioKg: '9800', cantidad: '1', polloProductoId: '', embutidoProductoId: '' }))
     onSaved()
     cargarHistorial()
     setTimeout(() => showAlert(null), 3000)
@@ -2339,6 +2356,16 @@ async function eliminar(entrada) {
     bovino_mr: '🐄 Media Res', bovino_corte: '🥩 Bovino Corte',
     bovino_brosa: '🫀 Brosa', cerdo: '🐷 Cerdo',
     pollo: '🍗 Pollo', embutido: '🌭 Embutido',
+    // Embutidos con stock propio (mig 60): las entradas nuevas se guardan
+    // con el tipo del bucket para que la reversión pegue donde corresponde.
+    emb_chorizo_parrillero: '🌭 Embutido',
+    emb_chorizo_saborizado: '🌭 Embutido',
+    emb_chorizo_colorado: '🌭 Embutido',
+    emb_salchicha_parrillera: '🌭 Embutido',
+    emb_morcilla: '🌭 Embutido',
+    emb_salame_comun: '🥩 Salame',
+    emb_salame_holanda: '🥩 Salame',
+    emb_salame_rockeford: '🥩 Salame',
     // Piezas bovinas — mismos nombres que la lista de precios (entran por
     // desposte interno de media res o por compra directa a proveedor).
     pieza_pierna: '🥩 Pierna Bovina – Mocho',
@@ -2415,6 +2442,31 @@ async function eliminar(entrada) {
                 {productosFiltradosTipo.length === 0
                   ? <span style={{ color: '#ff8b8b' }}>⚠️ No hay productos de esta categoría cargados — agregalos primero en /admin/precios.</span>
                   : 'Al elegir el producto se autocompleta los kg por unidad. Igual lo podés editar si este lote pesa distinto.'}
+              </div>
+            </div>
+          </div>
+        )}
+        {/* Selector de producto para EMBUTIDOS comprados elaborados (morcilla,
+            chorizos, salames de terceros). Define a qué stock propio (emb_*)
+            suma la entrada — el bucket genérico 'embutido' no existe más. */}
+        {esEmbutido && (
+          <div className="form-row">
+            <div className="form-group" style={{ gridColumn: '1/-1' }}>
+              <label>🌭 ¿Qué embutido ingresa?</label>
+              <select
+                value={form.embutidoProductoId || ''}
+                onChange={e => setForm(f => ({ ...f, embutidoProductoId: e.target.value }))}
+                style={{ borderColor: 'var(--gold)' }}
+              >
+                <option value="">— Seleccioná el embutido —</option>
+                {productosEmbutido.map(p => (
+                  <option key={p.id} value={p.id}>{p.nombre}</option>
+                ))}
+              </select>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                {productosEmbutido.length === 0
+                  ? <span style={{ color: '#ff8b8b' }}>⚠️ No hay embutidos con stock propio — asignales su "stock origen" en /admin/precios.</span>
+                  : 'La entrada suma directo al stock propio de ese producto (el mismo que descuentan las ventas). Si falta alguno, asignale su stock origen en Precios.'}
               </div>
             </div>
           </div>
