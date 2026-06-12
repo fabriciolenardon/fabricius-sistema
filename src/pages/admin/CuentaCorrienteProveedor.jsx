@@ -11,7 +11,7 @@
 // ============================================================
 import { useState, useEffect, useMemo } from 'react'
 import { parseNumero, fmtPrecio } from '../../lib/formatos'
-import { fechaHoyARG } from '../../lib/fechas'
+import { fechaHoyARG, esFechaFutura } from '../../lib/fechas'
 import {
   cargarMovimientos, registrarCompraProv, registrarPagoProv,
   registrarAjusteProv, registrarSaldoInicialProv, eliminarMovimiento,
@@ -67,6 +67,7 @@ export default function CuentaCorrienteProveedor({ proveedor, saldoSugerido = 0,
   async function guardarCompra() {
     const importe = parseNumero(fCompra.importe)
     if (importe <= 0) { showMsg('Ingresá un importe válido', 'error'); return }
+    if (esFechaFutura(fCompra.fecha)) { showMsg(`⛔ La fecha no puede ser futura (hoy es ${fechaHoyARG()})`, 'error'); return }
     setGuardando(true)
     const { error } = await registrarCompraProv({
       proveedorId: proveedor.id, proveedorNombre: proveedor.nombre,
@@ -81,6 +82,7 @@ export default function CuentaCorrienteProveedor({ proveedor, saldoSugerido = 0,
   async function guardarPago() {
     const importe = parseNumero(fPago.importe)
     if (importe <= 0) { showMsg('Ingresá un importe válido', 'error'); return }
+    if (esFechaFutura(fPago.fecha)) { showMsg(`⛔ La fecha no puede ser futura (hoy es ${fechaHoyARG()})`, 'error'); return }
     const saldoDespues = saldoActual - importe
     if (!confirm(
       `¿Registrar pago de ${fmt(importe)} (${fPago.forma}) a ${proveedor.nombre}?\n\n` +
@@ -101,6 +103,7 @@ export default function CuentaCorrienteProveedor({ proveedor, saldoSugerido = 0,
   async function guardarAjuste() {
     const importe = parseNumero(fAjuste.importe)
     if (importe <= 0) { showMsg('Ingresá un importe válido', 'error'); return }
+    if (esFechaFutura(fAjuste.fecha)) { showMsg(`⛔ La fecha no puede ser futura (hoy es ${fechaHoyARG()})`, 'error'); return }
     setGuardando(true)
     const { error } = await registrarAjusteProv({
       proveedorId: proveedor.id, proveedorNombre: proveedor.nombre,
@@ -208,7 +211,7 @@ export default function CuentaCorrienteProveedor({ proveedor, saldoSugerido = 0,
       {accion === 'compra' && (
         <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 14, marginBottom: 14 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 10 }}>
-            <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Fecha</label><input type="date" value={fCompra.fecha} onChange={e => setFCompra(f => ({ ...f, fecha: e.target.value }))} style={inp} /></div>
+            <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Fecha</label><input type="date" value={fCompra.fecha} max={fechaHoyARG()} onChange={e => setFCompra(f => ({ ...f, fecha: e.target.value }))} style={inp} /></div>
             <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Importe ($)</label><input type="text" inputMode="decimal" autoFocus value={fCompra.importe} onChange={e => setFCompra(f => ({ ...f, importe: e.target.value }))} placeholder="0" style={{ ...inp, borderColor: 'var(--amber)' }} /></div>
             <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Descripción</label><input value={fCompra.descripcion} onChange={e => setFCompra(f => ({ ...f, descripcion: e.target.value }))} placeholder="Ej: Media res x4" style={inp} /></div>
           </div>
@@ -227,7 +230,7 @@ export default function CuentaCorrienteProveedor({ proveedor, saldoSugerido = 0,
         return (
           <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 14, marginBottom: 14 }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8, marginBottom: 10 }}>
-              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Fecha</label><input type="date" value={fPago.fecha} onChange={e => setFPago(f => ({ ...f, fecha: e.target.value }))} style={inp} /></div>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Fecha</label><input type="date" value={fPago.fecha} max={fechaHoyARG()} onChange={e => setFPago(f => ({ ...f, fecha: e.target.value }))} style={inp} /></div>
               <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Importe ($)</label><input type="text" inputMode="decimal" autoFocus value={fPago.importe} onChange={e => setFPago(f => ({ ...f, importe: e.target.value }))} placeholder="0" style={{ ...inp, borderColor: 'var(--green)' }} /></div>
               <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Forma</label>
                 <select value={fPago.forma} onChange={e => setFPago(f => ({ ...f, forma: e.target.value }))} style={inp}>
@@ -257,7 +260,7 @@ export default function CuentaCorrienteProveedor({ proveedor, saldoSugerido = 0,
       {accion === 'ajuste' && (
         <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 14, marginBottom: 14 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1.5fr', gap: 8, marginBottom: 10 }}>
-            <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Fecha</label><input type="date" value={fAjuste.fecha} onChange={e => setFAjuste(f => ({ ...f, fecha: e.target.value }))} style={inp} /></div>
+            <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Fecha</label><input type="date" value={fAjuste.fecha} max={fechaHoyARG()} onChange={e => setFAjuste(f => ({ ...f, fecha: e.target.value }))} style={inp} /></div>
             <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Sentido</label>
               <select value={fAjuste.sentido} onChange={e => setFAjuste(f => ({ ...f, sentido: e.target.value }))} style={inp}>
                 <option value="debe">Sube deuda (DEBE)</option>

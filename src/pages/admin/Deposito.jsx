@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
-import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
+import { fechaHoyARG, fechaRelativaARG, esFechaFutura } from '../../lib/fechas'
 import { lunesDeLaSemana, domingoDeLaSemana } from '../../lib/cierreAuto'
 import { resolverDescuentoStock } from '../../lib/stockHelpers'
 import { bucketDePiezaBovina } from '../../lib/modelosDesposte'
@@ -1883,6 +1883,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     try {
     const esSoloUnid = TIPOS_SOLO_UNIDADES.includes(form.tipo)
     if (!form.tipo || !form.proveedor) { showAlert({ type: 'error', msg: 'Completá los campos requeridos' }); return }
+    if (esFechaFutura(form.fecha)) { showAlert({ type: 'error', msg: `⛔ La fecha no puede ser futura (hoy es ${fechaHoyARG()})` }); return }
 
     // Sanity check de kg: cualquier valor numérico inválido o sospechosamente
     // alto debe ser bloqueado o confirmado.
@@ -2228,6 +2229,7 @@ async function eliminar(entrada) {
   }
 
   async function guardarEdicion(entrada) {
+    if (esFechaFutura(formEdit.fecha)) { showAlert({ type: 'error', msg: `⛔ La fecha no puede ser futura (hoy es ${fechaHoyARG()})` }); return }
     const kgAnterior = entrada.kg_real || entrada.kg || 0
     const kgNuevo = parseNumero(formEdit.kg)
     const kgReal = kgNuevo * (1 - (entrada.merma_pct || 0) / 100)
@@ -2294,7 +2296,7 @@ async function eliminar(entrada) {
             </select>
           </div>
           <div className="form-group"><label>Fecha</label>
-            <input type="date" value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} />
+            <input type="date" value={form.fecha} max={fechaHoyARG()} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} />
           </div>
         </div>
         <div className="form-row">
@@ -2483,7 +2485,7 @@ async function eliminar(entrada) {
             {pag.items.map(e => (
               editando === e.id ? (
                 <tr key={e.id} style={{ background: 'rgba(201,168,76,0.08)' }}>
-                  <td><input type="date" value={formEdit.fecha} onChange={x => setFormEdit(f => ({ ...f, fecha: x.target.value }))} style={{ ...inp, width: 130 }} /></td>
+                  <td><input type="date" value={formEdit.fecha} max={fechaHoyARG()} onChange={x => setFormEdit(f => ({ ...f, fecha: x.target.value }))} style={{ ...inp, width: 130 }} /></td>
                   <td>{e.codigo_media ? <span style={{ background: 'var(--gold)', color: '#000', padding: '2px 7px', borderRadius: 6, fontSize: 11, fontWeight: 800, letterSpacing: 0.5 }}>{e.codigo_media}</span> : <span style={{ color: 'var(--muted)' }}>—</span>}</td>
                   <td style={{ color: 'var(--muted)', fontSize: 12 }}>{TIPOS[e.tipo] || e.tipo}</td>
                   <td><input value={formEdit.proveedor} onChange={x => setFormEdit(f => ({ ...f, proveedor: x.target.value }))} style={{ ...inp, width: 110 }} /></td>
@@ -2842,6 +2844,7 @@ const item = {
     if (guardandoRef.current) return
     if (items.length === 0) { showAlert({ type: 'error', msg: 'Agregá al menos un producto' }); return }
     if (!form.destino) { showAlert({ type: 'error', msg: 'Elegí un destino antes de despachar' }); return }
+    if (esFechaFutura(form.fecha)) { showAlert({ type: 'error', msg: `⛔ La fecha no puede ser futura (hoy es ${fechaHoyARG()})` }); return }
     // Pago dividido (cobro='mixto'): 2+ formas con monto y la suma debe igualar
     // el total. Se guarda el desglose en remitos.pagos. Es 100% pagado → no
     // genera deuda en cuenta corriente (cobro != 'cta_cte').
@@ -3024,7 +3027,7 @@ for (const item of items) {
             </select>
           </div>
           <div className="form-group"><label>Fecha</label>
-            <input type="date" value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} />
+            <input type="date" value={form.fecha} max={fechaHoyARG()} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} />
           </div>
         </div>
 {form.categoria === 'bovino_mr' && (() => {
@@ -3559,6 +3562,7 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
   async function guardarEdicion() {
     if (itemsEdit.length === 0) { showAlert('Debe tener al menos un producto', 'error'); return }
     if (!fechaEdit) { showAlert('La fecha de emisión no puede estar vacía', 'error'); return }
+    if (esFechaFutura(fechaEdit)) { showAlert(`⛔ La fecha no puede ser futura (hoy es ${fechaHoyARG()})`, 'error'); return }
     const nuevoTotal = itemsEdit.reduce((s, i) => s + (parseFloat(i.importe) || 0), 0)
     const diferencia = nuevoTotal - (editando.total || 0)
     const fechaAnterior = editando.fecha
@@ -3656,7 +3660,7 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
           <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
             <div className="form-group">
               <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Fecha del remito</label>
-              <input type="date" value={fechaEdit} onChange={e => setFechaEdit(e.target.value)} style={inp} />
+              <input type="date" value={fechaEdit} max={fechaHoyARG()} onChange={e => setFechaEdit(e.target.value)} style={inp} />
             </div>
             {fechaEdit !== editando.fecha && (
               <div style={{ fontSize: 12, color: 'var(--amber)', paddingBottom: 8 }}>
@@ -4035,6 +4039,7 @@ function ProveedoresTab() {
 
   async function guardarCompra() {
     if (!formCompra.proveedor_nombre) { showMsg('Seleccioná un proveedor', 'error'); return }
+    if (esFechaFutura(formCompra.fecha)) { showMsg(`⛔ La fecha no puede ser futura (hoy es ${fechaHoyARG()})`, 'error'); return }
     if (!(parseNumero(formCompra.importe) > 0)) { showMsg('⛔ Cargá el importe (precio) — debe ser mayor a 0', 'error'); return }
     if (procesandoProvRef.current) return       // anti doble-click
     procesandoProvRef.current = true; setProcesandoProv(true)
@@ -4050,6 +4055,7 @@ function ProveedoresTab() {
   //   percepción → DEBE (la percepción aumenta lo que debemos, como en el modelo viejo)
   async function guardarPago() {
     if (!formPago.proveedor_nombre) { showMsg('Seleccioná un proveedor', 'error'); return }
+    if (esFechaFutura(formPago.fecha)) { showMsg(`⛔ La fecha no puede ser futura (hoy es ${fechaHoyARG()})`, 'error'); return }
     const prov = proveedoresDB.find(p => p.nombre === formPago.proveedor_nombre)
     if (!prov) { showMsg('Proveedor no encontrado', 'error'); return }
     if (!inicializados.has(prov.id)) {
@@ -4246,7 +4252,7 @@ function ProveedoresTab() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
               <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Proveedor</label><select value={formCompra.proveedor_nombre} onChange={e => setFormCompra(f => ({ ...f, proveedor_nombre: e.target.value }))} style={inp}><option value="">— Seleccioná —</option>{proveedoresNombres.map(p => <option key={p}>{p}</option>)}</select></div>
               <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Producto</label><input value={formCompra.producto} onChange={e => setFormCompra(f => ({ ...f, producto: e.target.value }))} placeholder="Ej: Bovino Media Res" style={inp} /></div>
-              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Fecha</label><input type="date" value={formCompra.fecha} onChange={e => setFormCompra(f => ({ ...f, fecha: e.target.value }))} style={inp} /></div>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Fecha</label><input type="date" value={formCompra.fecha} max={fechaHoyARG()} onChange={e => setFormCompra(f => ({ ...f, fecha: e.target.value }))} style={inp} /></div>
               <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Kg</label><input type="number" value={formCompra.kg} onChange={e => setFormCompra(f => ({ ...f, kg: e.target.value }))} placeholder="0" style={inp} /></div>
               <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Importe ($)</label><input type="number" value={formCompra.importe} onChange={e => setFormCompra(f => ({ ...f, importe: e.target.value }))} placeholder="0" style={{ ...inp, borderColor: 'var(--gold)' }} /></div>
               <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Semana</label><div style={{ display: 'flex', gap: 4 }}><input type="date" value={formCompra.semana_inicio} onChange={e => setFormCompra(f => ({ ...f, semana_inicio: e.target.value }))} style={{ ...inp, fontSize: 11 }} /><input type="date" value={formCompra.semana_fin} onChange={e => setFormCompra(f => ({ ...f, semana_fin: e.target.value }))} style={{ ...inp, fontSize: 11 }} /></div></div>
@@ -4347,7 +4353,7 @@ function ProveedoresTab() {
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
               <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Proveedor</label><select value={formPago.proveedor_nombre} onChange={e => setFormPago(f => ({ ...f, proveedor_nombre: e.target.value }))} style={inp}><option value="">— Seleccioná —</option>{proveedoresNombres.map(p => <option key={p}>{p}</option>)}</select></div>
-              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Fecha</label><input type="date" value={formPago.fecha} onChange={e => setFormPago(f => ({ ...f, fecha: e.target.value }))} style={inp} /></div>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Fecha</label><input type="date" value={formPago.fecha} max={fechaHoyARG()} onChange={e => setFormPago(f => ({ ...f, fecha: e.target.value }))} style={inp} /></div>
               <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Percepción ($)</label><input type="text" inputMode="decimal" value={formPago.percepcion} onChange={e => setFormPago(f => ({ ...f, percepcion: e.target.value }))} placeholder="0" style={inp} /></div>
               <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Lo que se entrega ($)</label><input type="text" inputMode="decimal" value={formPago.entrega} onChange={e => setFormPago(f => ({ ...f, entrega: e.target.value }))} placeholder="0" style={{ ...inp, borderColor: 'var(--green)' }} /></div>
               <div style={{ gridColumn: 'span 2' }}><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Notas</label><input value={formPago.notas} onChange={e => setFormPago(f => ({ ...f, notas: e.target.value }))} placeholder="Cheque nro., banco, etc." style={inp} /></div>
