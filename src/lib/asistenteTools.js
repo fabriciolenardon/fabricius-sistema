@@ -65,6 +65,34 @@ NOTA: el usuario puede estar hablando por micrófono y los nombres llegan mal tr
       }
     }
   },
+
+  // ─── MEMORIA DE FABRI ──────────────────────────────────────
+  {
+    name: 'recordar',
+    description: `Guarda un recuerdo PERMANENTE en tu memoria (lo vas a ver en todas las charlas futuras). USALO PROACTIVAMENTE cuando:
+- el usuario exprese una preferencia de trato ("decime jefe", "respuestas más cortas", "no me tires tantos números")
+- aprendas un dato del negocio que NO está en el sistema (apodos de clientes/proveedores, rutinas: "los jueves llega media res", acuerdos de palabra)
+- el usuario te corrija algo que dijiste mal
+Reglas: UNA idea por recuerdo, frase corta y clara. NO guardes datos que ya viven en el sistema (precios, saldos, stock — eso se consulta fresco). Avisale al usuario con naturalidad que lo vas a recordar.`,
+    parameters: {
+      type: 'object',
+      properties: {
+        contenido: { type: 'string', description: 'El recuerdo, en una frase corta. Ej: "A Fabricio le gusta que lo saluden como jefe y respuestas breves".' },
+        tipo: { type: 'string', description: '"preferencia" (de trato/estilo) o "dato" (del negocio). Default: dato.' },
+        usuario: { type: 'string', description: 'Opcional: nombre de la persona a la que aplica el recuerdo. Vacío = general del negocio.' }
+      },
+      required: ['contenido']
+    }
+  },
+  {
+    name: 'olvidar',
+    description: 'Desactiva un recuerdo de tu memoria por su id (los ves como [id] en la sección TU MEMORIA). Usalo si el usuario te pide olvidar algo o si un recuerdo quedó viejo/equivocado.',
+    parameters: {
+      type: 'object',
+      properties: { id: { type: 'number', description: 'El id del recuerdo a olvidar.' } },
+      required: ['id']
+    }
+  },
   {
     name: 'consultar_entradas_recientes',
     description: 'Lista las últimas entradas cargadas en el depósito. Opcionalmente filtra por tipo.',
@@ -281,6 +309,26 @@ export async function ejecutarFuncion(nombre, args) {
         const lista = data.map(c => `${c.nombre}: ${formatearPesos(c.saldo)}`).join('\n')
         const total = data.reduce((s, c) => s + Number(c.saldo || 0), 0)
         return { resultado: `Clientes con deuda:\n${lista}\n\nTotal adeudado: ${formatearPesos(total)}` }
+      }
+
+      // ─── MEMORIA DE FABRI ──────────────────────────────────
+      case 'recordar': {
+        const contenido = String(args.contenido || '').trim()
+        if (!contenido) return { resultado: 'No me pasaste nada para recordar.' }
+        const { error } = await supabase.from('fabri_memoria').insert({
+          contenido,
+          tipo: args.tipo === 'preferencia' ? 'preferencia' : 'dato',
+          usuario: args.usuario?.trim() || null,
+        })
+        if (error) throw error
+        return { resultado: `🧠 Guardado en memoria: "${contenido}"` }
+      }
+
+      case 'olvidar': {
+        const { error } = await supabase.from('fabri_memoria')
+          .update({ activa: false }).eq('id', args.id)
+        if (error) throw error
+        return { resultado: `Listo, olvidé el recuerdo [${args.id}].` }
       }
 
       case 'consultar_deuda_proveedores': {
