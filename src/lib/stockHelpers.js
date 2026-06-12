@@ -83,7 +83,10 @@ export function resolverDescuentoStock(item, CATEGORIA_A_STOCK = {}) {
   }
 
   // Caso normal: usar stock_origen del producto si existe, sino mapear
-  // por categoría, sino fallback al nombre crudo de la categoría
-  const tipoStock = item.stock_origen || CATEGORIA_A_STOCK[cat] || cat
+  // por categoría, sino fallback al nombre crudo de la categoría.
+  // Un mapeo EXPLÍCITO en null (ej. embutido) significa "esta categoría
+  // no descuenta stock sin stock_origen" — el caller debe saltear
+  // tipoStock null en vez de caer al nombre crudo.
+  const tipoStock = item.stock_origen || (cat in CATEGORIA_A_STOCK ? CATEGORIA_A_STOCK[cat] : cat)
   return { tipoStock, cantidad: kg }
 }

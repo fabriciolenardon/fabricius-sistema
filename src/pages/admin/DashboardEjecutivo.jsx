@@ -362,9 +362,13 @@ function useDashboardData(refreshMs = 120000) {
       })
       .sort((a, b) => b.pctConsumo - a.pctConsumo)
 
-    // Stock crítico
+    // Stock crítico — los buckets emb_* (embutidos por producto, mig 60)
+    // se pliegan dentro de 'embutido' para el semáforo del total
     const stockMap = {}
-    ;(stock.data || []).forEach(r => stockMap[r.tipo] = r.kg_disponible || 0)
+    ;(stock.data || []).forEach(r => {
+      const t = String(r.tipo || '').startsWith('emb_') ? 'embutido' : r.tipo
+      stockMap[t] = (stockMap[t] || 0) + (r.kg_disponible || 0)
+    })
     const stockCritico = [
       { tipo: 'bovino_mr',    label: '🐄 Bovino M.R.',   minimo: 100, kg: stockMap.bovino_mr || 0 },
       { tipo: 'bovino_corte', label: '🥩 Bovino Cortes', minimo: 50,  kg: stockMap.bovino_corte || 0 },
