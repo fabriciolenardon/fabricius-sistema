@@ -129,6 +129,14 @@ const ESTILOS_GLOBALES = `
   18%  { transform: scale(1.05); text-shadow: 0 0 60px rgba(155,234,255,1), 0 0 24px rgba(255,255,255,0.8); }
   100% { transform: scale(1);    text-shadow: 0 0 16px rgba(0,212,255,0.45); }
 }
+/* 🎬 Anuncio cinematográfico: entra con zoom + desenfoque, como holograma */
+@keyframes dejAnuncio {
+  0%   { opacity: 0; transform: scale(0.7);  filter: blur(10px); }
+  60%  { opacity: 1; transform: scale(1.04); filter: blur(0); }
+  100% { opacity: 1; transform: scale(1); }
+}
+/* Barra de cuenta regresiva del anuncio */
+@keyframes dejCuenta { from { width: 100%; } to { width: 0%; } }
 /* Cinta de últimas ventas (marquee continuo, contenido duplicado) */
 @keyframes dejTicker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 .dej-ticker-pista { display: inline-flex; white-space: nowrap; animation: dejTicker 45s linear infinite; will-change: transform; }
@@ -193,12 +201,14 @@ function useDashboardData(refreshMs = 120000) {
       // hora incluida: alimenta la curva "hoy vs ayer a esta hora"
       supabase.from('ventas_minoristas').select('total, hora').eq('origen', 'caja').eq('fecha', ayer),
       supabase.from('ventas_minoristas').select('total, fecha').eq('origen', 'caja').gte('fecha', hace7).lte('fecha', hoy),
-      supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').gte('fecha', mesIni).lte('fecha', hoy),
+      // fecha incluida: detecta el mejor día del mes (para el RÉCORD en vivo)
+      supabase.from('ventas_minoristas').select('total, fecha').eq('origen', 'caja').gte('fecha', mesIni).lte('fecha', hoy),
       // Mes anterior recortado al MISMO período (01 → mismo día), no el mes completo
       supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').gte('fecha', mesAntIni).lte('fecha', mesAntMismoDia),
       supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').gte('fecha', anioPasadoMesIni).lte('fecha', anioPasadoHoy),
-      // Mayorista del mes (con filtro de flujos internos)
-      supabase.from('salidas_deposito').select('total, cobro').gte('fecha', mesIni).lte('fecha', hoy),
+      // Mayorista del mes (con filtro de flujos internos); cliente_nombre
+      // alimenta el podio de clientes y la separación mayorista/franquicias
+      supabase.from('salidas_deposito').select('total, cobro, cliente_nombre').gte('fecha', mesIni).lte('fecha', hoy),
       supabase.from('pedidos').select('total_estimado').eq('estado', 'confirmado').gte('dia_entrega', mesIni).lte('dia_entrega', hoy),
       supabase.from('cuentas_fiscales').select('*').eq('activa', true).then(r => r).catch(() => ({ data: null })),
       supabase.from('facturas').select('cuenta_id, monto_total, fecha').eq('tipo', 'emitida').gte('fecha', fechaHaceDias(365)).then(r => r).catch(() => ({ data: null })),
@@ -286,6 +296,38 @@ function useDashboardData(refreshMs = 120000) {
     const totalSalidasMes = salidasMesData.reduce((s, x) => s + (Number(x.total) || 0), 0)
     const totalPedidosMes = (pedidosMes.data || []).reduce((s, p) => s + (Number(p.total_estimado) || 0), 0)
     const facturadoMes = totalCajaMes + totalSalidasMes + totalPedidosMes
+
+    // ── 💥 RÉCORD: mejor día del mes (sin contar hoy) en la caja ──
+    const porDiaMes = {}
+    ;(ventasMes.data || []).forEach(v => {
+      if (v.fecha && v.fecha !== hoy) porDiaMes[v.fecha] = (porDiaMes[v.fecha] || 0) + (Number(v.total) || 0)
+    })
+    const mejorDiaEntry = Object.entries(porDiaMes).sort((a, b) => b[1] - a[1])[0] || null
+    const mejorDiaMes = mejorDiaEntry ? { fecha: mejorDiaEntry[0], monto: mejorDiaEntry[1] } : null
+
+    // ── ⚔️ CANALES DEL MES: carnicería (caja) vs mayorista vs franquicias ──
+    // Las franquicias salen por salidas_deposito con cliente ALVEAR / MONTE
+    // CRISTO (no hay columna destino; se identifican por nombre).
+    const esFranquiciaNombre = (n) => /ALVEAR|MONTE\s*CRISTO/i.test(n || '')
+    const totalFranqMes = salidasMesData
+      .filter(s => esFranquiciaNombre(s.cliente_nombre))
+      .reduce((s, x) => s + (Number(x.total) || 0), 0)
+    const canalesMes = {
+      carniceria: totalCajaMes,
+      mayorista: totalSalidasMes - totalFranqMes,
+      franquicias: totalFranqMes,
+    }
+
+    // ── 🏆 PODIO: top clientes mayoristas del mes (sin flujos internos) ──
+    const accCli = {}
+    salidasMesData.forEach(s => {
+      const k = (s.cliente_nombre || '—').trim().toUpperCase()
+      accCli[k] = (accCli[k] || 0) + (Number(s.total) || 0)
+    })
+    const topClientesMes = Object.entries(accCli)
+      .map(([nombre, total]) => ({ nombre, total, franquicia: esFranquiciaNombre(nombre) }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 5)
 
     // ── INGRESOS REALES DEL MES (cobranzas, no facturación) ──
     const ingresoCajaMes = totalCajaMes
@@ -381,6 +423,7 @@ function useDashboardData(refreshMs = 120000) {
       ultimaVentaHora,
       mensualVivo,
       curvaHoy, curvaAyer, ultimasVentas,
+      mejorDiaMes, canalesMes, topClientesMes,
       comprasSemanaProv, comprasSemanaTotal,
       cierreSemana: (cierresQ?.data || [])[0] || null,
       cierresHistorial: [...(cierresQ?.data || [])].reverse(), // viejas → nuevas (para las barras)
@@ -896,13 +939,25 @@ function CierreSemanaAnterior({ cierre, historial }) {
 function CurvaDia({ hoy, ayer, tv }) {
   const hAhora = horaActualARG()
   const hoyCortada = (hoy || []).filter(p => p.h <= Math.max(7, hAhora))
+  const ultimo = hoyCortada[hoyCortada.length - 1]
+  const ayerAEstaHora = (ayer || []).find(p => p.h === (ultimo?.h ?? 0))?.acum || 0
+  // 🎯 PROYECCIÓN DE CIERRE: escala el acumulado de hoy según qué fracción
+  // del día llevaba ayer a esta misma hora. Sin datos de ayer, regla lineal
+  // sobre las horas transcurridas (7→22). Recién desde las 9 (antes es ruido)
+  // y hasta las 21 (después el día ya está jugado).
+  const ayerFinal = (ayer || []).length ? (Number(ayer[ayer.length - 1].acum) || 0) : 0
+  let proyeccion = null
+  if (ultimo && ultimo.acum > 0 && hAhora >= 9 && hAhora < 21) {
+    proyeccion = (ayerAEstaHora > 0 && ayerFinal > 0)
+      ? ultimo.acum * (ayerFinal / ayerAEstaHora)
+      : (ultimo.acum / Math.max(1, hAhora - 6)) * 16
+  }
   const maxY = Math.max(
-    ...(ayer || []).map(p => p.acum), ...(hoyCortada.map(p => p.acum)), 1)
+    ...(ayer || []).map(p => p.acum), ...(hoyCortada.map(p => p.acum)), proyeccion || 0, 1)
   const X = (h) => ((h - 7) / 15) * 100
   const Y = (v) => 38 - (v / maxY) * 34
   const path = (pts) => pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${X(p.h).toFixed(1)},${Y(p.acum).toFixed(1)}`).join(' ')
-  const ultimo = hoyCortada[hoyCortada.length - 1]
-  const ayerAEstaHora = (ayer || []).find(p => p.h === (ultimo?.h ?? 0))?.acum || 0
+  const colorProy = proyeccion != null && ayerFinal > 0 && proyeccion < ayerFinal ? NEON.ambar : NEON.verde
   const fz = (n) => tv ? `${n}vw` : `${n * 13}px`
   return (
     <div className={tv ? 'dej-in hud' : 'hud'} style={{ ...glass, padding: tv ? '1.2vw 1.6vw' : 18, flex: tv ? 1 : undefined, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
@@ -916,6 +971,13 @@ function CurvaDia({ hoy, ayer, tv }) {
             </strong>
           )}
         </span>
+        {proyeccion != null && (
+          <span style={{ marginLeft: 'auto', fontSize: fz(0.75), fontWeight: 800, color: colorProy,
+            border: `1px solid ${colorProy}55`, borderRadius: 4, padding: tv ? '0.15vw 0.6vw' : '2px 8px',
+            background: 'rgba(0,212,255,0.04)', whiteSpace: 'nowrap' }}>
+            🎯 camino a {fmtArs(proyeccion)}
+          </span>
+        )}
       </div>
       <svg viewBox="0 0 100 42" preserveAspectRatio="none" style={{ width: '100%', flex: 1, minHeight: tv ? 0 : 110, marginTop: 6 }}>
         {/* guías horizontales */}
@@ -925,6 +987,11 @@ function CurvaDia({ hoy, ayer, tv }) {
         {/* ayer: punteada apagada */}
         {(ayer || []).length > 0 && (
           <path d={path(ayer)} fill="none" stroke="rgba(155,214,255,0.35)" strokeWidth="0.7" strokeDasharray="2 2" />
+        )}
+        {/* 🎯 proyección de cierre: línea de meta punteada */}
+        {proyeccion != null && (
+          <line x1="0" x2="100" y1={Y(proyeccion).toFixed(1)} y2={Y(proyeccion).toFixed(1)}
+            stroke={colorProy} strokeOpacity="0.55" strokeWidth="0.45" strokeDasharray="1.4 1.8" />
         )}
         {/* hoy: cian con relleno suave y glow */}
         {hoyCortada.length > 1 && (
@@ -1141,6 +1208,129 @@ function CentroAlertas({ data }) {
 }
 
 // ════════════════════════════════════════════════════════════
+// 🎬 ANUNCIOS CINEMATOGRÁFICOS (Modo TV)
+// ────────────────────────────────────────────────────────────
+// Cuando pasa algo importante, FABRI lo anuncia en pantalla con
+// una placa holográfica de 9 segundos (y lo dice en voz alta si
+// el parlante 🔊 del asistente está activado):
+//   💥 récord del mes (hoy superó al mejor día anterior)
+//   📦 stock crítico
+//   📄 cheque por cobrar que vence en ≤2 días
+// Cada evento se anuncia UNA vez por sesión de TV (Set en ref);
+// si hay varios juntos, salen en cola de a uno.
+// ════════════════════════════════════════════════════════════
+function hablarAnuncio(a) {
+  try {
+    // Respeta la config de voz de FABRI (toggle 🔊 + voz elegida)
+    if (localStorage.getItem('fabri_voz') !== '1') return
+    if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) return
+    const u = new window.SpeechSynthesisUtterance(a.voz || `${a.titulo}. ${a.detalle}`)
+    const elegida = localStorage.getItem('fabri_voz_nombre')
+    const voces = window.speechSynthesis.getVoices() || []
+    u.voice = voces.find(v => v.name === elegida) || voces.find(v => (v.lang || '').startsWith('es')) || null
+    if (u.voice) u.lang = u.voice.lang
+    window.speechSynthesis.speak(u)
+  } catch { /* la tele puede no tener voces — el anuncio visual alcanza */ }
+}
+
+function useAnunciosTV(data) {
+  const [actual, setActual] = useState(null)
+  const colaRef = useRef([])
+  const anunciadosRef = useRef(new Set())
+  const timerRef = useRef(null)
+
+  const procesar = useCallback(() => {
+    if (timerRef.current || colaRef.current.length === 0) return // ya hay uno en pantalla
+    const sig = colaRef.current.shift()
+    setActual(sig)
+    hablarAnuncio(sig)
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null
+      setActual(null)
+      setTimeout(procesar, 700) // respiro entre anuncios encadenados
+    }, 9000)
+  }, [])
+
+  useEffect(() => {
+    if (!data) return
+    const hoy = hoyISO()
+    const nuevos = []
+
+    // 💥 RÉCORD DEL MES: hoy superó al mejor día anterior (caja)
+    if (data.mejorDiaMes && data.mejorDiaMes.monto > 0 && data.totalHoy > data.mejorDiaMes.monto) {
+      nuevos.push({
+        key: `record-${hoy}`, tipo: 'celebracion', icono: '💥',
+        titulo: '¡RÉCORD DEL MES!',
+        detalle: `${fmtArs(data.totalHoy)} facturados hoy — superó al mejor día (${fcCorta(data.mejorDiaMes.fecha)}: ${fmtArs(data.mejorDiaMes.monto)})`,
+        voz: 'Atención. ¡Récord del mes! Hoy ya es el mejor día del mes en la caja. Felicitaciones, equipo.',
+      })
+    }
+    // 📦 STOCK CRÍTICO (uno por tipo por día)
+    ;(data.stockCritico || []).forEach(s => nuevos.push({
+      key: `stock-${s.tipo}-${hoy}`, tipo: 'danger', icono: '📦',
+      titulo: 'STOCK CRÍTICO',
+      detalle: `${s.label}: quedan ${fmtKg(s.kg)} — mínimo ${s.minimo} kg`,
+      voz: `Atención. Stock crítico de ${s.label.replace(/[^\p{L}\p{N} .]/gu, '').trim()}. Hay que reponer.`,
+    }))
+    // 📄 CHEQUES A COBRAR que vencen en ≤2 días
+    ;(data.cheques || []).forEach(ch => {
+      if (!ch.fecha_pago) return
+      const dias = Math.ceil((new Date(ch.fecha_pago + 'T12:00') - new Date()) / 86400000)
+      if (dias < 0 || dias > 2) return
+      nuevos.push({
+        key: `cheque-${ch.id}`, tipo: 'warning', icono: '📄',
+        titulo: dias === 0 ? 'CHEQUE VENCE HOY' : `CHEQUE VENCE EN ${dias} DÍA${dias === 1 ? '' : 'S'}`,
+        detalle: `#${ch.numero} · ${ch.cliente_nombre || 'sin cliente'} · ${fmtArs(ch.monto)}`,
+        voz: `Recordatorio: hay un cheque por cobrar que vence ${dias === 0 ? 'hoy' : `en ${dias} día${dias === 1 ? '' : 's'}`}.`,
+      })
+    })
+
+    nuevos.forEach(n => {
+      if (!anunciadosRef.current.has(n.key)) {
+        anunciadosRef.current.add(n.key)
+        colaRef.current.push(n)
+      }
+    })
+    procesar()
+  }, [data, procesar])
+
+  useEffect(() => () => clearTimeout(timerRef.current), [])
+  return actual
+}
+
+function AnuncioTV({ anuncio }) {
+  if (!anuncio) return null
+  const paleta = {
+    celebracion: { c: NEON.cianHi, borde: 'rgba(0,212,255,0.75)',  glow: 'rgba(0,212,255,0.25)' },
+    danger:      { c: NEON.rojo,   borde: 'rgba(255,92,108,0.75)', glow: 'rgba(255,92,108,0.22)' },
+    warning:     { c: NEON.ambar,  borde: 'rgba(255,179,92,0.75)', glow: 'rgba(255,179,92,0.22)' },
+  }
+  const p = paleta[anuncio.tipo] || paleta.celebracion
+  return (
+    <div style={{
+      position: 'absolute', inset: 0, zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'rgba(1,5,9,0.6)', backdropFilter: 'blur(5px)', animation: 'dejIn .35s ease both',
+    }}>
+      <div className="hud" style={{
+        ...glass, border: `1px solid ${p.borde}`, padding: '2.2vw 4.5vw', textAlign: 'center',
+        maxWidth: '62vw', animation: 'dejAnuncio .7s cubic-bezier(.2,1.4,.4,1) both',
+        boxShadow: `0 0 90px ${p.glow}, inset 0 0 40px rgba(0,212,255,0.06)`,
+      }}>
+        <div style={{ fontSize: '4.2vw', lineHeight: 1 }}>{anuncio.icono}</div>
+        <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '3.4vw', letterSpacing: 5, lineHeight: 1.1,
+          color: p.c, textShadow: `0 0 26px ${p.glow.replace('0.2', '0.7')}`, marginTop: '0.4vw' }}>
+          {anuncio.titulo}
+        </div>
+        <div style={{ fontSize: '1.25vw', color: NEON.texto, marginTop: '0.6vw' }}>{anuncio.detalle}</div>
+        <div style={{ height: 3, marginTop: '1.2vw', background: 'rgba(255,255,255,0.08)', borderRadius: 2, overflow: 'hidden' }}>
+          <div style={{ height: '100%', background: p.c, boxShadow: `0 0 8px ${p.c}`, animation: 'dejCuenta 9s linear both' }} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════
 // 📺 MODO TV — pantalla completa para proyectar en una tele
 // ────────────────────────────────────────────────────────────
 // - Tipografía gigante escalada en vw (se ve bien en cualquier TV)
@@ -1151,6 +1341,8 @@ function CentroAlertas({ data }) {
 function ModoTV({ onSalir }) {
   const { data, loading, ultimaAct } = useDashboardData(60000)
   const { hora, segundos, fecha } = useRelojARG()
+  // 🎬 Anuncios cinematográficos: récord / stock crítico / cheques por vencer
+  const anuncio = useAnunciosTV(data)
 
   // 🔔 Destello cuando entra una venta: si el facturado de hoy SUBE entre
   // recargas, replay de la animación dejFlash (la key fuerza el remount).
@@ -1187,6 +1379,8 @@ function ModoTV({ onSalir }) {
       {/* Capa holográfica: rejilla + línea de escaneo (decorativas) */}
       <div className="hud-rejilla" />
       <div className="hud-scan" />
+      {/* 🎬 Anuncio cinematográfico (récord / stock / cheques) */}
+      <AnuncioTV anuncio={anuncio} />
 
       {/* ── HEADER ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '1.4vw' }}>
@@ -1260,6 +1454,9 @@ function ModoTV({ onSalir }) {
                   sub="mismo período" color={colorVar(data.panelControl.variacionAnioPasado)} />
               </div>
 
+              {/* ⚔️ Canales del mes compitiendo */}
+              <CanalesEnVivo canales={data.canalesMes} />
+
               {/* Curva del día en vivo: hoy vs ayer */}
               <CurvaDia hoy={data.curvaHoy} ayer={data.curvaAyer} tv />
             </div>
@@ -1310,6 +1507,9 @@ function ModoTV({ onSalir }) {
                 </div>
                 <BarrasCierres cierres={data.cierresHistorial} tv />
               </div>
+
+              {/* 🏆 Podio de clientes mayoristas */}
+              <PodioClientes clientes={data.topClientesMes} />
 
               {/* Alertas */}
               <div className="dej-in hud" style={{ ...glass, padding: '1.4vw 1.8vw', flex: 1, minHeight: 0, overflow: 'hidden',
@@ -1364,13 +1564,14 @@ function ModoTV({ onSalir }) {
   )
 }
 
-// Medidor circular holográfico: arco de progreso + anillo punteado giratorio
-function HudGauge({ pct, label, color }) {
+// Medidor circular holográfico: arco de progreso + anillo punteado giratorio.
+// size/fsValor/fsLabel permiten versiones más chicas (canales en vivo).
+function HudGauge({ pct, label, color, size = '7vw', fsValor = '1.7vw', fsLabel = '0.55vw' }) {
   const p = Math.max(0, Math.min(100, Number(pct) || 0))
   const R = 40
   const C = 2 * Math.PI * R
   return (
-    <div style={{ position: 'relative', width: '7vw', height: '7vw', flexShrink: 0 }}>
+    <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
       <svg viewBox="0 0 100 100" style={{ width: '100%', height: '100%', transform: 'rotate(-90deg)' }}>
         <circle cx="50" cy="50" r={R} fill="none" stroke="rgba(0,212,255,0.12)" strokeWidth="5" />
         <circle cx="50" cy="50" r={R} fill="none" stroke={color} strokeWidth="5"
@@ -1381,9 +1582,101 @@ function HudGauge({ pct, label, color }) {
         <circle cx="50" cy="50" r="47" fill="none" stroke="rgba(0,212,255,0.3)" strokeWidth="0.8" strokeDasharray="3 9" />
       </svg>
       <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '1.7vw', color, lineHeight: 1 }}>{p.toFixed(0)}%</div>
-        <div style={{ fontSize: '0.55vw', letterSpacing: 2, color: NEON.muted, fontWeight: 700, textAlign: 'center' }}>{label}</div>
+        <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: fsValor, color, lineHeight: 1 }}>{p.toFixed(0)}%</div>
+        <div style={{ fontSize: fsLabel, letterSpacing: 2, color: NEON.muted, fontWeight: 700, textAlign: 'center' }}>{label}</div>
       </div>
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════
+// ⚔️ CANALES DEL MES — carnicería vs mayorista vs franquicias
+// ────────────────────────────────────────────────────────────
+// Tres medidores compitiendo: cada uno muestra su % del total
+// facturado del mes. El líder lleva la corona (y el oro, que en
+// este HUD queda reservado para los #1).
+// ════════════════════════════════════════════════════════════
+function CanalesEnVivo({ canales }) {
+  if (!canales) return null
+  const items = [
+    { k: 'carniceria',  label: 'CARNICERÍA',  icono: '🏪', v: Number(canales.carniceria) || 0, c: NEON.cian },
+    { k: 'mayorista',   label: 'MAYORISTA',   icono: '🚚', v: Number(canales.mayorista) || 0,  c: NEON.azul },
+    { k: 'franquicias', label: 'FRANQUICIAS', icono: '🏬', v: Number(canales.franquicias) || 0, c: NEON.ambar },
+  ]
+  const total = items.reduce((s, x) => s + x.v, 0)
+  const maxV = Math.max(...items.map(x => x.v))
+  return (
+    <div className="dej-in hud" style={{ ...glass, padding: '0.8vw 1.4vw', display: 'flex', alignItems: 'center', gap: '1vw' }}>
+      <div style={{ fontSize: '0.8vw', letterSpacing: 3, color: NEON.cian, fontWeight: 800, lineHeight: 1.3, flexShrink: 0 }}>
+        ⚔️ CANALES<br /><span style={{ color: NEON.muted, fontSize: '0.6vw', letterSpacing: 2 }}>DEL MES</span>
+      </div>
+      {items.map(x => {
+        const lider = total > 0 && x.v === maxV
+        return (
+          <div key={x.k} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.7vw', minWidth: 0 }}>
+            <HudGauge pct={total > 0 ? (x.v / total) * 100 : 0} label={x.icono}
+              color={lider ? NEON.oro : x.c} size="4.6vw" fsValor="1.15vw" fsLabel="0.9vw" />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: '0.65vw', letterSpacing: 2, color: NEON.muted, fontWeight: 800, whiteSpace: 'nowrap' }}>
+                {lider && '👑 '}{x.label}
+              </div>
+              <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '1.45vw', lineHeight: 1.1, color: lider ? NEON.oro : x.c,
+                textShadow: lider ? '0 0 12px rgba(255,209,122,0.45)' : 'none' }}>
+                {fmtArs(x.v)}
+              </div>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════
+// 🏆 PODIO — top clientes mayoristas del mes (oro para el #1)
+// ════════════════════════════════════════════════════════════
+function PodioClientes({ clientes }) {
+  if (!clientes || clientes.length === 0) return null
+  const [p1, p2, p3] = clientes
+  const podio = [
+    { c: p2, pos: '2º', color: NEON.cian,  alto: '2.1vw', fs: '1.05vw' },
+    { c: p1, pos: '1º', color: NEON.oro,   alto: '3.1vw', fs: '1.5vw' },
+    { c: p3, pos: '3º', color: NEON.azul,  alto: '1.5vw', fs: '0.95vw' },
+  ]
+  return (
+    <div className="dej-in hud" style={{ ...glass, padding: '0.9vw 1.6vw' }}>
+      <div style={{ fontSize: '0.85vw', letterSpacing: 3, color: NEON.cian, fontWeight: 800, marginBottom: '0.5vw' }}>
+        🏆 TOP CLIENTES MAYORISTAS · MES
+      </div>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.8vw' }}>
+        {podio.map((x, i) => x.c ? (
+          <div key={i} style={{ flex: i === 1 ? 1.2 : 1, textAlign: 'center', minWidth: 0 }}>
+            <div style={{ fontSize: '0.72vw', fontWeight: 700, color: x.pos === '1º' ? NEON.oro : NEON.texto,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {x.pos === '1º' && '👑 '}{x.c.nombre}{x.c.franquicia ? ' 🏬' : ''}
+            </div>
+            <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: x.fs, lineHeight: 1.15, color: x.color,
+              textShadow: x.pos === '1º' ? '0 0 14px rgba(255,209,122,0.5)' : 'none' }}>
+              {fmtArs(x.c.total)}
+            </div>
+            <div style={{ height: x.alto, borderRadius: '3px 3px 0 0', marginTop: '0.2vw',
+              background: `linear-gradient(180deg, ${x.color}, ${x.color}22)`,
+              boxShadow: x.pos === '1º' ? '0 0 14px rgba(255,209,122,0.35)' : 'none',
+              display: 'flex', alignItems: 'flex-start', justifyContent: 'center' }}>
+              <span style={{ fontSize: '0.7vw', fontWeight: 900, color: '#04101d', marginTop: '0.1vw' }}>{x.pos}</span>
+            </div>
+          </div>
+        ) : <div key={i} style={{ flex: 1 }} />)}
+      </div>
+      {clientes.length > 3 && (
+        <div style={{ display: 'flex', gap: '1.6vw', marginTop: '0.45vw', fontSize: '0.68vw', color: NEON.muted }}>
+          {clientes.slice(3, 5).map((c, i) => (
+            <span key={i} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {i + 4}º {c.nombre} · <strong style={{ color: NEON.texto }}>{fmtArs(c.total)}</strong>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
