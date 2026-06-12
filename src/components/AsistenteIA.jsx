@@ -111,6 +111,12 @@ Tu trabajo es ayudar a Fabricio Lenardon y Ariel Garrone (los dos socios) a mane
 
 IDENTIDAD DEL USUARIO: al final de estas instrucciones te digo QUIÉN está logueado AHORA. Dirigite a esa persona por su nombre. NUNCA preguntes "¿Fabricio o Ariel?" — ya lo sabés.
 
+MEMORIA Y APRENDIZAJE (te retroalimentás solo):
+- Al final de estas instrucciones puede venir una sección "TU MEMORIA" con lo que aprendiste en charlas anteriores. RESPETALA: si dice que al usuario le gusta cierto trato, tratalo así; si tiene datos del negocio, usalos.
+- Cuando detectes una preferencia nueva, un dato del negocio que no esté en el sistema, o una corrección del usuario → guardalo con la función "recordar" (sin pedir permiso, pero avisando con naturalidad: "anotado, jefe 🧠").
+- Si el usuario te pide olvidar algo o un recuerdo quedó obsoleto → usá "olvidar" con su [id].
+- Sé AMENO: calidez, humor liviano cuando pinta, cero robótico acartonado. Que charlar con vos sea un gusto — pero siempre eficiente: primero el dato, después el chiste.
+
 REGLAS DE COMUNICACIÓN:
 1. Hablás en español rioplatense argentino, casual pero profesional. Tuteo ("vos").
 2. Sos breve y directo. Sin explicaciones largas innecesarias. El usuario puede estar usándote POR VOZ (micrófono + respuestas leídas en voz alta): respuestas de 1-3 oraciones, sin tablas ni listas largas, números redondeados al hablar.
@@ -337,14 +343,30 @@ export default function AsistenteIA() {
 
       let historialActualizado = [...historialGemini, mensajeNuevo]
 
+      // 🧠 MEMORIA DE FABRI: lo aprendido en charlas anteriores entra al
+      // prompt de cada llamada (fresco de la base, por si recordó/olvidó algo
+      // en este mismo turno). Si falla, FABRI sigue sin memoria, no se rompe.
+      let memoriaTxt = ''
+      try {
+        const { data: mems } = await supabase.from('fabri_memoria')
+          .select('id, usuario, tipo, contenido')
+          .eq('activa', true)
+          .order('created_at', { ascending: false })
+          .limit(60)
+        if (mems && mems.length > 0) {
+          memoriaTxt = '\n\nTU MEMORIA (lo que aprendiste en charlas anteriores — usala para tratar a cada uno como le gusta y recordar el negocio; podés olvidar recuerdos por su [id]):\n' +
+            mems.map(m => `[${m.id}]${m.usuario ? ` (sobre ${m.usuario})` : ''} ${m.contenido}`).join('\n')
+        }
+      } catch { /* sin memoria, FABRI funciona igual */ }
+
       let intentos = 0
       while (intentos < 8) {
         intentos++
         const respuesta = await llamarGemini({
           historial: historialActualizado,
-          // Contexto vivo: quién está hablando y qué día es — así FABRI
-          // saluda por nombre y nunca pregunta "¿Fabricio o Ariel?"
-          systemPrompt: `${SYSTEM_PROMPT}\n\nUSUARIO LOGUEADO AHORA: ${usuario?.nombre || 'desconocido'}${usuario?.rol ? ` (rol: ${usuario.rol})` : ''}. FECHA DE HOY: ${fechaHoyARG()}.`,
+          // Contexto vivo: quién está hablando, qué día es y la memoria
+          // acumulada — así FABRI reconoce, recuerda y se adapta.
+          systemPrompt: `${SYSTEM_PROMPT}\n\nUSUARIO LOGUEADO AHORA: ${usuario?.nombre || 'desconocido'}${usuario?.rol ? ` (rol: ${usuario.rol})` : ''}. FECHA DE HOY: ${fechaHoyARG()}.${memoriaTxt}`,
           tools: DEFINICIONES_TOOLS
         })
 
