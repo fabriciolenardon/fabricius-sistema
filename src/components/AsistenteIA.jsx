@@ -269,6 +269,13 @@ export default function AsistenteIA() {
   const reanudarTimerRef = useRef(null)
   const iniciarEscuchaRef = useRef(() => {})
 
+  // ⏱️ Pausa de envío: lo dicho se ACUMULA y recién se envía después de
+  // este silencio. Permite hablar tranquilo, frenar a pensar, y seguir —
+  // sin que se dispare en la primera pausita. (Pedido de Fabricio.)
+  const PAUSA_ENVIO_MS = 2200
+  const finalAcumRef = useRef('')     // texto final acumulado entre pausas
+  const silencioTimerRef = useRef(null)
+
   // Re-arma el micrófono si el modo conversación sigue activo y FABRI ya
   // terminó de hablar. El delay evita que el mic agarre la cola del audio.
   function reanudarSiConversacion() {
@@ -290,30 +297,47 @@ export default function AsistenteIA() {
     }
   }
 
+  // Envía lo acumulado (lo dispara el timer de silencio o el cierre del recognizer)
+  function enviarAcumulado(rec) {
+    clearTimeout(silencioTimerRef.current)
+    const txt = finalAcumRef.current.trim()
+    finalAcumRef.current = ''
+    setEscuchando(false)
+    try { rec?.stop() } catch { /* ya detenido */ }
+    if (txt) enviar(txt, { vozEntrada: true })
+    else reanudarSiConversacion()
+  }
+
   function iniciarEscucha() {
     if (!SpeechRecognitionAPI || escuchando || cargando) return
     try {
       const rec = new SpeechRecognitionAPI()
       recognitionRef.current = rec
+      finalAcumRef.current = ''
       rec.lang = 'es-AR'
       rec.interimResults = true
-      rec.continuous = false
+      // continuous: el recognizer NO corta en la primera pausa — seguimos
+      // acumulando y el envío lo decide NUESTRO timer de silencio.
+      rec.continuous = true
       rec.onresult = (e) => {
         let parcial = ''
         let final = ''
         for (const res of e.results) {
-          if (res.isFinal) final += res[0].transcript
+          if (res.isFinal) final += res[0].transcript + ' '
           else parcial += res[0].transcript
         }
-        setInput(final || parcial)
+        finalAcumRef.current = final.trim()
+        setInput((final + parcial).trim())
+        clearTimeout(silencioTimerRef.current)
+        if (parcial) return // sigue hablando: no arrancar el contador
         if (final.trim()) {
-          setEscuchando(false)
-          rec.stop()
-          enviar(final.trim(), { vozEntrada: true })
+          // Hubo una pausa: arrancar el contador. Si retoma, se resetea solo.
+          silencioTimerRef.current = setTimeout(() => enviarAcumulado(rec), PAUSA_ENVIO_MS)
         }
       }
       rec.onerror = (e) => {
         setEscuchando(false)
+        clearTimeout(silencioTimerRef.current)
         // Sin permiso de micrófono → apagar el modo conversación (si no, loop de errores)
         if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed') {
           modoConvRef.current = false
@@ -321,9 +345,10 @@ export default function AsistenteIA() {
         }
       }
       rec.onend = () => {
-        setEscuchando(false)
-        // Silencio o timeout del navegador: en modo conversación, re-armar
-        reanudarSiConversacion()
+        // El navegador cortó solo (silencio largo): si quedó texto, se envía;
+        // si no, en modo conversación se re-arma.
+        if (finalAcumRef.current.trim()) enviarAcumulado(null)
+        else { setEscuchando(false); reanudarSiConversacion() }
       }
       setEscuchando(true)
       window.speechSynthesis?.cancel() // si estaba hablando, que se calle para escuchar
@@ -335,6 +360,9 @@ export default function AsistenteIA() {
   iniciarEscuchaRef.current = iniciarEscucha
 
   function detenerEscucha() {
+    // Cancelación manual: NO se envía lo acumulado
+    clearTimeout(silencioTimerRef.current)
+    finalAcumRef.current = ''
     try { recognitionRef.current?.stop() } catch { /* ya detenido */ }
     setEscuchando(false)
   }
@@ -591,7 +619,7 @@ export default function AsistenteIA() {
               onChange={e => setInput(e.target.value)}
               onKeyDown={manejarEnter}
               placeholder={
-                escuchando ? '🎤 Escuchando…'
+                escuchando ? '🎤 Escuchando… (2 seg de silencio = enviar)'
                 : modoConversacion ? (cargando ? '🤔 FABRI pensando…' : '🎙️ Conversación activa — hablá tranquilo')
                 : 'Pedime algo...'
               }
