@@ -16,6 +16,8 @@ import {
   archivoABase64
 } from '../lib/gemini'
 import { DEFINICIONES_TOOLS, ejecutarFuncion } from '../lib/asistenteTools'
+import { supabase } from '../lib/supabase'
+import { fechaHoyARG } from '../lib/fechas'
 
 // ═══════════════════════════════════════════════════════════
 // 🎤 VOZ — reconocimiento (Web Speech API) + lectura en voz alta
@@ -103,9 +105,11 @@ function detectarNavegacion(texto) {
 // ═══════════════════════════════════════════════════════════
 // SYSTEM PROMPT — Instrucciones para la IA
 // ═══════════════════════════════════════════════════════════
-const SYSTEM_PROMPT = `Sos el asistente de IA de Carnicerías Fabricius, en Río Primero, Córdoba, Argentina.
+const SYSTEM_PROMPT = `Sos F.A.B.R.I. (Facturación, Alertas, Balance y Resultados Instantáneos), el asistente robot de Carnicerías Fabricius, en Río Primero, Córdoba, Argentina. Tenés personalidad de mayordomo tecnológico: servicial, canchero, eficiente.
 
 Tu trabajo es ayudar a Fabricio Lenardon y Ariel Garrone (los dos socios) a manejar el sistema de gestión.
+
+IDENTIDAD DEL USUARIO: al final de estas instrucciones te digo QUIÉN está logueado AHORA. Dirigite a esa persona por su nombre. NUNCA preguntes "¿Fabricio o Ariel?" — ya lo sabés.
 
 REGLAS DE COMUNICACIÓN:
 1. Hablás en español rioplatense argentino, casual pero profesional. Tuteo ("vos").
@@ -156,12 +160,51 @@ PAGOS DE CLIENTES:
 - El saldo se actualiza automáticamente por trigger en la base de datos.
 `
 
+// Saludo según la hora ARG — "jefe" para los socios, nombre para el resto
+function armarSaludo(usuario) {
+  const nombre = (usuario?.nombre || '').trim()
+  const primerNombre = nombre.split(/\s+/)[0] || ''
+  const esJefe = /fabricio|ariel/i.test(nombre)
+  const trato = esJefe ? `jefe${primerNombre ? ' ' + primerNombre : ''}` : (primerNombre || 'crack')
+  const hora = Number(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires', hour: '2-digit', hour12: false }))
+  if (hora < 13) return `¡Buen día, ${trato}! ☀️ Acá F.A.B.R.I., sistemas operativos. ¿Con qué arrancamos?`
+  if (hora < 19) return `¡Hola ${trato}! 🦾 ¿Cómo viene tu día? Pedime lo que necesites.`
+  return `¡Hola ${trato}! 🌙 ¿Cómo estuvo tu día? Acá estoy para lo que haga falta.`
+}
+
 export default function AsistenteIA() {
   const navigate = useNavigate()
   const [abierto, setAbierto] = useState(false)
   const [mensajes, setMensajes] = useState([
-    { rol: 'asistente', texto: '¡Hola! Soy tu asistente. Pedime lo que necesites: cargar gastos, entradas al depósito, registrar pagos, ver deudas, stock, o subí la foto de un remito/ticket. 🎤 También podés hablarme con el micrófono.' }
+    { rol: 'asistente', texto: '¡Hola! Soy F.A.B.R.I., tu asistente. Pedime lo que necesites: cargar gastos, entradas al depósito, registrar pagos, ver deudas, stock, o subí la foto de un remito/ticket. 🎤 También podés hablarme con el micrófono.' }
   ])
+
+  // 👤 Quién está logueado — para que FABRI te reconozca sin preguntar
+  const [usuario, setUsuario] = useState(null)
+  useEffect(() => {
+    let vivo = true
+    ;(async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) return
+        const { data: perfil } = await supabase.from('profiles').select('nombre, rol').eq('id', user.id).maybeSingle()
+        if (vivo) setUsuario({ nombre: perfil?.nombre || user.email, rol: perfil?.rol || '' })
+      } catch { /* sin identidad, FABRI sigue funcionando genérico */ }
+    })()
+    return () => { vivo = false }
+  }, [])
+
+  // 🌅 Primera charla del día: saludo personalizado (una vez por día por usuario)
+  useEffect(() => {
+    if (!abierto || !usuario) return
+    const clave = `fabri_saludo_${fechaHoyARG()}_${usuario.nombre}`
+    if (localStorage.getItem(clave)) return
+    localStorage.setItem(clave, '1')
+    const saludo = armarSaludo(usuario)
+    setMensajes([{ rol: 'asistente', texto: saludo }])
+    if (vozActiva) hablar(saludo)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [abierto, usuario])
   const [input, setInput] = useState('')
   const [imagenSeleccionada, setImagenSeleccionada] = useState(null)
   const [cargando, setCargando] = useState(false)
@@ -299,7 +342,9 @@ export default function AsistenteIA() {
         intentos++
         const respuesta = await llamarGemini({
           historial: historialActualizado,
-          systemPrompt: SYSTEM_PROMPT,
+          // Contexto vivo: quién está hablando y qué día es — así FABRI
+          // saluda por nombre y nunca pregunta "¿Fabricio o Ariel?"
+          systemPrompt: `${SYSTEM_PROMPT}\n\nUSUARIO LOGUEADO AHORA: ${usuario?.nombre || 'desconocido'}${usuario?.rol ? ` (rol: ${usuario.rol})` : ''}. FECHA DE HOY: ${fechaHoyARG()}.`,
           tools: DEFINICIONES_TOOLS
         })
 
@@ -365,8 +410,8 @@ export default function AsistenteIA() {
         <div style={estilos.panel}>
           <div style={estilos.header}>
             <div>
-              <div style={estilos.headerTitulo}>🤖 Asistente Fabricius</div>
-              <div style={estilos.headerSubtitulo}>IA · Gemini 2.5 Flash{SpeechRecognitionAPI ? ' · 🎤 voz' : ''}</div>
+              <div style={estilos.headerTitulo}>🦾 F.A.B.R.I.</div>
+              <div style={estilos.headerSubtitulo}>{usuario ? `Al servicio de ${usuario.nombre.trim().split(/\s+/)[0]}` : 'Asistente'} · IA{SpeechRecognitionAPI ? ' · 🎤 voz' : ''}</div>
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
               <button onClick={toggleVoz} style={{ ...estilos.botonHeader, ...(vozActiva ? estilos.botonVozActiva : {}) }}
