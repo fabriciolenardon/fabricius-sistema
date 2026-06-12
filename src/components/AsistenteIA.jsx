@@ -235,13 +235,6 @@ function CaraHolograma() {
   )
 }
 
-const ETIQUETA_HOLO = {
-  apagado: 'CHAD · CLICK Y HABLAMOS',
-  escuchando: '🟢 TE ESCUCHO',
-  pensando: '🟠 PENSANDO…',
-  hablando: '🔵 HABLANDO',
-}
-
 export default function AsistenteIA() {
   const navigate = useNavigate()
   const [abierto, setAbierto] = useState(false)
@@ -649,7 +642,6 @@ export default function AsistenteIA() {
               <CaraHolograma />
             </div>
             <div className={`chad-holo-base ${estadoHolo}`} />
-            <div style={estilos.holoEstado}>{ETIQUETA_HOLO[estadoHolo]}</div>
           </div>
           <button onClick={() => setAbierto(true)} style={estilos.holoBotonChat}
             title="Abrir el chat (historial y configuración)" aria-label="Abrir chat">
@@ -803,19 +795,21 @@ export default function AsistenteIA() {
           50% { transform: scaleX(1.18); opacity: 1; }
         }
         .chad-holo {
-          position: relative; width: 70px; height: 72px;
-          perspective: 320px; animation: chadFlotar 3.2s ease-in-out infinite;
+          position: relative; width: 50px; height: 52px;
+          perspective: 280px; animation: chadFlotar 3.2s ease-in-out infinite;
           display: flex; align-items: flex-end; justify-content: center;
         }
         .chad-holo svg, .chad-holo .chad-holo-img {
           animation: chadSpin 7s linear infinite, chadFlicker 5s steps(1) infinite;
           transform-style: preserve-3d;
         }
-        /* foto real procesada como holograma: duotono cian */
+        .chad-holo svg { width: 48px; height: 48px; }
+        /* cabeza robot (PNG transparente, ya viene plateada con circuitos
+           azules — sin duotono, solo glow y efecto holograma) */
         .chad-holo .chad-holo-img {
-          width: 68px; height: 68px; object-fit: cover; border-radius: 16px;
-          filter: grayscale(1) sepia(1) hue-rotate(155deg) saturate(4) brightness(1.05) contrast(1.15) drop-shadow(0 0 8px rgba(0,212,255,0.75));
-          opacity: 0.92;
+          width: 48px; height: 50px; object-fit: contain;
+          filter: brightness(1.05) drop-shadow(0 0 6px rgba(0,212,255,0.8));
+          opacity: 0.95;
         }
         /* líneas de escaneo del holograma */
         .chad-holo::after {
@@ -823,21 +817,25 @@ export default function AsistenteIA() {
           background: repeating-linear-gradient(0deg, rgba(0,212,255,0.10) 0 1px, transparent 1px 3px);
           mix-blend-mode: screen;
         }
-        .chad-holo.apagado    { color: #2e7d96; opacity: 0.55; }
+        .chad-holo.apagado    { color: #2e7d96; opacity: 0.6; }
         .chad-holo.apagado svg, .chad-holo.apagado .chad-holo-img       { animation-duration: 11s, 7s; }
         .chad-holo.apagado svg    { filter: drop-shadow(0 0 4px rgba(0,212,255,0.35)); }
+        .chad-holo.apagado .chad-holo-img    { filter: brightness(0.8) drop-shadow(0 0 4px rgba(0,212,255,0.4)); }
         .chad-holo.escuchando { color: #51ffb0; }
         .chad-holo.escuchando svg, .chad-holo.escuchando .chad-holo-img { animation-duration: 4s, 5s; }
         .chad-holo.escuchando svg { filter: drop-shadow(0 0 8px rgba(81,255,176,0.9)); }
+        .chad-holo.escuchando .chad-holo-img { filter: brightness(1.1) drop-shadow(0 0 8px rgba(81,255,176,0.95)); }
         .chad-holo.pensando   { color: #ffb35c; }
         .chad-holo.pensando svg, .chad-holo.pensando .chad-holo-img     { animation-duration: 1.4s, 5s; }
         .chad-holo.pensando svg   { filter: drop-shadow(0 0 8px rgba(255,179,92,0.9)); }
+        .chad-holo.pensando .chad-holo-img   { filter: brightness(1.1) drop-shadow(0 0 8px rgba(255,179,92,0.95)); }
         .chad-holo.hablando   { color: #9beaff; }
         .chad-holo.hablando svg, .chad-holo.hablando .chad-holo-img     { animation-duration: 6s, 5s; }
         .chad-holo.hablando svg   { filter: drop-shadow(0 0 10px rgba(155,234,255,1)); }
+        .chad-holo.hablando .chad-holo-img   { filter: brightness(1.15) drop-shadow(0 0 9px rgba(155,234,255,1)); }
         /* base proyectora */
         .chad-holo-base {
-          width: 66px; height: 11px; border-radius: 50%; margin-top: -5px;
+          width: 46px; height: 8px; border-radius: 50%; margin-top: -4px;
           background: radial-gradient(ellipse at center, rgba(0,212,255,0.75), rgba(0,212,255,0.15) 60%, transparent 75%);
           animation: chadBasePulso 2.2s ease-in-out infinite;
         }
@@ -851,24 +849,21 @@ export default function AsistenteIA() {
 
 const estilos = {
   // ── Holograma flotante de Chad ──
+  // Compacto y pegado a la esquina: no tapa el footer del Modo TV
+  // ("ESC para salir"). Sin texto — el estado lo cuenta el color.
   holoZona: {
-    position: 'fixed', bottom: 16, right: 22, zIndex: 9999,
-    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
+    position: 'fixed', bottom: 8, right: 10, zIndex: 9999,
+    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
   },
   holoMarco: {
     cursor: 'pointer', display: 'flex', flexDirection: 'column',
     alignItems: 'center', userSelect: 'none', WebkitTapHighlightColor: 'transparent',
   },
-  holoEstado: {
-    fontSize: 8.5, letterSpacing: 1.6, color: '#9bd6ff', fontWeight: 800,
-    fontFamily: "'DM Sans', sans-serif", textTransform: 'uppercase',
-    textShadow: '0 0 8px rgba(0,212,255,0.6)', marginTop: 3, whiteSpace: 'nowrap',
-  },
   holoBotonChat: {
-    width: 32, height: 32, borderRadius: '50%',
+    width: 26, height: 26, borderRadius: '50%',
     border: '1px solid rgba(0,212,255,0.45)', background: 'rgba(7,24,42,0.85)',
-    color: '#9beaff', fontSize: 14, cursor: 'pointer',
-    boxShadow: '0 0 12px rgba(0,212,255,0.25)',
+    color: '#9beaff', fontSize: 12, cursor: 'pointer', lineHeight: 1,
+    boxShadow: '0 0 10px rgba(0,212,255,0.25)', padding: 0,
   },
   botonFlotante: {
     position: 'fixed', bottom: 24, right: 24, width: 60, height: 60,
