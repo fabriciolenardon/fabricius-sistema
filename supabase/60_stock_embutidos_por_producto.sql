@@ -10,8 +10,9 @@
 --   emb_chorizo_saborizado  → CHORIZO SABORIZADO
 --   emb_salchicha_parrillera→ Salchicha Parrillera x kg
 --   emb_morcilla            → Morcilla x kg
---   emb_salame              → Salame Casero (env. y sin env.; los 3
---                             tipos de elaboración comparten bucket)
+--   emb_salame_comun        → Salame Casero Env. / sin Envasar
+--   emb_salame_holanda      → Salame Holanda Envasado
+--   emb_salame_rockeford    → Salame Rockeford Envasado
 --
 -- El bucket 'embutido' QUEDA para los comprados / sin clasificar
 -- (morcilla, jamón crudo, etc.) y conserva su saldo actual; si parte
@@ -34,7 +35,9 @@ SELECT v.t, 0 FROM (VALUES
   ('emb_chorizo_colorado'),
   ('emb_salchicha_parrillera'),
   ('emb_morcilla'),
-  ('emb_salame')
+  ('emb_salame_comun'),
+  ('emb_salame_holanda'),
+  ('emb_salame_rockeford')
 ) AS v(t)
 WHERE NOT EXISTS (SELECT 1 FROM stock_actual s WHERE s.tipo = v.t);
 
@@ -50,8 +53,14 @@ UPDATE precios SET stock_origen = 'emb_salchicha_parrillera'
   WHERE categoria = 'embutido' AND nombre ILIKE 'Salchicha Parrillera%';
 UPDATE precios SET stock_origen = 'emb_morcilla'
   WHERE categoria = 'embutido' AND nombre ILIKE 'Morcilla%';
-UPDATE precios SET stock_origen = 'emb_salame'
+UPDATE precios SET stock_origen = 'emb_salame_comun'
   WHERE categoria = 'embutido' AND nombre ILIKE 'Salame Casero%';
+UPDATE precios SET stock_origen = 'emb_salame_holanda'
+  WHERE categoria = 'embutido' AND nombre ILIKE 'Salame Holanda%';
+UPDATE precios SET stock_origen = 'emb_salame_rockeford'
+  WHERE categoria = 'embutido' AND nombre ILIKE 'Salame Rockeford%';
+-- (60e) el bucket compartido emb_salame fue reemplazado por los 3 de arriba
+DELETE FROM stock_actual WHERE tipo = 'emb_salame';
 
 -- 60c: el bucket genérico 'embutido' se ELIMINA (pedido de Fabricio:
 -- el total de embutidos del Dashboard es la suma en vivo de los emb_*).

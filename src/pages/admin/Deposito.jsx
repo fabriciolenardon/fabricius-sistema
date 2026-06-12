@@ -31,18 +31,18 @@ const NOMBRE_EMBUTIDO = {
 // Bucket de stock PROPIO de cada embutido elaborado (mig 60, modelo "cerdo
 // piezas"): la elaboración suma acá y la venta descuenta de acá (vía
 // precios.stock_origen — la caja y las salidas lo priorizan sobre la
-// categoría). El bucket 'embutido' queda para comprados / sin clasificar
-// (morcilla, jamón, etc.). Los 3 salames comparten bucket porque a la
-// venta son un único producto ("Salame Casero").
+// categoría). Los embutidos no elaborados (jamón crudo, arrollado, etc.)
+// no trackean stock. Cada tipo de salame tiene su propio bucket (mig 60e):
+// Salame Casero Env./sin Env. → común; Holanda y Rockeford → el suyo.
 const BUCKET_EMBUTIDO = {
   chorizo_parrillero: 'emb_chorizo_parrillero',
   chorizo_saborizado: 'emb_chorizo_saborizado',
   chorizo_colorado: 'emb_chorizo_colorado',
   salchicha_parrillera: 'emb_salchicha_parrillera',
   morcilla: 'emb_morcilla',
-  salame_comun: 'emb_salame',
-  salame_rockeford: 'emb_salame',
-  salame_holanda: 'emb_salame',
+  salame_comun: 'emb_salame_comun',
+  salame_rockeford: 'emb_salame_rockeford',
+  salame_holanda: 'emb_salame_holanda',
 }
 const LABEL_BUCKET_EMB = {
   emb_chorizo_parrillero: '🌭 Chorizo Parrillero',
@@ -50,7 +50,9 @@ const LABEL_BUCKET_EMB = {
   emb_chorizo_colorado: '🌶️ Chorizo Colorado',
   emb_salchicha_parrillera: '🌭 Salchicha Parrillera',
   emb_morcilla: '🖤 Morcilla',
-  emb_salame: '🥩 Salame Casero',
+  emb_salame_comun: '🥩 Salame Común Casero',
+  emb_salame_holanda: '🧀 Salame Holanda',
+  emb_salame_rockeford: '🧀 Salame Rockeford',
 }
 
 // Etiqueta/estilo de la forma de cobro de un remito. Solo 'cta_cte' es a
@@ -737,9 +739,9 @@ async function confirmarElaboracionSalame() {
     if (!(kgFinales > 0)) { showAlert('Ingresá los kg finales pesados después del secado', 'error'); return }
     setLoading(true)
     try {
-      // Sumar al bucket de salames (mig 60) con verificación (mismo patrón
-      // anti-error que la elaboración de embutidos).
-      await sumarStockVerificado(BUCKET_EMBUTIDO[elab.tipo_embutido] || 'emb_salame', kgFinales)
+      // Sumar al bucket del tipo de salame (mig 60e) con verificación
+      // (mismo patrón anti-error que la elaboración de embutidos).
+      await sumarStockVerificado(BUCKET_EMBUTIDO[elab.tipo_embutido] || 'emb_salame_comun', kgFinales)
       // Marcar la elaboración como completa guardando el peso final seco.
       // pct_aumento = merma real (negativa) calculada con el peso exacto.
       const pct = elab.kg_elaborado > 0 ? parseFloat(((kgFinales / elab.kg_elaborado - 1) * 100).toFixed(2)) : 0
@@ -763,7 +765,7 @@ async function confirmarElaboracionSalame() {
         cantidad: 1,
       })
       if (errEnt) console.warn('No se registró la entrada del salame finalizado:', errEnt.message)
-      showAlert(`✅ Salame seco finalizado — ${kgFinales.toFixed(1)} kg al stock de Salame Casero`)
+      showAlert(`✅ Salame seco finalizado — ${kgFinales.toFixed(1)} kg al stock de ${NOMBRE_EMBUTIDO[elab.tipo_embutido] || 'Salame Común'}`)
       await cargarDatos(); onSaved()
     } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
     setLoading(false)
