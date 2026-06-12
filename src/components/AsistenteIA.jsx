@@ -38,11 +38,14 @@ function limpiarParaVoz(t) {
     .trim()
 }
 
-function hablar(texto) {
+// alTerminar: callback cuando FABRI termina de hablar — el modo conversación
+// lo usa para volver a prender el micrófono recién ahí (si escuchara mientras
+// habla, se transcribiría a sí mismo y quedaría en loop infinito).
+function hablar(texto, alTerminar = null) {
   try {
-    if (!('speechSynthesis' in window)) return
+    if (!('speechSynthesis' in window)) { alTerminar?.(); return }
     const limpio = limpiarParaVoz(texto)
-    if (!limpio) return
+    if (!limpio) { alTerminar?.(); return }
     window.speechSynthesis.cancel()
     const u = new SpeechSynthesisUtterance(limpio)
     u.lang = 'es-AR'
@@ -53,8 +56,12 @@ function hablar(texto) {
     const elegida = elegidaNombre ? voces.find(v => v.name === elegidaNombre) : null
     const vozEs = elegida || voces.find(v => v.lang === 'es-AR') || voces.find(v => v.lang?.startsWith('es'))
     if (vozEs) u.voice = vozEs
+    if (alTerminar) {
+      u.onend = () => alTerminar()
+      u.onerror = () => alTerminar()
+    }
     window.speechSynthesis.speak(u)
-  } catch { /* la voz nunca debe romper el chat */ }
+  } catch { alTerminar?.() }
 }
 
 // Frase de prueba del selector de voz — para elegir "la más Stark" 🦾
@@ -254,9 +261,33 @@ export default function AsistenteIA() {
     })
   }
 
-  // Responder en voz alta si corresponde (toggle global O el turno vino por mic)
+  // 🎙️ MODO CONVERSACIÓN: escucha continua. Ciclo: escuchar → enviar →
+  // FABRI responde HABLANDO (mic apagado, para no escucharse a sí mismo) →
+  // al terminar de hablar, el mic se vuelve a prender solo.
+  const [modoConversacion, setModoConversacion] = useState(false)
+  const modoConvRef = useRef(false)        // para los callbacks del recognizer/synth
+  const reanudarTimerRef = useRef(null)
+  const iniciarEscuchaRef = useRef(() => {})
+
+  // Re-arma el micrófono si el modo conversación sigue activo y FABRI ya
+  // terminó de hablar. El delay evita que el mic agarre la cola del audio.
+  function reanudarSiConversacion() {
+    if (!modoConvRef.current) return
+    clearTimeout(reanudarTimerRef.current)
+    reanudarTimerRef.current = setTimeout(() => {
+      if (!modoConvRef.current) return
+      if (window.speechSynthesis?.speaking || window.speechSynthesis?.pending) return // sigue hablando: su onend reintenta
+      iniciarEscuchaRef.current?.()
+    }, 450)
+  }
+
+  // Responder en voz alta si corresponde (toggle global, turno por mic, o conversación)
   function hablarSiCorresponde(texto) {
-    if (vozActiva || turnoDeVozRef.current) hablar(texto)
+    if (vozActiva || turnoDeVozRef.current || modoConvRef.current) {
+      hablar(texto, () => reanudarSiConversacion())
+    } else {
+      reanudarSiConversacion()
+    }
   }
 
   function iniciarEscucha() {
@@ -281,8 +312,19 @@ export default function AsistenteIA() {
           enviar(final.trim(), { vozEntrada: true })
         }
       }
-      rec.onerror = () => setEscuchando(false)
-      rec.onend = () => setEscuchando(false)
+      rec.onerror = (e) => {
+        setEscuchando(false)
+        // Sin permiso de micrófono → apagar el modo conversación (si no, loop de errores)
+        if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed') {
+          modoConvRef.current = false
+          setModoConversacion(false)
+        }
+      }
+      rec.onend = () => {
+        setEscuchando(false)
+        // Silencio o timeout del navegador: en modo conversación, re-armar
+        reanudarSiConversacion()
+      }
       setEscuchando(true)
       window.speechSynthesis?.cancel() // si estaba hablando, que se calle para escuchar
       rec.start()
@@ -290,10 +332,26 @@ export default function AsistenteIA() {
       setEscuchando(false)
     }
   }
+  iniciarEscuchaRef.current = iniciarEscucha
 
   function detenerEscucha() {
     try { recognitionRef.current?.stop() } catch { /* ya detenido */ }
     setEscuchando(false)
+  }
+
+  function toggleConversacion() {
+    if (modoConvRef.current) {
+      modoConvRef.current = false
+      setModoConversacion(false)
+      clearTimeout(reanudarTimerRef.current)
+      window.speechSynthesis?.cancel()
+      detenerEscucha()
+    } else {
+      modoConvRef.current = true
+      setModoConversacion(true)
+      window.speechSynthesis?.cancel()
+      iniciarEscucha()
+    }
   }
 
   useEffect(() => {
@@ -397,6 +455,9 @@ export default function AsistenteIA() {
       }])
     } finally {
       setCargando(false)
+      // Modo conversación: si FABRI no quedó hablando (respuesta sin texto o
+      // error), re-armar el micrófono igual para no cortar la charla.
+      reanudarSiConversacion()
     }
   }
 
@@ -444,7 +505,7 @@ export default function AsistenteIA() {
                 style={{ ...estilos.botonHeader, ...(mostrarConfigVoz ? estilos.botonVozActiva : {}) }}
                 title="Elegir la voz del asistente">⚙️</button>
               <button onClick={nuevaConversacion} style={estilos.botonHeader} title="Nueva conversación">🗑️</button>
-              <button onClick={() => setAbierto(false)} style={estilos.botonHeader} title="Cerrar">✕</button>
+              <button onClick={() => { if (modoConvRef.current) toggleConversacion(); setAbierto(false) }} style={estilos.botonHeader} title="Cerrar">✕</button>
             </div>
           </div>
 
@@ -510,19 +571,32 @@ export default function AsistenteIA() {
             <input type="file" accept="image/*" ref={fileInputRef} onChange={manejarImagen} style={{ display: 'none' }} />
             <button onClick={() => fileInputRef.current?.click()} style={estilos.botonAdjuntar} title="Subir foto">📎</button>
             {SpeechRecognitionAPI && (
-              <button onClick={escuchando ? detenerEscucha : iniciarEscucha}
+              <button onClick={escuchando && !modoConversacion ? detenerEscucha : iniciarEscucha}
                 style={{ ...estilos.botonAdjuntar, ...(escuchando ? estilos.botonMicEscuchando : {}) }}
-                title={escuchando ? 'Escuchando… (click para cortar)' : 'Hablarle al asistente'}>
+                title={escuchando ? 'Escuchando… (click para cortar)' : 'Hablarle una vez'}>
                 🎤
+              </button>
+            )}
+            {SpeechRecognitionAPI && (
+              <button onClick={toggleConversacion}
+                style={{ ...estilos.botonAdjuntar, ...(modoConversacion ? estilos.botonConvActiva : {}) }}
+                title={modoConversacion
+                  ? 'Modo conversación ACTIVO: FABRI escucha de corrido (click para cortar)'
+                  : 'Modo conversación: hablá de corrido sin apretar nada — FABRI responde y vuelve a escuchar solo'}>
+                🎙️
               </button>
             )}
             <textarea
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={manejarEnter}
-              placeholder={escuchando ? '🎤 Escuchando…' : 'Pedime algo...'}
+              placeholder={
+                escuchando ? '🎤 Escuchando…'
+                : modoConversacion ? (cargando ? '🤔 FABRI pensando…' : '🎙️ Conversación activa — hablá tranquilo')
+                : 'Pedime algo...'
+              }
               rows={1}
-              style={{ ...estilos.textarea, ...(escuchando ? { borderColor: '#e74c3c' } : {}) }}
+              style={{ ...estilos.textarea, ...(escuchando ? { borderColor: '#e74c3c' } : modoConversacion ? { borderColor: '#2ecc71' } : {}) }}
               disabled={cargando}
             />
             <button onClick={() => enviar()} disabled={cargando || (!input.trim() && !imagenSeleccionada)} style={estilos.botonEnviar}>
@@ -540,6 +614,10 @@ export default function AsistenteIA() {
         @keyframes micPulso {
           0%, 100% { box-shadow: 0 0 0 0 rgba(231,76,60,0.5); }
           50% { box-shadow: 0 0 0 8px rgba(231,76,60,0); }
+        }
+        @keyframes convPulso {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(46,204,113,0.5); }
+          50% { box-shadow: 0 0 0 8px rgba(46,204,113,0); }
         }
       `}</style>
     </>
@@ -600,6 +678,10 @@ const estilos = {
   botonMicEscuchando: {
     background: '#3a1a1a', border: '1px solid #e74c3c',
     animation: 'micPulso 1.2s ease-in-out infinite',
+  },
+  botonConvActiva: {
+    background: '#0e2a1a', border: '1px solid #2ecc71', color: '#2ecc71',
+    animation: 'convPulso 1.6s ease-in-out infinite',
   },
   configVoz: {
     padding: '10px 14px', background: '#181814', borderBottom: '1px solid #28281e',
