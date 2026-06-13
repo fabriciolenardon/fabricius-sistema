@@ -41,12 +41,13 @@ export default async function handler(req, res) {
 
     let body = req.body
     if (typeof body === 'string') { try { body = JSON.parse(body) } catch { body = {} } }
-    const { text, voiceId } = body || {}
+    const { text, voiceId, model } = body || {}
     const limpio = String(text || '').trim().slice(0, 800)
     if (!limpio) return res.status(400).json({ error: 'Falta el texto' })
 
     const voz = voiceId || process.env.ELEVENLABS_VOICE_ID || VOZ_DEFAULT
-    const modelo = process.env.ELEVENLABS_MODEL || MODELO_DEFAULT
+    // model opcional en el body: permite probar motores sin redeploy
+    const modelo = model || process.env.ELEVENLABS_MODEL || MODELO_DEFAULT
     let velocidad = Number(process.env.ELEVENLABS_SPEED) || VELOCIDAD_DEFAULT
     velocidad = Math.min(1.2, Math.max(0.7, velocidad))
 
