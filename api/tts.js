@@ -18,6 +18,9 @@
 // Voz elegida por Fabricio en la Voice Library de ElevenLabs.
 const VOZ_DEFAULT = 'nTkjq09AuYgsNR8E4sDe'
 const MODELO_DEFAULT = 'eleven_flash_v2_5'
+// Velocidad de habla (ElevenLabs: 0.7 lenta … 1.0 normal … 1.2 rápida).
+// 1.12 = un toque más ágil que lo normal. Pisable con ELEVENLABS_SPEED.
+const VELOCIDAD_DEFAULT = 1.12
 
 export default async function handler(req, res) {
   // TODO en un try/catch para que ningún error quede en 502 vacío: siempre
@@ -41,6 +44,8 @@ export default async function handler(req, res) {
 
     const voz = voiceId || process.env.ELEVENLABS_VOICE_ID || VOZ_DEFAULT
     const modelo = process.env.ELEVENLABS_MODEL || MODELO_DEFAULT
+    let velocidad = Number(process.env.ELEVENLABS_SPEED) || VELOCIDAD_DEFAULT
+    velocidad = Math.min(1.2, Math.max(0.7, velocidad)) // rango válido de ElevenLabs
 
     // Timeout duro: si ElevenLabs cuelga, abortamos a los 12s y respondemos
     // (en vez de que Vercel mate la función y devuelva 502 sin cuerpo).
