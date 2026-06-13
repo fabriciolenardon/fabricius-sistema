@@ -22,9 +22,13 @@ const MODELO_DEFAULT = 'eleven_flash_v2_5'
 // 1.12 = un toque más ágil que lo normal. Pisable con ELEVENLABS_SPEED.
 const VELOCIDAD_DEFAULT = 1.12
 
+// Extiende el límite de ejecución de la función (default Hobby = 10s, que
+// cortaba el llamado a ElevenLabs y devolvía 502 sin cuerpo). 60s es el
+// techo de Hobby; alcanza de sobra para TTS de una frase.
+export const config = { maxDuration: 60 }
+
 export default async function handler(req, res) {
-  // TODO en un try/catch para que ningún error quede en 502 vacío: siempre
-  // respondemos con cuerpo legible (diagnóstico mientras estabilizamos).
+  // TODO en try/catch: ningún error queda en 502 vacío, siempre hay cuerpo.
   try {
     res.setHeader('Access-Control-Allow-Origin', '*')
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
@@ -35,7 +39,6 @@ export default async function handler(req, res) {
     const apiKey = process.env.ELEVENLABS_API_KEY
     if (!apiKey) return res.status(503).json({ error: 'ElevenLabs no configurado (falta API key)' })
 
-    // req.body puede venir como objeto (Vercel lo parsea) o como string
     let body = req.body
     if (typeof body === 'string') { try { body = JSON.parse(body) } catch { body = {} } }
     const { text, voiceId } = body || {}
@@ -45,12 +48,13 @@ export default async function handler(req, res) {
     const voz = voiceId || process.env.ELEVENLABS_VOICE_ID || VOZ_DEFAULT
     const modelo = process.env.ELEVENLABS_MODEL || MODELO_DEFAULT
     let velocidad = Number(process.env.ELEVENLABS_SPEED) || VELOCIDAD_DEFAULT
-    velocidad = Math.min(1.2, Math.max(0.7, velocidad)) // rango válido de ElevenLabs
+    velocidad = Math.min(1.2, Math.max(0.7, velocidad))
 
-    // Timeout duro: si ElevenLabs cuelga, abortamos a los 12s y respondemos
-    // (en vez de que Vercel mate la función y devuelva 502 sin cuerpo).
+    // Timeout interno por debajo del techo de la función (45s < 60s): si
+    // ElevenLabs cuelga, abortamos y respondemos con cuerpo (no 502 vacío).
     const ctrl = new AbortController()
-    const timer = setTimeout(() => ctrl.abort(), 12000)
+    const timer = setTimeout(() => ctrl.abort(), 45000)
+    const t0 = Date.now()
     let r
     try {
       r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voz}?output_format=mp3_44100_128`, {
@@ -76,10 +80,10 @@ export default async function handler(req, res) {
     const audio = Buffer.from(await r.arrayBuffer())
     res.setHeader('Content-Type', 'audio/mpeg')
     res.setHeader('Cache-Control', 'no-store')
+    res.setHeader('X-TTS-Ms', String(Date.now() - t0)) // cuánto tardó ElevenLabs (diagnóstico)
     return res.status(200).send(audio)
   } catch (err) {
     console.error('TTS handler error:', err)
-    // Devolvemos el motivo en el cuerpo (no es sensible): nombre + mensaje.
     return res.status(500).json({ error: 'Error en TTS', detalle: `${err?.name || 'Error'}: ${err?.message || err}` })
   }
 }
