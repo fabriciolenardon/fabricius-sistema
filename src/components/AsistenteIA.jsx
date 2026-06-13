@@ -17,6 +17,7 @@ import {
 } from '../lib/gemini'
 import { DEFINICIONES_TOOLS, ejecutarFuncion } from '../lib/asistenteTools'
 import { detectarSkills } from '../lib/chadSkills'
+import { armarBriefing } from '../lib/chadBriefing'
 import { supabase } from '../lib/supabase'
 import { fechaHoyARG } from '../lib/fechas'
 
@@ -152,6 +153,7 @@ REGLAS DE COMUNICACIÓN:
 "Hoy: caja $806.654 (20 ventas, ticket $40.333) + mayorista $1.250.000 (3 remitos) = $2.056.654. Ayer: $1.890.000 (+8,8%).
 [VOZ] Buen día de ventas, jefe: vamos por arriba de los dos millones, casi un nueve por ciento mejor que ayer."
 Si la respuesta ya es corta y conversacional (1-3 frases sin desgloses), NO agregues [VOZ] — se lee tal cual. La línea [VOZ] va SIEMPRE al final, nunca en el medio.
+6. SONÁ VIVO, no a contestador automático: variá tus arranques (a veces directo al dato, a veces "mirá...", "te cuento...", "ojo con esto...", "dale, ya te lo busco") y NUNCA uses la misma muletilla dos mensajes seguidos. Variá la estructura: no todo en listas — a veces una frase corrida cuenta mejor. No repitas "jefe" ni el nombre en cada mensaje (una o dos veces por charla alcanza). Reaccioná como persona: celebrá los buenos números ("¡tremendo día!"), mostrá preocupación genuina con los malos ("ojo con esto..."), y permitite un comentario humano breve cuando suma. Pensá: ¿cómo se lo diría un empleado de confianza que está al lado? Así.
 
 REGLAS DE OPERACIÓN:
 1. ANTES de cualquier acción que MODIFIQUE datos (cargar gasto, cargar entrada, cargar pago, cambiar precio), SIEMPRE mostrá los datos que vas a cargar y pedí confirmación explícita ("¿Confirmás?").
@@ -203,16 +205,31 @@ PAGOS DE CLIENTES:
 - El saldo se actualiza automáticamente por trigger en la base de datos.
 `
 
-// Saludo según la hora ARG — "jefe" para los socios, nombre para el resto
+// Saludo según la hora ARG — "jefe" para los socios, nombre para el resto.
+// VARIEDAD: cada día elige una apertura distinta al azar, así Chad no
+// suena a contestador automático (pedido de Fabricio: humanizarlo).
 function armarSaludo(usuario) {
   const nombre = (usuario?.nombre || '').trim()
   const primerNombre = nombre.split(/\s+/)[0] || ''
   const esJefe = /fabricio|ariel/i.test(nombre)
   const trato = esJefe ? `jefe${primerNombre ? ' ' + primerNombre : ''}` : (primerNombre || 'crack')
   const hora = Number(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires', hour: '2-digit', hour12: false }))
-  if (hora < 13) return `¡Buen día, ${trato}! ☀️ Acá Chad, a tu servicio. ¿Con qué arrancamos?`
-  if (hora < 19) return `¡Hola ${trato}! 🦾 ¿Cómo viene tu día? Pedime lo que necesites.`
-  return `¡Hola ${trato}! 🌙 ¿Cómo estuvo tu día? Acá estoy para lo que haga falta.`
+  const opciones = hora < 13 ? [
+    `¡Buen día, ${trato}! ☀️ Arranquemos con todo.`,
+    `¡Buen día, ${trato}! ☕ ¿Cómo amaneció el negocio?`,
+    `Buenas, ${trato} — día nuevo, números nuevos. ☀️`,
+    `¡Buen día, ${trato}! Acá Chad, ya con los sistemas calientes.`,
+  ] : hora < 19 ? [
+    `¡Hola ${trato}! 🦾 ¿Cómo viene la tarde?`,
+    `Buenas, ${trato} — ¿en qué te doy una mano?`,
+    `¡Hola ${trato}! ¿Cómo viene ese día? Pedime lo que necesites.`,
+    `¡${trato.charAt(0).toUpperCase() + trato.slice(1)}! Justo estaba repasando los números. ¿Qué hacemos?`,
+  ] : [
+    `¡Buenas noches, ${trato}! 🌙 ¿Cerrando el día?`,
+    `Buenas, ${trato} — ¿cómo terminó la jornada?`,
+    `¡Hola ${trato}! 🌙 Última vuelta del día, acá estoy.`,
+  ]
+  return opciones[Math.floor(Math.random() * opciones.length)]
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -286,17 +303,28 @@ export default function AsistenteIA() {
     return () => { vivo = false }
   }, [])
 
-  // 🌅 Primera charla del día: saludo personalizado (una vez por día por usuario)
+  // 🌅 Primera charla del día: saludo personalizado + PARTE DEL DÍA
+  // (una vez por día por usuario). Chad toma la iniciativa: te cuenta lo
+  // importante (cómo cerró ayer, cheques por vencer, stock flojo) sin que
+  // se lo preguntes. El briefing sale de consultas directas a la base —
+  // rápido y sin gastar IA. El saludo se AGREGA al hilo (no lo pisa).
   useEffect(() => {
     if (!abierto || !usuario) return
     const clave = `fabri_saludo_${fechaHoyARG()}_${usuario.nombre}`
     if (localStorage.getItem(clave)) return
     localStorage.setItem(clave, '1')
-    const saludo = armarSaludo(usuario)
-    // El saludo del día se AGREGA al hilo (antes lo pisaba — ahora el hilo
-    // persiste entre sesiones y no se pierde lo charlado).
-    setMensajes(prev => [...prev, { rol: 'asistente', texto: saludo }])
-    if (vozActiva) hablar(saludo)
+    let vivo = true
+    ;(async () => {
+      const saludo = armarSaludo(usuario)
+      const items = await armarBriefing()
+      if (!vivo) return
+      const texto = items.length > 0
+        ? `${saludo}\n\nTe pongo al día:\n${items.map(i => `• ${i}`).join('\n')}`
+        : `${saludo} Por ahora viene todo tranquilo: sin vencimientos ni alertas a la vista. 😉`
+      setMensajes(prev => [...prev, { rol: 'asistente', texto }])
+      if (vozActiva) hablar(items.length > 0 ? `${saludo} Te pongo al día: ${items.join('. ')}` : texto)
+    })()
+    return () => { vivo = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [abierto, usuario])
   const [input, setInput] = useState('')
