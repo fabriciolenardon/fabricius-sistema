@@ -60,6 +60,11 @@ function limpiarParaVoz(t) {
 // Audio premium reproduciéndose ahora (module-level para que el chequeo
 // "¿Iris está hablando?" del modo conversación y del holograma lo vean).
 let audioPremium = null
+// Turno de habla: cada llamada a hablar() toma un número nuevo. Si mientras
+// se genera/descarga el audio llega OTRA llamada (Iris a veces responde en
+// 2 mensajes), la primera se descarta al resolver y NO suena — así nunca se
+// pisan dos voces. Solo habla la ÚLTIMA respuesta.
+let turnoHabla = 0
 function audioPremiumSonando() {
   return !!audioPremium && !audioPremium.paused && !audioPremium.ended
 }
@@ -105,6 +110,7 @@ function hablarNavegador(texto, alTerminar) {
 function hablar(texto, alTerminar = null) {
   const limpio = limpiarParaVoz(texto)
   if (!limpio) { alTerminar?.(); return }
+  const miTurno = ++turnoHabla   // este pasa a ser el turno vigente
   callarVoz()
   if (!vozPremiumActiva()) { hablarNavegador(texto, alTerminar); return }
   ;(async () => {
@@ -114,8 +120,12 @@ function hablar(texto, alTerminar = null) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: limpio }),
       })
+      // Si entró otra llamada mientras descargábamos, esta quedó vieja:
+      // descartar sin reproducir ni reanudar (el turno nuevo se encarga).
+      if (miTurno !== turnoHabla) return
       if (!resp.ok) throw new Error('tts ' + resp.status)
       const blob = await resp.blob()
+      if (miTurno !== turnoHabla) return
       if (!blob || blob.size === 0) throw new Error('audio vacío')
       const url = URL.createObjectURL(blob)
       const audio = new Audio(url)
@@ -125,6 +135,8 @@ function hablar(texto, alTerminar = null) {
       audio.onerror = () => { cerrar(); hablarNavegador(texto, alTerminar) }
       await audio.play()
     } catch {
+      // Si fue reemplazada por una llamada más nueva, no insistir.
+      if (miTurno !== turnoHabla) return
       // sin créditos / sin config / error → voz del navegador
       hablarNavegador(texto, alTerminar)
     }
@@ -203,6 +215,7 @@ REGLAS DE COMUNICACIÓN:
 "Hoy: caja $806.654 (20 ventas, ticket $40.333) + mayorista $1.250.000 (3 remitos) = $2.056.654. Ayer: $1.890.000 (+8,8%).
 [VOZ] Buen día de ventas, jefe: vamos por arriba de los dos millones, casi un nueve por ciento mejor que ayer."
 Si la respuesta ya es corta y conversacional (1-3 frases sin desgloses), NO agregues [VOZ] — se lee tal cual. La línea [VOZ] va SIEMPRE al final, nunca en el medio.
+IMPORTANTE — UN SOLO MENSAJE: respondé TODO en una sola respuesta de texto. NO mandes un mensaje de relleno (tipo "dale, ya te busco" o "déjame ver...") ANTES de consultar los datos y después otro con el resultado: consultá las funciones que necesites en silencio y respondé directo con el resultado final, todo junto en un único mensaje (con su línea [VOZ] al final si lleva números). Dos mensajes seguidos hacen que la voz se pise.
 6. SONÁ VIVO, no a contestador automático: variá tus arranques (a veces directo al dato, a veces "mirá...", "te cuento...", "ojo con esto...", "dale, ya te lo busco") y NUNCA uses la misma muletilla dos mensajes seguidos. Variá la estructura: no todo en listas — a veces una frase corrida cuenta mejor. No repitas "jefe" ni el nombre en cada mensaje (una o dos veces por charla alcanza). Reaccioná como persona: celebrá los buenos números ("¡tremendo día!"), mostrá preocupación genuina con los malos ("ojo con esto..."), y permitite un comentario humano breve cuando suma. Pensá: ¿cómo se lo diría un empleado de confianza que está al lado? Así.
 
 REGLAS DE OPERACIÓN:
