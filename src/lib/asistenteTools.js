@@ -395,6 +395,28 @@ El saldo del cliente se actualiza AUTOMÁTICAMENTE por un trigger en la base de 
     description: 'Últimos arqueos de caja: fecha, cajero, total contado y diferencia contra lo esperado. Usar para "cómo dieron los arqueos", "faltó plata en caja".',
     parameters: { type: 'object', properties: { limite: { type: 'number', description: 'Cantidad (default 5)' } } }
   },
+  {
+    name: 'comparar_ventas',
+    description: `Compara las VENTAS (caja minorista + mayorista) entre DOS períodos cualesquiera — días sueltos, semanas o rangos. Usar para "hoy vs el mismo día de la semana pasada", "esta semana vs la anterior", "la semana del 1/6 contra la del 25/5", "junio vs mayo", etc.
+CÓMO ARMAR LOS PERÍODOS (vos calculás las fechas a partir de FECHA DE HOY):
+- "hoy vs mismo día de la semana pasada" → A = hoy a hoy; B = (hoy − 7 días) a (hoy − 7 días).
+- "esta semana vs la anterior" → A = lunes de esta semana a HOY; B = lunes anterior al MISMO día de la semana anterior (períodos del MISMO largo).
+- "semana del DD/MM" → lunes a domingo de esa semana.
+REGLA KPI DEL JEFE: nunca comparar un período incompleto contra uno completo — si A termina hoy (en curso), recortá B al mismo largo. Si el usuario pide explícitamente semanas completas, usá lunes→domingo en ambos.
+Cada período puede ser un solo día (desde = hasta).`,
+    parameters: {
+      type: 'object',
+      properties: {
+        a_desde: { type: 'string', description: 'Inicio del período A (el más reciente). YYYY-MM-DD.' },
+        a_hasta: { type: 'string', description: 'Fin del período A. YYYY-MM-DD. Para un día suelto, igual a a_desde.' },
+        b_desde: { type: 'string', description: 'Inicio del período B (el de comparación). YYYY-MM-DD.' },
+        b_hasta: { type: 'string', description: 'Fin del período B. YYYY-MM-DD.' },
+        etiqueta_a: { type: 'string', description: 'Nombre corto del período A para mostrar. Ej: "hoy", "esta semana"' },
+        etiqueta_b: { type: 'string', description: 'Nombre corto del período B. Ej: "jueves pasado", "semana anterior"' }
+      },
+      required: ['a_desde', 'a_hasta', 'b_desde', 'b_hasta']
+    }
+  },
 
   // ─── MUNDO EXTERIOR (v4): internet, clima, mail, whatsapp ──
   {
@@ -1008,6 +1030,45 @@ export async function ejecutarFuncion(nombre, args) {
           return `${icono} ${formatearFecha(a.fecha)}${a.cajero ? ` · ${a.cajero}` : ''} · contado ${formatearPesos(a.total_contado)} · dif. ${dif >= 0 ? '+' : ''}${formatearPesos(dif)}`
         }).join('\n')
         return { resultado: `Últimos arqueos de caja:\n${lista}` }
+      }
+
+      case 'comparar_ventas': {
+        const reFecha = /^\d{4}-\d{2}-\d{2}$/
+        const A = { desde: args.a_desde, hasta: args.a_hasta, nombre: args.etiqueta_a || 'Período A' }
+        const B = { desde: args.b_desde, hasta: args.b_hasta, nombre: args.etiqueta_b || 'Período B' }
+        for (const p of [A, B]) {
+          if (!reFecha.test(p.desde || '') || !reFecha.test(p.hasta || '')) {
+            return { resultado: '❌ Necesito las fechas de ambos períodos en formato YYYY-MM-DD.' }
+          }
+        }
+        // Resumen de ventas de un período: caja minorista + mayorista (remitos
+        // sin flujos internos) — misma fórmula que consultar_ventas_dia.
+        const resumen = async (p) => {
+          const [caja, remitos] = await Promise.all([
+            supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').gte('fecha', p.desde).lte('fecha', p.hasta),
+            supabase.from('remitos').select('total').eq('eliminado', false).neq('cobro', 'interno').gte('fecha', p.desde).lte('fecha', p.hasta),
+          ])
+          if (caja.error) throw caja.error
+          if (remitos.error) throw remitos.error
+          const tCaja = sumar(caja.data, 'total')
+          const tMay = sumar(remitos.data, 'total')
+          return { tCaja, nCaja: (caja.data || []).length, tMay, nMay: (remitos.data || []).length, total: tCaja + tMay }
+        }
+        const [ra, rb] = await Promise.all([resumen(A), resumen(B)])
+        const rango = (p) => p.desde === p.hasta ? formatearFecha(p.desde) : `${formatearFecha(p.desde)} → ${formatearFecha(p.hasta)}`
+        const variacion = (va, vb) => vb > 0 ? ` (${va >= vb ? '+' : ''}${(((va - vb) / vb) * 100).toFixed(1)}%)` : ''
+        let r = `Comparación de ventas:\n`
+        r += `▸ ${A.nombre} (${rango(A)}):\n`
+        r += `  • Caja: ${formatearPesos(ra.tCaja)} (${ra.nCaja} ventas) · Mayorista: ${formatearPesos(ra.tMay)} (${ra.nMay} remitos)\n`
+        r += `  • TOTAL: ${formatearPesos(ra.total)}\n`
+        r += `▸ ${B.nombre} (${rango(B)}):\n`
+        r += `  • Caja: ${formatearPesos(rb.tCaja)} (${rb.nCaja} ventas) · Mayorista: ${formatearPesos(rb.tMay)} (${rb.nMay} remitos)\n`
+        r += `  • TOTAL: ${formatearPesos(rb.total)}\n`
+        r += `▸ Diferencia (${A.nombre} vs ${B.nombre}):\n`
+        r += `  • Caja: ${ra.tCaja >= rb.tCaja ? '+' : '−'}${formatearPesos(Math.abs(ra.tCaja - rb.tCaja))}${variacion(ra.tCaja, rb.tCaja)}\n`
+        r += `  • Mayorista: ${ra.tMay >= rb.tMay ? '+' : '−'}${formatearPesos(Math.abs(ra.tMay - rb.tMay))}${variacion(ra.tMay, rb.tMay)}\n`
+        r += `  • TOTAL: ${ra.total >= rb.total ? '+' : '−'}${formatearPesos(Math.abs(ra.total - rb.total))}${variacion(ra.total, rb.total)}`
+        return { resultado: r }
       }
 
       // ─── MUNDO EXTERIOR (v4) ───────────────────────────────
