@@ -56,10 +56,25 @@ function limpiarParaVoz(t) {
     .trim()
 }
 
-// alTerminar: callback cuando FABRI termina de hablar — el modo conversación
-// lo usa para volver a prender el micrófono recién ahí (si escuchara mientras
-// habla, se transcribiría a sí mismo y quedaría en loop infinito).
-function hablar(texto, alTerminar = null) {
+// ── 🎙️ VOZ PREMIUM (ElevenLabs) ──────────────────────────────
+// Audio premium reproduciéndose ahora (module-level para que el chequeo
+// "¿Chad está hablando?" del modo conversación y del holograma lo vean).
+let audioPremium = null
+function audioPremiumSonando() {
+  return !!audioPremium && !audioPremium.paused && !audioPremium.ended
+}
+// Callar a Chad por COMPLETO (voz navegador + audio premium). Se usa antes
+// de escuchar al usuario y al cortar la conversación.
+function callarChad() {
+  try { window.speechSynthesis?.cancel() } catch { /* ok */ }
+  if (audioPremium) { try { audioPremium.pause() } catch { /* ok */ } audioPremium = null }
+}
+const vozPremiumActiva = () => {
+  try { return localStorage.getItem('chad_voz_premium') === '1' } catch { return false }
+}
+
+// Voz del navegador (Web Speech) — el fallback de siempre.
+function hablarNavegador(texto, alTerminar) {
   try {
     if (!('speechSynthesis' in window)) { alTerminar?.(); return }
     const limpio = limpiarParaVoz(texto)
@@ -69,7 +84,6 @@ function hablar(texto, alTerminar = null) {
     u.lang = 'es-AR'
     u.rate = 1.05
     const voces = window.speechSynthesis.getVoices()
-    // Voz elegida por el usuario (selector ⚙️ del chat) → si no, automática es-AR
     const elegidaNombre = localStorage.getItem('fabri_voz_nombre')
     const elegida = elegidaNombre ? voces.find(v => v.name === elegidaNombre) : null
     const vozEs = elegida || voces.find(v => v.lang === 'es-AR') || voces.find(v => v.lang?.startsWith('es'))
@@ -80,6 +94,41 @@ function hablar(texto, alTerminar = null) {
     }
     window.speechSynthesis.speak(u)
   } catch { alTerminar?.() }
+}
+
+// alTerminar: callback cuando Chad termina de hablar — el modo conversación
+// lo usa para volver a prender el micrófono recién ahí (si escuchara mientras
+// habla, se transcribiría a sí mismo y quedaría en loop infinito).
+// Si la voz premium (ElevenLabs) está activa, pide el audio al servidor y lo
+// reproduce; ante cualquier falla (sin créditos, sin config, error de red)
+// cae solo a la voz del navegador — Chad nunca se queda mudo.
+function hablar(texto, alTerminar = null) {
+  const limpio = limpiarParaVoz(texto)
+  if (!limpio) { alTerminar?.(); return }
+  callarChad()
+  if (!vozPremiumActiva()) { hablarNavegador(texto, alTerminar); return }
+  ;(async () => {
+    try {
+      const resp = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: limpio }),
+      })
+      if (!resp.ok) throw new Error('tts ' + resp.status)
+      const blob = await resp.blob()
+      if (!blob || blob.size === 0) throw new Error('audio vacío')
+      const url = URL.createObjectURL(blob)
+      const audio = new Audio(url)
+      audioPremium = audio
+      const cerrar = () => { URL.revokeObjectURL(url); if (audioPremium === audio) audioPremium = null }
+      audio.onended = () => { cerrar(); alTerminar?.() }
+      audio.onerror = () => { cerrar(); hablarNavegador(texto, alTerminar) }
+      await audio.play()
+    } catch {
+      // sin créditos / sin config / error → voz del navegador
+      hablarNavegador(texto, alTerminar)
+    }
+  })()
 }
 
 // Frase de prueba del selector de voz — para elegir "la más Stark" 🦾
@@ -366,8 +415,11 @@ export default function AsistenteIA() {
   // 🗣️ ¿Chad está hablando ahora? (alimenta el estado del holograma)
   const [hablando, setHablando] = useState(false)
   useEffect(() => {
-    if (!('speechSynthesis' in window)) return
-    const t = setInterval(() => setHablando(!!window.speechSynthesis.speaking), 350)
+    // "Hablando" = voz del navegador O audio premium (ElevenLabs) sonando
+    const t = setInterval(() => {
+      const sint = ('speechSynthesis' in window) && window.speechSynthesis.speaking
+      setHablando(!!sint || audioPremiumSonando())
+    }, 300)
     return () => clearInterval(t)
   }, [])
 
@@ -402,7 +454,21 @@ export default function AsistenteIA() {
     setVozActiva(v => {
       const nuevo = !v
       localStorage.setItem('fabri_voz', nuevo ? '1' : '0')
-      if (!nuevo) window.speechSynthesis?.cancel()
+      if (!nuevo) callarChad()
+      return nuevo
+    })
+  }
+
+  // 🎙️ Voz premium ElevenLabs (humana, vía /api/tts). Persistida en
+  // localStorage; si está apagada, Chad usa la voz del navegador.
+  const [vozPremium, setVozPremium] = useState(() => {
+    try { return localStorage.getItem('chad_voz_premium') === '1' } catch { return false }
+  })
+  function toggleVozPremium() {
+    setVozPremium(v => {
+      const nuevo = !v
+      try { localStorage.setItem('chad_voz_premium', nuevo ? '1' : '0') } catch { /* ok */ }
+      callarChad()
       return nuevo
     })
   }
@@ -429,7 +495,7 @@ export default function AsistenteIA() {
     clearTimeout(reanudarTimerRef.current)
     reanudarTimerRef.current = setTimeout(() => {
       if (!modoConvRef.current) return
-      if (window.speechSynthesis?.speaking || window.speechSynthesis?.pending) return // sigue hablando: su onend reintenta
+      if (window.speechSynthesis?.speaking || window.speechSynthesis?.pending || audioPremiumSonando()) return // sigue hablando: su onend reintenta
       iniciarEscuchaRef.current?.()
     }, 450)
   }
@@ -497,7 +563,7 @@ export default function AsistenteIA() {
         else { setEscuchando(false); reanudarSiConversacion() }
       }
       setEscuchando(true)
-      window.speechSynthesis?.cancel() // si estaba hablando, que se calle para escuchar
+      callarChad() // si estaba hablando (navegador o premium), que se calle para escuchar
       rec.start()
     } catch {
       setEscuchando(false)
@@ -518,12 +584,12 @@ export default function AsistenteIA() {
       modoConvRef.current = false
       setModoConversacion(false)
       clearTimeout(reanudarTimerRef.current)
-      window.speechSynthesis?.cancel()
+      callarChad()
       detenerEscucha()
     } else {
       modoConvRef.current = true
       setModoConversacion(true)
-      window.speechSynthesis?.cancel()
+      callarChad()
       iniciarEscucha()
     }
   }
@@ -745,8 +811,31 @@ export default function AsistenteIA() {
 
           {mostrarConfigVoz && (
             <div style={estilos.configVoz}>
+              {/* 🎙️ Voz premium ElevenLabs: humana, suena igual en cualquier
+                  navegador. Si está OFF (o falla), usa las voces de abajo. */}
+              <div onClick={toggleVozPremium} role="button"
+                style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '8px 10px', marginBottom: 10, borderRadius: 8, border: `1px solid ${vozPremium ? '#00d4ff' : '#333328'}`, background: vozPremium ? 'rgba(0,212,255,0.08)' : 'transparent' }}>
+                <span style={{ fontSize: 18 }}>{vozPremium ? '🎙️' : '🔈'}</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: vozPremium ? '#9beaff' : '#c8c0b0' }}>
+                    Voz premium (humana) {vozPremium ? '· ACTIVADA' : '· apagada'}
+                  </div>
+                  <div style={{ fontSize: 10, color: '#6a6a50' }}>
+                    Voz realista de ElevenLabs, suena igual en cualquier navegador.
+                  </div>
+                </div>
+                <div style={{ width: 36, height: 20, borderRadius: 999, background: vozPremium ? '#00d4ff' : '#333328', position: 'relative', flexShrink: 0, transition: 'background .2s' }}>
+                  <div style={{ position: 'absolute', top: 2, left: vozPremium ? 18 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left .2s' }} />
+                </div>
+              </div>
+              {vozPremium && (
+                <button onClick={() => hablar(FRASE_PRUEBA_VOZ)} style={{ ...estilos.botonProbarVoz, width: '100%', marginBottom: 10 }} title="Escuchar la voz premium">
+                  ▶ Probar voz premium
+                </button>
+              )}
+
               <div style={{ fontSize: 11, color: '#c9a84c', fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>
-                🗣️ VOZ DEL ASISTENTE
+                🗣️ VOZ DEL NAVEGADOR {vozPremium ? '(respaldo)' : ''}
               </div>
               {vocesES.length === 0 ? (
                 <div style={{ fontSize: 11, color: '#6a6a50' }}>
