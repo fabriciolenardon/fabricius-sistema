@@ -10,7 +10,7 @@ const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY
 // ── Cadena de modelos con FALLBACK por cuota ──────────────────
 // El plan gratuito de Gemini tiene cupo DIARIO POR MODELO. Cuando un
 // modelo devuelve 429 (cuota agotada), pasamos al siguiente — cada uno
-// tiene su propio cupo, así Chad sigue respondiendo. El modelo agotado
+// tiene su propio cupo, así Iris sigue respondiendo. El modelo agotado
 // queda marcado 10 minutos para no insistirle en cada mensaje.
 const MODELOS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash']
 const agotadoHasta = {} // modelo → timestamp hasta el que no se intenta
@@ -19,7 +19,7 @@ function urlModelo(modelo) {
   return `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`
 }
 
-const MSG_SIN_CUPO = 'Chad se quedó sin cupo gratuito de IA por hoy en todos los modelos 😞. El cupo se renueva solo cada día. Si esto pasa seguido, conviene activar la facturación del proyecto en Google AI Studio (el modelo flash cuesta centavos) — avisale a Claude y lo configuran juntos.'
+const MSG_SIN_CUPO = 'Iris se quedó sin cupo gratuito de IA por hoy en todos los modelos 😞. El cupo se renueva solo cada día. Si esto pasa seguido, conviene activar la facturación del proyecto en Google AI Studio (el modelo flash cuesta centavos) — avisale a Claude y lo configuran juntos.'
 
 // POST a un modelo concreto. Devuelve { ok, status, data?, errorText? }
 async function postGemini(modelo, body) {
@@ -92,7 +92,7 @@ export async function llamarGemini({ historial, systemPrompt, tools }) {
 // ─────────────────────────────────────────────────────────────
 // Gemini NO permite mezclar google_search con functionDeclarations en
 // la misma llamada, así que la búsqueda es una llamada SEPARADA: la
-// tool buscar_en_internet de Chad delega acá y devuelve el resultado
+// tool buscar_en_internet de Iris delega acá y devuelve el resultado
 // al loop principal como cualquier otra función.
 export async function buscarConGoogle(consulta) {
   const body = {
