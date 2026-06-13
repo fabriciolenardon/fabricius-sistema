@@ -1,6 +1,7 @@
 {
   "functions": {
-    "api/tts.js": { "maxDuration": 60 }
+    "api/tts.js": { "maxDuration": 60 },
+    "api/whatsapp.js": { "maxDuration": 30 }
   },
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/" }
