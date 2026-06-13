@@ -105,14 +105,23 @@ async function responderConIris(texto) {
   }
 }
 
+// Argentina: WhatsApp ENTREGA el número entrante con un 9 tras el código de
+// país (549XXXXXXXXXX), pero la Cloud API solo ENVÍA si se le quita ese 9
+// (54XXXXXXXXXX). Sin esto el envío rebota con (#131030) "destinatario no
+// permitido / inválido". Solo afecta a números argentinos (código 54).
+function normalizarDestinoAR(numero) {
+  return String(numero || '').replace(/^549(\d+)$/, '54$1')
+}
+
 // Envía un mensaje de texto al cliente por la Cloud API de Meta.
 async function enviarWhatsApp(phoneId, to, texto) {
+  const destino = normalizarDestinoAR(to)
   const r = await fetch(`https://graph.facebook.com/v21.0/${phoneId}/messages`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${WA_TOKEN}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       messaging_product: 'whatsapp',
-      to,
+      to: destino,
       type: 'text',
       text: { body: String(texto).slice(0, 4000) },
     }),
