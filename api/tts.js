@@ -14,9 +14,9 @@
 // ═══════════════════════════════════════════════════════════
 
 // Voz por defecto (premade multilingüe de ElevenLabs). Se puede pisar
-// con ELEVENLABS_VOICE_ID sin tocar código — ej. una voz argentina de
-// la Voice Library que elija Fabricio.
-const VOZ_DEFAULT = 'EXAVITQu4vr4xnSDxMaL' // "Sarah" (multilingüe)
+// con ELEVENLABS_VOICE_ID sin tocar código.
+// Voz elegida por Fabricio en la Voice Library de ElevenLabs.
+const VOZ_DEFAULT = 'nTkjq09AuYgsNR8E4sDe'
 const MODELO_DEFAULT = 'eleven_flash_v2_5'
 
 export default async function handler(req, res) {
