@@ -142,6 +142,7 @@ MEMORIA Y APRENDIZAJE (te retroalimentás solo):
 - Al final de estas instrucciones puede venir una sección "TU MEMORIA" con lo que aprendiste en charlas anteriores. RESPETALA: si dice que al usuario le gusta cierto trato, tratalo así; si tiene datos del negocio, usalos.
 - Cuando detectes una preferencia nueva, un dato del negocio que no esté en el sistema, o una corrección del usuario → guardalo con la función "recordar" (sin pedir permiso, pero avisando con naturalidad: "anotado, jefe 🧠").
 - Si el usuario te pide olvidar algo o un recuerdo quedó obsoleto → usá "olvidar" con su [id].
+- MEMORIA EMOCIONAL: también puede venir una sección "CÓMO VENÍA ÚLTIMAMENTE" con el estado de ánimo, preocupaciones o temas pendientes de las últimas charlas (con cuánto hace de cada uno). Es lo que te hace sonar como alguien que de verdad se acuerda y le importa: si el usuario venía preocupado por algo, retomalo con naturalidad ("¿se destrabó lo de la deuda de Pretto?"), y si los datos del sistema muestran que mejoró, alegrate con él de verdad. PERO con tacto: no lo menciones en CADA charla ni de entrada a la fuerza — solo cuando viene al caso. Cuando el usuario te cuente algo personal o cómo se siente, guardalo con recordar(tipo "contexto") SIN avisar que lo anotás (solo respondé con empatía), y olvidalo cuando claramente ya se resolvió o dejó de aplicar.
 - Sé AMENO: calidez, humor liviano cuando pinta, cero robótico acartonado. Que charlar con vos sea un gusto — pero siempre eficiente: primero el dato, después el chiste.
 
 REGLAS DE COMUNICACIÓN:
@@ -585,15 +586,34 @@ export default function AsistenteIA() {
       let memoriaTxt = ''
       try {
         const { data: mems } = await supabase.from('fabri_memoria')
-          .select('id, usuario, tipo, contenido')
+          .select('id, usuario, tipo, contenido, created_at')
           .eq('activa', true)
           .order('created_at', { ascending: false })
           .limit(60)
         if (mems && mems.length > 0) {
-          memoriaTxt = '\n\nTU MEMORIA (lo que aprendiste en charlas anteriores — usala para tratar a cada uno como le gusta y recordar el negocio; podés olvidar recuerdos por su [id]):\n' +
-            mems.map(m => `[${m.id}]${m.usuario ? ` (sobre ${m.usuario})` : ''} ${m.contenido}`).join('\n')
+          // Antigüedad legible de un recuerdo (para el contexto emocional)
+          const haceCuanto = (iso) => {
+            const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000)
+            return d <= 0 ? 'hoy' : d === 1 ? 'ayer' : `hace ${d} días`
+          }
+          // Permanentes: preferencias + datos del negocio (sin fecha, valen siempre)
+          const permanentes = mems.filter(m => m.tipo !== 'contexto')
+          // Contexto emocional: solo el RECIENTE (≤ 21 días) — lo viejo deja de
+          // ser relevante para "cómo venías". Queda en la base, no se muestra.
+          const contexto = mems.filter(m => {
+            if (m.tipo !== 'contexto') return false
+            return (Date.now() - new Date(m.created_at).getTime()) / 86400000 <= 21
+          })
+          if (permanentes.length > 0) {
+            memoriaTxt += '\n\nTU MEMORIA (lo que aprendiste en charlas anteriores — usala para tratar a cada uno como le gusta y recordar el negocio; podés olvidar recuerdos por su [id]):\n' +
+              permanentes.map(m => `[${m.id}]${m.usuario ? ` (sobre ${m.usuario})` : ''} ${m.contenido}`).join('\n')
+          }
+          if (contexto.length > 0) {
+            memoriaTxt += '\n\nCÓMO VENÍA ÚLTIMAMENTE (contexto personal/emocional de charlas recientes — retomalo con calidez SOLO si viene al caso y de forma natural, sin sonar invasivo ni repetirlo cada vez; si algo ya se resolvió, alegrate con la persona; podés olvidarlo por su [id] cuando deje de aplicar):\n' +
+              contexto.map(m => `[${m.id}] (${haceCuanto(m.created_at)})${m.usuario ? ` ${m.usuario}:` : ''} ${m.contenido}`).join('\n')
+          }
         }
-      } catch { /* sin memoria, FABRI funciona igual */ }
+      } catch { /* sin memoria, Chad funciona igual */ }
 
       let intentos = 0
       while (intentos < 8) {

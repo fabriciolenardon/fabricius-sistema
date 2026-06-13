@@ -103,16 +103,17 @@ NOTA: el usuario puede estar hablando por micrófono y los nombres llegan mal tr
   // ─── MEMORIA DE FABRI ──────────────────────────────────────
   {
     name: 'recordar',
-    description: `Guarda un recuerdo PERMANENTE en tu memoria (lo vas a ver en todas las charlas futuras). USALO PROACTIVAMENTE cuando:
-- el usuario exprese una preferencia de trato ("decime jefe", "respuestas más cortas", "no me tires tantos números")
-- aprendas un dato del negocio que NO está en el sistema (apodos de clientes/proveedores, rutinas: "los jueves llega media res", acuerdos de palabra)
-- el usuario te corrija algo que dijiste mal
-Reglas: UNA idea por recuerdo, frase corta y clara. NO guardes datos que ya viven en el sistema (precios, saldos, stock — eso se consulta fresco). Avisale al usuario con naturalidad que lo vas a recordar.`,
+    description: `Guarda un recuerdo en tu memoria. USALO PROACTIVAMENTE cuando:
+- el usuario exprese una preferencia de trato ("decime jefe", "respuestas más cortas") → tipo "preferencia"
+- aprendas un dato del negocio que NO está en el sistema (apodos de clientes/proveedores, rutinas: "los jueves llega media res", acuerdos de palabra) → tipo "dato"
+- el usuario te corrija algo → tipo "dato"
+- el usuario comparta cómo se SIENTE, una PREOCUPACIÓN, un objetivo personal, algo que está esperando o un tema que lo tiene pendiente ("estoy cansado", "me preocupa la deuda de X", "ojalá repunte el mayorista", "estamos con un quilombo familiar") → tipo "contexto". Esto te sirve para retomar la próxima charla con calidez ("¿cómo viene aquello que te preocupaba?") y sonar como alguien que de verdad escucha.
+Reglas: UNA idea por recuerdo, frase corta y clara. NO guardes datos que ya viven en el sistema (precios, saldos, stock — eso se consulta fresco). Para "preferencia"/"dato" avisá con naturalidad ("anotado 🧠"). Para "contexto" NO hace falta avisar que lo anotás — solo respondé con empatía; queda guardado en silencio.`,
     parameters: {
       type: 'object',
       properties: {
-        contenido: { type: 'string', description: 'El recuerdo, en una frase corta. Ej: "A Fabricio le gusta que lo saluden como jefe y respuestas breves".' },
-        tipo: { type: 'string', description: '"preferencia" (de trato/estilo) o "dato" (del negocio). Default: dato.' },
+        contenido: { type: 'string', description: 'El recuerdo, en una frase corta. Ej: "A Fabricio le gusta que lo saluden como jefe" / "Fabricio venía preocupado por la deuda de Pretto".' },
+        tipo: { type: 'string', description: '"preferencia" (trato/estilo), "dato" (del negocio, permanente) o "contexto" (estado de ánimo / preocupación / tema pendiente, relevante por unos días). Default: dato.' },
         usuario: { type: 'string', description: 'Opcional: nombre de la persona a la que aplica el recuerdo. Vacío = general del negocio.' }
       },
       required: ['contenido']
@@ -528,13 +529,16 @@ export async function ejecutarFuncion(nombre, args) {
       case 'recordar': {
         const contenido = String(args.contenido || '').trim()
         if (!contenido) return { resultado: 'No me pasaste nada para recordar.' }
+        const TIPOS_MEM = ['preferencia', 'dato', 'contexto']
+        const tipo = TIPOS_MEM.includes(args.tipo) ? args.tipo : 'dato'
         const { error } = await supabase.from('fabri_memoria').insert({
-          contenido,
-          tipo: args.tipo === 'preferencia' ? 'preferencia' : 'dato',
+          contenido, tipo,
           usuario: args.usuario?.trim() || null,
         })
         if (error) throw error
-        return { resultado: `🧠 Guardado en memoria: "${contenido}"` }
+        // El "contexto" (emocional) se guarda en silencio — el modelo ya
+        // sabe no narrarlo; igual devolvemos confirmación por las dudas.
+        return { resultado: tipo === 'contexto' ? `(contexto anotado)` : `🧠 Guardado en memoria: "${contenido}"` }
       }
 
       case 'olvidar': {
