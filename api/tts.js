@@ -64,7 +64,13 @@ export default async function handler(req, res) {
       const detalle = await r.text().catch(() => '')
       console.error('ElevenLabs error', r.status, detalle.slice(0, 300))
       // 401/403 = key mala; 429 = sin créditos. El front cae a voz navegador.
-      return res.status(r.status === 429 ? 429 : 502).json({ error: 'ElevenLabs no disponible' })
+      // Detalle de diagnóstico (status real de ElevenLabs + mensaje) — útil
+      // para depurar; no expone datos sensibles (solo el código y el motivo).
+      return res.status(r.status === 429 ? 429 : 502).json({
+        error: 'ElevenLabs no disponible',
+        elStatus: r.status,
+        elDetalle: detalle.slice(0, 300),
+      })
     }
 
     const audio = Buffer.from(await r.arrayBuffer())
