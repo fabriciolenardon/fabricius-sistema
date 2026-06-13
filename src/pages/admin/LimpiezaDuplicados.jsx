@@ -1,0 +1,657 @@
+// ============================================================
+// LIMPIEZA DE DUPLICADOS — pantalla auxiliar dentro de Precios
+// ============================================================
+// Lista todos los productos sin codigo_balanza (sin PLU) y para cada uno
+// sugiere candidatos similares (productos con PLU 1-106) en base a tokens
+// compartidos del nombre (similitud Jaccard sobre palabras de 3+ letras).
+//
+// Acciones por fila:
+//   - Fusionar         → copia precios faltantes del sin-PLU al con-PLU
+//                        y borra el sin-PLU. Usar cuando el nombre del PDF
+//                        es el correcto.
+//   - Migrar PLU       → libera el PLU del con-PLU y se lo asigna al sin-PLU,
+//                        después borra el con-PLU. Usar cuando el nombre del
+//                        sin-PLU es más completo (ej. "ASADO VENTANA (LINEA
+//                        DORADA)" vs "ASADO VENTANA" del PDF).
+//   - Borrar           → elimina el sin-PLU sin migrar nada (cuando es
+//                        producto obsoleto o efectivamente duplicado puro).
+//   - Ignorar          → marca el producto como ya revisado (se guarda en
+//                        localStorage, no toca la BD). Usar cuando NO es
+//                        duplicado y debe quedar como está.
+// ============================================================
+import { useState, useEffect, useMemo } from 'react'
+import { supabase } from '../../lib/supabase'
+
+const fmt = n => n != null && n > 0 ? '$' + Math.round(n).toLocaleString('es-AR') : '—'
+
+// Categorías que típicamente NO se gestionan vía balanza
+// (no las propongo para fusión con productos del PDF de PLUs)
+const CATS_NO_BALANZA = new Set(['bovino_mr', 'bovino_caja_cb', 'bovino_caja_pt', 'bebidas', 'almacen'])
+
+const IGNORADOS_KEY = 'limpieza_duplicados_ignorados_v1'
+
+function tokenizar(nombre) {
+  return (nombre || '')
+    .toUpperCase()
+    .replace(/[^A-ZÁÉÍÓÚÑ0-9]+/g, ' ')
+    .split(/\s+/)
+    .filter(t => t.length >= 3)
+}
+
+function similitudJaccard(tokensA, tokensB) {
+  if (tokensA.length === 0 || tokensB.length === 0) return 0
+  const setA = new Set(tokensA)
+  const setB = new Set(tokensB)
+  let inter = 0
+  for (const t of setA) if (setB.has(t)) inter++
+  const union = new Set([...tokensA, ...tokensB]).size
+  return union > 0 ? inter / union : 0
+}
+
+// === DETECCIÓN ESTRICTA DE DUPLICADOS (alta confianza) ===
+// Normaliza nombres: mayúsculas, sin acentos, sin contenido entre paréntesis,
+// signos a espacios, espacios colapsados, trim.
+function normalizarFuerte(nombre) {
+  return (nombre || '')
+    .toUpperCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/[^A-Z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// Considera "iguales" dos tokens si difieren en sufijo corto (singular/plural,
+// COSTILLA vs COSTILLAR). Exige al menos 6 chars de prefijo común y diff ≤ 2.
+function tokensRaizIgual(a, b) {
+  if (a === b) return true
+  if (a.length < 5 || b.length < 5) return false
+  const prefLen = Math.min(a.length, b.length) - 1
+  if (prefLen < 6) return false
+  if (a.slice(0, prefLen) !== b.slice(0, prefLen)) return false
+  return Math.abs(a.length - b.length) <= 2
+}
+
+// Detecta si dos nombres son "muy probablemente el mismo producto".
+// Devuelve { match: bool, razon: string }.
+function esDuplicadoEstricto(nombreA, nombreB) {
+  const na = normalizarFuerte(nombreA)
+  const nb = normalizarFuerte(nombreB)
+  if (!na || !nb) return { match: false }
+  if (na === nb) return { match: true, razon: 'nombre idéntico' }
+
+  // Tokens significativos (4+ letras): descarta "DE", "CON", "Y", etc.
+  const ta = na.split(' ').filter(t => t.length >= 4)
+  const tb = nb.split(' ').filter(t => t.length >= 4)
+  if (ta.length === 0 || tb.length === 0) return { match: false }
+
+  // Prefijo de la cadena entera: uno es prefijo del otro
+  if (na.startsWith(nb + ' ') || nb.startsWith(na + ' ')) {
+    return { match: true, razon: 'prefijo exacto' }
+  }
+  if (na.startsWith(nb) && (na.length - nb.length) <= 3) return { match: true, razon: 'prefijo' }
+  if (nb.startsWith(na) && (nb.length - na.length) <= 3) return { match: true, razon: 'prefijo' }
+
+  // Primer token significativo coincide (con tolerancia singular/plural)
+  // Y los segundos también coinciden, O uno tiene solo 1 token.
+  const t1Igual = tokensRaizIgual(ta[0], tb[0])
+  if (!t1Igual) return { match: false }
+
+  if (ta.length === 1 || tb.length === 1) {
+    return { match: true, razon: 'mismo primer token, uno es de 1 palabra' }
+  }
+  if (tokensRaizIgual(ta[1], tb[1])) {
+    return { match: true, razon: 'primeros 2 tokens coinciden' }
+  }
+  return { match: false }
+}
+
+export default function LimpiezaDuplicados() {
+  const [productos, setProductos] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [msg, setMsg] = useState(null)
+  const [accionEnCurso, setAccionEnCurso] = useState(null) // id en proceso
+  const [batchEnCurso, setBatchEnCurso] = useState(false)
+  const [batchProgreso, setBatchProgreso] = useState({ procesados: 0, total: 0, exitos: 0, errores: 0 })
+  const [seleccionEstrictos, setSeleccionEstrictos] = useState(new Set()) // ids del sin-PLU seleccionados
+  const [mostrarSeleccion, setMostrarSeleccion] = useState(false)
+  const [ignorados, setIgnorados] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem(IGNORADOS_KEY) || '[]')) }
+    catch { return new Set() }
+  })
+  const [mostrarIgnorados, setMostrarIgnorados] = useState(false)
+  const [umbralSimilitud, setUmbralSimilitud] = useState(0.3)
+  const [umbralBatch, setUmbralBatch] = useState(0.5)
+
+  useEffect(() => { cargar() }, [])
+
+  async function cargar() {
+    setLoading(true)
+    const { data, error } = await supabase.from('precios').select('*').order('nombre')
+    if (error) { showMsg('❌ Error cargando: ' + error.message, 'error'); setLoading(false); return }
+    setProductos(data || [])
+    setLoading(false)
+  }
+
+  function showMsg(texto, tipo = 'success') {
+    setMsg({ texto, tipo })
+    setTimeout(() => setMsg(null), 3500)
+  }
+
+  function persistirIgnorados(nuevo) {
+    setIgnorados(nuevo)
+    localStorage.setItem(IGNORADOS_KEY, JSON.stringify([...nuevo]))
+  }
+
+  // Particionar productos: sin PLU vs con PLU 1-106
+  const sinPLU = useMemo(() =>
+    productos.filter(p =>
+      !p.codigo_balanza
+      && !(p.nombre || '').startsWith('ZZ_')
+      && (mostrarIgnorados || !ignorados.has(p.id))
+    ),
+    [productos, ignorados, mostrarIgnorados]
+  )
+
+  const conPLU = useMemo(() =>
+    productos
+      .filter(p => p.codigo_balanza >= 1 && p.codigo_balanza <= 106)
+      .map(p => ({ ...p, _tokens: tokenizar(p.nombre) })),
+    [productos]
+  )
+
+  // Duplicados de ALTA CONFIANZA (detección estricta)
+  const duplicadosEstrictos = useMemo(() => {
+    const pares = []
+    for (const sp of sinPLU) {
+      for (const cp of conPLU) {
+        const det = esDuplicadoEstricto(sp.nombre, cp.nombre)
+        if (det.match) {
+          pares.push({ sinPlu: sp, conPlu: cp, razon: det.razon })
+          break // un sin-PLU solo se empareja con un con-PLU
+        }
+      }
+    }
+    return pares
+  }, [sinPLU, conPLU])
+
+  // Para cada producto sin PLU, calcular sus mejores candidatos
+  const filas = useMemo(() => {
+    return sinPLU.map(p => {
+      const tokensP = tokenizar(p.nombre)
+      const cands = conPLU
+        .map(c => ({ ...c, _sim: similitudJaccard(tokensP, c._tokens) }))
+        .filter(c => c._sim >= umbralSimilitud)
+        .sort((a, b) => b._sim - a._sim)
+        .slice(0, 3)
+      return { ...p, _candidatos: cands }
+    })
+  }, [sinPLU, conPLU, umbralSimilitud])
+
+  // ----- Acciones -----
+  async function fusionar(sinPlu, conPlu) {
+    if (!confirm(`Fusionar:\n\n• Borrar "${sinPlu.nombre}"\n• Conservar "${conPlu.nombre}" (PLU ${conPlu.codigo_balanza})\n• Copiar precios faltantes del viejo al nuevo si los hay\n\n¿Confirmar?`)) return
+    setAccionEnCurso(sinPlu.id)
+    try {
+      const updates = {}
+      for (const c of ['precio_minorista', 'precio_mayorista', 'precio_carniceria']) {
+        const valNuevo = Number(conPlu[c]) || 0
+        const valViejo = Number(sinPlu[c]) || 0
+        if (valNuevo === 0 && valViejo > 0) updates[c] = valViejo
+      }
+      if (Object.keys(updates).length > 0) {
+        const { error: e1 } = await supabase.from('precios').update(updates).eq('id', conPlu.id)
+        if (e1) throw e1
+      }
+      const { error: e2 } = await supabase.from('precios').delete().eq('id', sinPlu.id)
+      if (e2) throw e2
+      showMsg(`✅ Fusionado: borrado "${sinPlu.nombre}", conservado PLU ${conPlu.codigo_balanza}`)
+      await cargar()
+    } catch (e) {
+      showMsg('❌ Error: ' + (e.message || e), 'error')
+    }
+    setAccionEnCurso(null)
+  }
+
+  async function migrarPLU(sinPlu, conPlu) {
+    const plu = conPlu.codigo_balanza
+    if (!confirm(`Migrar PLU ${plu}:\n\n• Asignar PLU ${plu} a "${sinPlu.nombre}"\n• Borrar "${conPlu.nombre}"\n\nLos precios actuales del primer producto se conservan.\n¿Confirmar?`)) return
+    setAccionEnCurso(sinPlu.id)
+    try {
+      // 1. Liberar PLU del con-PLU
+      const { error: e1 } = await supabase.from('precios').update({ codigo_balanza: null }).eq('id', conPlu.id)
+      if (e1) throw e1
+      // 2. Asignar PLU al sin-PLU
+      const { error: e2 } = await supabase.from('precios').update({ codigo_balanza: plu }).eq('id', sinPlu.id)
+      if (e2) throw e2
+      // 3. Borrar el que era con-PLU
+      const { error: e3 } = await supabase.from('precios').delete().eq('id', conPlu.id)
+      if (e3) throw e3
+      showMsg(`✅ PLU ${plu} migrado a "${sinPlu.nombre}"`)
+      await cargar()
+    } catch (e) {
+      showMsg('❌ Error: ' + (e.message || e), 'error')
+    }
+    setAccionEnCurso(null)
+  }
+
+  async function borrarSolo(sinPlu) {
+    if (!confirm(`Borrar "${sinPlu.nombre}" definitivamente.\n¿Confirmar?`)) return
+    setAccionEnCurso(sinPlu.id)
+    try {
+      const { error } = await supabase.from('precios').delete().eq('id', sinPlu.id)
+      if (error) throw error
+      showMsg(`✅ Borrado "${sinPlu.nombre}"`)
+      await cargar()
+    } catch (e) {
+      showMsg('❌ Error: ' + (e.message || e), 'error')
+    }
+    setAccionEnCurso(null)
+  }
+
+  // Batch específico: limpia SOLO los duplicados SELECCIONADOS por el usuario.
+  async function limpiezaSeleccionados() {
+    const pares = duplicadosEstrictos.filter(p => seleccionEstrictos.has(p.sinPlu.id))
+    if (pares.length === 0) {
+      showMsg('Tildá al menos un duplicado para procesar.', 'error')
+      return
+    }
+    if (!confirm(
+      `Vas a procesar ${pares.length} duplicado(s) seleccionado(s).\n\n` +
+      `Para cada uno:\n` +
+      `  1. El PLU pasa al producto del SISTEMA (preserva tus precios)\n` +
+      `  2. El producto del PDF se BORRA\n\n` +
+      `¿Continuar?`
+    )) return
+
+    setBatchEnCurso(true)
+    setBatchProgreso({ procesados: 0, total: pares.length, exitos: 0, errores: 0 })
+    let exitos = 0, errores = 0
+    const erroresDetalle = []
+    for (let i = 0; i < pares.length; i++) {
+      const { sinPlu, conPlu } = pares[i]
+      try {
+        const { error: e1 } = await supabase.from('precios').update({ codigo_balanza: null }).eq('id', conPlu.id)
+        if (e1) throw e1
+        const { error: e2 } = await supabase.from('precios').update({ codigo_balanza: conPlu.codigo_balanza }).eq('id', sinPlu.id)
+        if (e2) throw e2
+        const { error: e3 } = await supabase.from('precios').delete().eq('id', conPlu.id)
+        if (e3) throw e3
+        exitos++
+      } catch (e) {
+        errores++
+        erroresDetalle.push(`• "${sinPlu.nombre}" → ${e.message || e}`)
+      }
+      setBatchProgreso({ procesados: i + 1, total: pares.length, exitos, errores })
+    }
+    setBatchEnCurso(false)
+    setSeleccionEstrictos(new Set())
+    await cargar()
+    let resumen = `✅ Limpieza completada: ${exitos} duplicados eliminados, ${errores} con error.`
+    if (errores > 0) {
+      resumen += '\n\nDetalle:\n' + erroresDetalle.slice(0, 10).join('\n')
+      alert(resumen)
+    } else {
+      showMsg(resumen, 'success')
+    }
+  }
+
+  function toggleSeleccion(id) {
+    setSeleccionEstrictos(s => {
+      const n = new Set(s)
+      if (n.has(id)) n.delete(id); else n.add(id)
+      return n
+    })
+  }
+
+  function tildarTodos() {
+    setSeleccionEstrictos(new Set(duplicadosEstrictos.map(p => p.sinPlu.id)))
+  }
+
+  function destildarTodos() {
+    setSeleccionEstrictos(new Set())
+  }
+
+  // Batch: para cada producto sin PLU con candidato fuerte (>= umbralBatch),
+  // tomar el mejor candidato y aplicar la acción indicada. Se procesa
+  // SECUENCIALMENTE para evitar colisiones con el UNIQUE de codigo_balanza.
+  async function ejecutarBatch(accion) {
+    // Releer la lista actual con el umbral del batch (más estricto que el de la UI)
+    const objetivos = sinPLU
+      .map(p => {
+        const tokensP = tokenizar(p.nombre)
+        const cands = conPLU
+          .map(c => ({ ...c, _sim: similitudJaccard(tokensP, c._tokens) }))
+          .filter(c => c._sim >= umbralBatch)
+          .sort((a, b) => b._sim - a._sim)
+        return cands.length > 0 ? { sinPlu: p, conPlu: cands[0] } : null
+      })
+      .filter(Boolean)
+
+    if (objetivos.length === 0) {
+      showMsg(`No hay productos con candidatos al ${(umbralBatch*100).toFixed(0)}% o más.`, 'error')
+      return
+    }
+
+    const accionLabel = accion === 'migrar' ? 'Migrar PLU al producto viejo' : 'Fusionar (borrar viejo, conservar PLU)'
+    const advertencia = accion === 'migrar'
+      ? '⚠️ Esto va a tomar el PLU del producto del PDF y pasárselo al producto viejo. Después borra el del PDF.\n\nUsalo si los nombres del SISTEMA son los correctos y los del PDF son los duplicados.'
+      : '⚠️ Esto va a borrar los productos viejos y conservar los del PDF.\n\nUsalo si los nombres del PDF son los correctos.'
+
+    if (!confirm(`${accionLabel} para ${objetivos.length} producto(s)\n\nUmbral de similitud: ${(umbralBatch*100).toFixed(0)}%\n\n${advertencia}\n\n¿Continuar?`)) return
+
+    setBatchEnCurso(true)
+    setBatchProgreso({ procesados: 0, total: objetivos.length, exitos: 0, errores: 0 })
+
+    let exitos = 0, errores = 0
+    const erroresDetalle = []
+    for (let i = 0; i < objetivos.length; i++) {
+      const { sinPlu, conPlu } = objetivos[i]
+      try {
+        if (accion === 'migrar') {
+          // 1. Liberar PLU del con-PLU
+          const { error: e1 } = await supabase.from('precios').update({ codigo_balanza: null }).eq('id', conPlu.id)
+          if (e1) throw e1
+          // 2. Asignar PLU al sin-PLU
+          const { error: e2 } = await supabase.from('precios').update({ codigo_balanza: conPlu.codigo_balanza }).eq('id', sinPlu.id)
+          if (e2) throw e2
+          // 3. Borrar el que era con-PLU
+          const { error: e3 } = await supabase.from('precios').delete().eq('id', conPlu.id)
+          if (e3) throw e3
+        } else {
+          // Fusionar
+          const updates = {}
+          for (const c of ['precio_minorista', 'precio_mayorista', 'precio_carniceria']) {
+            const valNuevo = Number(conPlu[c]) || 0
+            const valViejo = Number(sinPlu[c]) || 0
+            if (valNuevo === 0 && valViejo > 0) updates[c] = valViejo
+          }
+          if (Object.keys(updates).length > 0) {
+            const { error: eu } = await supabase.from('precios').update(updates).eq('id', conPlu.id)
+            if (eu) throw eu
+          }
+          const { error: ed } = await supabase.from('precios').delete().eq('id', sinPlu.id)
+          if (ed) throw ed
+        }
+        exitos++
+      } catch (e) {
+        errores++
+        erroresDetalle.push(`• "${sinPlu.nombre}" → ${e.message || e}`)
+      }
+      setBatchProgreso({ procesados: i + 1, total: objetivos.length, exitos, errores })
+    }
+
+    setBatchEnCurso(false)
+    await cargar()
+    let resumen = `✅ Batch terminado: ${exitos} exitosos, ${errores} con error.`
+    if (errores > 0) {
+      resumen += '\n\nDetalle:\n' + erroresDetalle.slice(0, 10).join('\n')
+      if (erroresDetalle.length > 10) resumen += `\n...y ${erroresDetalle.length - 10} más`
+      alert(resumen)
+    } else {
+      showMsg(resumen, 'success')
+    }
+  }
+
+  function ignorar(sinPlu) {
+    const nuevo = new Set(ignorados)
+    nuevo.add(sinPlu.id)
+    persistirIgnorados(nuevo)
+    showMsg(`✓ "${sinPlu.nombre}" marcado como no-duplicado`)
+  }
+
+  function desIgnorar(sinPlu) {
+    const nuevo = new Set(ignorados)
+    nuevo.delete(sinPlu.id)
+    persistirIgnorados(nuevo)
+  }
+
+  // ----- Estilos -----
+  const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 16, marginBottom: 12 }
+  const btn = (color = 'var(--gold)', bg) => ({
+    padding: '6px 12px', borderRadius: 6, border: 'none',
+    background: bg || color, color: bg ? '#fff' : '#000',
+    cursor: 'pointer', fontWeight: 700, fontSize: 12, fontFamily: "'DM Sans',sans-serif",
+    marginRight: 6, marginTop: 4,
+  })
+  const chip = (bg, color = '#000') => ({
+    background: bg, color, padding: '2px 8px', borderRadius: 4,
+    fontFamily: 'monospace', fontSize: 11, fontWeight: 700, marginRight: 6,
+  })
+
+  return (
+    <div>
+      {msg && (
+        <div style={{
+          background: msg.tipo === 'error' ? '#3a1a1a' : '#1a2a1a',
+          border: `1px solid ${msg.tipo === 'error' ? '#5a2a2a' : '#2d5a2d'}`,
+          borderRadius: 8, padding: '10px 16px', marginBottom: 16,
+          color: msg.tipo === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600,
+        }}>{msg.texto}</div>
+      )}
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-title">🧹 Limpieza de duplicados</div>
+        <p style={{ color: 'var(--muted)', fontSize: 13, lineHeight: 1.5, marginBottom: 12 }}>
+          Acá ves los productos <strong>sin PLU asignado</strong>. Para cada uno te sugiero candidatos similares (con PLU 1-106) y podés decidir qué hacer.
+        </p>
+        <ul style={{ fontSize: 12, color: 'var(--muted)', paddingLeft: 18, marginTop: 0 }}>
+          <li><strong style={{ color: '#7dff7d' }}>Fusionar</strong>: el nombre del PDF es el correcto. Borra el viejo, conserva precios faltantes.</li>
+          <li><strong style={{ color: '#ffd17a' }}>Migrar PLU</strong>: el nombre viejo es el correcto (ej. con anotación "LÍNEA DORADA"). Le pasa el PLU.</li>
+          <li><strong style={{ color: '#ff8b8b' }}>Borrar</strong>: el producto viejo no sirve y no tiene equivalente.</li>
+          <li><strong style={{ color: '#aaa' }}>Ignorar</strong>: no es duplicado de nada, debe quedar como está. Se oculta en futuras sesiones.</li>
+        </ul>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 12, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 13, color: 'var(--text)' }}>
+            <strong>{sinPLU.length}</strong> productos sin PLU{mostrarIgnorados ? '' : ' (excluyendo ignorados)'} · {ignorados.size} ignorados
+          </div>
+          <label style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input type="checkbox" checked={mostrarIgnorados} onChange={e => setMostrarIgnorados(e.target.checked)} />
+            mostrar ignorados
+          </label>
+          <label style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+            Umbral similitud:
+            <input type="range" min="0.1" max="0.9" step="0.05" value={umbralSimilitud}
+              onChange={e => setUmbralSimilitud(parseFloat(e.target.value))} style={{ width: 100 }} />
+            <span style={{ fontFamily: 'monospace' }}>{(umbralSimilitud * 100).toFixed(0)}%</span>
+          </label>
+          <button onClick={cargar} style={btn('var(--surface)', '#444')}>🔄 Recargar</button>
+        </div>
+      </div>
+
+      {/* Panel: duplicados detectados con checkboxes para selección manual */}
+      {duplicadosEstrictos.length > 0 && (
+        <div className="card" style={{ marginBottom: 16, background: 'linear-gradient(135deg, #1a2a1a, #1a3a1a)', border: '2px solid #7dff7d' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: '#7dff7d' }}>
+              🟢 Duplicados detectados ({duplicadosEstrictos.length})
+            </div>
+            <button
+              onClick={() => setMostrarSeleccion(v => !v)}
+              style={{ padding: '6px 14px', background: 'transparent', border: '1px solid #7dff7d', color: '#7dff7d', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
+              {mostrarSeleccion ? '▲ Ocultar lista' : '▼ Mostrar lista para revisar'}
+            </button>
+          </div>
+          <p style={{ color: '#cfc', fontSize: 13, lineHeight: 1.5, marginBottom: 12 }}>
+            Tildá los que querés limpiar. Por cada tilde: el PLU pasa al producto del SISTEMA (preserva tus precios) y el producto del PDF se BORRA. Los que no tildes quedan como están.
+          </p>
+
+          {mostrarSeleccion && (
+            <>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                <button onClick={tildarTodos} style={{ padding: '6px 12px', background: '#2d5a2d', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+                  ☑️ Tildar todos
+                </button>
+                <button onClick={destildarTodos} style={{ padding: '6px 12px', background: 'transparent', color: '#aaa', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+                  ☐ Destildar todos
+                </button>
+                <span style={{ alignSelf: 'center', color: 'var(--muted)', fontSize: 12 }}>
+                  {seleccionEstrictos.size} de {duplicadosEstrictos.length} tildados
+                </span>
+              </div>
+
+              <div style={{ maxHeight: 500, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8, background: 'rgba(0,0,0,0.2)' }}>
+                <table style={{ width: '100%', fontSize: 13 }}>
+                  <thead style={{ position: 'sticky', top: 0, background: '#1a2a1a' }}>
+                    <tr>
+                      <th style={{ width: 40, padding: '8px' }}></th>
+                      <th style={{ textAlign: 'left', padding: '8px' }}>Producto del SISTEMA (se conserva)</th>
+                      <th style={{ width: 80, padding: '8px' }}>PLU</th>
+                      <th style={{ textAlign: 'left', padding: '8px' }}>Producto del PDF (se BORRA)</th>
+                      <th style={{ padding: '8px' }}>Razón</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {duplicadosEstrictos.map(p => (
+                      <tr key={p.sinPlu.id} style={{ borderTop: '1px solid var(--border)', background: seleccionEstrictos.has(p.sinPlu.id) ? 'rgba(125,255,125,0.06)' : 'transparent' }}>
+                        <td style={{ textAlign: 'center', padding: '6px' }}>
+                          <input
+                            type="checkbox"
+                            checked={seleccionEstrictos.has(p.sinPlu.id)}
+                            onChange={() => toggleSeleccion(p.sinPlu.id)}
+                            style={{ width: 18, height: 18, cursor: 'pointer' }}
+                          />
+                        </td>
+                        <td style={{ padding: '6px' }}>{p.sinPlu.nombre}</td>
+                        <td style={{ padding: '6px', textAlign: 'center' }}>
+                          <span style={chip('var(--gold)')}>PLU {p.conPlu.codigo_balanza}</span>
+                        </td>
+                        <td style={{ padding: '6px', color: '#ff9999' }}>{p.conPlu.nombre}</td>
+                        <td style={{ padding: '6px', fontSize: 11, color: 'var(--muted)' }}>{p.razon}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                <button
+                  onClick={limpiezaSeleccionados}
+                  disabled={batchEnCurso || seleccionEstrictos.size === 0}
+                  style={{ padding: '12px 24px', borderRadius: 8, border: 'none', background: seleccionEstrictos.size === 0 ? '#444' : '#7dff7d', color: seleccionEstrictos.size === 0 ? '#888' : '#000', cursor: batchEnCurso || seleccionEstrictos.size === 0 ? 'not-allowed' : 'pointer', fontWeight: 800, fontSize: 14, fontFamily: "'DM Sans',sans-serif", opacity: batchEnCurso ? 0.6 : 1 }}>
+                  🚀 Limpiar los {seleccionEstrictos.size} duplicados tildados
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Panel de acciones masivas */}
+      <div className="card" style={{ marginBottom: 16, background: 'linear-gradient(180deg, rgba(255,209,122,0.06), rgba(255,209,122,0))', border: '1px solid #6a5a2a' }}>
+        <div className="card-title">⚡ Acciones masivas (por umbral de similitud)</div>
+        <p style={{ color: 'var(--muted)', fontSize: 13, lineHeight: 1.5, marginBottom: 12 }}>
+          Aplica la misma acción a TODOS los productos que tengan al menos un candidato con similitud ≥ umbral. Procesa de a uno secuencialmente. Si algo falla, sigue con los demás y te muestra el detalle al final.
+        </p>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+          <label style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+            Umbral mínimo para batch:
+            <input type="range" min="0.3" max="0.95" step="0.05" value={umbralBatch}
+              onChange={e => setUmbralBatch(parseFloat(e.target.value))} style={{ width: 120 }} disabled={batchEnCurso} />
+            <span style={{ fontFamily: 'monospace', fontWeight: 700, color: 'var(--gold)' }}>{(umbralBatch * 100).toFixed(0)}%</span>
+          </label>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            onClick={() => ejecutarBatch('migrar')}
+            disabled={batchEnCurso || loading}
+            style={{ padding: '10px 18px', borderRadius: 8, border: 'none', background: '#ffd17a', color: '#000', cursor: batchEnCurso ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 13, fontFamily: "'DM Sans',sans-serif", opacity: batchEnCurso ? 0.6 : 1 }}>
+            🟡 Migrar PLU al viejo — TODOS
+          </button>
+          <button
+            onClick={() => ejecutarBatch('fusionar')}
+            disabled={batchEnCurso || loading}
+            style={{ padding: '10px 18px', borderRadius: 8, border: 'none', background: '#7dff7d', color: '#000', cursor: batchEnCurso ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 13, fontFamily: "'DM Sans',sans-serif", opacity: batchEnCurso ? 0.6 : 1 }}>
+            🟢 Fusionar (conservar PDF) — TODOS
+          </button>
+        </div>
+        {batchEnCurso && (
+          <div style={{ marginTop: 12, padding: '10px 14px', background: 'rgba(125,255,125,0.08)', border: '1px solid #2d5a2d', borderRadius: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>⏳ Procesando batch...</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+              {batchProgreso.procesados} / {batchProgreso.total} · ✅ {batchProgreso.exitos} OK · ❌ {batchProgreso.errores} con error
+            </div>
+            <div style={{ background: '#222', borderRadius: 4, height: 6, marginTop: 8, overflow: 'hidden' }}>
+              <div style={{ background: 'var(--gold)', height: '100%', width: `${batchProgreso.total > 0 ? (batchProgreso.procesados / batchProgreso.total * 100) : 0}%`, transition: 'width 0.2s' }} />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {loading && <p style={{ color: 'var(--muted)' }}>Cargando productos...</p>}
+
+      {!loading && filas.length === 0 && (
+        <div className="card" style={{ textAlign: 'center', padding: 32 }}>
+          <div style={{ fontSize: 40, marginBottom: 8 }}>🎉</div>
+          <div style={{ fontWeight: 700, fontSize: 16 }}>Nada para limpiar</div>
+          <div style={{ color: 'var(--muted)', fontSize: 13, marginTop: 4 }}>
+            No quedan productos sin PLU por revisar.
+          </div>
+        </div>
+      )}
+
+      {!loading && filas.map(p => {
+        const esIgnorado = ignorados.has(p.id)
+        const esCatNoBalanza = CATS_NO_BALANZA.has(p.categoria)
+        return (
+          <div key={p.id} style={{ ...card, opacity: esIgnorado ? 0.5 : 1 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>
+                  {p.nombre}
+                  {esIgnorado && <span style={chip('#444', '#aaa')}>IGNORADO</span>}
+                  {esCatNoBalanza && <span style={chip('#2a3a4a', '#7af')}>{p.categoria}</span>}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+                  ID: {p.id} · Cat: {p.categoria} · Min: {fmt(p.precio_minorista)} · May: {fmt(p.precio_mayorista)} · Carn: {fmt(p.precio_carniceria)}
+                </div>
+              </div>
+              <div>
+                {esIgnorado
+                  ? <button onClick={() => desIgnorar(p)} style={btn('var(--surface)', '#666')}>↺ Des-ignorar</button>
+                  : <button onClick={() => ignorar(p)} style={btn('var(--surface)', '#444')} disabled={accionEnCurso === p.id}>✕ Ignorar (no es duplicado)</button>
+                }
+                <button onClick={() => borrarSolo(p)} style={btn('var(--surface)', '#5a2a2a')} disabled={accionEnCurso === p.id}>🗑️ Borrar este</button>
+              </div>
+            </div>
+
+            {!esIgnorado && p._candidatos.length > 0 && (
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px dashed var(--border)' }}>
+                <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
+                  Candidatos similares (con PLU)
+                </div>
+                {p._candidatos.map(c => (
+                  <div key={c.id} style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)', borderRadius: 6, padding: '8px 12px', marginBottom: 6 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                      <div style={{ flex: 1, minWidth: 200 }}>
+                        <span style={chip('var(--gold)')}>PLU {c.codigo_balanza}</span>
+                        <span style={{ fontWeight: 600 }}>{c.nombre}</span>
+                        <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 8 }}>
+                          ({(c._sim * 100).toFixed(0)}% match · Min: {fmt(c.precio_minorista)})
+                        </span>
+                      </div>
+                      <div>
+                        <button onClick={() => fusionar(p, c)} style={btn('#7dff7d')} disabled={accionEnCurso === p.id}>
+                          🟢 Fusionar (conservar PLU)
+                        </button>
+                        <button onClick={() => migrarPLU(p, c)} style={btn('#ffd17a')} disabled={accionEnCurso === p.id}>
+                          🟡 Migrar PLU al viejo
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {!esIgnorado && p._candidatos.length === 0 && (
+              <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>
+                Sin candidatos similares con umbral {(umbralSimilitud * 100).toFixed(0)}%. Probá bajar el umbral o ignoralo si no es duplicado.
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
