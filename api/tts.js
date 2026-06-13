@@ -22,7 +22,8 @@ const VOZ_DEFAULT = 'cgSgspJ2msm6clMCkdW9'
 // Motor multilingüe v2: mejor pronunciación en español (probado ~0.9s).
 const MODELO_DEFAULT = 'eleven_multilingual_v2'
 // Velocidad de habla (0.7 lenta … 1.0 normal … 1.2 rápida).
-const VELOCIDAD_DEFAULT = 1.12
+// 1.0 = ritmo natural, no atropellado (mejor para dictar números).
+const VELOCIDAD_DEFAULT = 1.0
 
 // Extiende el límite de ejecución (default Hobby = 10s, que cortaba el
 // llamado a ElevenLabs y devolvía 502 vacío). El maxDuration real lo fija
