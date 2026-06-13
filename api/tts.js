@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-// TTS — Texto a voz con ElevenLabs (voz humana de Chad)
+// TTS — Texto a voz con ElevenLabs (voz humana de IRIS)
 // ═══════════════════════════════════════════════════════════
 // Corre EN EL SERVIDOR (función Vercel): la API key de ElevenLabs
 // nunca llega al navegador. Recibe { text, voiceId? } y devuelve el
@@ -8,23 +8,25 @@
 //
 // Config por variables de entorno (Vercel → Settings → Env Vars):
 //   ELEVENLABS_API_KEY   (obligatoria, secreta)
-//   ELEVENLABS_VOICE_ID  (opcional — la voz elegida; default abajo)
-//   ELEVENLABS_MODEL     (opcional — default eleven_flash_v2_5, el
-//                         más barato y rápido, multilingüe/español)
+//   ELEVENLABS_VOICE_ID  (opcional — pisa la voz por defecto)
+//   ELEVENLABS_MODEL     (opcional — pisa el motor por defecto)
+//   ELEVENLABS_SPEED     (opcional — 0.7 a 1.2, default 1.12)
+//
+// NOTA: las voces de la Voice Library COMUNITARIA cuelgan en cuentas
+// free de ElevenLabs (timeout → 502). Usar voces "Default" oficiales.
 // ═══════════════════════════════════════════════════════════
 
-// Voz por defecto (premade multilingüe de ElevenLabs). Se puede pisar
-// con ELEVENLABS_VOICE_ID sin tocar código.
-// Voz elegida por Fabricio en la Voice Library de ElevenLabs.
-const VOZ_DEFAULT = 'nTkjq09AuYgsNR8E4sDe'
-const MODELO_DEFAULT = 'eleven_flash_v2_5'
-// Velocidad de habla (ElevenLabs: 0.7 lenta … 1.0 normal … 1.2 rápida).
-// 1.12 = un toque más ágil que lo normal. Pisable con ELEVENLABS_SPEED.
+// Voz por defecto: "Jessica" (oficial de ElevenLabs, femenina joven,
+// buen español latino) — elegida por Fabricio. Pisable por env var.
+const VOZ_DEFAULT = 'cgSgspJ2msm6clMCkdW9'
+// Motor multilingüe v2: mejor pronunciación en español (probado ~0.9s).
+const MODELO_DEFAULT = 'eleven_multilingual_v2'
+// Velocidad de habla (0.7 lenta … 1.0 normal … 1.2 rápida).
 const VELOCIDAD_DEFAULT = 1.12
 
-// Extiende el límite de ejecución de la función (default Hobby = 10s, que
-// cortaba el llamado a ElevenLabs y devolvía 502 sin cuerpo). 60s es el
-// techo de Hobby; alcanza de sobra para TTS de una frase.
+// Extiende el límite de ejecución (default Hobby = 10s, que cortaba el
+// llamado a ElevenLabs y devolvía 502 vacío). El maxDuration real lo fija
+// vercel.json; este export es por compatibilidad.
 export const config = { maxDuration: 60 }
 
 export default async function handler(req, res) {
@@ -51,11 +53,9 @@ export default async function handler(req, res) {
     let velocidad = Number(process.env.ELEVENLABS_SPEED) || VELOCIDAD_DEFAULT
     velocidad = Math.min(1.2, Math.max(0.7, velocidad))
 
-    // Timeout interno por debajo del techo de la función (45s < 60s): si
-    // ElevenLabs cuelga, abortamos y respondemos con cuerpo (no 502 vacío).
+    // Timeout interno por debajo del techo de la función (45s < 60s).
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), 45000)
-    const t0 = Date.now()
     let r
     try {
       r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voz}?output_format=mp3_44100_128`, {
@@ -72,19 +72,17 @@ export default async function handler(req, res) {
 
     if (!r.ok) {
       const detalle = await r.text().catch(() => '')
-      console.error('ElevenLabs error', r.status, detalle.slice(0, 300))
-      return res.status(r.status === 429 ? 429 : 502).json({
-        error: 'ElevenLabs no disponible', elStatus: r.status, elDetalle: detalle.slice(0, 300),
-      })
+      console.error('ElevenLabs error', r.status, detalle.slice(0, 200))
+      // 401/403 = key; 429 = sin créditos; el front cae a voz navegador.
+      return res.status(r.status === 429 ? 429 : 502).json({ error: 'ElevenLabs no disponible', elStatus: r.status })
     }
 
     const audio = Buffer.from(await r.arrayBuffer())
     res.setHeader('Content-Type', 'audio/mpeg')
     res.setHeader('Cache-Control', 'no-store')
-    res.setHeader('X-TTS-Ms', String(Date.now() - t0)) // cuánto tardó ElevenLabs (diagnóstico)
     return res.status(200).send(audio)
   } catch (err) {
     console.error('TTS handler error:', err)
-    return res.status(500).json({ error: 'Error en TTS', detalle: `${err?.name || 'Error'}: ${err?.message || err}` })
+    return res.status(500).json({ error: 'Error en TTS', detalle: `${err?.name || 'Error'}` })
   }
 }
