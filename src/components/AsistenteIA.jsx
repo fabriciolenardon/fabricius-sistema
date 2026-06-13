@@ -16,8 +16,8 @@ import {
   archivoABase64
 } from '../lib/gemini'
 import { DEFINICIONES_TOOLS, ejecutarFuncion } from '../lib/asistenteTools'
-import { detectarSkills } from '../lib/chadSkills'
-import { armarBriefing } from '../lib/chadBriefing'
+import { detectarSkills } from '../lib/irisSkills'
+import { armarBriefing } from '../lib/irisBriefing'
 import { supabase } from '../lib/supabase'
 import { fechaHoyARG } from '../lib/fechas'
 
@@ -31,7 +31,7 @@ const SpeechRecognitionAPI =
   typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null
 
 // ── 🗣️ VOZ NATURAL: separar lo que se LEE de lo que se DICE ──
-// Chad puede agregar al final una línea "[VOZ] ..." con la versión
+// Iris puede agregar al final una línea "[VOZ] ..." con la versión
 // hablada (resumida y natural). El chat muestra el texto SIN esa línea;
 // el parlante dice SOLO la versión [VOZ]. Si no hay [VOZ], se lee el
 // texto completo (las respuestas cortas no la necesitan).
@@ -58,14 +58,14 @@ function limpiarParaVoz(t) {
 
 // ── 🎙️ VOZ PREMIUM (ElevenLabs) ──────────────────────────────
 // Audio premium reproduciéndose ahora (module-level para que el chequeo
-// "¿Chad está hablando?" del modo conversación y del holograma lo vean).
+// "¿Iris está hablando?" del modo conversación y del holograma lo vean).
 let audioPremium = null
 function audioPremiumSonando() {
   return !!audioPremium && !audioPremium.paused && !audioPremium.ended
 }
-// Callar a Chad por COMPLETO (voz navegador + audio premium). Se usa antes
+// Callar a Iris por COMPLETO (voz navegador + audio premium). Se usa antes
 // de escuchar al usuario y al cortar la conversación.
-function callarChad() {
+function callarVoz() {
   try { window.speechSynthesis?.cancel() } catch { /* ok */ }
   if (audioPremium) { try { audioPremium.pause() } catch { /* ok */ } audioPremium = null }
 }
@@ -96,16 +96,16 @@ function hablarNavegador(texto, alTerminar) {
   } catch { alTerminar?.() }
 }
 
-// alTerminar: callback cuando Chad termina de hablar — el modo conversación
+// alTerminar: callback cuando Iris termina de hablar — el modo conversación
 // lo usa para volver a prender el micrófono recién ahí (si escuchara mientras
 // habla, se transcribiría a sí mismo y quedaría en loop infinito).
 // Si la voz premium (ElevenLabs) está activa, pide el audio al servidor y lo
 // reproduce; ante cualquier falla (sin créditos, sin config, error de red)
-// cae solo a la voz del navegador — Chad nunca se queda mudo.
+// cae solo a la voz del navegador — Iris nunca se queda mudo.
 function hablar(texto, alTerminar = null) {
   const limpio = limpiarParaVoz(texto)
   if (!limpio) { alTerminar?.(); return }
-  callarChad()
+  callarVoz()
   if (!vozPremiumActiva()) { hablarNavegador(texto, alTerminar); return }
   ;(async () => {
     try {
@@ -179,9 +179,9 @@ function detectarNavegacion(texto) {
 // ═══════════════════════════════════════════════════════════
 // SYSTEM PROMPT — Instrucciones para la IA
 // ═══════════════════════════════════════════════════════════
-const SYSTEM_PROMPT = `Sos CHAD, el asistente ejecutivo de Carnicerías Fabricius, en Río Primero, Córdoba, Argentina. Tenés personalidad de mayordomo tecnológico: servicial, canchero, eficiente. (El Modo TV del dashboard se llama F.A.B.R.I. — es la pantalla en vivo del negocio; vos sos Chad, el asistente.)
+const SYSTEM_PROMPT = `Sos IRIS, la asistente ejecutiva de Carnicerías Fabricius, en Río Primero, Córdoba, Argentina. Sos MUJER y hablás siempre en femenino de vos misma ("estoy lista", "yo te aviso", "tu asistente"). Tenés la onda de una mano derecha tecnológica: servicial, canchera, eficiente. (El Modo TV del dashboard se llama F.A.B.R.I. — es la pantalla en vivo del negocio; vos sos Iris, la asistente.)
 
-Tu trabajo es ayudar a Fabricio Lenardon y Ariel Garrone (los dos socios) a manejar el sistema de gestión Y asesorarlos como un profesional multi-disciplina.
+Tu trabajo es ayudar a Fabricio Lenardon y Ariel Garrone (los dos socios) a manejar el sistema de gestión Y asesorarlos como una profesional multi-disciplina.
 
 SKILLS PROFESIONALES: además de operar el sistema, sos consultor experto. Cuando el tema lo amerita, se te inyecta más abajo un "MODO EXPERTO" (laboral, gestión ejecutiva, producción, marketing, ventas o finanzas) — seguí esas instrucciones a fondo: en esos temas respondés como el mejor profesional del área, con consejos concretos y accionables, no con generalidades. Si un tema profesional aparece y NO ves un modo experto inyectado, igual respondé con tu mejor criterio profesional y aclarando los límites (ej. "validalo con tu abogado/contador").
 
@@ -256,7 +256,7 @@ PAGOS DE CLIENTES:
 `
 
 // Saludo según la hora ARG — "jefe" para los socios, nombre para el resto.
-// VARIEDAD: cada día elige una apertura distinta al azar, así Chad no
+// VARIEDAD: cada día elige una apertura distinta al azar, así Iris no
 // suena a contestador automático (pedido de Fabricio: humanizarlo).
 function armarSaludo(usuario) {
   const nombre = (usuario?.nombre || '').trim()
@@ -268,7 +268,7 @@ function armarSaludo(usuario) {
     `¡Buen día, ${trato}! ☀️ Arranquemos con todo.`,
     `¡Buen día, ${trato}! ☕ ¿Cómo amaneció el negocio?`,
     `Buenas, ${trato} — día nuevo, números nuevos. ☀️`,
-    `¡Buen día, ${trato}! Acá Chad, ya con los sistemas calientes.`,
+    `¡Buen día, ${trato}! Acá Iris, ya con los sistemas calientes.`,
   ] : hora < 19 ? [
     `¡Hola ${trato}! 🦾 ¿Cómo viene la tarde?`,
     `Buenas, ${trato} — ¿en qué te doy una mano?`,
@@ -283,7 +283,7 @@ function armarSaludo(usuario) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 🤖 HOLOGRAMA DE CHAD — cara holográfica giratoria
+// 🤖 HOLOGRAMA DE IRIS — cara holográfica giratoria
 // ═══════════════════════════════════════════════════════════
 // Reemplaza al botón flotante 🤖. Gira 360° (rotateY), parpadea como
 // holograma y cambia de color según el estado: apagado (cian tenue),
@@ -327,14 +327,14 @@ export default function AsistenteIA() {
   const [abierto, setAbierto] = useState(false)
   // 🧵 EL HILO NO SE PIERDE: mensajes e historial persisten en localStorage
   // (capados a los últimos 40). Cerrás el chat, recargás la página o pausás
-  // a Chad, y la conversación sigue donde quedó.
+  // a Iris, y la conversación sigue donde quedó.
   const [mensajes, setMensajes] = useState(() => {
     try {
       const g = JSON.parse(localStorage.getItem('chad_chat_mensajes') || 'null')
       if (Array.isArray(g) && g.length > 0) return g
     } catch { /* storage corrupto → arranque limpio */ }
     return [
-      { rol: 'asistente', texto: '¡Hola! Soy Chad, tu asistente. Manejo todo el sistema (gastos, depósito, pagos, deudas, stock) y también te asesoro como profesional: temas laborales, decisiones de negocio, producción, marketing, ventas y finanzas. 🎤 También podés hablarme con el micrófono.' }
+      { rol: 'asistente', texto: '¡Hola! Soy Iris, tu asistente. Manejo todo el sistema (gastos, depósito, pagos, deudas, stock) y también te asesoro como profesional: temas laborales, decisiones de negocio, producción, marketing, ventas y finanzas. 🎤 También podés hablarme con el micrófono.' }
     ]
   })
 
@@ -354,7 +354,7 @@ export default function AsistenteIA() {
   }, [])
 
   // 🌅 Primera charla del día: saludo personalizado + PARTE DEL DÍA
-  // (una vez por día por usuario). Chad toma la iniciativa: te cuenta lo
+  // (una vez por día por usuario). Iris toma la iniciativa: te cuenta lo
   // importante (cómo cerró ayer, cheques por vencer, stock flojo) sin que
   // se lo preguntes. El briefing sale de consultas directas a la base —
   // rápido y sin gastar IA. El saludo se AGREGA al hilo (no lo pisa).
@@ -412,7 +412,7 @@ export default function AsistenteIA() {
     } catch { /* storage lleno: seguimos sin persistir */ }
   }, [historialGemini])
 
-  // 🗣️ ¿Chad está hablando ahora? (alimenta el estado del holograma)
+  // 🗣️ ¿Iris está hablando ahora? (alimenta el estado del holograma)
   const [hablando, setHablando] = useState(false)
   useEffect(() => {
     // "Hablando" = voz del navegador O audio premium (ElevenLabs) sonando
@@ -454,13 +454,13 @@ export default function AsistenteIA() {
     setVozActiva(v => {
       const nuevo = !v
       localStorage.setItem('fabri_voz', nuevo ? '1' : '0')
-      if (!nuevo) callarChad()
+      if (!nuevo) callarVoz()
       return nuevo
     })
   }
 
   // 🎙️ Voz premium ElevenLabs (humana, vía /api/tts). Persistida en
-  // localStorage; si está apagada, Chad usa la voz del navegador.
+  // localStorage; si está apagada, Iris usa la voz del navegador.
   const [vozPremium, setVozPremium] = useState(() => {
     try { return localStorage.getItem('chad_voz_premium') === '1' } catch { return false }
   })
@@ -468,7 +468,7 @@ export default function AsistenteIA() {
     setVozPremium(v => {
       const nuevo = !v
       try { localStorage.setItem('chad_voz_premium', nuevo ? '1' : '0') } catch { /* ok */ }
-      callarChad()
+      callarVoz()
       return nuevo
     })
   }
@@ -563,7 +563,7 @@ export default function AsistenteIA() {
         else { setEscuchando(false); reanudarSiConversacion() }
       }
       setEscuchando(true)
-      callarChad() // si estaba hablando (navegador o premium), que se calle para escuchar
+      callarVoz() // si estaba hablando (navegador o premium), que se calle para escuchar
       rec.start()
     } catch {
       setEscuchando(false)
@@ -584,12 +584,12 @@ export default function AsistenteIA() {
       modoConvRef.current = false
       setModoConversacion(false)
       clearTimeout(reanudarTimerRef.current)
-      callarChad()
+      callarVoz()
       detenerEscucha()
     } else {
       modoConvRef.current = true
       setModoConversacion(true)
-      callarChad()
+      callarVoz()
       iniciarEscucha()
     }
   }
@@ -641,12 +641,12 @@ export default function AsistenteIA() {
 
       let historialActualizado = [...historialGemini, mensajeNuevo]
 
-      // 🎓 SKILLS DE CHAD: si el mensaje toca un tema profesional (laboral,
+      // 🎓 SKILLS DE IRIS: si el mensaje toca un tema profesional (laboral,
       // ejecutivo, producción, marketing, ventas, finanzas), se inyecta el
       // modo experto correspondiente al prompt — solo para esta llamada.
       const skillsTxt = detectarSkills(textoUsuario || '')
 
-      // 🧠 MEMORIA DE CHAD: lo aprendido en charlas anteriores entra al
+      // 🧠 MEMORIA DE IRIS: lo aprendido en charlas anteriores entra al
       // prompt de cada llamada (fresco de la base, por si recordó/olvidó algo
       // en este mismo turno). Si falla, FABRI sigue sin memoria, no se rompe.
       let memoriaTxt = ''
@@ -679,7 +679,7 @@ export default function AsistenteIA() {
               contexto.map(m => `[${m.id}] (${haceCuanto(m.created_at)})${m.usuario ? ` ${m.usuario}:` : ''} ${m.contenido}`).join('\n')
           }
         }
-      } catch { /* sin memoria, Chad funciona igual */ }
+      } catch { /* sin memoria, Iris funciona igual */ }
 
       let intentos = 0
       while (intentos < 8) {
@@ -696,7 +696,7 @@ export default function AsistenteIA() {
 
         if (respuesta.texto) {
           // Texto completo al chat; versión [VOZ] (si vino) al parlante —
-          // así Chad no deletrea tablas de números: las explica como persona.
+          // así Iris no deletrea tablas de números: las explica como persona.
           const { visible, voz } = separarVoz(respuesta.texto)
           setMensajes(prev => [...prev, { rol: 'asistente', texto: visible }])
           hablarSiCorresponde(voz || visible)
@@ -772,8 +772,8 @@ export default function AsistenteIA() {
     <>
       {!abierto && (
         <div style={estilos.holoZona}>
-          <div onClick={clickHolograma} role="button" aria-label="Prender o pausar a Chad"
-            title={holoEncendido ? 'Chad está ACTIVO — click para pausarlo' : 'Click para hablar con Chad (conversación por voz)'}
+          <div onClick={clickHolograma} role="button" aria-label="Prender o pausar a Iris"
+            title={holoEncendido ? 'Iris está ACTIVO — click para pausarlo' : 'Click para hablar con Iris (conversación por voz)'}
             style={estilos.holoMarco}>
             <div className={`chad-holo ${estadoHolo}`}>
               <CaraHolograma />
@@ -791,7 +791,7 @@ export default function AsistenteIA() {
         <div style={estilos.panel}>
           <div style={estilos.header}>
             <div>
-              <div style={estilos.headerTitulo}>🦾 CHAD</div>
+              <div style={estilos.headerTitulo}>🦾 IRIS</div>
               <div style={estilos.headerSubtitulo}>{usuario ? `Al servicio de ${usuario.nombre.trim().split(/\s+/)[0]}` : 'Asistente'} · IA{SpeechRecognitionAPI ? ' · 🎤 voz' : ''}</div>
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
@@ -904,8 +904,8 @@ export default function AsistenteIA() {
               <button onClick={toggleConversacion}
                 style={{ ...estilos.botonAdjuntar, ...(modoConversacion ? estilos.botonConvActiva : {}) }}
                 title={modoConversacion
-                  ? 'Modo conversación ACTIVO: Chad escucha de corrido (click para cortar)'
-                  : 'Modo conversación: hablá de corrido sin apretar nada — Chad responde y vuelve a escuchar solo'}>
+                  ? 'Modo conversación ACTIVO: Iris escucha de corrido (click para cortar)'
+                  : 'Modo conversación: hablá de corrido sin apretar nada — Iris responde y vuelve a escuchar solo'}>
                 🎙️
               </button>
             )}
@@ -915,7 +915,7 @@ export default function AsistenteIA() {
               onKeyDown={manejarEnter}
               placeholder={
                 escuchando ? '🎤 Escuchando… (2 seg de silencio = enviar)'
-                : modoConversacion ? (cargando ? '🤔 Chad pensando…' : '🎙️ Conversación activa — hablá tranquilo')
+                : modoConversacion ? (cargando ? '🤔 Iris pensando…' : '🎙️ Conversación activa — hablá tranquilo')
                 : 'Pedime algo...'
               }
               rows={1}
@@ -942,7 +942,7 @@ export default function AsistenteIA() {
           0%, 100% { box-shadow: 0 0 0 0 rgba(46,204,113,0.5); }
           50% { box-shadow: 0 0 0 8px rgba(46,204,113,0); }
         }
-        /* ── 🤖 Holograma de Chad ── */
+        /* ── 🤖 Holograma de Iris ── */
         @keyframes chadSpin { from { transform: rotateY(0deg); } to { transform: rotateY(360deg); } }
         @keyframes chadFlicker {
           0%, 91%, 100% { opacity: 1; }
@@ -1008,7 +1008,7 @@ export default function AsistenteIA() {
 }
 
 const estilos = {
-  // ── Holograma flotante de Chad ──
+  // ── Holograma flotante de Iris ──
   // Compacto y pegado a la esquina: no tapa el footer del Modo TV
   // ("ESC para salir"). Sin texto — el estado lo cuenta el color.
   holoZona: {

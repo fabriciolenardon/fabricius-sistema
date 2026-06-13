@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════
-// PARTE DEL DÍA DE CHAD — briefing proactivo al primer saludo
+// PARTE DEL DÍA DE IRIS — briefing proactivo al primer saludo
 // ═══════════════════════════════════════════════════════════
-// La primera vez que abrís a Chad cada día, además de saludar te pone
+// La primera vez que abrís a Iris cada día, además de saludar te pone
 // al día con lo importante SIN que le preguntes: cómo cerró ayer,
 // cheques por vencer y stock flojo. Son consultas directas a Supabase
 // (rápidas, deterministas, sin gastar llamadas de IA).
@@ -66,7 +66,7 @@ export async function armarBriefing() {
 
     return items.slice(0, 3)
   } catch {
-    // Sin briefing no se rompe nada: Chad saluda normal
+    // Sin briefing no se rompe nada: Iris saluda normal
     return []
   }
 }

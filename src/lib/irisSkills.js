@@ -1,10 +1,10 @@
 // ═══════════════════════════════════════════════════════════
-// SKILLS DE CHAD — modos experto que se activan según el tema
+// SKILLS DE IRIS — modos experto que se activan según el tema
 // ═══════════════════════════════════════════════════════════
 // Funciona como los "skills" de Claude: cada skill es un módulo de
 // instrucciones experto que SOLO se inyecta al system prompt cuando
 // el mensaje del usuario toca ese tema (detección por palabras clave).
-// Así Chad responde como profesional del área sin engordar todas las
+// Así Iris responde como profesional del área sin engordar todas las
 // llamadas con texto que no aplica.
 //
 // Para agregar un skill: nombre + triggers (regex, minúsculas sin
