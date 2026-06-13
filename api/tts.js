@@ -18,6 +18,9 @@
 // Voz elegida por Fabricio en la Voice Library de ElevenLabs.
 const VOZ_DEFAULT = 'nTkjq09AuYgsNR8E4sDe'
 const MODELO_DEFAULT = 'eleven_flash_v2_5'
+// Velocidad de habla (ElevenLabs: 0.7 lenta … 1.0 normal … 1.2 rápida).
+// 1.12 = un toque más ágil que lo normal. Pisable con ELEVENLABS_SPEED.
+const VELOCIDAD_DEFAULT = 1.12
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
@@ -39,6 +42,8 @@ export default async function handler(req, res) {
 
     const voz = voiceId || process.env.ELEVENLABS_VOICE_ID || VOZ_DEFAULT
     const modelo = process.env.ELEVENLABS_MODEL || MODELO_DEFAULT
+    let velocidad = Number(process.env.ELEVENLABS_SPEED) || VELOCIDAD_DEFAULT
+    velocidad = Math.min(1.2, Math.max(0.7, velocidad)) // rango válido de ElevenLabs
 
     const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voz}?output_format=mp3_44100_128`, {
       method: 'POST',
@@ -51,7 +56,7 @@ export default async function handler(req, res) {
         text: limpio,
         model_id: modelo,
         // Ajustes equilibrados: natural pero estable para uso diario
-        voice_settings: { stability: 0.45, similarity_boost: 0.8, style: 0.0, use_speaker_boost: true },
+        voice_settings: { stability: 0.45, similarity_boost: 0.8, style: 0.0, use_speaker_boost: true, speed: velocidad },
       }),
     })
 
