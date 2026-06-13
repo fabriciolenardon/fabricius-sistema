@@ -43,6 +43,7 @@ const Ventas = lazy(() => import('./pages/admin/Ventas'))
 const Etiquetas = lazy(() => import('./pages/admin/Etiquetas'))
 const Franquicias = lazy(() => import('./pages/admin/Franquicias'))
 const Pedidos = lazy(() => import('./pages/admin/Pedidos'))
+const PedidosWhatsapp = lazy(() => import('./pages/admin/PedidosWhatsapp'))
 
 // Lazy: portal franquicia (solo lo usa el rol franquicia)
 const FranquiciaLayout = lazy(() => import('./pages/franquicia/FranquiciaLayout'))
@@ -134,6 +135,7 @@ export default function App() {
           <Route path="precios" element={<Precios />} />
           <Route path="clientes" element={<Clientes />} />
           <Route path="pedidos" element={<Pedidos />} />
+          <Route path="pedidos-whatsapp" element={<PedidosWhatsapp />} />
           <Route path="cheques" element={<Cheques />} />
           <Route path="sueldos" element={<Sueldos />} />
           <Route path="gastos" element={<Gastos />} />

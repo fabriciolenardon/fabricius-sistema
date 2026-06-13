@@ -20,6 +20,7 @@ const navItems = [
   { to: '/admin/etiquetas',   icon: '🏷️', label: 'Etiquetas' },
   { to: '/admin/clientes',    icon: '👥', label: 'Clientes' },
   { to: '/admin/pedidos',     icon: '📥', label: 'Pedidos' },
+  { to: '/admin/pedidos-whatsapp', icon: '💬', label: 'Pedidos WA' },
   { to: '/admin/franquicias', icon: '🏪', label: 'Franquicias' },
   { to: '/admin/cheques',     icon: '📄', label: 'Cheques' },
   { to: '/admin/sueldos',     icon: '💰', label: 'Sueldos' },
@@ -144,6 +145,23 @@ function usePedidosPendientes() {
   return count
 }
 
+// Pedidos entrantes de WhatsApp (que tomó Iris) todavía sin ver.
+function usePedidosWaNuevos() {
+  const [count, setCount] = useState(0)
+  useEffect(() => {
+    async function cargar() {
+      const { count: c } = await supabase.from('pedidos_whatsapp').select('id', { count: 'exact', head: true }).eq('estado', 'nuevo')
+      setCount(c || 0)
+    }
+    cargar()
+    const canal = supabase.channel('pedidos-wa-count-admin')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos_whatsapp' }, () => cargar())
+      .subscribe()
+    return () => supabase.removeChannel(canal)
+  }, [])
+  return count
+}
+
 function CampanaNotificaciones({ notifs }) {
   const [abierto, setAbierto] = useState(false)
   const navigate = useNavigate()
@@ -249,6 +267,9 @@ function MenuMobile({ onClose }) {
                 {item.to === '/admin/pedidos' && (window.__pedidosPendientes > 0) && (
                   <span style={{ background: '#ef4444', color: '#fff', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{window.__pedidosPendientes}</span>
                 )}
+                {item.to === '/admin/pedidos-whatsapp' && (window.__pedidosWaNuevos > 0) && (
+                  <span style={{ background: 'var(--green)', color: '#000', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{window.__pedidosWaNuevos}</span>
+                )}
               </NavLink>
             )
           })}
@@ -273,11 +294,13 @@ export default function AdminLayout() {
   const { user } = useAuth()
   const notifs = useNotificaciones()
   const pedidosPendientes = usePedidosPendientes()
+  const pedidosWaNuevos = usePedidosWaNuevos()
   const { pendientes: flujosPendientes } = useFlujoNotificaciones()
   // Exponer en window para que el sidebar mobile pueda mostrar los badges
   // (el sidebar mobile es un componente separado que no recibe estos valores como props)
   useEffect(() => { window.__flujosPendientes = flujosPendientes }, [flujosPendientes])
   useEffect(() => { window.__pedidosPendientes = pedidosPendientes }, [pedidosPendientes])
+  useEffect(() => { window.__pedidosWaNuevos = pedidosWaNuevos }, [pedidosWaNuevos])
   // Exponer el email del usuario actual para que el menú mobile pueda
   // filtrar las opciones CEO-only (Ejecutivo, Reportes). Antes esto estaba
   // referenciado pero nunca seteado → en mobile esos links nunca aparecían.
@@ -324,6 +347,9 @@ export default function AdminLayout() {
                   <span>{item.icon}</span>{item.label}
                   {item.to === '/admin/pedidos' && pedidosPendientes > 0 && (
                     <span style={{ background: 'var(--red-light)', color: '#fff', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{pedidosPendientes}</span>
+                  )}
+                  {item.to === '/admin/pedidos-whatsapp' && pedidosWaNuevos > 0 && (
+                    <span style={{ background: 'var(--green)', color: '#000', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{pedidosWaNuevos}</span>
                   )}
                   {item.to === '/admin/deposito' && flujosPendientes > 0 && (
                     <span title="Flujos de desposte pendientes" style={{ background: '#ef4444', color: '#fff', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{flujosPendientes}</span>
