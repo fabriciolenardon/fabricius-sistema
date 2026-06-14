@@ -943,6 +943,10 @@ export default function AsistenteIA() {
       )}
 
       <style>{`
+        @keyframes irisAbrir {
+          from { opacity: 0; transform: translateY(18px) scale(0.92); }
+          to   { opacity: 1; transform: none; }
+        }
         @keyframes blink {
           0%, 80%, 100% { opacity: 0.2; }
           40% { opacity: 1; }
@@ -1047,12 +1051,17 @@ const estilos = {
     zIndex: 9999, transition: 'transform 0.2s',
   },
   panel: {
-    position: 'fixed', bottom: 24, right: 24, width: 400, height: 600,
+    // Formato "pantalla horizontal": más ancho que alto para ver desgloses de
+    // remitos/análisis cómodos. Responsive: en pantallas chicas ocupa casi todo.
+    position: 'fixed', bottom: 24, right: 24,
+    width: 'min(880px, calc(100vw - 32px))', height: 'min(560px, calc(100vh - 48px))',
     maxWidth: 'calc(100vw - 32px)', maxHeight: 'calc(100vh - 48px)',
     background: '#131310', border: '1px solid #28281e', borderRadius: 16,
     boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
     display: 'flex', flexDirection: 'column', zIndex: 9999,
     fontFamily: "'DM Sans', sans-serif",
+    transformOrigin: 'bottom right',
+    animation: 'irisAbrir 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
   },
   header: {
     padding: '14px 16px', borderBottom: '1px solid #28281e',

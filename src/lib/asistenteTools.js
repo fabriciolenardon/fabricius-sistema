@@ -329,6 +329,33 @@ El saldo del cliente se actualiza AUTOMÁTICAMENTE por un trigger en la base de 
     }
   },
   {
+    name: 'buscar_remitos',
+    description: 'Busca remitos/despachos en un RANGO DE FECHAS con el DESGLOSE de lo vendido en cada uno (producto, kg, importe). Si se pasa "producto", filtra solo los remitos que lo contienen y desglosa esas líneas sumando su total en kg y plata. Usar para "remitos del 1 al 7 de junio", "buscame todos los remitos donde se vendió matambre de cerdo entre tal y tal fecha y desglosámelo", "qué le vendimos a X esta semana con detalle".',
+    parameters: {
+      type: 'object',
+      properties: {
+        desde: { type: 'string', description: 'Fecha inicio YYYY-MM-DD. OBLIGATORIO.' },
+        hasta: { type: 'string', description: 'Fecha fin YYYY-MM-DD. OBLIGATORIO.' },
+        cliente: { type: 'string', description: 'Opcional: filtrar por nombre de cliente.' },
+        producto: { type: 'string', description: 'Opcional: nombre del producto a buscar (ej "matambre de cerdo", "media res"). Desglosa solo esas líneas y suma su total en kg e importe.' }
+      },
+      required: ['desde', 'hasta']
+    }
+  },
+  {
+    name: 'consultar_compras_tipo',
+    description: 'Total de COMPRAS de mercadería ingresada al depósito, por tipo y rango de fechas: cantidad de UNIDADES, total en KILOS e importe gastado. Usar para "cuántas medias reses compramos la semana pasada", "cuántos kilos de cerdo entraron este mes", "qué compramos de pollo entre tal y tal fecha". Responder el total en número (unidades) y en kilos.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tipo: { type: 'string', description: 'Tipo de mercadería: "media res"/"bovino", "cerdo", "pollo", "cajon", "embutido". Si se omite, suma todo.' },
+        desde: { type: 'string', description: 'Fecha inicio YYYY-MM-DD. OBLIGATORIO.' },
+        hasta: { type: 'string', description: 'Fecha fin YYYY-MM-DD. OBLIGATORIO.' }
+      },
+      required: ['desde', 'hasta']
+    }
+  },
+  {
     name: 'consultar_pedidos',
     description: 'Pedidos de clientes en el sistema (pendientes, confirmados, día de entrega). Usar para "qué pedidos hay", "qué hay que entregar mañana".',
     parameters: { type: 'object', properties: {} }
@@ -885,6 +912,66 @@ export async function ejecutarFuncion(nombre, args) {
           `• ${formatearFecha(rm.fecha)} · #${rm.numero} · ${rm.cliente_nombre} · ${formatearPesos(rm.total)} · ${rm.cobro === 'cta_cte' ? 'CTA CTE' : 'pagado'}`
         ).join('\n')
         return { resultado: `Últimos remitos:\n${lista}` }
+      }
+
+      case 'buscar_remitos': {
+        if (!args?.desde || !args?.hasta) return { resultado: 'Necesito el rango de fechas (desde y hasta, formato YYYY-MM-DD).' }
+        let query = supabase.from('remitos').select('numero, fecha, cliente_nombre, total, cobro, items')
+          .eq('eliminado', false).gte('fecha', args.desde).lte('fecha', args.hasta)
+          .order('fecha', { ascending: true }).order('numero', { ascending: true })
+        if (args?.cliente) query = query.ilike('cliente_nombre', `%${args.cliente}%`)
+        const { data, error } = await query
+        if (error) throw error
+        if (!data || data.length === 0) return { resultado: `No encontré remitos entre ${formatearFecha(args.desde)} y ${formatearFecha(args.hasta)}${args?.cliente ? ` para "${args.cliente}"` : ''}.` }
+
+        const prod = (args?.producto || '').trim().toLowerCase()
+        if (prod) {
+          let totalKg = 0, totalImp = 0, nRemitos = 0
+          const lineas = []
+          data.forEach(rm => {
+            const items = Array.isArray(rm.items) ? rm.items : []
+            const match = items.filter(it => String(it.descripcion || '').toLowerCase().includes(prod))
+            if (!match.length) return
+            nRemitos++
+            match.forEach(it => {
+              const kg = Number(it.kg) || 0, imp = Number(it.importe) || 0
+              totalKg += kg; totalImp += imp
+              const cant = kg ? `${kg.toLocaleString('es-AR')} kg` : (it.unidad === 'u' ? '1 u' : '—')
+              lineas.push(`• ${formatearFecha(rm.fecha)} · #${rm.numero} · ${rm.cliente_nombre} · ${it.descripcion}: ${cant} · ${formatearPesos(imp)}`)
+            })
+          })
+          if (!lineas.length) return { resultado: `No encontré "${args.producto}" en remitos entre ${formatearFecha(args.desde)} y ${formatearFecha(args.hasta)}.` }
+          return { resultado: `🔎 Ventas de "${args.producto}" (${formatearFecha(args.desde)} → ${formatearFecha(args.hasta)}):\n${lineas.join('\n')}\n\n📊 TOTAL: ${totalKg.toLocaleString('es-AR')} kg · ${formatearPesos(totalImp)} · en ${nRemitos} remito${nRemitos === 1 ? '' : 's'}.` }
+        }
+
+        const bloques = data.map(rm => {
+          const items = Array.isArray(rm.items) ? rm.items : []
+          const det = items.map(it => {
+            const kg = Number(it.kg) || 0
+            return `   - ${it.descripcion}${kg ? ': ' + kg.toLocaleString('es-AR') + ' kg' : ''} · ${formatearPesos(Number(it.importe) || 0)}`
+          }).join('\n')
+          return `• ${formatearFecha(rm.fecha)} · #${rm.numero} · ${rm.cliente_nombre} · ${formatearPesos(rm.total)} · ${rm.cobro === 'cta_cte' ? 'CTA CTE' : 'pagado'}${det ? '\n' + det : ''}`
+        }).join('\n\n')
+        return { resultado: `📋 Remitos ${formatearFecha(args.desde)} → ${formatearFecha(args.hasta)} (${data.length}):\n\n${bloques}\n\n📊 TOTAL FACTURADO: ${formatearPesos(sumar(data, 'total'))}` }
+      }
+
+      case 'consultar_compras_tipo': {
+        if (!args?.desde || !args?.hasta) return { resultado: 'Necesito el rango de fechas (desde y hasta, formato YYYY-MM-DD).' }
+        const MAP_TIPO = { 'media res': 'bovino_mr', 'medias res': 'bovino_mr', 'media': 'bovino_mr', 'bovino': 'bovino_mr', 'res': 'bovino_mr', 'vaca': 'bovino_mr', 'novillo': 'bovino_mr', 'cerdo': 'cerdo', 'chancho': 'cerdo', 'pollo': 'pollo', 'cajon': 'cajon_bovino', 'cajón': 'cajon_bovino', 'embutido': 'embutido' }
+        const termino = (args?.tipo || '').trim().toLowerCase()
+        let tipoBd = null
+        if (termino) tipoBd = MAP_TIPO[termino] || (Object.entries(MAP_TIPO).find(([k]) => termino.includes(k)) || [])[1] || null
+        let query = supabase.from('entradas_deposito').select('tipo, kg, kg_real, importe, cantidad, fecha')
+          .gte('fecha', args.desde).lte('fecha', args.hasta).eq('eliminado', false)
+        if (tipoBd) query = query.eq('tipo', tipoBd)
+        const { data, error } = await query
+        if (error) throw error
+        if (!data || data.length === 0) return { resultado: `No encontré compras${args?.tipo ? ' de ' + args.tipo : ''} entre ${formatearFecha(args.desde)} y ${formatearFecha(args.hasta)}.` }
+        const unidades = data.reduce((s, e) => s + (Number(e.cantidad) || 1), 0)
+        const kgTotal = data.reduce((s, e) => s + (Number(e.kg_real) > 0 ? Number(e.kg_real) : (Number(e.kg) || 0)), 0)
+        const importe = sumar(data, 'importe')
+        const etiqueta = args?.tipo ? args.tipo : 'mercadería (todo)'
+        return { resultado: `🛒 Compras de ${etiqueta} (${formatearFecha(args.desde)} → ${formatearFecha(args.hasta)}):\n• Unidades / ingresos: ${unidades}\n• Kilos totales: ${kgTotal.toLocaleString('es-AR')} kg\n• Importe gastado: ${formatearPesos(importe)}` }
       }
 
       case 'consultar_pedidos': {
