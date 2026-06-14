@@ -194,7 +194,7 @@ function useDashboardData(refreshMs = 120000) {
     const anioPasadoHoy    = `${hoyDt.getFullYear() - 1}-${String(hoyDt.getMonth() + 1).padStart(2, '0')}-${String(hoyDt.getDate()).padStart(2, '0')}`
 
     const [ventasHoy, ventasAyer, ventasSemana, ventasMes, ventasMesAnt, ventasAnioPasado,
-           salidasMes, pedidosMes, cuentas, facturas12m, stock, cheques, clientes,
+           salidasMes, cuentas, facturas12m, stock, cheques, clientes,
            gastosMes, sueldosMes, pagosProvMes, movCtacteMes, todasCajas, todosDeudores, promoCfg,
            comprasMesQ, cierresQ, comprasSemQ, remitosHoyQ] = await Promise.all([
       supabase.from('ventas_minoristas').select('total, efectivo, debito, transferencia, items, fecha, hora').eq('origen', 'caja').eq('fecha', hoy),
@@ -209,7 +209,6 @@ function useDashboardData(refreshMs = 120000) {
       // Mayorista del mes (con filtro de flujos internos); cliente_nombre
       // alimenta el podio de clientes y la separación mayorista/franquicias
       supabase.from('salidas_deposito').select('total, cobro, cliente_nombre').gte('fecha', mesIni).lte('fecha', hoy),
-      supabase.from('pedidos').select('total_estimado').eq('estado', 'confirmado').gte('dia_entrega', mesIni).lte('dia_entrega', hoy),
       supabase.from('cuentas_fiscales').select('*').eq('activa', true).then(r => r).catch(() => ({ data: null })),
       supabase.from('facturas').select('cuenta_id, monto_total, fecha').eq('tipo', 'emitida').gte('fecha', fechaHaceDias(365)).then(r => r).catch(() => ({ data: null })),
       supabase.from('stock_actual').select('*'),
@@ -294,8 +293,11 @@ function useDashboardData(refreshMs = 120000) {
     // ── FACTURADO TOTAL DEL MES (caja + mayorista sin flujos internos) ──
     const salidasMesData = (salidasMes.data || []).filter(s => s.cobro !== 'interno')
     const totalSalidasMes = salidasMesData.reduce((s, x) => s + (Number(x.total) || 0), 0)
-    const totalPedidosMes = (pedidosMes.data || []).reduce((s, p) => s + (Number(p.total_estimado) || 0), 0)
-    const facturadoMes = totalCajaMes + totalSalidasMes + totalPedidosMes
+    // VENTAS reales = caja minorista + mayorista despachado (remitos → salidas).
+    // Los pedidos del portal NO son ventas: son solo informativos. El stock y la
+    // venta se registran recién al emitir el remito o cobrar por caja. Sumarlos
+    // inflaba el facturado (y duplicaba al despacharse). Por eso NO van.
+    const facturadoMes = totalCajaMes + totalSalidasMes
 
     // ── 💥 RÉCORD: mejor día del mes (sin contar hoy) en la caja ──
     const porDiaMes = {}
@@ -466,7 +468,7 @@ function useDashboardData(refreshMs = 120000) {
     // INSERT) es clave para la AUTOCORRECCIÓN: si se anula un remito mal cargado
     // o se elimina una compra errónea, el número se corrige EN VIVO (sin esperar
     // el refresh de 2 min). Requiere que estas tablas estén en supabase_realtime.
-    const TABLAS_LIVE = ['ventas_minoristas', 'remitos', 'salidas_deposito', 'entradas_deposito', 'gastos', 'liquidaciones_sueldos', 'pedidos', 'config_sistema']
+    const TABLAS_LIVE = ['ventas_minoristas', 'remitos', 'salidas_deposito', 'entradas_deposito', 'gastos', 'liquidaciones_sueldos', 'config_sistema']
     let canal = supabase.channel('dashboard-ejecutivo-live')
     TABLAS_LIVE.forEach(t => { canal = canal.on('postgres_changes', { event: '*', schema: 'public', table: t }, debounced) })
     canal.subscribe()
