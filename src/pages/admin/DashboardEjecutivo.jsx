@@ -424,6 +424,7 @@ function useDashboardData(refreshMs = 120000) {
     setData({
       totalHoy, cantHoy, ticketProm, totalSemana,
       totalMes: totalCajaMes,
+      mayoristaMes: totalSalidasMes,
       totalMesAnt, variacion,
       topProductosHoy, cuentasConPct, stockCritico,
       ultimaVentaHora,
@@ -696,10 +697,12 @@ function ResumenEjecutivo() {
 
         <CardKPI label="ÚLTIMOS 7 DÍAS" valor={fmtArs(data.totalSemana)} color={NEON.azul}
           sub={`Promedio ${fmtArs(data.totalSemana / 7)}/día`} />
-        <CardKPI label="ESTE MES (CAJA)" valor={fmtArs(data.totalMes)} color={colorVar(data.variacion)}
+        <CardKPI label="ESTE MES · CAJA (mostrador)" valor={fmtArs(data.totalMes)} color={colorVar(data.variacion)}
           sub={data.totalMesAnt > 0
-            ? `${flecha(data.variacion)} ${signo(data.variacion)}${data.variacion.toFixed(1)}% vs mismo período mes ant. (01→${fechaHoyARG().slice(8, 10)})`
-            : 'Sin datos del mismo período del mes anterior'} />
+            ? `Solo mostrador · ${flecha(data.variacion)} ${signo(data.variacion)}${data.variacion.toFixed(1)}% vs mismo período mes ant.`
+            : 'Solo mostrador (ventas por caja)'} />
+        <CardKPI label="ESTE MES · MAYORISTA" valor={fmtArs(data.mayoristaMes)} color={NEON.cian}
+          sub="Remitos a clientes y franquicias" />
         {/* MENSUAL EN VIVO — los 3 parámetros que pidió Fabricio: V − C − G */}
         <div className="hud" style={{ ...glass, padding: 18 }}>
           <Etiqueta texto={`MENSUAL EN VIVO · 01→${fechaHoyARG().slice(8, 10)}`} extra={<PuntoVivo />} />
