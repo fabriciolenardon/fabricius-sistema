@@ -3027,14 +3027,21 @@ const item = {
       }
     }
 
+    // Las salidas se crean acá (una por item) y se vinculan al remito apenas
+    // este existe (más abajo). El vínculo remito_id es clave: al anular el
+    // remito, sus salidas se borran con él. Sin esto quedaban vivas inflando
+    // el Dashboard (bug Andrea Angaramo 13/06: remito x1000 anulado pero su
+    // salida seguía sumando al podio mayorista).
+    const salidaIds = []
     for (const item of items) {
-      await supabase.from('salidas_deposito').insert({
+      const { data: salIns } = await supabase.from('salidas_deposito').insert({
         fecha: form.fecha, cliente_nombre: clienteNombre,
         tipo: item.tipo, descripcion: item.descripcion,
         kg: item.kg, precio_kg: item.precio,
         total: item.importe, lista: getLista(form.destino, clienteId),
         cobro: form.cobro, notas: form.notas
-      })
+      }).select('id').single()
+      if (salIns?.id) salidaIds.push(salIns.id)
     }
 
     const kgPorTipo = {}
@@ -3078,6 +3085,12 @@ for (const item of items) {
       domicilio, telefono, localidad,
       items, total, cobro: form.cobro, pagos: pagosMixto, notas: form.notas
     }).select().single()
+
+    // Vincular las salidas_deposito recién creadas con este remito (por id, no
+    // por atributos) → al anularlo se borran con él y el Dashboard no se infla.
+    if (salidaIds.length && remitoData?.id) {
+      await supabase.from('salidas_deposito').update({ remito_id: remitoData.id }).in('id', salidaIds)
+    }
 
     // Marcar cajas individuales como vendidas (cajas_stock) — venderCaja
     // también decrementa stock_actual.caja_cb / caja_pt automáticamente.
@@ -3588,6 +3601,24 @@ export function RemitosTab({ remitoActual }) {
     eliminado_por: eliminadoPor,
     eliminado_en: new Date().toISOString()
   }).eq('id', remito.id)
+
+  // Borrar las salidas_deposito de este remito (son el registro denormalizado
+  // que alimenta el Dashboard: mayorista, canales, podio). Si no se borran, el
+  // remito anulado sigue inflando el panel. Match por remito_id (mig 60); para
+  // remitos viejos sin vínculo, fallback por created_at del propio remito.
+  const { data: salsDelRemito } = await supabase.from('salidas_deposito').select('id').eq('remito_id', remito.id)
+  if (salsDelRemito && salsDelRemito.length > 0) {
+    await supabase.from('salidas_deposito').delete().eq('remito_id', remito.id)
+  } else if (remito.created_at) {
+    // Remito viejo (pre-mig 60): sus salidas se insertaron justo antes de él.
+    const desde = new Date(new Date(remito.created_at).getTime() - 60000).toISOString()
+    await supabase.from('salidas_deposito').delete()
+      .is('remito_id', null)
+      .eq('fecha', remito.fecha)
+      .eq('cliente_nombre', remito.cliente_nombre)
+      .gte('created_at', desde)
+      .lte('created_at', remito.created_at)
+  }
   if (remito.cliente_id) {
     // Revertir del saldo SOLO lo que este remito realmente aplicó al ledger
     // (Σdebe − Σhaber de sus movimientos). Un remito pagado al contado no tiene
