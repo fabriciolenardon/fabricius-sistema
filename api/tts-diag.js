@@ -15,15 +15,19 @@ export default async function handler(req, res) {
       sufijo: raw.slice(-3),
       tiene_espacios_o_saltos: raw !== key,
     }
-    let userStatus = null, userBody = null, voicesStatus = null
+    let voicesStatus = null, ttsStatus = null, ttsBody = null
     if (key) {
-      const ru = await fetch('https://api.elevenlabs.io/v1/user', { headers: { 'xi-api-key': key } })
-      userStatus = ru.status
-      userBody = await ru.text().then(t => { try { return JSON.parse(t) } catch { return String(t).slice(0, 300) } })
       const rv = await fetch('https://api.elevenlabs.io/v1/voices', { headers: { 'xi-api-key': key } })
       voicesStatus = rv.status
+      // Prueba REAL de text-to-speech con la voz Jessica.
+      const rt = await fetch('https://api.elevenlabs.io/v1/text-to-speech/cgSgspJ2msm6clMCkdW9?output_format=mp3_44100_128', {
+        method: 'POST', headers: { 'xi-api-key': key, 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
+        body: JSON.stringify({ text: 'Hola, prueba.', model_id: 'eleven_multilingual_v2' }),
+      })
+      ttsStatus = rt.status
+      ttsBody = rt.ok ? `[AUDIO OK ${rt.headers.get('content-type')}]` : await rt.text().then(t => { try { return JSON.parse(t) } catch { return String(t).slice(0, 400) } })
     }
-    return res.status(200).json({ meta, userStatus, userBody, voicesStatus })
+    return res.status(200).json({ meta, voicesStatus, ttsStatus, ttsBody })
   } catch (err) {
     return res.status(500).json({ error: String(err?.message || err) })
   }
