@@ -8,7 +8,8 @@ const CATEGORIAS = {
   cerdo_corte: '🐷 Cerdo — Cortes',
   cerdo_pieza: '🐷 Cerdo — Piezas',
   embutido: '🌭 Embutidos',
-  pollo: '🍗 Pollo x Kg',
+  pollo: '🍗 Pollo x Kilo',
+  pollo_cajon: '🍗 Pollo x Cajón',
   rebozado: '🧊 Rebozados',
   insumos: '🧰 Insumos',
 }
