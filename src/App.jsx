@@ -174,7 +174,9 @@ export default function App() {
         </Route>
       </Routes>
       </Suspense>
-      {user && profile && profile.rol !== 'cajero' && profile.rol !== 'desposte' && <AsistenteIA />}
+      {/* El asistente Iris (holograma flotante) tiene acceso total al sistema:
+          solo lo ve el CEO. NUNCA clientes, franquicias ni otros roles. */}
+      {user && profile?.rol === 'admin' && user.email === 'fabriciolenardon@gmail.com' && <AsistenteIA />}
     </>
   )
 }
