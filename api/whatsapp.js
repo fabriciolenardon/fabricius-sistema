@@ -1,28 +1,18 @@
 // ═══════════════════════════════════════════════════════════
 // WHATSAPP — Iris atiende el WhatsApp del negocio (Cloud API Meta)
 // ═══════════════════════════════════════════════════════════
-// FASE 2 (este archivo): Iris responde con PRECIOS y STOCK reales del
-// sistema (consulta Supabase) y, ante un PEDIDO, lo registra en la bandeja
-// `pedidos_whatsapp` y le avisa al dueño por WhatsApp. Modo "auto con
-// barreras": NUNCA cierra la venta — toma la solicitud y la escala al equipo.
+// FASE 3: además de responder con precios/stock reales y registrar pedidos,
+// GUARDA toda la conversación (wa_mensajes/wa_contactos) para verla en vivo
+// en el panel "Conversaciones", respeta la PAUSA por contacto (cuando un
+// humano atiende, Iris se calla), da un acuse y deriva ante avisos de PAGO,
+// usa la CONFIG editable del negocio (wa_config) e ignora los comprobantes
+// (imágenes/PDF) sin responder.
 //
 // Config (Vercel → Settings → Environment Variables):
-//   WHATSAPP_TOKEN              (secreta — token de la Cloud API de Meta)
-//   WHATSAPP_VERIFY_TOKEN       (opcional — verificación del webhook;
-//                                default 'fabricius-iris-2026')
-//   VITE_GEMINI_API_KEY         (ya existe — el cerebro de Iris)
-//   VITE_SUPABASE_URL           (ya existe — URL del proyecto Supabase)
-//   SUPABASE_SERVICE_ROLE_KEY   (NUEVA, secreta — lee precios/stock y
-//                                registra pedidos saltando RLS; server-only)
-//   WHATSAPP_AVISOS_TO          (NUEVA, opcional — número del dueño en formato
-//                                internacional sin '+' p/ recibir avisos de
-//                                pedidos, ej 543575400406; si falta, solo se
-//                                guarda en la bandeja sin avisar)
+//   WHATSAPP_TOKEN, WHATSAPP_VERIFY_TOKEN (opc), VITE_GEMINI_API_KEY,
+//   VITE_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, WHATSAPP_AVISOS_TO (opc)
 //
-// Meta exige responder 200 al webhook; si algo falla, igual devolvemos 200
-// (para que Meta no reintente en loop) y logueamos el error. Toda la parte
-// de precios/stock/pedidos degrada con gracia: si falta una env var o falla
-// una consulta, Iris sigue respondiendo (como en Fase 1).
+// Siempre responde 200 (para que Meta no reintente). Todo degrada con gracia.
 // ═══════════════════════════════════════════════════════════
 
 export const config = { maxDuration: 30 }
@@ -35,29 +25,26 @@ const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 const AVISOS_TO = process.env.WHATSAPP_AVISOS_TO
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent'
 
-// Categorías que SÍ se le muestran al público por WhatsApp. Se excluyen las
-// mayoristas/internas (insumos, medias reses, cajas y cajones).
 const CATEGORIAS_PUBLICAS = [
   'bovino_corte', 'bovino_brosa', 'bovino_pieza',
   'cerdo_corte', 'cerdo_pieza', 'embutido',
   'pollo', 'rebozado', 'almacen', 'bebidas',
 ]
 
+const ACUSE_PAGO = '¡Gracias! 🙌 Ya le aviso al equipo para que verifique tu pago. En un ratito te confirman. 🥩'
+
 const PROMPT_BASE = `Sos IRIS, la asistente de Carnicerías Fabricius (Río Primero, Córdoba), atendiendo el WhatsApp del negocio. Sos MUJER, cálida, simpática y profesional. Es un chat de WhatsApp: respondé BREVE (1-3 frases), en español argentino, sin tecnicismos, con alguna emoji si pinta 🥩.
 
 REGLAS (modo "auto con barreras"):
-- Para PRECIOS y STOCK usá SOLO los datos de la sección "DATOS DEL NEGOCIO" de abajo. Son precios al público (minorista). NUNCA inventes un precio ni un stock que no esté en esa lista.
-- Si te preguntan por algo que NO está en la lista, decí con amabilidad que enseguida te lo confirma alguien del equipo (no inventes).
+- Para PRECIOS y STOCK usá SOLO los datos de la sección "DATOS DEL NEGOCIO". Son precios al público (minorista). NUNCA inventes un precio ni un stock que no esté en esa lista.
+- Para horarios, dirección, formas de pago y envíos usá la sección "INFORMACIÓN DEL NEGOCIO" si está cargada. Si te preguntan algo que no está, derivá con amabilidad al equipo (no inventes).
 - El stock es orientativo; si preguntan por una cantidad grande o puntual, aclará que el equipo confirma disponibilidad.
-- Dudas generales (horarios, envíos, formas de pago, dónde están) → respondé con buena onda.
-- Si el cliente quiere HACER UN PEDIDO o encargar algo (ej. "quiero 5 kg de asado para mañana") → tomá con amabilidad QUÉ quiere y para cuándo, decile que ya le pasás el pedido al equipo para confirmar disponibilidad y precio final, y marcá es_pedido=true con un resumen claro. NUNCA confirmes el total ni cierres la venta vos.
+- Si el cliente quiere HACER UN PEDIDO o encargar algo → tomá QUÉ quiere y para cuándo, decile que ya le pasás el pedido al equipo para confirmar disponibilidad y precio final, y marcá es_pedido=true con un resumen claro. NUNCA confirmes el total ni cierres la venta vos.
 - Si saludan, saludá cálida y preguntá en qué ayudás.
 - Sos la asistente del negocio (no lo escondas si te preguntan), pero hablá natural, no robótica.
 
-Respondé SIEMPRE en el formato JSON pedido: "respuesta" (lo que le mandás al cliente), "es_pedido" (true solo si está encargando algo concreto) y "resumen_pedido" (qué pidió y para cuándo, vacío si no es pedido).`
+Respondé SIEMPRE en el formato JSON pedido: "respuesta", "es_pedido" (true solo si está encargando algo concreto) y "resumen_pedido" (qué pidió y para cuándo, vacío si no es pedido).`
 
-// Esquema de salida estructurada: una sola llamada a Gemini nos da el texto
-// para el cliente + si es un pedido + el resumen, sin round-trips extra.
 const SCHEMA_RESPUESTA = {
   type: 'object',
   properties: {
@@ -69,14 +56,11 @@ const SCHEMA_RESPUESTA = {
 }
 
 export default async function handler(req, res) {
-  // ── Verificación del webhook (Meta hace un GET al configurarlo) ──
   if (req.method === 'GET') {
     const mode = req.query['hub.mode']
     const token = req.query['hub.verify_token']
     const challenge = req.query['hub.challenge']
-    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-      return res.status(200).send(challenge)
-    }
+    if (mode === 'subscribe' && token === VERIFY_TOKEN) return res.status(200).send(challenge)
     return res.status(403).send('forbidden')
   }
 
@@ -89,27 +73,52 @@ export default async function handler(req, res) {
     const value = body?.entry?.[0]?.changes?.[0]?.value
     const msg = value?.messages?.[0]
     const phoneId = value?.metadata?.phone_number_id
+    if (!msg || !phoneId) return res.status(200).end()
 
-    // Solo procesamos mensajes de texto entrantes; lo demás (estados de
-    // entrega, etc.) se ignora respondiendo 200.
-    if (!msg || msg.type !== 'text' || !phoneId) return res.status(200).end()
-
-    const texto = (msg.text?.body || '').trim()
     const from = msg.from
     const nombreContacto = value?.contacts?.[0]?.profile?.name || null
-    if (!texto || !from) return res.status(200).end()
+    if (!from) return res.status(200).end()
 
     if (!WA_TOKEN) { console.error('Falta WHATSAPP_TOKEN'); return res.status(200).end() }
 
-    // Datos reales del negocio (precios + stock). Si falla, queda vacío y
-    // Iris responde igual derivando al equipo.
-    const datosNegocio = await traerDatosNegocio()
+    // Guardamos el phone_id del negocio para que el envío manual del panel lo use.
+    setConfig('phone_id', phoneId)
 
-    const ia = await responderConIris(texto, datosNegocio)
+    // Texto a mostrar / procesar según el tipo de mensaje.
+    const tipo = msg.type === 'text' ? 'text'
+      : (msg.type === 'image' ? 'image' : (msg.type === 'document' ? 'document' : (msg.type === 'audio' || msg.type === 'voice' ? 'audio' : 'other')))
+    const texto = (msg.text?.body || '').trim()
+    const textoMostrable = tipo === 'text' ? texto
+      : (msg[msg.type]?.caption ? `${etiquetaTipo(tipo)} ${msg[msg.type].caption}` : etiquetaTipo(tipo))
+
+    // Estado previo del contacto (para saber si Iris está pausada y el conteo).
+    const contacto = await getContacto(from)
+    const pausada = contacto?.iris_pausada === true
+
+    // Persistimos el mensaje entrante y actualizamos el contacto (siempre,
+    // aunque Iris no responda — así el panel ve TODO lo que entra).
+    await guardarMensaje(from, 'in', 'cliente', tipo, textoMostrable)
+    await upsertContacto(from, nombreContacto, textoMostrable, contacto)
+
+    // Comprobantes (imágenes/PDF/audio) → NO se responden. Quedan en el panel.
+    if (tipo !== 'text' || !texto) return res.status(200).end()
+
+    // Si un humano tomó el control de este chat, Iris no responde.
+    if (pausada) return res.status(200).end()
+
+    // Aviso de pago/transferencia por texto → acuse y derivar (no flujo normal).
+    if (esMensajePago(texto)) {
+      await enviarWhatsApp(phoneId, from, ACUSE_PAGO)
+      await guardarMensaje(from, 'out', 'iris', 'text', ACUSE_PAGO)
+      return res.status(200).end()
+    }
+
+    // Flujo normal: precios/stock + info editable → respuesta de Iris.
+    const [datosNegocio, infoNegocio] = await Promise.all([traerDatosNegocio(), traerConfigNegocio()])
+    const ia = await responderConIris(texto, datosNegocio, infoNegocio)
     await enviarWhatsApp(phoneId, from, ia.respuesta)
+    await guardarMensaje(from, 'out', 'iris', 'text', ia.respuesta)
 
-    // Si el cliente está encargando algo, lo registramos y avisamos al dueño.
-    // Va aparte para que un fallo acá nunca corte la respuesta al cliente.
     if (ia.es_pedido) {
       try {
         await registrarPedido({ telefono: from, nombreContacto, mensaje: texto, resumen: ia.resumen_pedido })
@@ -120,63 +129,130 @@ export default async function handler(req, res) {
     return res.status(200).end()
   } catch (err) {
     console.error('WhatsApp handler error:', err)
-    return res.status(200).end() // 200 igual para que Meta no reintente en loop
+    return res.status(200).end()
   }
 }
 
-// ── Datos del negocio (Supabase, service_role → saltea RLS) ──────────────
-// Devuelve un texto listo para inyectar al prompt. Ante cualquier falla
-// devuelve '' (Iris responde sin precios, como en Fase 1).
-async function traerDatosNegocio() {
-  if (!SB_URL || !SB_KEY) return ''
-  try {
-    const headers = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
-    const inCats = `(${CATEGORIAS_PUBLICAS.join(',')})`
-    const [precios, stock] = await Promise.all([
-      sbGet(`precios?select=nombre,categoria,precio_minorista&precio_minorista=not.is.null&categoria=in.${inCats}&order=categoria,nombre`, headers),
-      sbGet('stock_actual?select=tipo,kg_disponible', headers),
-    ])
-
-    const listaPrecios = (precios || [])
-      .filter(p => p.nombre && Number(p.precio_minorista) > 0)
-      .map(p => `- ${p.nombre.trim()}: ${formatearPesos(p.precio_minorista)}`)
-      .join('\n')
-
-    const lineasStock = (stock || [])
-      .filter(s => Number(s.kg_disponible) > 0)
-      .map(s => `- ${s.tipo}: ${Math.round(Number(s.kg_disponible))} kg`)
-      .join('\n')
-
-    let out = ''
-    if (listaPrecios) out += `PRECIOS AL PÚBLICO (por kg salvo que el nombre diga lo contrario):\n${listaPrecios}\n`
-    if (lineasStock) out += `\nSTOCK ORIENTATIVO disponible hoy:\n${lineasStock}\n`
-    return out
-  } catch (e) {
-    console.error('traerDatosNegocio error', e)
-    return ''
-  }
+function etiquetaTipo(tipo) {
+  if (tipo === 'image') return '📷 [imagen / comprobante]'
+  if (tipo === 'document') return '📄 [documento / comprobante]'
+  if (tipo === 'audio') return '🎤 [audio]'
+  return '📎 [adjunto]'
 }
 
+// Detecta avisos de pago/transferencia en texto (sin acentos, minúsculas).
+function esMensajePago(texto) {
+  const t = String(texto).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  return /(transfer|deposit|comprobante|ya pague|ya abone|ya pagu|\bsena\b|te pase|le pase|abone el|pague el|hice el deposito|mando el comp|paso el comp)/.test(t)
+}
+
+// ── Supabase REST (service_role → saltea RLS) ────────────────────────────
+function sbHeaders(extra = {}) {
+  return { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, 'Content-Type': 'application/json', ...extra }
+}
 async function sbGet(path, headers) {
   const r = await fetch(`${SB_URL}/rest/v1/${path}`, { headers })
   if (!r.ok) throw new Error(`Supabase GET ${r.status} ${path}`)
   return r.json()
 }
 
-// ── Cerebro de Iris (Gemini con salida estructurada) ─────────────────────
-// Ante cualquier falla devuelve una respuesta segura para que el cliente
-// nunca quede sin contestación.
-async function responderConIris(texto, datosNegocio) {
-  const fallback = {
-    respuesta: '¡Hola! 🥩 Gracias por tu mensaje. En un ratito te responde alguien del equipo de Carnicerías Fabricius.',
-    es_pedido: false,
-    resumen_pedido: '',
-  }
+async function getContacto(telefono) {
+  if (!SB_URL || !SB_KEY) return null
+  try {
+    const rows = await sbGet(`wa_contactos?telefono=eq.${encodeURIComponent(telefono)}&select=*`, sbHeaders())
+    return rows?.[0] || null
+  } catch (e) { console.error('getContacto', e); return null }
+}
+
+async function guardarMensaje(telefono, direccion, autor, tipo, texto) {
+  if (!SB_URL || !SB_KEY) return
+  try {
+    await fetch(`${SB_URL}/rest/v1/wa_mensajes`, {
+      method: 'POST', headers: sbHeaders({ Prefer: 'return=minimal' }),
+      body: JSON.stringify({ telefono, direccion, autor, tipo, texto }),
+    })
+  } catch (e) { console.error('guardarMensaje', e) }
+}
+
+async function upsertContacto(telefono, nombre, ultimoMensaje, contactoPrevio) {
+  if (!SB_URL || !SB_KEY) return
+  try {
+    if (contactoPrevio) {
+      await fetch(`${SB_URL}/rest/v1/wa_contactos?telefono=eq.${encodeURIComponent(telefono)}`, {
+        method: 'PATCH', headers: sbHeaders({ Prefer: 'return=minimal' }),
+        body: JSON.stringify({
+          nombre: nombre || contactoPrevio.nombre,
+          ultimo_mensaje: ultimoMensaje,
+          ultimo_at: new Date().toISOString(),
+          no_leidos: (contactoPrevio.no_leidos || 0) + 1,
+        }),
+      })
+    } else {
+      await fetch(`${SB_URL}/rest/v1/wa_contactos`, {
+        method: 'POST', headers: sbHeaders({ Prefer: 'return=minimal' }),
+        body: JSON.stringify({ telefono, nombre, ultimo_mensaje: ultimoMensaje, ultimo_at: new Date().toISOString(), no_leidos: 1 }),
+      })
+    }
+  } catch (e) { console.error('upsertContacto', e) }
+}
+
+// Upsert de una clave de wa_config (sin await crítico).
+function setConfig(clave, valor) {
+  if (!SB_URL || !SB_KEY) return
+  fetch(`${SB_URL}/rest/v1/wa_config?on_conflict=clave`, {
+    method: 'POST', headers: sbHeaders({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
+    body: JSON.stringify({ clave, valor, updated_at: new Date().toISOString() }),
+  }).catch(() => {})
+}
+
+// Info editable del negocio (la carga el admin en el panel).
+async function traerConfigNegocio() {
+  if (!SB_URL || !SB_KEY) return ''
+  try {
+    const rows = await sbGet('wa_config?select=clave,valor', sbHeaders())
+    const c = {}; (rows || []).forEach(r => { if (r.valor) c[r.clave] = r.valor })
+    const L = []
+    if (c.horarios) L.push(`Horarios: ${c.horarios}`)
+    if (c.direccion) L.push(`Dirección: ${c.direccion}`)
+    if (c.formas_pago) L.push(`Formas de pago: ${c.formas_pago}`)
+    if (c.envios) L.push(`Envíos: ${c.envios}`)
+    if (c.instrucciones_extra) L.push(c.instrucciones_extra)
+    return L.join('\n')
+  } catch (e) { console.error('traerConfigNegocio', e); return '' }
+}
+
+// ── Datos del negocio (precios + stock) ──────────────────────────────────
+async function traerDatosNegocio() {
+  if (!SB_URL || !SB_KEY) return ''
+  try {
+    const inCats = `(${CATEGORIAS_PUBLICAS.join(',')})`
+    const [precios, stock] = await Promise.all([
+      sbGet(`precios?select=nombre,categoria,precio_minorista&precio_minorista=not.is.null&categoria=in.${inCats}&order=categoria,nombre`, sbHeaders()),
+      sbGet('stock_actual?select=tipo,kg_disponible', sbHeaders()),
+    ])
+    const listaPrecios = (precios || [])
+      .filter(p => p.nombre && Number(p.precio_minorista) > 0)
+      .map(p => `- ${p.nombre.trim()}: ${formatearPesos(p.precio_minorista)}`).join('\n')
+    const lineasStock = (stock || [])
+      .filter(s => Number(s.kg_disponible) > 0)
+      .map(s => `- ${s.tipo}: ${Math.round(Number(s.kg_disponible))} kg`).join('\n')
+    let out = ''
+    if (listaPrecios) out += `PRECIOS AL PÚBLICO (por kg salvo que el nombre diga lo contrario):\n${listaPrecios}\n`
+    if (lineasStock) out += `\nSTOCK ORIENTATIVO disponible hoy:\n${lineasStock}\n`
+    return out
+  } catch (e) { console.error('traerDatosNegocio error', e); return '' }
+}
+
+// ── Cerebro de Iris (Gemini, salida estructurada) ────────────────────────
+async function responderConIris(texto, datosNegocio, infoNegocio) {
+  const fallback = { respuesta: '¡Hola! 🥩 Gracias por tu mensaje. En un ratito te responde alguien del equipo de Carnicerías Fabricius.', es_pedido: false, resumen_pedido: '' }
   if (!GEMINI_KEY) return fallback
 
-  const systemText = datosNegocio
-    ? `${PROMPT_BASE}\n\n=== DATOS DEL NEGOCIO (usar SOLO esto para precios/stock) ===\n${datosNegocio}`
-    : `${PROMPT_BASE}\n\n(No tengo la lista de precios cargada en este momento: para precios/stock puntuales, derivá al equipo con amabilidad.)`
+  let systemText = PROMPT_BASE
+  if (infoNegocio) systemText += `\n\n=== INFORMACIÓN DEL NEGOCIO (horarios/dirección/pagos/envíos) ===\n${infoNegocio}`
+  systemText += datosNegocio
+    ? `\n\n=== DATOS DEL NEGOCIO (usar SOLO esto para precios/stock) ===\n${datosNegocio}`
+    : `\n\n(No tengo la lista de precios cargada ahora: para precios/stock puntuales, derivá al equipo con amabilidad.)`
 
   try {
     const ctrl = new AbortController()
@@ -184,17 +260,11 @@ async function responderConIris(texto, datosNegocio) {
     let r
     try {
       r = await fetch(`${GEMINI_URL}?key=${GEMINI_KEY}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ role: 'user', parts: [{ text: texto }] }],
           systemInstruction: { parts: [{ text: systemText }] },
-          generationConfig: {
-            temperature: 0.4,
-            maxOutputTokens: 600,
-            responseMimeType: 'application/json',
-            responseSchema: SCHEMA_RESPUESTA,
-          },
+          generationConfig: { temperature: 0.4, maxOutputTokens: 600, responseMimeType: 'application/json', responseSchema: SCHEMA_RESPUESTA },
         }),
         signal: ctrl.signal,
       })
@@ -210,34 +280,19 @@ async function responderConIris(texto, datosNegocio) {
       es_pedido: parsed.es_pedido === true,
       resumen_pedido: (parsed.resumen_pedido || '').trim(),
     }
-  } catch (e) {
-    console.error('Gemini WA error', e)
-    return fallback
-  }
+  } catch (e) { console.error('Gemini WA error', e); return fallback }
 }
 
-// ── Registro del pedido en la bandeja (Supabase) ─────────────────────────
+// ── Registro del pedido + aviso al dueño ─────────────────────────────────
 async function registrarPedido({ telefono, nombreContacto, mensaje, resumen }) {
   if (!SB_URL || !SB_KEY) return
   const r = await fetch(`${SB_URL}/rest/v1/pedidos_whatsapp`, {
-    method: 'POST',
-    headers: {
-      apikey: SB_KEY,
-      Authorization: `Bearer ${SB_KEY}`,
-      'Content-Type': 'application/json',
-      Prefer: 'return=minimal',
-    },
-    body: JSON.stringify({
-      telefono,
-      nombre_contacto: nombreContacto,
-      mensaje_cliente: mensaje,
-      resumen_pedido: resumen || null,
-    }),
+    method: 'POST', headers: sbHeaders({ Prefer: 'return=minimal' }),
+    body: JSON.stringify({ telefono, nombre_contacto: nombreContacto, mensaje_cliente: mensaje, resumen_pedido: resumen || null }),
   })
   if (!r.ok) console.error('Registrar pedido WA', r.status, await r.text().catch(() => ''))
 }
 
-// ── Aviso al dueño por WhatsApp ──────────────────────────────────────────
 async function avisarAlDueno(phoneId, { nombreContacto, telefono, resumen, mensaje }) {
   if (!AVISOS_TO) return
   const quien = nombreContacto ? `${nombreContacto} (${telefono})` : telefono
@@ -245,31 +300,23 @@ async function avisarAlDueno(phoneId, { nombreContacto, telefono, resumen, mensa
   await enviarWhatsApp(phoneId, AVISOS_TO, aviso)
 }
 
-// ── Envío por la Cloud API de Meta ───────────────────────────────────────
-// Argentina: WhatsApp ENTREGA el número entrante con un 9 tras el código de
-// país (549XXXXXXXXXX), pero la Cloud API solo ENVÍA si se le quita ese 9
-// (54XXXXXXXXXX). Sin esto el envío rebota con (#131030) "destinatario no
-// permitido / inválido". Solo afecta a números argentinos (código 54).
+// ── Envío por la Cloud API ───────────────────────────────────────────────
+// Argentina: WhatsApp ENTREGA el número con un 9 tras el código de país
+// (549...), pero la API solo ENVÍA si se le quita (54...). Sin esto rebota
+// con (#131030). Solo afecta a números argentinos.
 function normalizarDestinoAR(numero) {
   return String(numero || '').replace(/^549(\d+)$/, '54$1')
 }
-
 async function enviarWhatsApp(phoneId, to, texto) {
   const destino = normalizarDestinoAR(to)
   const r = await fetch(`https://graph.facebook.com/v21.0/${phoneId}/messages`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${WA_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      messaging_product: 'whatsapp',
-      to: destino,
-      type: 'text',
-      text: { body: String(texto).slice(0, 4000) },
-    }),
+    body: JSON.stringify({ messaging_product: 'whatsapp', to: destino, type: 'text', text: { body: String(texto).slice(0, 4000) } }),
   })
   if (!r.ok) console.error('Envío WhatsApp', r.status, await r.text().catch(() => ''))
 }
 
-// Formatea un número como pesos argentinos ($ 12.345).
 function formatearPesos(n) {
   const v = Math.round(Number(n) || 0)
   return '$ ' + v.toLocaleString('es-AR')
