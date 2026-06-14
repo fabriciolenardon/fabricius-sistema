@@ -39,7 +39,7 @@ export default function Whatsapp() {
       {/* Sub-pestañas */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 16, borderBottom: '1px solid var(--border)', paddingBottom: 0 }}>
         <TabBtn activo={tab === 'conversaciones'} onClick={() => cambiar('conversaciones')} icon="🗨️" label="Conversaciones" badge={noLeidos} color="var(--blue)" />
-        <TabBtn activo={tab === 'pedidos'} onClick={() => cambiar('pedidos')} icon="📥" label="Pedidos" badge={pedidosNuevos} color="var(--green)" />
+        <TabBtn activo={tab === 'pedidos'} onClick={() => cambiar('pedidos')} icon="📥" label="Pedidos minoristas" badge={pedidosNuevos} color="var(--green)" />
       </div>
 
       {tab === 'conversaciones' ? <ConversacionesWhatsapp /> : <PedidosWhatsapp />}

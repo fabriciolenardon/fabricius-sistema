@@ -19,7 +19,7 @@ const navItems = [
   { to: '/admin/precios',     icon: '💲', label: 'Precios' },
   { to: '/admin/etiquetas',   icon: '🏷️', label: 'Etiquetas' },
   { to: '/admin/clientes',    icon: '👥', label: 'Clientes' },
-  { to: '/admin/pedidos',     icon: '📥', label: 'Pedidos' },
+  { to: '/admin/pedidos',     icon: '📥', label: 'Pedidos Mayoristas' },
   { to: '/admin/whatsapp', icon: '💬', label: 'WhatsApp' },
   { to: '/admin/franquicias', icon: '🏪', label: 'Franquicias' },
   { to: '/admin/cheques',     icon: '📄', label: 'Cheques' },
