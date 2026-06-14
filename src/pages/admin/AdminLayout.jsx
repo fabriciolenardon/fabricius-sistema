@@ -20,8 +20,7 @@ const navItems = [
   { to: '/admin/etiquetas',   icon: '🏷️', label: 'Etiquetas' },
   { to: '/admin/clientes',    icon: '👥', label: 'Clientes' },
   { to: '/admin/pedidos',     icon: '📥', label: 'Pedidos' },
-  { to: '/admin/pedidos-whatsapp', icon: '💬', label: 'Pedidos WA' },
-  { to: '/admin/conversaciones', icon: '🗨️', label: 'Chats WA' },
+  { to: '/admin/whatsapp', icon: '💬', label: 'WhatsApp' },
   { to: '/admin/franquicias', icon: '🏪', label: 'Franquicias' },
   { to: '/admin/cheques',     icon: '📄', label: 'Cheques' },
   { to: '/admin/sueldos',     icon: '💰', label: 'Sueldos' },
@@ -285,11 +284,8 @@ function MenuMobile({ onClose }) {
                 {item.to === '/admin/pedidos' && (window.__pedidosPendientes > 0) && (
                   <span style={{ background: '#ef4444', color: '#fff', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{window.__pedidosPendientes}</span>
                 )}
-                {item.to === '/admin/pedidos-whatsapp' && (window.__pedidosWaNuevos > 0) && (
-                  <span style={{ background: 'var(--green)', color: '#000', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{window.__pedidosWaNuevos}</span>
-                )}
-                {item.to === '/admin/conversaciones' && (window.__waNoLeidos > 0) && (
-                  <span style={{ background: 'var(--blue)', color: '#fff', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{window.__waNoLeidos}</span>
+                {item.to === '/admin/whatsapp' && (((window.__pedidosWaNuevos || 0) + (window.__waNoLeidos || 0)) > 0) && (
+                  <span style={{ background: 'var(--green)', color: '#000', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{(window.__pedidosWaNuevos || 0) + (window.__waNoLeidos || 0)}</span>
                 )}
               </NavLink>
             )
@@ -371,11 +367,8 @@ export default function AdminLayout() {
                   {item.to === '/admin/pedidos' && pedidosPendientes > 0 && (
                     <span style={{ background: 'var(--red-light)', color: '#fff', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{pedidosPendientes}</span>
                   )}
-                  {item.to === '/admin/pedidos-whatsapp' && pedidosWaNuevos > 0 && (
-                    <span style={{ background: 'var(--green)', color: '#000', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{pedidosWaNuevos}</span>
-                  )}
-                  {item.to === '/admin/conversaciones' && waNoLeidos > 0 && (
-                    <span style={{ background: 'var(--blue)', color: '#fff', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{waNoLeidos}</span>
+                  {item.to === '/admin/whatsapp' && (pedidosWaNuevos + waNoLeidos) > 0 && (
+                    <span style={{ background: 'var(--green)', color: '#000', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{pedidosWaNuevos + waNoLeidos}</span>
                   )}
                   {item.to === '/admin/deposito' && flujosPendientes > 0 && (
                     <span title="Flujos de desposte pendientes" style={{ background: '#ef4444', color: '#fff', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{flujosPendientes}</span>
