@@ -461,12 +461,15 @@ function useDashboardData(refreshMs = 120000) {
     // También escucha config_sistema (promo mundial on/off en vivo).
     let timer = null
     const debounced = () => { clearTimeout(timer); timer = setTimeout(cargar, 1500) }
-    const canal = supabase.channel('dashboard-ejecutivo-live')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'ventas_minoristas' }, debounced)
-      // Despachos mayoristas: cada remito emitido entra al ticker en vivo
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'remitos' }, debounced)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'config_sistema' }, debounced)
-      .subscribe()
+    // Cualquier cambio (alta, edición o ANULACIÓN/corrección) en las tablas que
+    // afectan el saldo recalcula el panel al instante. Usar event '*' (no solo
+    // INSERT) es clave para la AUTOCORRECCIÓN: si se anula un remito mal cargado
+    // o se elimina una compra errónea, el número se corrige EN VIVO (sin esperar
+    // el refresh de 2 min). Requiere que estas tablas estén en supabase_realtime.
+    const TABLAS_LIVE = ['ventas_minoristas', 'remitos', 'salidas_deposito', 'entradas_deposito', 'gastos', 'liquidaciones_sueldos', 'pedidos', 'config_sistema']
+    let canal = supabase.channel('dashboard-ejecutivo-live')
+    TABLAS_LIVE.forEach(t => { canal = canal.on('postgres_changes', { event: '*', schema: 'public', table: t }, debounced) })
+    canal.subscribe()
     return () => {
       clearInterval(intervalo)
       clearTimeout(timer)
