@@ -756,7 +756,7 @@ async function confirmarElaboracionSalame() {
         fecha: fechaHoyARG(),
         tipo: 'embutido',
         proveedor_nombre: 'Elaboración propia',
-        descripcion: `${nombreSal} seco finalizado — ${kgFinales.toFixed(1)} kg finales (de ${(elab.kg_elaborado || 0).toFixed(1)} kg netos · merma ${pct.toFixed(1)}%)`,
+        descripcion: `${nombreSal} seco finalizado — ${kgFinales.toFixed(1)} kg finales (de ${Number(elab.kg_elaborado || 0).toFixed(1)} kg netos · merma ${pct.toFixed(1)}%)`,
         kg: kgFinales,
         kg_real: kgFinales,
         merma_pct: 0,
@@ -1556,7 +1556,7 @@ async function confirmarDesposteCerdo() {
                 {d.tipo_animal ? ` · ${MERMAS_KILO[d.tipo_animal]?.label || d.tipo_animal}` : ''}
                 {d.modelo && d.modelo !== 'KILO' && d.modelo !== 'PIEZA_KILO' && d.modelo !== 'CERDO' ? ` · Modelo ${d.modelo}` : ''}
               </div>
-              <div style={{ fontSize: 11, color: 'var(--muted)' }}>{d.fecha} · {d.kg_media_res?.toFixed(1)} kg — {d.kg_neto?.toFixed(1)} kg neto</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>{d.fecha} · {fmtKg(d.kg_media_res)} — {fmtKg(d.kg_neto)} neto</div>
               {d.notas && <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>{d.notas}</div>}
             </div>
             <span style={{ background: d.tipo_desposte === 'piezas' ? '#2a2010' : d.tipo_desposte === 'cerdo' ? '#2a1a0a' : '#1a1a2a', color: d.tipo_desposte === 'piezas' ? 'var(--gold)' : d.tipo_desposte === 'cerdo' ? 'var(--amber)' : '#7db5ff', borderRadius: 6, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>
@@ -1745,7 +1745,7 @@ function HistorialDespostes({ despostes }) {
                   {d.tipo_desposte === 'piezas' ? '🍖 Piezas' : d.tipo_desposte === 'kilo' ? '⚖️ Por Kilo' : d.tipo_desposte === 'cerdo' ? '🐷 Cerdo' : '🔄 Pieza a Kilo'}
                   {d.modelo && d.modelo !== 'KILO' && d.modelo !== 'PIEZA_KILO' && d.modelo !== 'CERDO' ? ` · Modelo ${d.modelo}` : ''}
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--muted)' }}>{d.fecha} · {d.kg_media_res?.toFixed(1)} kg — {d.kg_neto?.toFixed(1)} kg neto</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>{d.fecha} · {fmtKg(d.kg_media_res)} — {fmtKg(d.kg_neto)} neto</div>
                 {d.notas && <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>{d.notas}</div>}
               </div>
               <span style={{ background: d.tipo_desposte === 'piezas' ? '#2a2010' : d.tipo_desposte === 'cerdo' ? '#2a1a0a' : '#1a1a2a', color: d.tipo_desposte === 'piezas' ? 'var(--gold)' : d.tipo_desposte === 'cerdo' ? 'var(--amber)' : '#7db5ff', borderRadius: 6, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>
@@ -1784,8 +1784,8 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, loading }) {
                   {e.tipo === 'salame' ? '🥩 Salame' : '🌭'} {e.tipo === 'embutido' ? e.tipo_embutido?.replace(/_/g, ' ').toUpperCase() : (e.tipo_embutido?.replace(/_/g, ' ').toUpperCase() || '')}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                  {e.fecha}{e.created_at ? ` · ${fmtHora(e.created_at)}` : ''} · {(e.kg_carne_cerdo || 0).toFixed(1)} kg cerdo + {(e.kg_carne_bovina || 0).toFixed(1)} kg bovino
-                  {e.kg_queso > 0 ? ` + ${e.kg_queso.toFixed(1)} kg queso` : ''}
+                  {e.fecha}{e.created_at ? ` · ${fmtHora(e.created_at)}` : ''} · {fmtKg(e.kg_carne_cerdo)} cerdo + {fmtKg(e.kg_carne_bovina)} bovino
+                  {Number(e.kg_queso) > 0 ? ` + ${fmtKg(e.kg_queso)} queso` : ''}
                 </div>
                 {Array.isArray(e.productos_finales) && e.productos_finales.length > 0 && (
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
@@ -1797,10 +1797,10 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, loading }) {
                   </div>
                 )}
                 {e.tipo === 'salame' && !e.maduracion_completa && (
-                  <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 2 }}>🔒 En proceso de secado · {(e.kg_elaborado || 0).toFixed(1)} kg netos (no suma al stock todavía)</div>
+                  <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 2 }}>🔒 En proceso de secado · {fmtKg(e.kg_elaborado)} netos (no suma al stock todavía)</div>
                 )}
                 {e.tipo === 'salame' && e.maduracion_completa && (
-                  <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 2 }}>✅ Secado finalizado · {(e.kg_final || 0).toFixed(1)} kg finales al stock{e.kg_elaborado > 0 ? ` · merma ${(((e.kg_final || 0) / e.kg_elaborado - 1) * 100).toFixed(1)}%` : ''}</div>
+                  <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 2 }}>✅ Secado finalizado · {fmtKg(e.kg_final)} finales al stock{Number(e.kg_elaborado) > 0 ? ` · merma ${(((Number(e.kg_final) || 0) / Number(e.kg_elaborado) - 1) * 100).toFixed(1)}%` : ''}</div>
                 )}
                 {e.notas && <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>{e.notas}</div>}
               </div>
@@ -1810,8 +1810,8 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, loading }) {
                 </span>
                 <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: 'var(--gold)', marginTop: 4 }}>
                   {e.tipo === 'salame'
-                    ? (e.maduracion_completa ? `${(e.kg_final || 0).toFixed(1)} kg` : `${(e.kg_elaborado || 0).toFixed(1)} kg netos`)
-                    : `${(e.kg_final || 0).toFixed(1)} kg`}
+                    ? (e.maduracion_completa ? fmtKg(e.kg_final) : `${fmtKg(e.kg_elaborado)} netos`)
+                    : fmtKg(e.kg_final)}
                 </div>
               </div>
             </div>
