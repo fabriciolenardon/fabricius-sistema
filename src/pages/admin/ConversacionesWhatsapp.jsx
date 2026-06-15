@@ -20,7 +20,8 @@ function fmtTelefono(wa) {
   return d ? '+' + d : ''
 }
 const nombreUtil = n => !!(n && n.trim().length >= 2 && /[a-zA-ZÀ-ÿ]/.test(n))
-const displayNombre = c => nombreUtil(c?.nombre) ? c.nombre.trim() : fmtTelefono(c?.telefono)
+// El ALIAS (que el admin pone a mano) manda sobre el nombre de perfil de WhatsApp.
+const displayNombre = c => (c?.alias && c.alias.trim()) || (nombreUtil(c?.nombre) ? c.nombre.trim() : fmtTelefono(c?.telefono))
 
 const CAMPOS_CONFIG = [
   { clave: 'horarios', label: '🕐 Horarios', ph: 'Ej: Lun a Sáb de 8 a 13 y 17 a 21. Dom cerrado.' },
@@ -112,6 +113,17 @@ export default function ConversacionesWhatsapp() {
     setContactos(cs => cs.map(c => c.telefono === sel ? { ...c, iris_pausada: nuevo } : c))
   }
 
+  // Alias interno: el nombre que vos le ponés al contacto (manda sobre el perfil
+  // de WhatsApp). El webhook nunca lo pisa. Vacío = borra el alias.
+  async function editarAlias() {
+    if (!sel) return
+    const a = prompt('Alias para este contacto (el nombre que querés verle acá, ej "Cliente sorteo 89"):', contactoSel?.alias || '')
+    if (a === null) return
+    const alias = a.trim() || null
+    await supabase.from('wa_contactos').update({ alias }).eq('telefono', sel)
+    setContactos(cs => cs.map(c => c.telefono === sel ? { ...c, alias } : c))
+  }
+
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 820
   const mostrarHilo = !isMobile || !!sel
 
@@ -165,7 +177,10 @@ export default function ConversacionesWhatsapp() {
                 <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, background: 'var(--surface2)' }}>
                   {isMobile && <button onClick={() => setSel(null)} style={{ background: 'none', border: 'none', color: 'var(--text)', fontSize: 18, cursor: 'pointer' }}>←</button>}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{nombreUtil(contactoSel?.nombre) ? contactoSel.nombre.trim() : 'Sin nombre'}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                      <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(contactoSel?.alias && contactoSel.alias.trim()) || (nombreUtil(contactoSel?.nombre) ? contactoSel.nombre.trim() : 'Sin nombre')}</span>
+                      <button onClick={editarAlias} title="Poner / editar alias (nombre interno)" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, padding: 0, lineHeight: 1, flexShrink: 0 }}>✏️</button>
+                    </div>
                     <div style={{ fontSize: 11, color: 'var(--muted)', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                       <a href={`https://wa.me/${soloDigitos(sel)}`} target="_blank" rel="noreferrer" style={{ color: 'var(--green)', textDecoration: 'none', fontWeight: 600 }}>📱 {fmtTelefono(sel)}</a>
                       <span style={{ color: contactoSel?.iris_pausada ? 'var(--amber)' : 'var(--green)' }}>
