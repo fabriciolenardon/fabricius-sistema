@@ -7,6 +7,7 @@ import { bucketDePiezaBovina } from '../../lib/modelosDesposte'
 import { cargarCajasDisponibles, crearCajasIngreso, venderCaja, revertirVentaCaja, CATEGORIA_A_TIPO_CAJA } from '../../lib/cajasStock'
 import { fmtPrecio, fmtKg, parseNumero } from '../../lib/formatos'
 import { imprimirHTML } from '../../lib/imprimir'
+import { recomputarSaldoCliente } from '../../lib/ctaCorriente'
 import { getCampoPrecio } from '../../lib/listasPrecios'
 import CuentaCorrienteProveedor from './CuentaCorrienteProveedor'
 import { agregarMovimiento, eliminarMovimiento, registrarCompraDesdeEntrada, revertirCompraDeEntrada } from '../../lib/ctaProveedores'
@@ -3143,14 +3144,13 @@ for (const item of items) {
     // saldo. (Antes se cargaba la compra siempre → el cliente "debía" algo que
     // ya había pagado.)
     if (clienteId && form.cobro === 'cta_cte') {
-      const { data: clienteActual } = await supabase.from('clientes').select('saldo').eq('id', clienteId).single()
-      const nuevoSaldo = (clienteActual?.saldo || 0) + total
       await supabase.from('movimientos_ctacte').insert({
         cliente_id: clienteId, fecha: form.fecha, tipo: 'compra',
         descripcion: `Remito N° ${String(remitoData?.numero || '').padStart(5, '0')} — ${items.map(i => i.descripcion).join(', ')}`,
-        debe: total, haber: 0, saldo: nuevoSaldo, remito_id: remitoData?.id || null
+        debe: total, haber: 0, saldo: 0, remito_id: remitoData?.id || null
       })
-      await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', clienteId)
+      // El saldo (del movimiento y del cliente) lo fija el recálculo desde el ledger.
+      await recomputarSaldoCliente(clienteId)
     }
 
     showAlert({ type: 'success', msg: '✅ Despacho registrado — Stock descontado — Remito generado' })
@@ -3631,17 +3631,11 @@ export function RemitosTab({ remitoActual }) {
       .lte('created_at', remito.created_at)
   }
   if (remito.cliente_id) {
-    // Revertir del saldo SOLO lo que este remito realmente aplicó al ledger
-    // (Σdebe − Σhaber de sus movimientos). Un remito pagado al contado no tiene
-    // movimiento → netoLedger = 0 → no afecta el saldo. Así nunca se descuenta
-    // de más (antes restaba el total fijo aunque no hubiera generado deuda).
-    const { data: movsRemito } = await supabase.from('movimientos_ctacte').select('debe, haber').eq('remito_id', remito.id)
-    const netoLedger = (movsRemito || []).reduce((s, m) => s + (Number(m.debe) || 0) - (Number(m.haber) || 0), 0)
-    if (netoLedger !== 0) {
-      const { data: clienteActual } = await supabase.from('clientes').select('saldo').eq('id', remito.cliente_id).single()
-      await supabase.from('clientes').update({ saldo: (clienteActual?.saldo || 0) - netoLedger }).eq('id', remito.cliente_id)
-    }
+    // Borramos el movimiento del remito y recalculamos el saldo desde el ledger.
+    // Un remito pagado al contado no tiene movimiento → el recálculo da igual y no
+    // toca el saldo. (Antes se restaba a mano, frágil ante numeric=string.)
     await supabase.from('movimientos_ctacte').delete().eq('remito_id', remito.id)
+    await recomputarSaldoCliente(remito.cliente_id)
   }
   // Revertir cajas individuales vendidas en este remito (vuelven a 'disponible')
   const itemsCajas = (remito.items || []).filter(it => it.caja_id)
@@ -3773,19 +3767,18 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
       if (movs) {
         const upd = {}
         if (diferencia !== 0) {
-          upd.debe = (movs.debe || 0) + diferencia
-          upd.saldo = (movs.saldo || 0) + diferencia
+          // El debe de un remito a cuenta corriente = su total nuevo (no sumar la
+          // diferencia sobre el valor viejo: las columnas numeric pueden venir como
+          // string y concatenar). El saldo lo recalcula recomputarSaldoCliente.
+          upd.debe = nuevoTotal
           upd.descripcion = `Remito N° ${String(editando.numero || '').padStart(5, '0')} — ${itemsEdit.map(i => i.descripcion).join(', ')} ✏️ Editado`
         }
         if (fechaCambio) upd.fecha = fechaEdit
         await supabase.from('movimientos_ctacte').update(upd).eq('id', movs.id)
-        // El saldo del cliente solo se ajusta si el remito tiene movimiento de
-        // cuenta corriente (fue a crédito). Los remitos pagados al contado no
-        // tienen movimiento, así que editar su total NO debe tocar el saldo.
-        if (diferencia !== 0) {
-          const { data: clienteActual } = await supabase.from('clientes').select('saldo').eq('id', editando.cliente_id).single()
-          await supabase.from('clientes').update({ saldo: (clienteActual?.saldo || 0) + diferencia }).eq('id', editando.cliente_id)
-        }
+        // Recalcular el saldo del cliente y los acumulados desde el ledger (esto
+        // arregla además los movimientos POSTERIORES, que antes quedaban stale al
+        // editar un remito que no era el último).
+        if (diferencia !== 0) await recomputarSaldoCliente(editando.cliente_id)
       }
     }
 

@@ -6,6 +6,7 @@ import { supabase } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
 import { parseNumero, fmtPrecio } from '../../lib/formatos'
 import { imprimirHTML } from '../../lib/imprimir'
+import { recomputarSaldoCliente } from '../../lib/ctaCorriente'
 import { getEtiquetaLista } from '../../lib/listasPrecios'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
@@ -103,9 +104,8 @@ async function seleccionar(cliente) {
     eliminado_por: eliminadoPor,
     eliminado_en: new Date().toISOString()
   }).eq('id', remito.id)
-  const nuevoSaldo = (seleccionado.saldo || 0) - remito.total
-  await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', seleccionado.id)
   await supabase.from('movimientos_ctacte').delete().eq('remito_id', remito.id)
+  const nuevoSaldo = await recomputarSaldoCliente(seleccionado.id)
   setSeleccionado(prev => ({ ...prev, saldo: nuevoSaldo }))
   setClientes(prev => prev.map(c => c.id === seleccionado.id ? { ...c, saldo: nuevoSaldo } : c))
   const { data: rems } = await supabase.from('remitos').select('*').eq('cliente_id', seleccionado.id).order('created_at', { ascending: false })
@@ -114,17 +114,9 @@ async function seleccionar(cliente) {
 async function eliminarMovimiento(mov) {
   if (!confirm(`¿Eliminar este movimiento de ${fmt(mov.debe || mov.haber)}?`)) return
   await supabase.from('movimientos_ctacte').delete().eq('id', mov.id)
-  
-  let nuevoSaldo
-  if (mov.tipo === 'compra') {
-    // Era una venta — al eliminarla el cliente debe menos
-    nuevoSaldo = (seleccionado.saldo || 0) - mov.debe
-  } else {
-    // Era un pago — al eliminarlo el cliente debe más
-    nuevoSaldo = (seleccionado.saldo || 0) + mov.haber
-  }
-  
-  await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', seleccionado.id)
+  // Recalcular el saldo desde el ledger (antes se ajustaba a mano; el caso del
+  // pago hacía `saldo + mov.haber`, que con numeric=string CONCATENA en vez de sumar).
+  const nuevoSaldo = await recomputarSaldoCliente(seleccionado.id)
   const { data: movs } = await supabase.from('movimientos_ctacte').select('*').eq('cliente_id', seleccionado.id).order('fecha', { ascending: false })
   setMovimientos(movs || [])
   setSeleccionado(prev => ({ ...prev, saldo: nuevoSaldo }))
@@ -258,7 +250,6 @@ async function eliminarMovimiento(mov) {
                 `Saldo después: ${fmt((seleccionado.saldo || 0) - importe)}`
     if (!confirm(msg)) return
 
-    const nuevoSaldo = (seleccionado.saldo || 0) - importe
     await supabase.from('movimientos_ctacte').insert({
       cliente_id: seleccionado.id,
       fecha: pago.fecha,
@@ -266,9 +257,9 @@ async function eliminarMovimiento(mov) {
       descripcion: `Pago — ${pago.forma}${pago.notas ? ' — ' + pago.notas : ''}`,
       debe: 0,
       haber: importe,
-      saldo: nuevoSaldo
+      saldo: 0
     })
-    await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', seleccionado.id)
+    const nuevoSaldo = await recomputarSaldoCliente(seleccionado.id)
     setPago({ importe: '', forma: 'efectivo', fecha: fechaHoyARG(), notas: '' })
     setShowPago(false)
     await fetchClientes()
@@ -284,8 +275,7 @@ async function eliminarMovimiento(mov) {
                 `El saldo del cliente subirá en ${fmt(mov.haber)}.`
     if (!confirm(msg)) return
     await supabase.from('movimientos_ctacte').delete().eq('id', mov.id)
-    const nuevoSaldo = (seleccionado.saldo || 0) + Number(mov.haber || 0)
-    await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', seleccionado.id)
+    const nuevoSaldo = await recomputarSaldoCliente(seleccionado.id)
     await fetchClientes()
     await seleccionar({ ...seleccionado, saldo: nuevoSaldo })
   }
