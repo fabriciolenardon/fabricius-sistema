@@ -537,7 +537,7 @@ setElaboraciones(elaboracionesData || [])
           precio_costo_kg: p.precio_costo_kg || seleccionada.precio_kg || null,
           fecha_ingreso: fecha,
           proveedor_origen: seleccionada.proveedor_nombre || null,
-          descripcion_origen: (seleccionada.descripcion || 'Media Res') + ' (' + (seleccionada.kg_real || seleccionada.kg || 0).toFixed(1) + ' kg)',
+          descripcion_origen: (seleccionada.descripcion || 'Media Res') + ' (' + (Number(seleccionada.kg_real) || Number(seleccionada.kg) || 0).toFixed(1) + ' kg)',
           modelo_desposte: modelo,
           estado: 'disponible',
         }))
@@ -1268,7 +1268,7 @@ async function confirmarDesposteCerdo() {
               <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.fecha} · {e.proveedor_nombre}</div>
               {e.precio_kg > 0 && <div style={{ fontSize: 11, color: 'var(--amber)' }}>{fmtPrecio(e.precio_kg)}/kg</div>}
             </div>
-            <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--amber)' }}>{(e.kg_real || e.kg || 0).toFixed(1)} kg</div>
+            <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--amber)' }}>{(Number(e.kg_real) || Number(e.kg) || 0).toFixed(1)} kg</div>
           </div>
         </div>
       ))}
@@ -1276,7 +1276,7 @@ async function confirmarDesposteCerdo() {
   </div>
     {caponSeleccionado && (
       <div className="card" style={{ borderColor: 'var(--amber)' }}>
-        <div className="card-title">🔪 Despostar capón: {caponSeleccionado.descripcion || 'Capón'} — {(caponSeleccionado.kg_real || caponSeleccionado.kg || 0).toFixed(1)} kg</div>
+        <div className="card-title">🔪 Despostar capón: {caponSeleccionado.descripcion || 'Capón'} — {(Number(caponSeleccionado.kg_real) || Number(caponSeleccionado.kg) || 0).toFixed(1)} kg</div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>Ingresá los kg de cada pieza. Los valores son editables.</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
           {[
@@ -1302,7 +1302,7 @@ async function confirmarDesposteCerdo() {
         <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', marginBottom: 14 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span style={{ fontSize: 12, color: 'var(--muted)' }}>Kg capón:</span>
-            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{(caponSeleccionado.kg_real || caponSeleccionado.kg || 0).toFixed(1)} kg</span>
+            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{(Number(caponSeleccionado.kg_real) || Number(caponSeleccionado.kg) || 0).toFixed(1)} kg</span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span style={{ fontSize: 12, color: 'var(--muted)' }}>Kg registrados:</span>
@@ -1583,8 +1583,8 @@ async function confirmarDesposteCerdo() {
                 {e.tipo === 'salame' ? '🥩 Salame' : '🌭'} {e.tipo === 'embutido' ? e.tipo_embutido?.replace(/_/g, ' ').toUpperCase() : ''}
               </div>
               <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                {e.fecha} · {(e.kg_carne_cerdo || 0).toFixed(1)} kg cerdo + {(e.kg_carne_bovina || 0).toFixed(1)} kg bovino
-                {e.kg_queso > 0 ? ` + ${e.kg_queso.toFixed(1)} kg queso` : ''}
+                {e.fecha} · {(Number(e.kg_carne_cerdo) || 0).toFixed(1)} kg cerdo + {(Number(e.kg_carne_bovina) || 0).toFixed(1)} kg bovino
+                {Number(e.kg_queso) > 0 ? ` + ${Number(e.kg_queso).toFixed(1)} kg queso` : ''}
               </div>
               {Array.isArray(e.productos_finales) && e.productos_finales.length > 0 && (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
@@ -1608,7 +1608,7 @@ async function confirmarDesposteCerdo() {
                 {e.tipo === 'salame' ? 'SALAME' : 'EMBUTIDO'}
               </span>
               <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: 'var(--gold)', marginTop: 4 }}>
-                {e.tipo === 'salame' ? `${(e.kg_elaborado || 0).toFixed(1)} kg salame` : `${(e.kg_final || 0).toFixed(1)} kg`}
+                {e.tipo === 'salame' ? `${(Number(e.kg_elaborado) || 0).toFixed(1)} kg salame` : `${(Number(e.kg_final) || 0).toFixed(1)} kg`}
               </div>
             </div>
           </div>
@@ -2653,7 +2653,7 @@ async function eliminar(entrada) {
                     {e.descripcion}
                     {e.eliminado && <span style={{ marginLeft: 6, background: '#3a1a1a', color: '#ff6b6b', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700 }}>❌ ANULADO{e.eliminado_por ? ' por ' + e.eliminado_por : ''}</span>}
                   </td>
-                  <td style={{ color: 'var(--gold)', fontWeight: 600 }}>{(e.kg_real || e.kg || 0).toFixed(1)} kg</td>
+                  <td style={{ color: 'var(--gold)', fontWeight: 600 }}>{(Number(e.kg_real) || Number(e.kg) || 0).toFixed(1)} kg</td>
                   <td style={{ color: 'var(--muted)' }}>{e.precio_kg > 0 ? '$' + Math.round(e.precio_kg).toLocaleString('es-AR') : '—'}</td>
                   <td>
                     {e.eliminado ? (
@@ -3208,7 +3208,7 @@ for (const item of items) {
           <div style={{ fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>🐄 {e.descripcion || 'Media Res'}{dupIds.has(e.id) && <TagDuplicada />}</div>
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.fecha} · {e.proveedor_nombre}</div>
         </div>
-        <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{(e.kg_real || e.kg || 0).toFixed(1)} kg</div>
+        <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{(Number(e.kg_real) || Number(e.kg) || 0).toFixed(1)} kg</div>
       </div>
     )) })()}
   </div>
@@ -3236,7 +3236,7 @@ for (const item of items) {
               <div style={{ fontWeight: 600, fontSize: 12 }}>#{pz.id} · {pz.tipo_pieza}</div>
               <div style={{ fontSize: 10, color: 'var(--muted)' }}>{pz.proveedor_origen || '—'} · MR del {pz.fecha_ingreso}{pz.modelo_desposte && ' · Mod. ' + pz.modelo_desposte}</div>
             </div>
-            <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{(pz.kg || 0).toFixed(1)} kg</div>
+            <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{(Number(pz.kg) || 0).toFixed(1)} kg</div>
           </div>
         ))}
       </div>
@@ -4832,10 +4832,10 @@ function PiezasTab() {
     disponibles: piezas.filter(p => p.estado === 'disponible').length,
     convertidas: piezas.filter(p => p.estado === 'convertida_cortes').length,
     vendidas:    piezas.filter(p => p.estado === 'vendida').length,
-    kgDisp:      piezas.filter(p => p.estado === 'disponible').reduce((s, p) => s + (p.kg || 0), 0),
-    kgConv:      piezas.filter(p => p.estado === 'convertida_cortes').reduce((s, p) => s + (p.kg || 0), 0),
-    kgVend:      piezas.filter(p => p.estado === 'vendida').reduce((s, p) => s + (p.kg || 0), 0),
-    valorVend:   piezas.filter(p => p.estado === 'vendida').reduce((s, p) => s + (p.total_venta || 0), 0),
+    kgDisp:      piezas.filter(p => p.estado === 'disponible').reduce((s, p) => s + (Number(p.kg) || 0), 0),
+    kgConv:      piezas.filter(p => p.estado === 'convertida_cortes').reduce((s, p) => s + (Number(p.kg) || 0), 0),
+    kgVend:      piezas.filter(p => p.estado === 'vendida').reduce((s, p) => s + (Number(p.kg) || 0), 0),
+    valorVend:   piezas.filter(p => p.estado === 'vendida').reduce((s, p) => s + (Number(p.total_venta) || 0), 0),
   }
 
   const card = { background: 'var(--surface2)', borderRadius: 10, padding: '12px 16px', border: '1px solid var(--border)' }
@@ -4928,7 +4928,7 @@ function PiezasTab() {
                     <tr key={p.id} style={{ opacity: disabled ? 0.65 : 1 }}>
                       <td style={{ color: 'var(--muted)', fontSize: 11 }}>#{p.id}</td>
                       <td style={{ fontWeight: 600 }}>{p.tipo_pieza}</td>
-                      <td style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 16, color: 'var(--gold)' }}>{(p.kg || 0).toFixed(1)}</td>
+                      <td style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 16, color: 'var(--gold)' }}>{(Number(p.kg) || 0).toFixed(1)}</td>
                       <td style={{ fontSize: 11 }}>
                         <div style={{ color: 'var(--text)' }}>{p.proveedor_origen || '—'}</div>
                         <div style={{ color: 'var(--muted)' }}>{p.descripcion_origen || ''}{p.modelo_desposte && ' · Mod. ' + p.modelo_desposte}</div>
