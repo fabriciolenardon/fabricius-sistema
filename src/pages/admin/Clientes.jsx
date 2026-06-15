@@ -5,6 +5,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
 import { parseNumero, fmtPrecio } from '../../lib/formatos'
+import { imprimirHTML } from '../../lib/imprimir'
 import { getEtiquetaLista } from '../../lib/listasPrecios'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
@@ -297,8 +298,7 @@ async function eliminarMovimiento(mov) {
     const domicilio = remito.domicilio || seleccionado?.domicilio || ''
     const telefono  = remito.telefono  || seleccionado?.telefono  || ''
     const localidad = remito.localidad || seleccionado?.localidad || ''
-    const win = window.open('', '_blank')
-    win.document.write(`
+    const html = `
       <html><head><title>Remito N° ${remito.numero}</title>
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -367,10 +367,9 @@ async function eliminarMovimiento(mov) {
         </table>
         <div class="total-row"><div class="total-box">TOTAL: $${Math.round(remito.total).toLocaleString('es-AR')}</div></div>
         <div class="firma">Firma y aclaración: ________________________________</div>
-        <script>window.onload = () => { window.print(); }</script>
       </body></html>
-    `)
-    win.document.close()
+    `
+    imprimirHTML(html)
   }
 
   const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))

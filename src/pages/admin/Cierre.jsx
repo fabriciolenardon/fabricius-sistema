@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
 import { fmtPrecio, fmtKg as fmtKgAR, parseNumero } from '../../lib/formatos'
+import { imprimirHTML } from '../../lib/imprimir'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 import { calcularCierreAuto, cierreAutoAFila, lunesDeLaSemana, domingoDeLaSemana } from '../../lib/cierreAuto'
 
@@ -43,8 +44,7 @@ function exportarExcel(semanasMes, totMes, mesLabel) {
 }
 
 function imprimirCierreMensual(semanasMes, totMes, mesLabel) {
-  const win = window.open('', '_blank')
-  win.document.write(`
+  const html = `
     <html><head><title>Cierre Mensual — ${mesLabel}</title>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -115,10 +115,9 @@ function imprimirCierreMensual(semanasMes, totMes, mesLabel) {
           <div class="socio-valor" style="color:#1a3a7a">${fmtPrecio(totMes.ganancia * 0.15)}</div>
         </div>
       </div>
-      <script>window.onload = () => { window.print(); }</script>
     </body></html>
-  `)
-  win.document.close()
+  `
+  imprimirHTML(html)
 }
 
 // ============================================================

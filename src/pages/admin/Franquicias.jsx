@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
 import { parseNumero, fmtPrecio, fmtKg } from '../../lib/formatos'
+import { imprimirHTML } from '../../lib/imprimir'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
 
@@ -63,8 +64,7 @@ export default function Franquicias() {
 
   function imprimirRemito(remito) {
     const items = remito.items || []
-    const win = window.open('', '_blank')
-    win.document.write(`
+    const html = `
       <html><head><title>Remito N° ${remito.numero}</title>
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -121,10 +121,9 @@ export default function Franquicias() {
           <div class="total-box">TOTAL: ${fmtPrecio(remito.total)}</div>
         </div>
         <div class="firma">Firma y aclaración: ________________________________</div>
-        <script>window.onload = () => { window.print(); }</script>
       </body></html>
-    `)
-    win.document.close()
+    `
+    imprimirHTML(html)
   }
 
   const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }

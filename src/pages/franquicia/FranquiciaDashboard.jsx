@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
 import { fmtPrecio, fmtKg } from '../../lib/formatos'
+import { imprimirHTML } from '../../lib/imprimir'
 function fmt(n) { return fmtPrecio(Math.abs(Number(n) || 0)) }
 
 function useClienteFranquicia() {
@@ -240,8 +241,7 @@ export function FranquiciaRemitos() {
 
   function imprimir(remito) {
     const items = remito.items || []
-    const win = window.open('', '_blank')
-    win.document.write(`
+    const html = `
       <html><head><title>Remito N° ${remito.numero}</title>
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -292,10 +292,9 @@ export function FranquiciaRemitos() {
           <div class="total-box">TOTAL: ${fmtPrecio(remito.total)}</div>
         </div>
         <div class="firma">Firma y aclaración: ________________________________</div>
-        <script>window.onload = () => { window.print(); }</script>
       </body></html>
-    `)
-    win.document.close()
+    `
+    imprimirHTML(html)
   }
 
   // Paginación del historial completo de remitos
