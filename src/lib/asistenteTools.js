@@ -343,6 +343,19 @@ El saldo del cliente se actualiza AUTOMÁTICAMENTE por un trigger en la base de 
     }
   },
   {
+    name: 'buscar_producto_vendido',
+    description: 'Cuánto se vendió de un PRODUCTO en un rango de fechas, sumando los DOS canales: CAJA (mostrador/minorista) y MAYORISTA (remitos). Devuelve kg e importe de cada canal, el total general y el desglose de los remitos mayoristas. Usar para "cuánto matambre de cerdo vendimos del 8 al 14", "cuánto se vendió de costilla por caja y por remito", "total de tal producto esta semana".',
+    parameters: {
+      type: 'object',
+      properties: {
+        producto: { type: 'string', description: 'Nombre del producto (ej "matambre de cerdo", "costilla de ternera", "chorizo"). OBLIGATORIO.' },
+        desde: { type: 'string', description: 'Fecha inicio YYYY-MM-DD. OBLIGATORIO.' },
+        hasta: { type: 'string', description: 'Fecha fin YYYY-MM-DD. OBLIGATORIO.' }
+      },
+      required: ['producto', 'desde', 'hasta']
+    }
+  },
+  {
     name: 'consultar_compras_tipo',
     description: 'Total de COMPRAS de mercadería ingresada al depósito, por tipo y rango de fechas: cantidad de UNIDADES, total en KILOS e importe gastado. Usar para "cuántas medias reses compramos la semana pasada", "cuántos kilos de cerdo entraron este mes", "qué compramos de pollo entre tal y tal fecha". Responder el total en número (unidades) y en kilos.',
     parameters: {
@@ -961,6 +974,56 @@ export async function ejecutarFuncion(nombre, args) {
           return `• ${formatearFecha(rm.fecha)} · #${rm.numero} · ${rm.cliente_nombre} · ${formatearPesos(rm.total)} · ${rm.cobro === 'cta_cte' ? 'CTA CTE' : 'pagado'}${det ? '\n' + det : ''}`
         }).join('\n\n')
         return { resultado: `📋 Remitos ${formatearFecha(args.desde)} → ${formatearFecha(args.hasta)} (${data.length}):\n\n${bloques}\n\n📊 TOTAL FACTURADO: ${formatearPesos(sumar(data, 'total'))}` }
+      }
+
+      case 'buscar_producto_vendido': {
+        if (!args?.producto || !args?.desde || !args?.hasta) return { resultado: 'Necesito el producto y el rango de fechas (desde y hasta).' }
+        const sinTilde = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+        const STOP = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'y', 'con', 'x', 'a', 'al'])
+        const tokens = sinTilde(args.producto).split(/\s+/).filter(w => w && !STOP.has(w))
+        if (!tokens.length) return { resultado: 'Decime un nombre de producto para buscar.' }
+        const matchProd = desc => { const d = sinTilde(desc); return tokens.every(t => d.includes(t)) }
+
+        const [remitosR, cajaR] = await Promise.all([
+          supabase.from('remitos').select('numero, fecha, cliente_nombre, items').eq('eliminado', false).gte('fecha', args.desde).lte('fecha', args.hasta).order('fecha', { ascending: true }),
+          supabase.from('ventas_minoristas').select('items').eq('origen', 'caja').gte('fecha', args.desde).lte('fecha', args.hasta),
+        ])
+        if (remitosR.error) throw remitosR.error
+        if (cajaR.error) throw cajaR.error
+
+        let mayKg = 0, mayImp = 0, mayN = 0
+        const lineasMay = []
+        ;(remitosR.data || []).forEach(rm => {
+          const its = Array.isArray(rm.items) ? rm.items : []
+          const m = its.filter(it => matchProd(it.descripcion))
+          if (!m.length) return
+          mayN++
+          m.forEach(it => {
+            const kg = Number(it.kg) || 0, imp = Number(it.importe) || 0
+            mayKg += kg; mayImp += imp
+            lineasMay.push(`  • ${formatearFecha(rm.fecha)} · #${rm.numero} · ${rm.cliente_nombre}: ${kg.toLocaleString('es-AR')} kg · ${formatearPesos(imp)}`)
+          })
+        })
+
+        let cajaKg = 0, cajaImp = 0, cajaN = 0
+        ;(cajaR.data || []).forEach(v => {
+          const its = Array.isArray(v.items) ? v.items : []
+          const m = its.filter(it => matchProd(it.descripcion))
+          if (!m.length) return
+          cajaN++
+          m.forEach(it => { cajaKg += Number(it.kg) || 0; cajaImp += Number(it.importe) || 0 })
+        })
+
+        if (lineasMay.length === 0 && cajaN === 0) {
+          return { resultado: `No encontré ventas de "${args.producto}" entre ${formatearFecha(args.desde)} y ${formatearFecha(args.hasta)} (ni por caja ni por remito).` }
+        }
+        const totKg = mayKg + cajaKg, totImp = mayImp + cajaImp
+        let out = `🔎 Ventas de "${args.producto}" (${formatearFecha(args.desde)} → ${formatearFecha(args.hasta)}):\n\n`
+        out += `🚚 MAYORISTA (remitos): ${mayKg.toLocaleString('es-AR')} kg · ${formatearPesos(mayImp)} · ${mayN} remito${mayN === 1 ? '' : 's'}\n`
+        if (lineasMay.length) out += lineasMay.join('\n') + '\n'
+        out += `\n🛒 CAJA (mostrador): ${cajaKg.toLocaleString('es-AR')} kg · ${formatearPesos(cajaImp)} · en ${cajaN} venta${cajaN === 1 ? '' : 's'}\n`
+        out += `\n📊 TOTAL (las dos vías): ${totKg.toLocaleString('es-AR')} kg · ${formatearPesos(totImp)}`
+        return { resultado: out }
       }
 
       case 'consultar_compras_tipo': {
