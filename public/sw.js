@@ -4,10 +4,11 @@
 // así que siempre tiene que mostrar la última versión y los datos al día.
 self.addEventListener('install', () => self.skipWaiting())
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()))
-self.addEventListener('fetch', (e) => {
-  // Passthrough a la red (sin caché). El handler existe para cumplir el
-  // requisito de instalabilidad; ante un fallo de red intenta un cache vacío.
-  e.respondWith(fetch(e.request).catch(() => caches.match(e.request)))
+self.addEventListener('fetch', () => {
+  // Passthrough TOTAL: NO interceptamos, deja que el navegador haga el fetch
+  // normal. (Antes el respondWith con fallback a un cache vacío devolvía
+  // undefined y rompía la carga de recursos → "Failed to convert to Response"
+  // y pantallas negras.) El listener existe igual para la instalabilidad PWA.
 })
 
 // ── Notificaciones push ──────────────────────────────────────
