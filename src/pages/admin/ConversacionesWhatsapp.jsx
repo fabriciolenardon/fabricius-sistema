@@ -8,6 +8,20 @@ const TZ = 'America/Argentina/Cordoba'
 const horaCorta = iso => iso ? new Intl.DateTimeFormat('es-AR', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso)) : ''
 const fechaHora = iso => iso ? new Intl.DateTimeFormat('es-AR', { timeZone: TZ, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso)).replace(',', '') : ''
 
+// ── Identificación del contacto ──
+// El telefono es el wa_id (AR: 549 + 10 dígitos). Lo mostramos legible para saber
+// con quién habla Iris y poder contactarlo. El nombre de perfil de WhatsApp a veces
+// es basura (ej "…" de 1 carácter) o no viene → en ese caso mostramos el número.
+const soloDigitos = s => String(s || '').replace(/\D/g, '')
+function fmtTelefono(wa) {
+  const d = soloDigitos(wa)
+  const m = d.match(/^54(9)?(\d{10})$/)  // AR: 9 opcional + 10 dígitos (área + número)
+  if (m) { const n = m[2]; return `+54${m[1] ? ' 9' : ''} ${n.slice(0, 4)} ${n.slice(4, 6)}-${n.slice(6)}` }
+  return d ? '+' + d : ''
+}
+const nombreUtil = n => !!(n && n.trim().length >= 2 && /[a-zA-ZÀ-ÿ]/.test(n))
+const displayNombre = c => nombreUtil(c?.nombre) ? c.nombre.trim() : fmtTelefono(c?.telefono)
+
 const CAMPOS_CONFIG = [
   { clave: 'horarios', label: '🕐 Horarios', ph: 'Ej: Lun a Sáb de 8 a 13 y 17 a 21. Dom cerrado.' },
   { clave: 'direccion', label: '📍 Dirección', ph: 'Ej: San Martín 123, Río Primero.' },
@@ -125,7 +139,7 @@ export default function ConversacionesWhatsapp() {
                 <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'var(--surface2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>{c.iris_pausada ? '🙋' : '🤖'}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.nombre || c.telefono}</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayNombre(c)}</span>
                     <span style={{ fontSize: 10, color: 'var(--muted)', flexShrink: 0 }}>{fechaHora(c.ultimo_at)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6, alignItems: 'center' }}>
@@ -151,9 +165,12 @@ export default function ConversacionesWhatsapp() {
                 <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, background: 'var(--surface2)' }}>
                   {isMobile && <button onClick={() => setSel(null)} style={{ background: 'none', border: 'none', color: 'var(--text)', fontSize: 18, cursor: 'pointer' }}>←</button>}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>{contactoSel?.nombre || sel}</div>
-                    <div style={{ fontSize: 11, color: contactoSel?.iris_pausada ? 'var(--amber)' : 'var(--green)' }}>
-                      {contactoSel?.iris_pausada ? '🙋 Lo estás atendiendo vos (Iris pausada)' : '🤖 Iris está respondiendo'}
+                    <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{nombreUtil(contactoSel?.nombre) ? contactoSel.nombre.trim() : 'Sin nombre'}</div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <a href={`https://wa.me/${soloDigitos(sel)}`} target="_blank" rel="noreferrer" style={{ color: 'var(--green)', textDecoration: 'none', fontWeight: 600 }}>📱 {fmtTelefono(sel)}</a>
+                      <span style={{ color: contactoSel?.iris_pausada ? 'var(--amber)' : 'var(--green)' }}>
+                        {contactoSel?.iris_pausada ? '🙋 Lo atendés vos (Iris pausada)' : '🤖 Iris respondiendo'}
+                      </span>
                     </div>
                   </div>
                   <button onClick={togglePausa} style={contactoSel?.iris_pausada ? btnGreen : btnSec}>
