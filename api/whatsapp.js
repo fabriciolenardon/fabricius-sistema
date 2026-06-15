@@ -114,8 +114,13 @@ export default async function handler(req, res) {
     }
 
     // Flujo normal: precios/stock + info editable → respuesta de Iris.
-    const [datosNegocio, infoNegocio] = await Promise.all([traerDatosNegocio(), traerConfigNegocio()])
-    const ia = await responderConIris(texto, datosNegocio, infoNegocio)
+    // Traemos también el HISTORIAL del chat para que Iris tenga contexto (no
+    // re-salude en cada mensaje y siga el hilo del pedido). El mensaje entrante
+    // ya quedó guardado arriba, así que es el último turno del cliente.
+    const [datosNegocio, infoNegocio, historial] = await Promise.all([
+      traerDatosNegocio(), traerConfigNegocio(), traerHistorial(from),
+    ])
+    const ia = await responderConIris(historial, texto, datosNegocio, infoNegocio)
     await enviarWhatsApp(phoneId, from, ia.respuesta)
     await guardarMensaje(from, 'out', 'iris', 'text', ia.respuesta)
 
@@ -243,10 +248,41 @@ async function traerDatosNegocio() {
   } catch (e) { console.error('traerDatosNegocio error', e); return '' }
 }
 
+// Historial del chat como `contents` de Gemini, para que Iris tenga contexto
+// (no re-salude ni pierda el hilo). Trae los últimos mensajes de texto, los
+// ordena cronológicamente, mapea cliente→'user' / Iris+humano→'model' y mergea
+// turnos consecutivos del mismo lado (Gemini espera roles alternados y arrancar
+// en 'user'). El mensaje entrante actual ya está guardado → queda de último.
+async function traerHistorial(telefono) {
+  if (!SB_URL || !SB_KEY) return null
+  try {
+    const rows = await sbGet(
+      `wa_mensajes?telefono=eq.${encodeURIComponent(telefono)}&tipo=eq.text&order=created_at.desc&limit=14&select=direccion,texto,created_at`,
+      sbHeaders()
+    )
+    const ordenados = (rows || []).reverse()
+    const contents = []
+    for (const m of ordenados) {
+      const t = (m.texto || '').trim()
+      if (!t) continue
+      const role = m.direccion === 'in' ? 'user' : 'model'
+      const last = contents[contents.length - 1]
+      if (last && last.role === role) last.parts[0].text += '\n' + t
+      else contents.push({ role, parts: [{ text: t }] })
+    }
+    while (contents.length && contents[0].role !== 'user') contents.shift()
+    return contents.length ? contents : null
+  } catch (e) { console.error('traerHistorial', e); return null }
+}
+
 // ── Cerebro de Iris (Gemini, salida estructurada) ────────────────────────
-async function responderConIris(texto, datosNegocio, infoNegocio) {
+async function responderConIris(historial, textoActual, datosNegocio, infoNegocio) {
   const fallback = { respuesta: '¡Hola! 🥩 Gracias por tu mensaje. En un ratito te responde alguien del equipo de Carnicerías Fabricius.', es_pedido: false, resumen_pedido: '' }
   if (!GEMINI_KEY) return fallback
+  // Si no hay historial (o falló), usamos solo el mensaje actual.
+  const contents = (Array.isArray(historial) && historial.length)
+    ? historial
+    : [{ role: 'user', parts: [{ text: textoActual }] }]
 
   let systemText = PROMPT_BASE
   if (infoNegocio) systemText += `\n\n=== INFORMACIÓN DEL NEGOCIO (horarios/dirección/pagos/envíos) ===\n${infoNegocio}`
@@ -262,17 +298,23 @@ async function responderConIris(texto, datosNegocio, infoNegocio) {
       r = await fetch(`${GEMINI_URL}?key=${GEMINI_KEY}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: texto }] }],
+          contents,
           systemInstruction: { parts: [{ text: systemText }] },
-          generationConfig: { temperature: 0.4, maxOutputTokens: 600, responseMimeType: 'application/json', responseSchema: SCHEMA_RESPUESTA },
+          // thinkingBudget:0 desactiva el "pensamiento" de gemini-2.5-flash. Sin
+          // esto, los tokens de thinking se comían el presupuesto de salida y en
+          // mensajes que requieren razonar (tomar un pedido) Gemini devolvía
+          // contenido VACÍO → caíamos al fallback "en un ratito te responde
+          // alguien" (bug 15/06: Iris no tomó el pedido y re-saludaba).
+          generationConfig: { temperature: 0.4, maxOutputTokens: 800, thinkingConfig: { thinkingBudget: 0 }, responseMimeType: 'application/json', responseSchema: SCHEMA_RESPUESTA },
         }),
         signal: ctrl.signal,
       })
     } finally { clearTimeout(timer) }
-    if (!r.ok) { console.error('Gemini WA', r.status); return fallback }
+    if (!r.ok) { console.error('Gemini WA', r.status, (await r.text().catch(() => '')).slice(0, 300)); return fallback }
     const data = await r.json()
-    const raw = (data.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('').trim()
-    if (!raw) return fallback
+    const cand = data.candidates?.[0]
+    const raw = (cand?.content?.parts || []).map(p => p.text || '').join('').trim()
+    if (!raw) { console.error('Gemini WA vacío — finishReason:', cand?.finishReason, 'block:', data.promptFeedback?.blockReason); return fallback }
     let parsed
     try { parsed = JSON.parse(raw) } catch { return { ...fallback, respuesta: raw } }
     return {
