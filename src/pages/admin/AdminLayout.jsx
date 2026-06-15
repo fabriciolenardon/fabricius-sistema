@@ -6,6 +6,7 @@ import { useFlujoNotificaciones } from '../../lib/useFlujoNotificaciones'
 import { fechaHoyARG } from '../../lib/fechas'
 import { fmtPrecio, fmtKg } from '../../lib/formatos'
 import BuscadorGlobal from '../../components/BuscadorGlobal'
+import CentroActividad from '../../components/CentroActividad'
 import LogoFabricius from '../../components/LogoFabricius'
 import UserDropdown from '../../components/UserDropdown'
 import CambiarPasswordModal from '../../components/CambiarPasswordModal'
@@ -386,6 +387,9 @@ export default function AdminLayout() {
 
       {/* MENÚ MOBILE DRAWER */}
       {menuAbierto && <MenuMobile onClose={() => setMenuAbierto(false)} />}
+
+      {/* Widget de actividad en vivo (conversaciones + pedidos) con notificaciones */}
+      <CentroActividad />
 
       {/* CONTENIDO */}
       <main style={{ paddingTop: 56, minHeight: '100vh' }}>
