@@ -424,6 +424,13 @@ El saldo del cliente se actualiza AUTOMÁTICAMENTE por un trigger en la base de 
     }, required: ['numero'] }
   },
   {
+    name: 'sugerir_compra',
+    description: 'ASISTENTE DE COMPRAS: sugiere qué encargar al proveedor. Toma como base lo que se COMPRÓ en los últimos N días (pedido habitual) y lo compara con el STOCK actual, para sugerir reponer ajustando por lo que quedó. Usar para "qué tengo que encargar", "qué compro esta semana", "armame el pedido", "cuánto encargo de medias".',
+    parameters: { type: 'object', properties: {
+      dias: { type: 'number', description: 'Días hacia atrás para tomar como base de consumo/pedido habitual. Default 7 (una semana).' }
+    } }
+  },
+  {
     name: 'consultar_compras_tipo',
     description: 'Total de COMPRAS de mercadería ingresada al depósito, por tipo y rango de fechas: cantidad de UNIDADES, total en KILOS e importe gastado. Usar para "cuántas medias reses compramos la semana pasada", "cuántos kilos de cerdo entraron este mes", "qué compramos de pollo entre tal y tal fecha". Responder el total en número (unidades) y en kilos.',
     parameters: {
@@ -1213,6 +1220,37 @@ export async function ejecutarFuncion(nombre, args) {
           const det = its.map(it => { const kg = Number(it.kg) || 0; return `   - ${it.descripcion}${kg ? ': ' + kg.toLocaleString('es-AR') + ' kg' : ''} · ${formatearPesos(Number(it.importe) || 0)}` }).join('\n')
           return `📄 Remito #${rm.numero}${rm.eliminado ? ' (ANULADO)' : ''}\n${formatearFecha(rm.fecha)} · ${rm.cliente_nombre} · ${rm.cobro === 'cta_cte' ? 'CTA CTE' : 'pagado'}\n${det}\nTotal: ${formatearPesos(rm.total)}` }).join('\n\n')
         return { resultado: txt }
+      }
+
+      case 'sugerir_compra': {
+        const dias = Number(args?.dias) || 7
+        const desde = fechaRelativaARG(-dias)
+        const hasta = fechaHoyARG()
+        const [comprasR, stockR] = await Promise.all([
+          supabase.from('entradas_deposito').select('tipo, cantidad, kg, kg_real').eq('eliminado', false).gte('fecha', desde).lte('fecha', hasta),
+          supabase.from('stock_actual').select('tipo, kg_disponible'),
+        ])
+        if (comprasR.error) throw comprasR.error
+        if (stockR.error) throw stockR.error
+        const stock = {}
+        ;(stockR.data || []).forEach(s => { stock[s.tipo] = Number(s.kg_disponible) || 0 })
+        const acc = {}
+        ;(comprasR.data || []).forEach(e => {
+          const t = e.tipo || 'otro'
+          if (!acc[t]) acc[t] = { unidades: 0, kg: 0 }
+          acc[t].unidades += Number(e.cantidad) || 1
+          acc[t].kg += Number(e.kg_real) > 0 ? Number(e.kg_real) : (Number(e.kg) || 0)
+        })
+        const NOMBRE = { bovino_mr: 'Media res', cerdo: 'Cerdo (capones)', pollo: 'Pollo', cajon_bovino: 'Cajones bovino', embutido: 'Embutidos' }
+        if (Object.keys(acc).length === 0) {
+          return { resultado: `No registré compras en los últimos ${dias} días, así que no tengo una base para sugerir el pedido. Si me decís tu pedido habitual (ej. 10 medias, 12 cerdos), lo comparo con el stock.` }
+        }
+        const lineas = Object.entries(acc).map(([t, v]) => {
+          const st = stock[t] || 0
+          const nom = NOMBRE[t] || t
+          return `• ${nom}: la última semana entraron ${v.unidades} u (${v.kg.toLocaleString('es-AR')} kg). Stock hoy: ${st.toLocaleString('es-AR')} kg.`
+        }).join('\n')
+        return { resultado: `🛒 BASE PARA TU PEDIDO (compras últimos ${dias} días vs stock actual):\n${lineas}\n\n💡 Criterio: reponé lo que se consumió. Si de algún tipo quedó bastante stock, encargá menos; si está en cero o bajo, encargá lo habitual o un poco más. Decime y te armo el pedido fino con las cantidades exactas.` }
       }
 
       case 'consultar_compras_tipo': {
