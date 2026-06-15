@@ -126,8 +126,11 @@ export default async function handler(req, res) {
 
     if (ia.es_pedido) {
       try {
-        await registrarPedido({ telefono: from, nombreContacto, mensaje: texto, resumen: ia.resumen_pedido })
-        await avisarAlDueno(phoneId, { nombreContacto, telefono: from, resumen: ia.resumen_pedido, mensaje: texto })
+        // registrarPedido consolida los turnos del mismo encargo en UNA fila.
+        // Solo avisamos al dueño cuando es un pedido NUEVO (no en cada refinada),
+        // así no le llega una notificación por cada mensaje del cliente.
+        const esNuevoPedido = await registrarPedido({ telefono: from, nombreContacto, mensaje: texto, resumen: ia.resumen_pedido })
+        if (esNuevoPedido) await avisarAlDueno(phoneId, { nombreContacto, telefono: from, resumen: ia.resumen_pedido, mensaje: texto })
       } catch (e) { console.error('Registro/aviso pedido WA error', e) }
     }
 
@@ -326,13 +329,42 @@ async function responderConIris(historial, textoActual, datosNegocio, infoNegoci
 }
 
 // ── Registro del pedido + aviso al dueño ─────────────────────────────────
+// Devuelve true si creó un pedido NUEVO, false si actualizó uno existente (o falló).
+// Consolidación: Iris marca es_pedido=true en cada mensaje del encargo (más ahora
+// que tiene historial), y Meta puede reintentar el webhook → antes eso creaba
+// VARIAS filas del mismo pedido. Ahora, si ya hay un pedido 'nuevo' de este
+// teléfono de hace menos de 6h, lo ACTUALIZAMOS (el último resumen manda) en vez
+// de duplicar. El estado 'nuevo' es la ventana: una vez atendido/descartado, un
+// mensaje posterior abre un pedido fresco (es otro encargo).
 async function registrarPedido({ telefono, nombreContacto, mensaje, resumen }) {
-  if (!SB_URL || !SB_KEY) return
+  if (!SB_URL || !SB_KEY) return false
+  const desde = new Date(Date.now() - 6 * 3600 * 1000).toISOString()
+  let existente = null
+  try {
+    const rows = await sbGet(
+      `pedidos_whatsapp?telefono=eq.${encodeURIComponent(telefono)}&estado=eq.nuevo&created_at=gt.${encodeURIComponent(desde)}&order=created_at.desc&limit=1&select=id`,
+      sbHeaders()
+    )
+    existente = rows?.[0] || null
+  } catch (e) { console.error('buscar pedido WA existente', e) }
+
+  if (existente?.id) {
+    const upd = { mensaje_cliente: mensaje, resumen_pedido: resumen || null }
+    if (nombreContacto) upd.nombre_contacto = nombreContacto
+    const r = await fetch(`${SB_URL}/rest/v1/pedidos_whatsapp?id=eq.${existente.id}`, {
+      method: 'PATCH', headers: sbHeaders({ Prefer: 'return=minimal' }),
+      body: JSON.stringify(upd),
+    })
+    if (!r.ok) console.error('Actualizar pedido WA', r.status, await r.text().catch(() => ''))
+    return false
+  }
+
   const r = await fetch(`${SB_URL}/rest/v1/pedidos_whatsapp`, {
     method: 'POST', headers: sbHeaders({ Prefer: 'return=minimal' }),
     body: JSON.stringify({ telefono, nombre_contacto: nombreContacto, mensaje_cliente: mensaje, resumen_pedido: resumen || null }),
   })
-  if (!r.ok) console.error('Registrar pedido WA', r.status, await r.text().catch(() => ''))
+  if (!r.ok) { console.error('Registrar pedido WA', r.status, await r.text().catch(() => '')); return false }
+  return true
 }
 
 async function avisarAlDueno(phoneId, { nombreContacto, telefono, resumen, mensaje }) {
