@@ -106,6 +106,20 @@ export default async function handler(req, res) {
     // Si un humano tomó el control de este chat, Iris no responde.
     if (pausada) return res.status(200).end()
 
+    // Sorteo vigente: si preguntan por el sorteo/rifa/comprar número, derivamos
+    // al encargado. El contacto vive en wa_config.sorteo_contacto → cuando el
+    // sorteo termina, se borra esa clave y Iris vuelve a responder normal (sin
+    // tocar código). Va ANTES del pago: aunque mencionen pagar, es tema de Ariel.
+    if (esMensajeSorteo(texto)) {
+      const sorteo = await getConfigValor('sorteo_contacto')
+      if (sorteo) {
+        const msg = `¡Hola! 🎉 Para el sorteo de la media res escribile directamente a ${sorteo}, que es quien lo maneja y te pasa todos los datos para participar. ¡Mucha suerte! 🥩`
+        await enviarWhatsApp(phoneId, from, msg)
+        await guardarMensaje(from, 'out', 'iris', 'text', msg)
+        return res.status(200).end()
+      }
+    }
+
     // Aviso de pago/transferencia por texto → acuse y derivar (no flujo normal).
     if (esMensajePago(texto)) {
       await enviarWhatsApp(phoneId, from, ACUSE_PAGO)
@@ -154,6 +168,16 @@ function esMensajePago(texto) {
   return /(transfer|deposit|comprobante|ya pague|ya abone|ya pagu|\bsena\b|te pase|le pase|abone el|pague el|hice el deposito|mando el comp|paso el comp)/.test(t)
 }
 
+// Detecta consultas sobre el sorteo/rifa (para derivar al encargado). 'sorteo'
+// y 'rifa' son inequívocos; "comprar/sacar/participar/anotar + número" es la
+// otra forma típica. Evitamos el 'numero' suelto (muy ambiguo).
+function esMensajeSorteo(texto) {
+  const t = String(texto).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  return /(\bsorte\w*|\brif[ao]\w*)/.test(t)
+    || /(comprar|sacar|saco|saca|participar|participo|anotar|anoto|reservar).{0,15}(numero|numeros|nro|numerito|numeritos)/.test(t)
+    || /(numero|numeros|nro).{0,15}(sorteo|rifa|media res)/.test(t)
+}
+
 // ── Supabase REST (service_role → saltea RLS) ────────────────────────────
 function sbHeaders(extra = {}) {
   return { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, 'Content-Type': 'application/json', ...extra }
@@ -162,6 +186,15 @@ async function sbGet(path, headers) {
   const r = await fetch(`${SB_URL}/rest/v1/${path}`, { headers })
   if (!r.ok) throw new Error(`Supabase GET ${r.status} ${path}`)
   return r.json()
+}
+
+// Lee una sola clave de wa_config (string vacío si no existe o falla).
+async function getConfigValor(clave) {
+  if (!SB_URL || !SB_KEY) return ''
+  try {
+    const rows = await sbGet(`wa_config?clave=eq.${encodeURIComponent(clave)}&select=valor`, sbHeaders())
+    return (rows?.[0]?.valor || '').trim()
+  } catch (e) { console.error('getConfigValor', e); return '' }
 }
 
 async function getContacto(telefono) {
