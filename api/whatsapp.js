@@ -106,18 +106,17 @@ export default async function handler(req, res) {
     // Si un humano tomó el control de este chat, Iris no responde.
     if (pausada) return res.status(200).end()
 
-    // Sorteo vigente: si preguntan por el sorteo/rifa/comprar número, derivamos
-    // al encargado. El contacto vive en wa_config.sorteo_contacto → cuando el
-    // sorteo termina, se borra esa clave y Iris vuelve a responder normal (sin
-    // tocar código). Va ANTES del pago: aunque mencionen pagar, es tema de Ariel.
-    if (esMensajeSorteo(texto)) {
-      const sorteo = await getConfigValor('sorteo_contacto')
-      if (sorteo) {
-        const msg = `¡Hola! 🎉 Para el sorteo de la media res escribile directamente a ${sorteo}, que es quien lo maneja y te pasa todos los datos para participar. ¡Mucha suerte! 🥩`
-        await enviarWhatsApp(phoneId, from, msg)
-        await guardarMensaje(from, 'out', 'iris', 'text', msg)
-        return res.status(200).end()
-      }
+    // Sorteo vigente (wa_config.sorteo_contacto). Cuando está cargado: (1) las
+    // consultas EXPLÍCITAS del sorteo/rifa/comprar número se derivan acá directo al
+    // encargado; (2) además le pasamos a Iris que hay un sorteo, para que entienda
+    // frases ambiguas ("el número 89", "guardame") y derive sola. Cuando el sorteo
+    // termina se borra esa clave y todo vuelve a la normalidad, sin tocar código.
+    const sorteo = await getConfigValor('sorteo_contacto')
+    if (sorteo && esMensajeSorteo(texto)) {  // va ANTES del pago: aunque mencionen pagar, es tema del encargado
+      const msg = `¡Hola! 🎉 Para el sorteo de la media res escribile directamente a ${sorteo}, que es quien lo maneja y te pasa todos los datos para participar. ¡Mucha suerte! 🥩`
+      await enviarWhatsApp(phoneId, from, msg)
+      await guardarMensaje(from, 'out', 'iris', 'text', msg)
+      return res.status(200).end()
     }
 
     // Aviso de pago/transferencia por texto → acuse y derivar (no flujo normal).
@@ -134,7 +133,7 @@ export default async function handler(req, res) {
     const [datosNegocio, infoNegocio, historial] = await Promise.all([
       traerDatosNegocio(), traerConfigNegocio(), traerHistorial(from),
     ])
-    const ia = await responderConIris(historial, texto, datosNegocio, infoNegocio)
+    const ia = await responderConIris(historial, texto, datosNegocio, infoNegocio, sorteo)
     await enviarWhatsApp(phoneId, from, ia.respuesta)
     await guardarMensaje(from, 'out', 'iris', 'text', ia.respuesta)
 
@@ -174,8 +173,9 @@ function esMensajePago(texto) {
 function esMensajeSorteo(texto) {
   const t = String(texto).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
   return /(\bsorte\w*|\brif[ao]\w*)/.test(t)
-    || /(comprar|sacar|saco|saca|participar|participo|anotar|anoto|reservar).{0,15}(numero|numeros|nro|numerito|numeritos)/.test(t)
+    || /(comprar|sacar|saco|saca|participa|anota|anoto|reserva|guarda)\w*.{0,15}(numero|numeros|nro|numerito|numeritos)/.test(t)
     || /(numero|numeros|nro).{0,15}(sorteo|rifa|media res)/.test(t)
+    || /\b(numero|nro)\s+\d{1,4}\b/.test(t)
 }
 
 // ── Supabase REST (service_role → saltea RLS) ────────────────────────────
@@ -312,7 +312,7 @@ async function traerHistorial(telefono) {
 }
 
 // ── Cerebro de Iris (Gemini, salida estructurada) ────────────────────────
-async function responderConIris(historial, textoActual, datosNegocio, infoNegocio) {
+async function responderConIris(historial, textoActual, datosNegocio, infoNegocio, sorteo) {
   const fallback = { respuesta: '¡Hola! 🥩 Gracias por tu mensaje. En un ratito te responde alguien del equipo de Carnicerías Fabricius.', es_pedido: false, resumen_pedido: '' }
   if (!GEMINI_KEY) return fallback
   // Si no hay historial (o falló), usamos solo el mensaje actual.
@@ -321,6 +321,7 @@ async function responderConIris(historial, textoActual, datosNegocio, infoNegoci
     : [{ role: 'user', parts: [{ text: textoActual }] }]
 
   let systemText = PROMPT_BASE
+  if (sorteo) systemText += `\n\n=== SORTEO VIGENTE ===\nHay un SORTEO/RIFA de una media res que maneja ${sorteo} (NO el equipo de la carnicería). Si el cliente menciona el sorteo, la rifa, o quiere comprar/guardar/reservar un NÚMERO (ej. "el número 89", "guardame uno", "cuánto sale el número"), NO lo tomes vos como pedido ni preguntes qué quiere encargar: derivalo con amabilidad a ${sorteo}, que es quien maneja el sorteo y le pasa los datos para participar. En ese caso es_pedido=false.`
   if (infoNegocio) systemText += `\n\n=== INFORMACIÓN DEL NEGOCIO (horarios/dirección/pagos/envíos) ===\n${infoNegocio}`
   systemText += datosNegocio
     ? `\n\n=== DATOS DEL NEGOCIO (usar SOLO esto para precios/stock) ===\n${datosNegocio}`
