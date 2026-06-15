@@ -12,6 +12,16 @@ import UserDropdown from '../../components/UserDropdown'
 import CambiarPasswordModal from '../../components/CambiarPasswordModal'
 import BotonAvisos from '../../components/BotonAvisos'
 
+// En el CELULAR, el CEO solo ve lo que usa en la calle: Ejecutivo, Modo TV,
+// los pedidos (para coordinarlos con Iris) y WhatsApp. El resto lo resuelve
+// pidiéndoselo a Iris (no necesita la app completa en el teléfono).
+const NAV_MOVIL_CEO = [
+  { to: '/admin/ejecutivo',      icon: '⚡', label: 'Ejecutivo' },
+  { to: '/admin/ejecutivo?tv=1', icon: '📺', label: 'Modo TV (F.A.B.R.I.)' },
+  { to: '/admin/pedidos',        icon: '📥', label: 'Pedidos Mayoristas' },
+  { to: '/admin/whatsapp',       icon: '💬', label: 'WhatsApp' },
+]
+
 const navItems = [
   { to: '/admin/dashboard',   icon: '📊', label: 'Dashboard' },
   { to: '/admin/ejecutivo',   icon: '⚡', label: 'Ejecutivo' },
@@ -273,7 +283,7 @@ function MenuMobile({ onClose }) {
 
         {/* Nav items */}
         <nav style={{ flex: 1, overflowY: 'auto', padding: '10px 12px' }}>
-          {navItems.filter(it => it.to !== '/admin/ejecutivo' || window.__ceoEmail === 'fabriciolenardon@gmail.com').map(item => {
+          {(user?.email === 'fabriciolenardon@gmail.com' ? NAV_MOVIL_CEO : navItems).filter(it => it.to !== '/admin/ejecutivo' || window.__ceoEmail === 'fabriciolenardon@gmail.com').map(item => {
             const isActive = location.pathname === item.to
             return (
               <NavLink key={item.to} to={item.to} onClick={onClose}
