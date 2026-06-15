@@ -344,13 +344,14 @@ El saldo del cliente se actualiza AUTOMÁTICAMENTE por un trigger en la base de 
   },
   {
     name: 'buscar_producto_vendido',
-    description: 'Cuánto se vendió de un PRODUCTO en un rango de fechas, sumando los DOS canales: CAJA (mostrador/minorista) y MAYORISTA (remitos). Devuelve kg e importe de cada canal, el total general y el desglose de los remitos mayoristas. Usar para "cuánto matambre de cerdo vendimos del 8 al 14", "cuánto se vendió de costilla por caja y por remito", "total de tal producto esta semana".',
+    description: 'Cuánto se vendió de un PRODUCTO en un rango de fechas, sumando los DOS canales: CAJA (mostrador/minorista) y MAYORISTA (remitos). Devuelve kg e importe de cada canal, el total general y el desglose de los remitos mayoristas. Si se pasa "cliente", filtra solo las ventas mayoristas a ese cliente (sirve para "qué/cuánto matambre le vendí a Carlos García del X al Y"). Usar para "cuánto matambre de cerdo vendimos del 8 al 14", "cuánto se vendió de costilla por caja y por remito", "qué le vendí de tal producto a tal cliente".',
     parameters: {
       type: 'object',
       properties: {
         producto: { type: 'string', description: 'Nombre del producto (ej "matambre de cerdo", "costilla de ternera", "chorizo"). OBLIGATORIO.' },
         desde: { type: 'string', description: 'Fecha inicio YYYY-MM-DD. OBLIGATORIO.' },
-        hasta: { type: 'string', description: 'Fecha fin YYYY-MM-DD. OBLIGATORIO.' }
+        hasta: { type: 'string', description: 'Fecha fin YYYY-MM-DD. OBLIGATORIO.' },
+        cliente: { type: 'string', description: 'Opcional: nombre del cliente. Si se pasa, busca ese producto solo en los remitos de ese cliente (la caja minorista no distingue cliente).' }
       },
       required: ['producto', 'desde', 'hasta']
     }
@@ -405,6 +406,22 @@ El saldo del cliente se actualiza AUTOMÁTICAMENTE por un trigger en la base de 
     parameters: { type: 'object', properties: {
       dias: { type: 'number', description: 'Días sin comprar. Default 30.' }
     } }
+  },
+  {
+    name: 'historial_cliente',
+    description: 'TODO lo que se le vendió a un CLIENTE en un rango de fechas: lista de remitos con su desglose (productos, kg, importe) y el total facturado. Usar para "qué le vendí a Carlos García este mes", "historial de compras de tal cliente", "mostrame todo lo de X".',
+    parameters: { type: 'object', properties: {
+      cliente: { type: 'string', description: 'Nombre (o parte) del cliente. OBLIGATORIO.' },
+      desde: { type: 'string', description: 'YYYY-MM-DD. OBLIGATORIO.' },
+      hasta: { type: 'string', description: 'YYYY-MM-DD. OBLIGATORIO.' }
+    }, required: ['cliente', 'desde', 'hasta'] }
+  },
+  {
+    name: 'detalle_remito',
+    description: 'El detalle completo de un remito puntual por su NÚMERO: cliente, fecha, todos los productos con kg e importe, total y forma de cobro. Usar para "mostrame el remito 345", "qué tenía el remito número X".',
+    parameters: { type: 'object', properties: {
+      numero: { type: 'number', description: 'Número del remito. OBLIGATORIO.' }
+    }, required: ['numero'] }
   },
   {
     name: 'consultar_compras_tipo',
@@ -1035,9 +1052,12 @@ export async function ejecutarFuncion(nombre, args) {
         if (!tokens.length) return { resultado: 'Decime un nombre de producto para buscar.' }
         const matchProd = desc => { const d = sinTilde(desc); return tokens.every(t => d.includes(t)) }
 
+        let qRem = supabase.from('remitos').select('numero, fecha, cliente_nombre, items').eq('eliminado', false).gte('fecha', args.desde).lte('fecha', args.hasta).order('fecha', { ascending: true })
+        if (args?.cliente) qRem = qRem.ilike('cliente_nombre', `%${args.cliente}%`)
+        // Si se filtra por cliente, la caja (mostrador anónimo) no aplica.
         const [remitosR, cajaR] = await Promise.all([
-          supabase.from('remitos').select('numero, fecha, cliente_nombre, items').eq('eliminado', false).gte('fecha', args.desde).lte('fecha', args.hasta).order('fecha', { ascending: true }),
-          supabase.from('ventas_minoristas').select('items').eq('origen', 'caja').gte('fecha', args.desde).lte('fecha', args.hasta),
+          qRem,
+          args?.cliente ? Promise.resolve({ data: [], error: null }) : supabase.from('ventas_minoristas').select('items').eq('origen', 'caja').gte('fecha', args.desde).lte('fecha', args.hasta),
         ])
         if (remitosR.error) throw remitosR.error
         if (cajaR.error) throw cajaR.error
@@ -1066,7 +1086,10 @@ export async function ejecutarFuncion(nombre, args) {
         })
 
         if (lineasMay.length === 0 && cajaN === 0) {
-          return { resultado: `No encontré ventas de "${args.producto}" entre ${formatearFecha(args.desde)} y ${formatearFecha(args.hasta)} (ni por caja ni por remito).` }
+          return { resultado: `No encontré ventas de "${args.producto}"${args?.cliente ? ` a "${args.cliente}"` : ''} entre ${formatearFecha(args.desde)} y ${formatearFecha(args.hasta)}.` }
+        }
+        if (args?.cliente) {
+          return { resultado: `🔎 "${args.producto}" vendido a ${args.cliente} (${formatearFecha(args.desde)} → ${formatearFecha(args.hasta)}):\n${lineasMay.join('\n')}\n\n📊 TOTAL: ${mayKg.toLocaleString('es-AR')} kg · ${formatearPesos(mayImp)} · en ${mayN} remito${mayN === 1 ? '' : 's'}.` }
         }
         const totKg = mayKg + cajaKg, totImp = mayImp + cajaImp
         let out = `🔎 Ventas de "${args.producto}" (${formatearFecha(args.desde)} → ${formatearFecha(args.hasta)}):\n\n`
@@ -1164,6 +1187,32 @@ export async function ejecutarFuncion(nombre, args) {
         if (!inactivos.length) return { resultado: `Todos los clientes compraron en los últimos ${dias} días. 👍` }
         const txt = inactivos.slice(0, 20).map(([n, f]) => `• ${n} — última compra ${formatearFecha(f)}`).join('\n')
         return { resultado: `⚠️ Clientes sin comprar hace +${dias} días (${inactivos.length}):\n${txt}` }
+      }
+
+      case 'historial_cliente': {
+        if (!args?.cliente || !args?.desde || !args?.hasta) return { resultado: 'Necesito el cliente y el rango de fechas (desde y hasta).' }
+        const { data, error } = await supabase.from('remitos').select('numero, fecha, cliente_nombre, total, cobro, items')
+          .eq('eliminado', false).ilike('cliente_nombre', `%${args.cliente}%`).gte('fecha', args.desde).lte('fecha', args.hasta).order('fecha', { ascending: true })
+        if (error) throw error
+        if (!data || !data.length) return { resultado: `No encontré ventas a "${args.cliente}" entre ${formatearFecha(args.desde)} y ${formatearFecha(args.hasta)}.` }
+        const bloques = data.map(rm => {
+          const its = Array.isArray(rm.items) ? rm.items : []
+          const det = its.map(it => { const kg = Number(it.kg) || 0; return `   - ${it.descripcion}${kg ? ': ' + kg.toLocaleString('es-AR') + ' kg' : ''} · ${formatearPesos(Number(it.importe) || 0)}` }).join('\n')
+          return `• ${formatearFecha(rm.fecha)} · #${rm.numero} · ${formatearPesos(rm.total)} · ${rm.cobro === 'cta_cte' ? 'CTA CTE' : 'pagado'}${det ? '\n' + det : ''}`
+        }).join('\n\n')
+        return { resultado: `📋 Ventas a ${(data[0].cliente_nombre || args.cliente).trim()} (${formatearFecha(args.desde)} → ${formatearFecha(args.hasta)}, ${data.length} remito${data.length === 1 ? '' : 's'}):\n\n${bloques}\n\n📊 TOTAL: ${formatearPesos(sumar(data, 'total'))}` }
+      }
+
+      case 'detalle_remito': {
+        if (!args?.numero) return { resultado: 'Decime el número del remito.' }
+        const { data, error } = await supabase.from('remitos').select('numero, fecha, cliente_nombre, total, cobro, items, eliminado').eq('numero', args.numero).limit(5)
+        if (error) throw error
+        if (!data || !data.length) return { resultado: `No encontré el remito #${args.numero}.` }
+        const txt = data.map(rm => {
+          const its = Array.isArray(rm.items) ? rm.items : []
+          const det = its.map(it => { const kg = Number(it.kg) || 0; return `   - ${it.descripcion}${kg ? ': ' + kg.toLocaleString('es-AR') + ' kg' : ''} · ${formatearPesos(Number(it.importe) || 0)}` }).join('\n')
+          return `📄 Remito #${rm.numero}${rm.eliminado ? ' (ANULADO)' : ''}\n${formatearFecha(rm.fecha)} · ${rm.cliente_nombre} · ${rm.cobro === 'cta_cte' ? 'CTA CTE' : 'pagado'}\n${det}\nTotal: ${formatearPesos(rm.total)}` }).join('\n\n')
+        return { resultado: txt }
       }
 
       case 'consultar_compras_tipo': {
