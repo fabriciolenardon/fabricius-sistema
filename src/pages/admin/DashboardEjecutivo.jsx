@@ -16,6 +16,7 @@ import { supabase } from '../../lib/supabase'
 import { enviarWhatsapp, fmtArs } from '../../lib/whatsapp'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
 import { fmtKg } from '../../lib/formatos'
+import { useCentroActividad } from '../../lib/useCentroActividad'
 import {
   useReportesData, SelectorPeriodo,
   ReporteMargen, ReporteCliente, ReporteCanal, ReporteTemporal,
@@ -1459,9 +1460,7 @@ function ModoTV({ onSalir }) {
                 <TvKPI label="ESTE MES" valor={fmtArs(data.totalMes)}
                   sub={data.totalMesAnt > 0 ? `${flecha(data.variacion)} ${signo(data.variacion)}${data.variacion.toFixed(0)}% vs mismo período mes ant.` : '—'}
                   color={colorVar(data.variacion)} />
-                <TvKPI label={`VS ${new Date().getFullYear() - 1}`}
-                  valor={data.panelControl.variacionAnioPasado != null ? `${signo(data.panelControl.variacionAnioPasado)}${data.panelControl.variacionAnioPasado.toFixed(0)}%` : '—'}
-                  sub="mismo período" color={colorVar(data.panelControl.variacionAnioPasado)} />
+                <TvWhatsapp />
               </div>
 
               {/* ⚔️ Canales del mes compitiendo */}
@@ -1697,6 +1696,39 @@ function TvKPI({ label, valor, sub, color }) {
       <div style={{ fontSize: '0.75vw', letterSpacing: 3, color: NEON.muted, fontWeight: 800 }}>{label}</div>
       <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '2.2vw', lineHeight: 1.05, color: color || NEON.cianHi }}>{valor}</div>
       {sub && <div style={{ fontSize: '0.75vw', color: NEON.muted, marginTop: '0.15vw' }}>{sub}</div>}
+    </div>
+  )
+}
+
+// Tarjeta de actividad de WhatsApp en vivo para el panel TV (reemplaza el "VS año
+// pasado" hasta que haya datos del año anterior). notificar:false → no beepea
+// (de eso ya se encarga el widget flotante del admin).
+function TvWhatsapp() {
+  const { feed } = useCentroActividad({ notificar: false })
+  const cuenta = { conv: 0, min: 0, may: 0 }
+  feed.forEach(f => { cuenta[f.tipo]++ })
+  const ultimo = feed[0]
+  return (
+    <div className="dej-in hud" style={{ ...glass, padding: '0.85vw 1.2vw', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+      <div style={{ fontSize: '0.75vw', letterSpacing: 3, color: NEON.muted, fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.4vw' }}>
+        WHATSAPP <PuntoVivo />
+      </div>
+      <div style={{ display: 'flex', gap: '1.3vw', marginTop: '0.25vw', alignItems: 'flex-end' }}>
+        <TvWaCount icono="💬" n={cuenta.conv} color={NEON.verde} />
+        <TvWaCount icono="🛒" n={cuenta.min} color={NEON.oro} />
+        <TvWaCount icono="📦" n={cuenta.may} color={NEON.cian} />
+      </div>
+      <div style={{ fontSize: '0.7vw', color: NEON.muted, marginTop: '0.25vw', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        {ultimo ? `${ultimo.icono} ${ultimo.titulo}` : 'Sin pendientes ✓'}
+      </div>
+    </div>
+  )
+}
+function TvWaCount({ icono, n, color }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1 }}>
+      <span style={{ fontSize: '0.9vw' }}>{icono}</span>
+      <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '2vw', lineHeight: 1, color: n ? color : NEON.muted }}>{n}</span>
     </div>
   )
 }
