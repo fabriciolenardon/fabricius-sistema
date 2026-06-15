@@ -2982,6 +2982,16 @@ const item = {
     if (items.length === 0) { showAlert({ type: 'error', msg: 'Agregá al menos un producto' }); return }
     if (!form.destino) { showAlert({ type: 'error', msg: 'Elegí un destino antes de despachar' }); return }
     if (esFechaFutura(form.fecha)) { showAlert({ type: 'error', msg: `⛔ La fecha no puede ser futura (hoy es ${fechaHoyARG()})` }); return }
+    // Guardia anti-"media res sin media física": una media res debe venderse
+    // ELIGIÉNDOLA de la lista de "Medias Reses disponibles" (eso marca la MR-XXX
+    // física como vendida y la saca del stock). Si se carga como producto genérico
+    // "Media Res" de la lista de precios queda sin media_res_id y la media física
+    // nunca se descuenta — sigue figurando "disponible" para siempre (bug Alvear
+    // remito 434, 13/06: MR-098 quedó disponible tras venderse). Bloqueamos acá.
+    if (items.some(it => it.tipo === 'bovino_mr' && !it.media_res_id)) {
+      showAlert({ type: 'error', msg: '⚠️ La "Media Res" está cargada como producto suelto. Quitala del carrito y elegí la media física desde la lista de "Medias Reses disponibles", así se descuenta del stock y queda trazada.' })
+      return
+    }
     // Pago dividido (cobro='mixto'): 2+ formas con monto y la suma debe igualar
     // el total. Se guarda el desglose en remitos.pagos. Es 100% pagado → no
     // genera deuda en cuenta corriente (cobro != 'cta_cte').
