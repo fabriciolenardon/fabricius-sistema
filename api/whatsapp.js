@@ -39,11 +39,12 @@ REGLAS (modo "auto con barreras"):
 - Para PRECIOS y STOCK usá SOLO los datos de la sección "DATOS DEL NEGOCIO". Son precios al público (minorista). NUNCA inventes un precio ni un stock que no esté en esa lista.
 - Para horarios, dirección, formas de pago y envíos usá la sección "INFORMACIÓN DEL NEGOCIO" si está cargada. Si te preguntan algo que no está, derivá con amabilidad al equipo (no inventes).
 - El stock es orientativo; si preguntan por una cantidad grande o puntual, aclará que el equipo confirma disponibilidad.
-- Si el cliente quiere HACER UN PEDIDO o encargar algo → tomá QUÉ quiere y para cuándo, decile que ya le pasás el pedido al equipo para confirmar disponibilidad y precio final, y marcá es_pedido=true con un resumen claro. NUNCA confirmes el total ni cierres la venta vos.
+- Si el cliente quiere HACER UN PEDIDO o encargar algo → tomá QUÉ quiere y para cuándo, y marcá es_pedido=true con un resumen claro. NUNCA confirmes el total ni cierres la venta vos.
+- PEDIDOS — CONFIRMÁ ANTES DE PASARLO: cuando el cliente arma un pedido, NO lo des por cerrado de una. Repetile en una línea lo que entendiste y preguntale si quiere agregar algo más o se lo dejás así (ej: "Te anoto 2 kg de milanesa para mañana. ¿Querés sumar algo más o te lo dejo así? 🥩"). Mantené pedido_confirmado=false mientras siga agregando o no haya confirmado. SOLO cuando el cliente confirma que está completo (dice "así está", "nada más", "dale", "listo", "eso es todo", etc.) ponés pedido_confirmado=true y recién ahí le decís que ya le pasás el pedido al equipo para confirmar disponibilidad y precio final. Si el cliente ya deja claro de entrada que es todo, podés confirmar directo.
 - Si saludan, saludá cálida y preguntá en qué ayudás.
 - Sos la asistente del negocio (no lo escondas si te preguntan), pero hablá natural, no robótica.
 
-Respondé SIEMPRE en el formato JSON pedido: "respuesta", "es_pedido" (true solo si está encargando algo concreto) y "resumen_pedido" (qué pidió y para cuándo, vacío si no es pedido).`
+Respondé SIEMPRE en el formato JSON pedido: "respuesta", "es_pedido" (true si está armando/encargando algo concreto), "resumen_pedido" (qué pidió y para cuándo, vacío si no es pedido) y "pedido_confirmado" (true SOLO cuando el cliente confirmó que el pedido está completo; false mientras todavía lo está armando o no confirmó).`
 
 const SCHEMA_RESPUESTA = {
   type: 'object',
@@ -51,6 +52,7 @@ const SCHEMA_RESPUESTA = {
     respuesta: { type: 'string' },
     es_pedido: { type: 'boolean' },
     resumen_pedido: { type: 'string' },
+    pedido_confirmado: { type: 'boolean' },
   },
   required: ['respuesta', 'es_pedido'],
 }
@@ -137,7 +139,10 @@ export default async function handler(req, res) {
     await enviarWhatsApp(phoneId, from, ia.respuesta)
     await guardarMensaje(from, 'out', 'iris', 'text', ia.respuesta)
 
-    if (ia.es_pedido) {
+    // Registramos el pedido SOLO cuando el cliente lo confirmó (pidió que se lo
+    // deje así). Mientras lo está armando, Iris pregunta "¿algo más?" y no se pasa
+    // nada al equipo todavía → no llegan pedidos a medias.
+    if (ia.pedido_confirmado) {
       try {
         // registrarPedido consolida los turnos del mismo encargo en UNA fila.
         // Solo avisamos al dueño cuando es un pedido NUEVO (no en cada refinada),
@@ -313,7 +318,7 @@ async function traerHistorial(telefono) {
 
 // ── Cerebro de Iris (Gemini, salida estructurada) ────────────────────────
 async function responderConIris(historial, textoActual, datosNegocio, infoNegocio, sorteo) {
-  const fallback = { respuesta: '¡Hola! 🥩 Gracias por tu mensaje. En un ratito te responde alguien del equipo de Carnicerías Fabricius.', es_pedido: false, resumen_pedido: '' }
+  const fallback = { respuesta: '¡Hola! 🥩 Gracias por tu mensaje. En un ratito te responde alguien del equipo de Carnicerías Fabricius.', es_pedido: false, resumen_pedido: '', pedido_confirmado: false }
   if (!GEMINI_KEY) return fallback
   // Si no hay historial (o falló), usamos solo el mensaje actual.
   const contents = (Array.isArray(historial) && historial.length)
@@ -358,6 +363,7 @@ async function responderConIris(historial, textoActual, datosNegocio, infoNegoci
       respuesta: (parsed.respuesta || '').trim() || fallback.respuesta,
       es_pedido: parsed.es_pedido === true,
       resumen_pedido: (parsed.resumen_pedido || '').trim(),
+      pedido_confirmado: parsed.pedido_confirmado === true,
     }
   } catch (e) { console.error('Gemini WA error', e); return fallback }
 }
