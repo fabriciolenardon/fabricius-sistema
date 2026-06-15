@@ -926,11 +926,19 @@ export async function ejecutarFuncion(nombre, args) {
 
         const prod = (args?.producto || '').trim().toLowerCase()
         if (prod) {
+          // Match por PALABRAS (no substring literal): ignora conectores como
+          // "de/la/el" y exige TODAS las palabras significativas. Así "matambre
+          // de cerdo" encuentra "MATAMBRE CERDO" pero no "MATAMBRE DE TERNERA"
+          // (le falta "cerdo"). Normaliza tildes.
+          const sinTilde = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+          const STOP = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'y', 'con', 'x', 'a', 'al'])
+          const tokens = sinTilde(prod).split(/\s+/).filter(w => w && !STOP.has(w))
+          const matchProd = desc => { const d = sinTilde(desc); return tokens.length > 0 && tokens.every(t => d.includes(t)) }
           let totalKg = 0, totalImp = 0, nRemitos = 0
           const lineas = []
           data.forEach(rm => {
             const items = Array.isArray(rm.items) ? rm.items : []
-            const match = items.filter(it => String(it.descripcion || '').toLowerCase().includes(prod))
+            const match = items.filter(it => matchProd(it.descripcion))
             if (!match.length) return
             nRemitos++
             match.forEach(it => {
