@@ -1355,7 +1355,7 @@ export async function ejecutarFuncion(nombre, args) {
         if (!data || data.length === 0) return { resultado: 'No hay elaboraciones registradas.' }
         const lista = data.map(e => {
           const prods = Array.isArray(e.productos_finales) && e.productos_finales.length > 0
-            ? e.productos_finales.map(p => `${(p.tipo || '').replace(/_/g, ' ')} ${Number(p.kg).toFixed(1)} kg`).join(' + ')
+            ? e.productos_finales.filter(Boolean).map(p => `${(p.tipo || '').replace(/_/g, ' ')} ${Number(p.kg).toFixed(1)} kg`).join(' + ')
             : (e.tipo_embutido || '').replace(/_/g, ' ')
           const estado = e.tipo === 'salame' && !e.maduracion_completa ? ' · 🔒 en secado' : ''
           return `• ${formatearFecha(e.fecha)} · ${prods} · ${Number(e.kg_final || e.kg_elaborado || 0).toFixed(1)} kg${estado}`

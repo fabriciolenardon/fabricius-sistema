@@ -95,7 +95,7 @@ export default function Dashboard() {
         .order('fecha', { ascending: false }).order('created_at', { ascending: false })
       const despostesComoSalidas = (despCerdo || []).map(d => {
         const piezas = Array.isArray(d.piezas) ? d.piezas : []
-        const detalle = piezas.map(p => `${p.nombre} ${fmtKg(p.kg)}`).join(' · ')
+        const detalle = piezas.filter(Boolean).map(p => `${p.nombre} ${fmtKg(p.kg)}`).join(' · ')
         return {
           id: 'desp-' + d.id,
           fecha: d.fecha,

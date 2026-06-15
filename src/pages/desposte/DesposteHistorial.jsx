@@ -222,7 +222,7 @@ function ItemHistorial({ item, expandido, onToggle }) {
                 Piezas
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 6 }}>
-                {item.piezas.map((p, i) => (
+                {item.piezas.filter(Boolean).map((p, i) => (
                   <div key={i} style={{ padding: '6px 10px', background: 'var(--surface)', borderRadius: 6, fontSize: 12 }}>
                     <div style={{ color: 'var(--muted)' }}>{p.nombre}</div>
                     <div style={{ fontWeight: 700, color: 'var(--gold)' }}>{fmtKg(p.kg)}</div>
