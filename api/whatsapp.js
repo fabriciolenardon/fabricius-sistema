@@ -148,7 +148,16 @@ export default async function handler(req, res) {
         // Solo avisamos al dueño cuando es un pedido NUEVO (no en cada refinada),
         // así no le llega una notificación por cada mensaje del cliente.
         const esNuevoPedido = await registrarPedido({ telefono: from, nombreContacto, mensaje: texto, resumen: ia.resumen_pedido })
-        if (esNuevoPedido) await avisarAlDueno(phoneId, { nombreContacto, telefono: from, resumen: ia.resumen_pedido, mensaje: texto })
+        if (esNuevoPedido) {
+          await avisarAlDueno(phoneId, { nombreContacto, telefono: from, resumen: ia.resumen_pedido, mensaje: texto })
+          // Notificación push a los dispositivos suscritos (además del WhatsApp).
+          try {
+            await fetch(`https://${req.headers.host}/api/enviar-push?secret=${VERIFY_TOKEN}`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ titulo: '🛎️ Nuevo pedido por WhatsApp', body: `${nombreContacto || from}: ${ia.resumen_pedido || texto}`, url: '/admin/whatsapp' }),
+            })
+          } catch {}
+        }
       } catch (e) { console.error('Registro/aviso pedido WA error', e) }
     }
 

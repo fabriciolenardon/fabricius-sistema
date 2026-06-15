@@ -10,6 +10,7 @@ import CentroActividad from '../../components/CentroActividad'
 import LogoFabricius from '../../components/LogoFabricius'
 import UserDropdown from '../../components/UserDropdown'
 import CambiarPasswordModal from '../../components/CambiarPasswordModal'
+import BotonAvisos from '../../components/BotonAvisos'
 
 const navItems = [
   { to: '/admin/dashboard',   icon: '📊', label: 'Dashboard' },
@@ -351,6 +352,7 @@ export default function AdminLayout() {
             <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
               <LogoFabricius size="small" />
             </div>
+            <BotonAvisos />
             <CampanaNotificaciones notifs={notifs} />
           </>
         ) : (
@@ -378,6 +380,7 @@ export default function AdminLayout() {
               ))}
             </nav>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>
+              <BotonAvisos />
               <CampanaNotificaciones notifs={notifs} />
               <UserDropdown />
             </div>
