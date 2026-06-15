@@ -356,6 +356,57 @@ El saldo del cliente se actualiza AUTOMÁTICAMENTE por un trigger en la base de 
     }
   },
   {
+    name: 'ranking_productos',
+    description: 'Top productos MÁS VENDIDOS en un rango de fechas, sumando caja (mostrador) + mayorista (remitos). Ordena por kilos o por facturación. Usar para "qué fue lo más vendido este mes", "top 10 productos", "qué corte se vende más".',
+    parameters: { type: 'object', properties: {
+      desde: { type: 'string', description: 'YYYY-MM-DD. OBLIGATORIO.' },
+      hasta: { type: 'string', description: 'YYYY-MM-DD. OBLIGATORIO.' },
+      criterio: { type: 'string', description: '"kg" (kilos) o "importe" (plata). Default importe.' },
+      limite: { type: 'number', description: 'Cuántos mostrar. Default 10.' }
+    }, required: ['desde', 'hasta'] }
+  },
+  {
+    name: 'ranking_clientes',
+    description: 'Top clientes mayoristas por facturación en un rango de fechas (quién compró más). Usar para "quién me compró más", "mejores clientes del mes", "ranking de clientes".',
+    parameters: { type: 'object', properties: {
+      desde: { type: 'string', description: 'YYYY-MM-DD. OBLIGATORIO.' },
+      hasta: { type: 'string', description: 'YYYY-MM-DD. OBLIGATORIO.' },
+      limite: { type: 'number', description: 'Cuántos. Default 10.' }
+    }, required: ['desde', 'hasta'] }
+  },
+  {
+    name: 'ranking_proveedores',
+    description: 'Top proveedores por monto de COMPRAS en un rango de fechas (a quién le compré más mercadería). Usar para "a qué proveedor le compré más", "ranking de proveedores".',
+    parameters: { type: 'object', properties: {
+      desde: { type: 'string', description: 'YYYY-MM-DD. OBLIGATORIO.' },
+      hasta: { type: 'string', description: 'YYYY-MM-DD. OBLIGATORIO.' },
+      limite: { type: 'number', description: 'Cuántos. Default 10.' }
+    }, required: ['desde', 'hasta'] }
+  },
+  {
+    name: 'ventas_por_categoria',
+    description: 'Desglose de VENTAS por categoría/rubro (bovino, cerdo, pollo, embutido, almacén, etc.) en un rango de fechas, sumando caja + mayorista. Usar para "cuánto vendí de cada rubro", "ventas por categoría", "qué peso tiene el cerdo en mis ventas".',
+    parameters: { type: 'object', properties: {
+      desde: { type: 'string', description: 'YYYY-MM-DD. OBLIGATORIO.' },
+      hasta: { type: 'string', description: 'YYYY-MM-DD. OBLIGATORIO.' }
+    }, required: ['desde', 'hasta'] }
+  },
+  {
+    name: 'desglose_medios_pago',
+    description: 'Desglose de cobros de la CAJA minorista por medio de pago (efectivo, débito, transferencia) en un rango de fechas. Usar para "cuánto cobré en efectivo vs tarjeta", "medios de pago de la semana".',
+    parameters: { type: 'object', properties: {
+      desde: { type: 'string', description: 'YYYY-MM-DD. OBLIGATORIO.' },
+      hasta: { type: 'string', description: 'YYYY-MM-DD. OBLIGATORIO.' }
+    }, required: ['desde', 'hasta'] }
+  },
+  {
+    name: 'clientes_inactivos',
+    description: 'Clientes mayoristas que NO compran hace más de N días, con la fecha de su última compra (para recuperarlos). Usar para "qué clientes dejaron de comprar", "clientes inactivos", "a quién tengo que llamar".',
+    parameters: { type: 'object', properties: {
+      dias: { type: 'number', description: 'Días sin comprar. Default 30.' }
+    } }
+  },
+  {
     name: 'consultar_compras_tipo',
     description: 'Total de COMPRAS de mercadería ingresada al depósito, por tipo y rango de fechas: cantidad de UNIDADES, total en KILOS e importe gastado. Usar para "cuántas medias reses compramos la semana pasada", "cuántos kilos de cerdo entraron este mes", "qué compramos de pollo entre tal y tal fecha". Responder el total en número (unidades) y en kilos.',
     parameters: {
@@ -1024,6 +1075,95 @@ export async function ejecutarFuncion(nombre, args) {
         out += `\n🛒 CAJA (mostrador): ${cajaKg.toLocaleString('es-AR')} kg · ${formatearPesos(cajaImp)} · en ${cajaN} venta${cajaN === 1 ? '' : 's'}\n`
         out += `\n📊 TOTAL (las dos vías): ${totKg.toLocaleString('es-AR')} kg · ${formatearPesos(totImp)}`
         return { resultado: out }
+      }
+
+      case 'ranking_productos': {
+        if (!args?.desde || !args?.hasta) return { resultado: 'Necesito el rango de fechas (desde y hasta).' }
+        const crit = args?.criterio === 'kg' ? 'kg' : 'importe'
+        const [rem, caja] = await Promise.all([
+          supabase.from('remitos').select('items').eq('eliminado', false).gte('fecha', args.desde).lte('fecha', args.hasta),
+          supabase.from('ventas_minoristas').select('items').eq('origen', 'caja').gte('fecha', args.desde).lte('fecha', args.hasta),
+        ])
+        if (rem.error) throw rem.error; if (caja.error) throw caja.error
+        const acc = {}
+        const proc = rows => (rows || []).forEach(r => (Array.isArray(r.items) ? r.items : []).forEach(it => {
+          const n = String(it.descripcion || '').trim().toUpperCase() || 'SIN NOMBRE'
+          if (!acc[n]) acc[n] = { kg: 0, importe: 0 }
+          acc[n].kg += Number(it.kg) || 0; acc[n].importe += Number(it.importe) || 0
+        }))
+        proc(rem.data); proc(caja.data)
+        const lista = Object.entries(acc).map(([n, v]) => ({ n, ...v })).sort((a, b) => b[crit] - a[crit]).slice(0, args?.limite || 10)
+        if (!lista.length) return { resultado: `No hay ventas entre ${formatearFecha(args.desde)} y ${formatearFecha(args.hasta)}.` }
+        const txt = lista.map((p, i) => `${i + 1}. ${p.n}: ${p.kg.toLocaleString('es-AR')} kg · ${formatearPesos(p.importe)}`).join('\n')
+        return { resultado: `🏆 Top productos (${formatearFecha(args.desde)} → ${formatearFecha(args.hasta)}, por ${crit === 'kg' ? 'kilos' : 'facturación'}):\n${txt}` }
+      }
+
+      case 'ranking_clientes': {
+        if (!args?.desde || !args?.hasta) return { resultado: 'Necesito el rango de fechas (desde y hasta).' }
+        const { data, error } = await supabase.from('salidas_deposito').select('cliente_nombre, total, cobro').gte('fecha', args.desde).lte('fecha', args.hasta)
+        if (error) throw error
+        const acc = {}
+        ;(data || []).filter(s => s.cobro !== 'interno').forEach(s => {
+          const n = (s.cliente_nombre || 'Sin nombre').trim()
+          acc[n] = (acc[n] || 0) + (Number(s.total) || 0)
+        })
+        const lista = Object.entries(acc).sort((a, b) => b[1] - a[1]).slice(0, args?.limite || 10)
+        if (!lista.length) return { resultado: `No hay ventas mayoristas entre ${formatearFecha(args.desde)} y ${formatearFecha(args.hasta)}.` }
+        const txt = lista.map(([n, t], i) => `${i + 1}. ${n}: ${formatearPesos(t)}`).join('\n')
+        return { resultado: `🏆 Top clientes mayoristas (${formatearFecha(args.desde)} → ${formatearFecha(args.hasta)}):\n${txt}` }
+      }
+
+      case 'ranking_proveedores': {
+        if (!args?.desde || !args?.hasta) return { resultado: 'Necesito el rango de fechas (desde y hasta).' }
+        const { data, error } = await supabase.from('entradas_deposito').select('proveedor_nombre, importe').eq('eliminado', false).gte('fecha', args.desde).lte('fecha', args.hasta).gt('importe', 0)
+        if (error) throw error
+        const acc = {}
+        ;(data || []).forEach(e => { const n = (e.proveedor_nombre || 'Sin proveedor').trim(); acc[n] = (acc[n] || 0) + (Number(e.importe) || 0) })
+        const lista = Object.entries(acc).sort((a, b) => b[1] - a[1]).slice(0, args?.limite || 10)
+        if (!lista.length) return { resultado: `No hay compras entre ${formatearFecha(args.desde)} y ${formatearFecha(args.hasta)}.` }
+        const txt = lista.map(([n, t], i) => `${i + 1}. ${n}: ${formatearPesos(t)}`).join('\n')
+        return { resultado: `🏆 Top proveedores por compras (${formatearFecha(args.desde)} → ${formatearFecha(args.hasta)}):\n${txt}` }
+      }
+
+      case 'ventas_por_categoria': {
+        if (!args?.desde || !args?.hasta) return { resultado: 'Necesito el rango de fechas (desde y hasta).' }
+        const [rem, caja] = await Promise.all([
+          supabase.from('remitos').select('items').eq('eliminado', false).gte('fecha', args.desde).lte('fecha', args.hasta),
+          supabase.from('ventas_minoristas').select('items').eq('origen', 'caja').gte('fecha', args.desde).lte('fecha', args.hasta),
+        ])
+        if (rem.error) throw rem.error; if (caja.error) throw caja.error
+        const acc = {}
+        const proc = rows => (rows || []).forEach(r => (Array.isArray(r.items) ? r.items : []).forEach(it => {
+          const cat = String(it.categoria || it.tipo || 'otros')
+          if (!acc[cat]) acc[cat] = { kg: 0, importe: 0 }
+          acc[cat].kg += Number(it.kg) || 0; acc[cat].importe += Number(it.importe) || 0
+        }))
+        proc(rem.data); proc(caja.data)
+        const lista = Object.entries(acc).map(([c, v]) => ({ c, ...v })).sort((a, b) => b.importe - a.importe)
+        if (!lista.length) return { resultado: `No hay ventas entre ${formatearFecha(args.desde)} y ${formatearFecha(args.hasta)}.` }
+        const txt = lista.map(p => `• ${p.c}: ${formatearPesos(p.importe)} · ${p.kg.toLocaleString('es-AR')} kg`).join('\n')
+        return { resultado: `📊 Ventas por categoría (${formatearFecha(args.desde)} → ${formatearFecha(args.hasta)}):\n${txt}` }
+      }
+
+      case 'desglose_medios_pago': {
+        if (!args?.desde || !args?.hasta) return { resultado: 'Necesito el rango de fechas (desde y hasta).' }
+        const { data, error } = await supabase.from('ventas_minoristas').select('efectivo, debito, transferencia, total').eq('origen', 'caja').gte('fecha', args.desde).lte('fecha', args.hasta)
+        if (error) throw error
+        const ef = sumar(data, 'efectivo'), de = sumar(data, 'debito'), tr = sumar(data, 'transferencia'), tot = sumar(data, 'total')
+        return { resultado: `💳 Medios de pago en caja (${formatearFecha(args.desde)} → ${formatearFecha(args.hasta)}):\n• Efectivo: ${formatearPesos(ef)}\n• Débito: ${formatearPesos(de)}\n• Transferencia: ${formatearPesos(tr)}\n• TOTAL: ${formatearPesos(tot)}` }
+      }
+
+      case 'clientes_inactivos': {
+        const dias = Number(args?.dias) || 30
+        const limite = fechaRelativaARG(-dias)
+        const { data, error } = await supabase.from('salidas_deposito').select('cliente_nombre, fecha, cobro').order('fecha', { ascending: false })
+        if (error) throw error
+        const ultima = {}
+        ;(data || []).filter(s => s.cobro !== 'interno').forEach(s => { const n = (s.cliente_nombre || '').trim(); if (n && !ultima[n]) ultima[n] = s.fecha })
+        const inactivos = Object.entries(ultima).filter(([, f]) => f < limite).sort((a, b) => a[1].localeCompare(b[1]))
+        if (!inactivos.length) return { resultado: `Todos los clientes compraron en los últimos ${dias} días. 👍` }
+        const txt = inactivos.slice(0, 20).map(([n, f]) => `• ${n} — última compra ${formatearFecha(f)}`).join('\n')
+        return { resultado: `⚠️ Clientes sin comprar hace +${dias} días (${inactivos.length}):\n${txt}` }
       }
 
       case 'consultar_compras_tipo': {
