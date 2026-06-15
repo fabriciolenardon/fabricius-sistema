@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
 import { fmtPrecio, fmtKg } from '../../lib/formatos'
+import { imprimirHTML } from '../../lib/imprimir'
 import { getLista } from '../../lib/listasPrecios'
 function fmt(n) { return fmtPrecio(Math.abs(Number(n) || 0)) }
 
@@ -234,8 +235,7 @@ export function ClienteRemitos() {
 
   function imprimir(remito) {
     const items = remito.items || []
-    const win = window.open('', '_blank')
-    win.document.write(`
+    const html = `
       <html><head><title>Remito N° ${remito.numero}</title>
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -286,10 +286,9 @@ export function ClienteRemitos() {
           <div class="total-box">TOTAL: ${fmtPrecio(remito.total)}</div>
         </div>
         <div class="firma">Firma y aclaración: ________________________________</div>
-        <script>window.onload = () => { window.print(); }</script>
       </body></html>
-    `)
-    win.document.close()
+    `
+    imprimirHTML(html)
   }
 
   // Paginación del listado completo de remitos del cliente
