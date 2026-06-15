@@ -38,12 +38,16 @@ function detalleMay(p) {
   return `${n} ${n === 1 ? 'ítem' : 'ítems'}${ent}`
 }
 
-export function useCentroActividad() {
+export function useCentroActividad({ notificar = true } = {}) {
   const [feed, setFeed] = useState([])
   const [nuevoSignal, setNuevoSignal] = useState(0)
   const [ultimoNuevo, setUltimoNuevo] = useState(null)   // { tipo, titulo, detalle }
   const audioCtxRef = useRef(null)
   const debRef = useRef(null)
+  // Canal único por instancia: así el widget flotante y la tarjeta del panel TV
+  // pueden usar el hook a la vez sin pisarse el canal de realtime.
+  const canalIdRef = useRef(null)
+  if (!canalIdRef.current) canalIdRef.current = 'centro-actividad-' + Math.random().toString(36).slice(2, 9)
 
   const recargar = useCallback(async () => {
     const [conv, min, may] = await Promise.all([
@@ -76,25 +80,25 @@ export function useCentroActividad() {
     debRef.current = setTimeout(() => recargar(), 350)
   }, [recargar])
 
-  // Permiso de notificaciones del navegador (una sola vez)
+  // Permiso de notificaciones del navegador (una sola vez; solo si notifica)
   useEffect(() => {
+    if (!notificar) return
     if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
       Notification.requestPermission().catch(() => {})
     }
-  }, [])
+  }, [notificar])
 
   useEffect(() => { recargar() }, [recargar])
 
   // Realtime: un solo canal escucha las 3 tablas
   useEffect(() => {
     const novedad = (tipo, titulo, detalle, ruta) => {
-      dispararBeep(audioCtxRef)
-      dispararNotif(titulo, detalle, ruta)
+      if (notificar) { dispararBeep(audioCtxRef); dispararNotif(titulo, detalle, ruta) }
       setUltimoNuevo({ tipo, titulo, detalle })
       setNuevoSignal(s => s + 1)
       recargarDeb()
     }
-    const canal = supabase.channel('centro-actividad')
+    const canal = supabase.channel(canalIdRef.current)
       // Mensaje entrante de un cliente → notifica (los salientes de Iris/vos no)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'wa_mensajes' }, ({ new: m }) => {
         if (m && m.direccion === 'in') novedad('conv', '💬 Mensaje nuevo de WhatsApp', m.texto || '', RUTA_ACTIVIDAD.conv)
@@ -115,7 +119,7 @@ export function useCentroActividad() {
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'pedidos' }, () => recargarDeb())
       .subscribe()
     return () => { clearTimeout(debRef.current); supabase.removeChannel(canal) }
-  }, [recargar, recargarDeb])
+  }, [recargar, recargarDeb, notificar])
 
   return { feed, nuevoSignal, ultimoNuevo }
 }
