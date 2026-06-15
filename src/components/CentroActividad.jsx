@@ -48,7 +48,8 @@ export default function CentroActividad() {
     try { localStorage.setItem(LS, v ? '1' : '0') } catch { /* noop */ }
   }
 
-  if (feed.length === 0 && !abierto) return null
+  // Antes, si no había actividad y estaba minimizado, el widget desaparecía
+  // del todo y no quedaba botón para reabrirlo. Ahora SIEMPRE queda el botón 📡.
 
   const total = feed.length
   const cuenta = { conv: 0, min: 0, may: 0 }
@@ -62,7 +63,7 @@ export default function CentroActividad() {
       <div style={{ position: 'fixed', left: 16, bottom: 18, zIndex: 9998, fontFamily: "'DM Sans', sans-serif" }}>
         {!abierto ? (
           <button onClick={() => toggle(false)} title="Actividad en vivo" style={{ ...pill, animation: flash ? 'ca-pulse 0.8s ease 2' : 'none' }}>
-            📡 <span style={{ fontWeight: 800 }}>{total}</span>
+            📡{total > 0 ? <span style={{ fontWeight: 800, marginLeft: 4 }}>{total}</span> : null}
           </button>
         ) : (
           <div style={{ ...card, animation: flash ? 'ca-flash 1.2s ease' : 'none' }}
