@@ -1564,7 +1564,7 @@ async function confirmarDesposteCerdo() {
             </span>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {(d.piezas || []).map((p, i) => (
+            {(d.piezas || []).filter(Boolean).map((p, i) => (
               <span key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, padding: '2px 8px', fontSize: 11, color: 'var(--text2)' }}>
                 {p.nombre}: {p.kg?.toFixed(1)} kg{p.precio_venta > 0 ? ` · $${Math.round(p.precio_venta).toLocaleString('es-AR')}/kg` : ''}
               </span>
@@ -1588,7 +1588,7 @@ async function confirmarDesposteCerdo() {
               </div>
               {Array.isArray(e.productos_finales) && e.productos_finales.length > 0 && (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
-                  {e.productos_finales.map((p, i) => (
+                  {(e.productos_finales || []).filter(Boolean).map((p, i) => (
                     <span key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, padding: '2px 8px', fontSize: 11, color: 'var(--text2)' }}>
                       {NOMBRE_EMBUTIDO[p.tipo] || p.tipo}: {(Number(p.kg) || 0).toFixed(1)} kg
                     </span>
@@ -1753,7 +1753,7 @@ function HistorialDespostes({ despostes }) {
               </span>
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {(d.piezas || []).map((p, i) => (
+              {(d.piezas || []).filter(Boolean).map((p, i) => (
                 <span key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, padding: '2px 8px', fontSize: 11, color: 'var(--text2)' }}>
                   {p.nombre}: {p.kg?.toFixed(1)} kg{p.precio_venta > 0 ? ` · $${Math.round(p.precio_venta).toLocaleString('es-AR')}/kg` : ''}
                 </span>
@@ -1789,7 +1789,7 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, loading }) {
                 </div>
                 {Array.isArray(e.productos_finales) && e.productos_finales.length > 0 && (
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
-                    {e.productos_finales.map((p, i) => (
+                    {(e.productos_finales || []).filter(Boolean).map((p, i) => (
                       <span key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, padding: '2px 8px', fontSize: 11, color: 'var(--text2)' }}>
                         {NOMBRE_EMBUTIDO[p.tipo] || p.tipo}: {(Number(p.kg) || 0).toFixed(1)} kg
                       </span>
