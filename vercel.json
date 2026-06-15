@@ -1,8 +1,12 @@
 {
   "functions": {
     "api/tts.js": { "maxDuration": 60 },
-    "api/whatsapp.js": { "maxDuration": 30 }
+    "api/whatsapp.js": { "maxDuration": 30 },
+    "api/recordatorio-compras.js": { "maxDuration": 30 }
   },
+  "crons": [
+    { "path": "/api/recordatorio-compras", "schedule": "0 21 * * *" }
+  ],
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/" }
   ]
