@@ -2,7 +2,7 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>Carnicerias Fabricius — Sistema de Gestión</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="manifest" href="/manifest.json" />
@@ -10,7 +10,18 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+      /* Sensación de app nativa: sin zoom raro, sin selección accidental,
+         sin rebote, texto a tamaño fijo. */
+      html, body {
+        touch-action: manipulation;          /* corta el doble-tap-zoom */
+        -webkit-text-size-adjust: 100%;      /* iOS no reescala el texto */
+        overscroll-behavior-y: none;         /* sin "rebote" elástico raro */
+      }
+      * { -webkit-tap-highlight-color: transparent; }
+    </style>
   </head>
   <body>
     <div id="root"></div>
@@ -22,6 +33,10 @@
           navigator.serviceWorker.register('/sw.js').catch(() => {})
         })
       }
+      // iOS ignora user-scalable=no: bloqueamos el pinch-zoom a mano para que
+      // la app quede ESTABLE como una nativa (no se desarma al hacer zoom).
+      document.addEventListener('gesturestart', (e) => e.preventDefault())
+      document.addEventListener('gesturechange', (e) => e.preventDefault())
     </script>
   </body>
 </html>
