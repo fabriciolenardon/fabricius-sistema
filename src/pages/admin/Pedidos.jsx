@@ -264,7 +264,7 @@ export function Pedidos() {
                     </div>
                     <div style={{ fontSize: 13 }}>📅 Para el <strong>{p.dia_entrega}</strong> — 🕐 {p.horario_entrega}</div>
                     <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
-                      {(p.items || []).length} producto(s) · Total: <strong style={{ color: 'var(--gold)' }}>{fmt(p.total_estimado)}</strong>
+                      {(p.items || []).length} producto(s)
                       {(p.remitos_enlazados || []).length > 0 && <> · 🧾 {(p.remitos_enlazados || []).length} remito(s) enlazados</>}
                     </div>
                   </div>
@@ -295,7 +295,7 @@ function DetallePedido({ p, editingItems, editingDia, editingHorario, editingNot
         <div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>📦 Productos {p.estado === 'pendiente' && '(editable)'}</div>
           <table style={{ width: '100%', fontSize: 12 }}>
-            <thead><tr><th>Producto</th><th>Cant.</th><th>Precio</th><th>Subtotal</th><th></th></tr></thead>
+            <thead><tr><th>Producto</th><th>Cant.</th><th>Precio</th><th></th></tr></thead>
             <tbody>
               {itemsRender.map((it, i) => {
                 const unidad = it.unidad || 'kg'
@@ -311,7 +311,6 @@ function DetallePedido({ p, editingItems, editingDia, editingHorario, editingNot
                       )}
                     </td>
                     <td>{fmt(it.precio_unitario)}/{unidad === 'unidad' ? 'u' : 'kg'}</td>
-                    <td style={{ color: 'var(--gold)', fontWeight: 600 }}>{fmt(it.subtotal)}</td>
                     <td>
                       {p.estado === 'pendiente' && (
                         <button onClick={() => quitarItemEdit(i)} style={{ background: 'none', border: 'none', color: 'var(--red-light)', cursor: 'pointer' }}>🗑️</button>
@@ -320,13 +319,6 @@ function DetallePedido({ p, editingItems, editingDia, editingHorario, editingNot
                   </tr>
                 )
               })}
-              <tr style={{ borderTop: '1px solid var(--gold)' }}>
-                <td colSpan={3} style={{ textAlign: 'right', fontWeight: 700 }}>TOTAL</td>
-                <td style={{ color: 'var(--gold)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>
-                  {fmt(itemsRender.reduce((s, i) => s + (i.subtotal || 0), 0))}
-                </td>
-                <td></td>
-              </tr>
             </tbody>
           </table>
 
@@ -334,9 +326,8 @@ function DetallePedido({ p, editingItems, editingDia, editingHorario, editingNot
             <div style={{ marginTop: 14, background: '#2a1a08', border: '1px solid #ff9d3a', borderRadius: 8, padding: 10 }}>
               <div style={{ fontSize: 11, color: '#ff9d3a', fontWeight: 700, marginBottom: 6 }}>📦 PENDIENTE DE DESPACHO</div>
               {(p.items_pendientes || []).map((it, i) => (
-                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '2px 0' }}>
-                  <span>{it.nombre} — {it.kg_pendiente} {(it.unidad || 'kg') === 'unidad' ? 'u' : 'kg'}</span>
-                  <span style={{ color: 'var(--gold)' }}>{fmt(it.subtotal_pendiente)}</span>
+                <div key={i} style={{ fontSize: 12, padding: '2px 0' }}>
+                  {it.nombre} — {it.kg_pendiente} {(it.unidad || 'kg') === 'unidad' ? 'u' : 'kg'}
                 </div>
               ))}
             </div>

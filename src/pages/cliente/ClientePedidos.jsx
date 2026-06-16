@@ -81,7 +81,7 @@ export default function ClientePedidos() {
                       <span style={{ fontSize: 11, color: 'var(--muted)' }}>{new Date(p.created_at).toLocaleString('es-AR')}</span>
                     </div>
                     <div style={{ fontSize: 14, fontWeight: 600 }}>📅 Para el {p.dia_entrega} — 🕐 {p.horario_entrega}</div>
-                    <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{(p.items || []).length} producto(s) · Total estimado: <strong style={{ color: 'var(--gold)' }}>{fmt(p.total_estimado)}</strong></div>
+                    <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{(p.items || []).length} producto(s) · el precio final se confirma al preparar el pedido</div>
                     {p.editado_por_admin && <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 4 }}>⚠️ El admin ajustó el pedido</div>}
                     {p.rechazado_motivo && <div style={{ fontSize: 12, color: 'var(--red-light)', marginTop: 4 }}>Motivo: {p.rechazado_motivo}</div>}
                   </div>
@@ -100,7 +100,7 @@ export default function ClientePedidos() {
                     {/* Items */}
                     <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>📦 Productos</div>
                     <table style={{ width: '100%', marginBottom: 14 }}>
-                      <thead><tr><th>Producto</th><th>Kg</th><th>Precio/kg</th><th style={{ textAlign: 'right' }}>Subtotal</th></tr></thead>
+                      <thead><tr><th>Producto</th><th>Kg</th><th style={{ textAlign: 'right' }}>Precio/kg</th></tr></thead>
                       <tbody>
                         {(p.items || []).map((it, i) => {
                           const u = (it.unidad || 'kg') === 'unidad' ? 'u' : 'kg'
@@ -108,15 +108,10 @@ export default function ClientePedidos() {
                             <tr key={i}>
                               <td>{it.nombre}</td>
                               <td>{it.kg} {u}</td>
-                              <td>{fmt(it.precio_unitario)}/{u}</td>
-                              <td style={{ textAlign: 'right', color: 'var(--gold)', fontWeight: 600 }}>{fmt(it.subtotal)}</td>
+                              <td style={{ textAlign: 'right' }}>{fmt(it.precio_unitario)}/{u}</td>
                             </tr>
                           )
                         })}
-                        <tr style={{ borderTop: '2px solid var(--gold)' }}>
-                          <td colSpan={3} style={{ textAlign: 'right', fontWeight: 700 }}>TOTAL</td>
-                          <td style={{ textAlign: 'right', fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{fmt(p.total_estimado)}</td>
-                        </tr>
                       </tbody>
                     </table>
 
@@ -127,9 +122,8 @@ export default function ClientePedidos() {
                         {(p.items_pendientes || []).map((it, i) => {
                           const u = (it.unidad || 'kg') === 'unidad' ? 'u' : 'kg'
                           return (
-                            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '2px 0' }}>
-                              <span>{it.nombre} — {it.kg_pendiente} {u}</span>
-                              <span style={{ color: 'var(--gold)' }}>{fmt(it.subtotal_pendiente)}</span>
+                            <div key={i} style={{ fontSize: 12, padding: '2px 0' }}>
+                              {it.nombre} — {it.kg_pendiente} {u}
                             </div>
                           )
                         })}
