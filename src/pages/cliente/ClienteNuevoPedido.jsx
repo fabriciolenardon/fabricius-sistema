@@ -133,7 +133,7 @@ export default function ClienteNuevoPedido() {
     }
     setCarrito(c => [...c, item])
     pushCliente(`${cant} ${unidadLabel} de ${productoSel.nombre}`)
-    pushBot(`Listo, agregué ${cant} ${unidadLabel} de ${productoSel.nombre} (${fmt(subtotal)}). ¿Querés agregar otro producto o seguir con el pedido?`)
+    pushBot(`Listo, agregué ${cant} ${unidadLabel} de ${productoSel.nombre} (${fmt(precio_unitario)}/${unidadLabel}). El total final se confirma al preparar el pedido. ¿Querés agregar otro producto o seguir con el pedido?`)
     setKgInput('')
     setUnidadSel('')
     setProductoSel(null)
@@ -323,7 +323,7 @@ export default function ClienteNuevoPedido() {
               </div>
               {kgInput && parseFloat(kgInput) > 0 && (
                 <div style={{ marginTop: 10, fontSize: 13, color: 'var(--muted)' }}>
-                  {parseFloat(kgInput)} {unidadSel === 'kg' ? 'kg' : 'u'} × {fmt(productoSel[listaPrecioField] || 0)} = <strong style={{ color: 'var(--gold)' }}>{fmt(parseFloat(kgInput) * (productoSel[listaPrecioField] || 0))}</strong>
+                  {parseFloat(kgInput)} {unidadSel === 'kg' ? 'kg' : 'u'} · <strong style={{ color: 'var(--gold)' }}>{fmt(productoSel[listaPrecioField] || 0)}/{unidadSel === 'kg' ? 'kg' : 'u'}</strong>
                 </div>
               )}
             </div>
@@ -408,12 +408,11 @@ export default function ClienteNuevoPedido() {
                 {carrito.map((it, i) => (
                   <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 13 }}>
                     <span>{it.nombre} — {it.kg} {(it.unidad || 'kg') === 'unidad' ? 'u' : 'kg'}</span>
-                    <span style={{ color: 'var(--gold)', fontWeight: 600 }}>{fmt(it.subtotal)}</span>
+                    <span style={{ color: 'var(--muted)' }}>{fmt(it.precio_unitario)}/{(it.unidad || 'kg') === 'unidad' ? 'u' : 'kg'}</span>
                   </div>
                 ))}
-                <div style={{ borderTop: '1px solid var(--border)', marginTop: 8, paddingTop: 8, display: 'flex', justifyContent: 'space-between', fontSize: 15, fontWeight: 700 }}>
-                  <span>Total estimado</span>
-                  <span style={{ color: 'var(--gold)', fontFamily: "'Bebas Neue',cursive", fontSize: 24 }}>{fmt(total)}</span>
+                <div style={{ borderTop: '1px solid var(--border)', marginTop: 8, paddingTop: 8, fontSize: 12, color: 'var(--muted)' }}>
+                  💡 El precio final se confirma al preparar el pedido (el peso de la carne puede variar).
                 </div>
               </div>
 
@@ -469,10 +468,9 @@ export default function ClienteNuevoPedido() {
                 <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
                   <div>
                     <div style={{ fontWeight: 600 }}>{it.nombre}</div>
-                    <div style={{ color: 'var(--muted)', fontSize: 11 }}>{it.kg} {(it.unidad || 'kg') === 'unidad' ? 'u' : 'kg'} × {fmt(it.precio_unitario)}/{(it.unidad || 'kg') === 'unidad' ? 'u' : 'kg'}</div>
+                    <div style={{ color: 'var(--muted)', fontSize: 11 }}>{it.kg} {(it.unidad || 'kg') === 'unidad' ? 'u' : 'kg'} · {fmt(it.precio_unitario)}/{(it.unidad || 'kg') === 'unidad' ? 'u' : 'kg'}</div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ color: 'var(--gold)', fontWeight: 700 }}>{fmt(it.subtotal)}</span>
                     {(paso === 'otro' || paso === 'resumen' || paso === 'categoria') && (
                       <button onClick={() => quitarItem(i)} style={{ background: 'none', border: 'none', color: 'var(--red-light)', cursor: 'pointer' }}>🗑️</button>
                     )}
@@ -480,9 +478,8 @@ export default function ClienteNuevoPedido() {
                 </div>
               ))}
             </div>
-            <div style={{ borderTop: '2px solid var(--gold)', paddingTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 13, fontWeight: 700 }}>TOTAL</span>
-              <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 26, color: 'var(--gold)' }}>{fmt(total)}</span>
+            <div style={{ borderTop: '2px solid var(--gold)', paddingTop: 10, fontSize: 11, color: 'var(--muted)' }}>
+              💡 El precio final se confirma al preparar el pedido (el peso de la carne puede variar).
             </div>
           </div>
         )}
