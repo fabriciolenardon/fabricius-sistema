@@ -41,6 +41,7 @@ REGLAS (modo "auto con barreras"):
 - El stock es orientativo; si preguntan por una cantidad grande o puntual, aclará que el equipo confirma disponibilidad.
 - Si el cliente quiere HACER UN PEDIDO o encargar algo → tomá QUÉ quiere y para cuándo, y marcá es_pedido=true con un resumen claro. NUNCA confirmes el total ni cierres la venta vos.
 - PEDIDOS — CONFIRMÁ ANTES DE PASARLO: cuando el cliente arma un pedido, NO lo des por cerrado de una. Repetile en una línea lo que entendiste y preguntale si quiere agregar algo más o se lo dejás así (ej: "Te anoto 2 kg de milanesa para mañana. ¿Querés sumar algo más o te lo dejo así? 🥩"). Mantené pedido_confirmado=false mientras siga agregando o no haya confirmado. SOLO cuando el cliente confirma que está completo (dice "así está", "nada más", "dale", "listo", "eso es todo", etc.) ponés pedido_confirmado=true y recién ahí le decís que ya le pasás el pedido al equipo para confirmar disponibilidad y precio final. Si el cliente ya deja claro de entrada que es todo, podés confirmar directo.
+- SEGUIMIENTO DE UN PEDIDO YA HECHO: si el cliente pregunta si su pedido está listo, te pide que le avises, o hace referencia a un encargo que YA hizo antes (ej "me podrás avisar?", "está la carne?", "sobre eso") → buscá ese pedido en el HISTORIAL y recordáselo al equipo: re-confirmá QUÉ pidió y PARA CUÁNDO, ajustando las fechas relativas a HOY según las marcas de tiempo del historial. Ej: si AYER pidió "para esta tarde o mañana temprano", hoy eso es "para ayer a la tarde o hoy temprano". Tranquilizá al cliente: "Perfecto, ya le recuerdo tu pedido al equipo de … para retirar … Ellos se contactarán para confirmar disponibilidad y el precio final. ¡Gracias! 😊". NO inventes un pedido si en el historial no hay ninguno; en ese caso pedí amablemente que te diga qué encargó.
 - Si saludan, saludá cálida y preguntá en qué ayudás.
 - Sos la asistente del negocio (no lo escondas si te preguntan), pero hablá natural, no robótica.
 
@@ -303,6 +304,32 @@ async function traerDatosNegocio() {
 // ordena cronológicamente, mapea cliente→'user' / Iris+humano→'model' y mergea
 // turnos consecutivos del mismo lado (Gemini espera roles alternados y arrancar
 // en 'user'). El mensaje entrante actual ya está guardado → queda de último.
+// Fecha/hora actual en Argentina, legible (ej "lunes, 16 de junio de 2026, 10:21").
+function fechaHoraARG() {
+  try {
+    return new Intl.DateTimeFormat('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date())
+  } catch { return '' }
+}
+
+// Marca de tiempo relativa de un mensaje: "hoy 13:52" / "ayer 09:46" / "14/06 10:00".
+// Sirve para que Iris ubique cuándo pasó cada cosa y re-ancle las fechas relativas.
+function etiquetaTiempo(iso) {
+  if (!iso) return ''
+  try {
+    const tz = 'America/Argentina/Buenos_Aires'
+    const tieneTZ = /(Z|[+\-]\d{2}:?\d{2})$/.test(String(iso).trim())
+    const d = new Date(tieneTZ ? iso : String(iso).replace(' ', 'T') + 'Z')
+    const dia = x => new Intl.DateTimeFormat('es-AR', { timeZone: tz, day: '2-digit', month: '2-digit', year: 'numeric' }).format(x)
+    const hora = new Intl.DateTimeFormat('es-AR', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(d)
+    const hoy = dia(new Date())
+    const ayer = dia(new Date(Date.now() - 86400000))
+    const dDia = dia(d)
+    if (dDia === hoy) return `hoy ${hora}`
+    if (dDia === ayer) return `ayer ${hora}`
+    return `${dDia.slice(0, 5)} ${hora}`
+  } catch { return '' }
+}
+
 async function traerHistorial(telefono) {
   if (!SB_URL || !SB_KEY) return null
   try {
@@ -316,9 +343,12 @@ async function traerHistorial(telefono) {
       const t = (m.texto || '').trim()
       if (!t) continue
       const role = m.direccion === 'in' ? 'user' : 'model'
+      // Prefijo con la marca de tiempo (hoy/ayer/fecha) para que Iris ubique
+      // cuándo se dijo cada cosa y re-ancle "hoy/mañana" al día actual.
+      const linea = `[${etiquetaTiempo(m.created_at)}] ${t}`
       const last = contents[contents.length - 1]
-      if (last && last.role === role) last.parts[0].text += '\n' + t
-      else contents.push({ role, parts: [{ text: t }] })
+      if (last && last.role === role) last.parts[0].text += '\n' + linea
+      else contents.push({ role, parts: [{ text: linea }] })
     }
     while (contents.length && contents[0].role !== 'user') contents.shift()
     return contents.length ? contents : null
@@ -335,6 +365,7 @@ async function responderConIris(historial, textoActual, datosNegocio, infoNegoci
     : [{ role: 'user', parts: [{ text: textoActual }] }]
 
   let systemText = PROMPT_BASE
+  systemText += `\n\n=== FECHA Y HORA AHORA ===\nAhora es ${fechaHoraARG()} (hora de Argentina). Usá esto para interpretar "hoy", "ayer", "mañana", "esta tarde", "temprano", etc. En el HISTORIAL cada mensaje arranca con su marca de tiempo entre corchetes (ej "[ayer 13:52]", "[hoy 09:46]") — usala para saber CUÁNDO se dijo cada cosa y re-anclar las fechas al día de hoy, pero NUNCA copies esa marca en tu respuesta.`
   if (sorteo) systemText += `\n\n=== SORTEO VIGENTE ===\nHay un SORTEO/RIFA de una media res que maneja ${sorteo} (NO el equipo de la carnicería). Si el cliente menciona el sorteo, la rifa, o quiere comprar/guardar/reservar un NÚMERO (ej. "el número 89", "guardame uno", "cuánto sale el número"), NO lo tomes vos como pedido ni preguntes qué quiere encargar: derivalo con amabilidad a ${sorteo}, que es quien maneja el sorteo y le pasa los datos para participar. En ese caso es_pedido=false.`
   if (infoNegocio) systemText += `\n\n=== INFORMACIÓN DEL NEGOCIO (horarios/dirección/pagos/envíos) ===\n${infoNegocio}`
   systemText += datosNegocio
