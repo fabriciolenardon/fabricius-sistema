@@ -4,3 +4,6 @@ dist
 .env.local
 .DS_Store
 *.js.txt
+# Artefactos temporales que genera Vite al cargar la config (no versionar)
+vite.config.js.timestamp-*.mjs
+vite.config.*.timestamp-*.mjs
