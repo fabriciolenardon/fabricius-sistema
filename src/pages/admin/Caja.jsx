@@ -450,6 +450,13 @@ export default function Caja() {
       showMsg(`❌ Falta cobrar ${fmt(totalACobrar - cobrado)}`, 'error')
       return
     }
+    // Guardia anti-typo: si lo cargado supera al total por un vuelto absurdo
+    // (> $1.000.000), casi seguro es un error de tipeo en el monto (ej. una venta
+    // de $10.279 con $2.000.000.000 de efectivo). Pedimos confirmación para que el
+    // cajero lo revise antes de guardar un número disparatado que ensucia la caja.
+    if (vuelto > 1000000) {
+      if (!confirm(`⚠️ Cargaste ${fmt(cobrado)} para una venta de ${fmt(totalACobrar)}.\nEl vuelto sería ${fmt(vuelto)}.\n\n¿Es correcto? Si te equivocaste, cancelá y corregí el monto.`)) return
+    }
 
     setGuardandoVenta(true)
     try {
