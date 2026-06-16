@@ -100,9 +100,16 @@ export default async function handler(req, res) {
     const contacto = await getContacto(from)
     const pausada = contacto?.iris_pausada === true
 
+    // Si vino una foto/archivo/audio/comprobante, lo bajamos de WhatsApp y lo
+    // guardamos en storage para poder VERLO en el chat (no solo el rótulo).
+    let mediaUrl = null
+    if (tipo !== 'text' && msg[msg.type]?.id) {
+      mediaUrl = await descargarMedia(msg, from)
+    }
+
     // Persistimos el mensaje entrante y actualizamos el contacto (siempre,
     // aunque Iris no responda — así el panel ve TODO lo que entra).
-    await guardarMensaje(from, 'in', 'cliente', tipo, textoMostrable)
+    await guardarMensaje(from, 'in', 'cliente', tipo, textoMostrable, mediaUrl)
     await upsertContacto(from, nombreContacto, textoMostrable, contacto)
 
     // Comprobantes (imágenes/PDF/audio) → NO se responden. Quedan en el panel.
@@ -238,14 +245,51 @@ async function getContacto(telefono) {
   } catch (e) { console.error('getContacto', e); return null }
 }
 
-async function guardarMensaje(telefono, direccion, autor, tipo, texto) {
+async function guardarMensaje(telefono, direccion, autor, tipo, texto, mediaUrl = null) {
   if (!SB_URL || !SB_KEY) return
   try {
     await fetch(`${SB_URL}/rest/v1/wa_mensajes`, {
       method: 'POST', headers: sbHeaders({ Prefer: 'return=minimal' }),
-      body: JSON.stringify({ telefono, direccion, autor, tipo, texto }),
+      body: JSON.stringify({ telefono, direccion, autor, tipo, texto, media_url: mediaUrl || null }),
     })
   } catch (e) { console.error('guardarMensaje', e) }
+}
+
+// Baja un archivo entrante de la Cloud API y lo sube al bucket privado wa-media.
+// Devuelve el PATH en storage (para guardar en wa_mensajes.media_url) o null si
+// falla. Flujo Cloud API: GET /{media-id} → {url, mime_type, file_size}; luego
+// GET de esa url con el token → bytes. Degrada con gracia: si falla, el mensaje
+// igual se guarda con su rótulo.
+const MEDIA_MAX_BYTES = 30 * 1024 * 1024
+const EXT_POR_MIME = {
+  'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif',
+  'application/pdf': 'pdf', 'audio/ogg': 'ogg', 'audio/mpeg': 'mp3', 'audio/mp4': 'm4a',
+  'audio/amr': 'amr', 'video/mp4': 'mp4', 'video/3gpp': '3gp',
+}
+async function descargarMedia(msg, from) {
+  if (!WA_TOKEN || !SB_URL || !SB_KEY) return null
+  try {
+    const mediaObj = msg[msg.type]
+    const mediaId = mediaObj?.id
+    if (!mediaId) return null
+    const metaR = await fetch(`https://graph.facebook.com/v21.0/${mediaId}`, { headers: { Authorization: `Bearer ${WA_TOKEN}` } })
+    if (!metaR.ok) { console.error('media meta', metaR.status); return null }
+    const meta = await metaR.json()
+    if (meta.file_size && Number(meta.file_size) > MEDIA_MAX_BYTES) { console.warn('media muy grande, no se baja:', meta.file_size); return null }
+    const binR = await fetch(meta.url, { headers: { Authorization: `Bearer ${WA_TOKEN}` } })
+    if (!binR.ok) { console.error('media bin', binR.status); return null }
+    const buf = Buffer.from(await binR.arrayBuffer())
+    const mime = (meta.mime_type || mediaObj?.mime_type || 'application/octet-stream').split(';')[0].trim()
+    const ext = EXT_POR_MIME[mime] || (mime.split('/')[1] || 'bin').replace(/[^a-z0-9]/gi, '') || 'bin'
+    const path = `${String(from).replace(/\D/g, '')}/${mediaId}.${ext}`
+    const upR = await fetch(`${SB_URL}/storage/v1/object/wa-media/${path}`, {
+      method: 'POST',
+      headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, 'Content-Type': mime, 'x-upsert': 'true' },
+      body: buf,
+    })
+    if (!upR.ok) { console.error('media upload', upR.status, await upR.text().catch(() => '')); return null }
+    return path
+  } catch (e) { console.error('descargarMedia', e); return null }
 }
 
 async function upsertContacto(telefono, nombre, ultimoMensaje, contactoPrevio) {
