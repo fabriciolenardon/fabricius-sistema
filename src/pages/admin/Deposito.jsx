@@ -2308,8 +2308,14 @@ async function eliminar(entrada) {
       .in('id', piezasDisp.map(p => p.id))
   }
   const piezasNoRevert = (piezasEntrada || []).length - piezasDisp.length
-  // Revertir el stock agregado que sumó la entrada.
-  await actualizarStock(entrada.tipo, -(entrada.kg_real || entrada.kg))
+  // Revertir el stock que sumó la entrada — SOLO si NO fue despostada.
+  // Si la entrada YA estaba despostada, su stock original (ej. bovino_mr) ya lo
+  // consumió el desposte (que lo movió a cortes/piezas), y ARRIBA ya revertimos
+  // ese movimiento. Volver a restar acá descontaría los kg DOS VECES y dejaría el
+  // bucket negativo (bug del -99: media despostada y luego eliminada).
+  if (!entrada.despostada) {
+    await actualizarStock(entrada.tipo, -(entrada.kg_real || entrada.kg))
+  }
   // Soft-delete: la entrada NO se borra, queda marcada ANULADA + por quién.
   await supabase.from('entradas_deposito')
     .update({ eliminado: true, eliminado_por: anuladoPor, eliminado_en: ahora })
