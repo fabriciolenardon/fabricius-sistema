@@ -36,7 +36,8 @@ const ACUSE_PAGO = '¡Gracias! 🙌 Ya le aviso al equipo para que verifique tu 
 const PROMPT_BASE = `Sos IRIS, la asistente de Carnicerías Fabricius (Río Primero, Córdoba), atendiendo el WhatsApp del negocio. Sos MUJER, cálida, simpática y profesional. Es un chat de WhatsApp: respondé BREVE (1-3 frases), en español argentino, sin tecnicismos, con alguna emoji si pinta 🥩.
 
 REGLAS (modo "auto con barreras"):
-- Para PRECIOS y STOCK usá SOLO los datos de la sección "DATOS DEL NEGOCIO". Son precios al público (minorista). NUNCA inventes un precio ni un stock que no esté en esa lista.
+- PRECIOS — PREGUNTÁ PRIMERO EL TIPO DE CLIENTE: hay 3 listas (Minorista, Gastronómico, Carnicero). Si el cliente pregunta por precios y todavía NO sabés qué tipo es (ni vos lo preguntaste antes en este chat), preguntáselo amablemente: "¿Sos cliente minorista, gastronómico o carnicero? Así te paso la lista que te corresponde 🥩". Una vez que sabés el tipo, usá SOLO ese precio de cada producto en "DATOS DEL NEGOCIO": Minorista→precio Minorista, Gastronómico→precio Gastronómico, Carnicero→precio Carnicero. NUNCA mezcles listas, NUNCA le muestres las tres, NUNCA inventes un precio.
+- PRECIO QUE NO ESTÁ: si te piden un producto que NO figura en la lista, o que no tiene precio cargado para la lista del cliente → NO inventes. Decile que lo consultás con el equipo y que en un ratito te confirman, y marcá escalar=true (así avisamos al equipo para seguir la conversación). Lo mismo si te piden algo que no sabés responder.
 - Para horarios, dirección, formas de pago y envíos usá la sección "INFORMACIÓN DEL NEGOCIO" si está cargada. Si te preguntan algo que no está, derivá con amabilidad al equipo (no inventes).
 - El stock es orientativo; si preguntan por una cantidad grande o puntual, aclará que el equipo confirma disponibilidad.
 - Si el cliente quiere HACER UN PEDIDO o encargar algo → tomá QUÉ quiere y para cuándo, y marcá es_pedido=true con un resumen claro. NUNCA confirmes el total ni cierres la venta vos.
@@ -45,7 +46,7 @@ REGLAS (modo "auto con barreras"):
 - Si saludan, saludá cálida y preguntá en qué ayudás.
 - Sos la asistente del negocio (no lo escondas si te preguntan), pero hablá natural, no robótica.
 
-Respondé SIEMPRE en el formato JSON pedido: "respuesta", "es_pedido" (true si está armando/encargando algo concreto), "resumen_pedido" (qué pidió y para cuándo, vacío si no es pedido) y "pedido_confirmado" (true SOLO cuando el cliente confirmó que el pedido está completo; false mientras todavía lo está armando o no confirmó).`
+Respondé SIEMPRE en el formato JSON pedido: "respuesta", "es_pedido" (true si está armando/encargando algo concreto), "resumen_pedido" (qué pidió y para cuándo, vacío si no es pedido), "pedido_confirmado" (true SOLO cuando el cliente confirmó que el pedido está completo; false mientras todavía lo está armando o no confirmó) y "escalar" (true cuando no podés responder algo —ej. un precio que no está en la lista— y necesitás que el equipo siga la conversación).`
 
 const SCHEMA_RESPUESTA = {
   type: 'object',
@@ -54,6 +55,7 @@ const SCHEMA_RESPUESTA = {
     es_pedido: { type: 'boolean' },
     resumen_pedido: { type: 'string' },
     pedido_confirmado: { type: 'boolean' },
+    escalar: { type: 'boolean' },
   },
   required: ['respuesta', 'es_pedido'],
 }
@@ -160,6 +162,22 @@ export default async function handler(req, res) {
           } catch {}
         }
       } catch (e) { console.error('Registro/aviso pedido WA error', e) }
+    }
+
+    // Escalada: Iris no pudo responder algo (ej. un precio que no está en la lista)
+    // → avisamos al equipo para que siga la conversación. No registra pedido.
+    if (ia.escalar) {
+      try {
+        const quien = nombreContacto ? `${nombreContacto} (${from})` : from
+        if (AVISOS_TO) {
+          const aviso = `🙋 *WhatsApp — Iris necesita ayuda*\n\n👤 ${quien}\n💬 Preguntó: "${texto}"\n\nEntrá a responderle desde el sistema (WhatsApp → Conversaciones).`
+          await enviarWhatsApp(phoneId, AVISOS_TO, aviso)
+        }
+        await fetch(`https://${req.headers.host}/api/enviar-push?secret=${VERIFY_TOKEN}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ titulo: '🙋 Iris necesita ayuda (WhatsApp)', body: `${nombreContacto || from}: ${texto}`, url: '/admin/whatsapp' }),
+        }).catch(() => {})
+      } catch (e) { console.error('Aviso escalada WA error', e) }
     }
 
     return res.status(200).end()
@@ -283,17 +301,25 @@ async function traerDatosNegocio() {
   try {
     const inCats = `(${CATEGORIAS_PUBLICAS.join(',')})`
     const [precios, stock] = await Promise.all([
-      sbGet(`precios?select=nombre,categoria,precio_minorista&precio_minorista=not.is.null&categoria=in.${inCats}&order=categoria,nombre`, sbHeaders()),
+      sbGet(`precios?select=nombre,categoria,precio_minorista,precio_mayorista,precio_carniceria&categoria=in.${inCats}&order=categoria,nombre`, sbHeaders()),
       sbGet('stock_actual?select=tipo,kg_disponible', sbHeaders()),
     ])
     const listaPrecios = (precios || [])
-      .filter(p => p.nombre && Number(p.precio_minorista) > 0)
-      .map(p => `- ${p.nombre.trim()}: ${formatearPesos(p.precio_minorista)}`).join('\n')
+      .map(p => {
+        if (!p.nombre) return null
+        const partes = []
+        if (Number(p.precio_minorista) > 0) partes.push(`Minorista ${formatearPesos(p.precio_minorista)}`)
+        if (Number(p.precio_mayorista) > 0) partes.push(`Gastronómico ${formatearPesos(p.precio_mayorista)}`)
+        if (Number(p.precio_carniceria) > 0) partes.push(`Carnicero ${formatearPesos(p.precio_carniceria)}`)
+        if (!partes.length) return null
+        return `- ${p.nombre.trim()}: ${partes.join(' · ')}`
+      })
+      .filter(Boolean).join('\n')
     const lineasStock = (stock || [])
       .filter(s => Number(s.kg_disponible) > 0)
       .map(s => `- ${s.tipo}: ${Math.round(Number(s.kg_disponible))} kg`).join('\n')
     let out = ''
-    if (listaPrecios) out += `PRECIOS AL PÚBLICO (por kg salvo que el nombre diga lo contrario):\n${listaPrecios}\n`
+    if (listaPrecios) out += `PRECIOS POR LISTA (por kg salvo que el nombre diga lo contrario). Cada producto trae su precio en las 3 listas — usá SOLO la que corresponde al tipo de cliente:\n${listaPrecios}\n`
     if (lineasStock) out += `\nSTOCK ORIENTATIVO disponible hoy:\n${lineasStock}\n`
     return out
   } catch (e) { console.error('traerDatosNegocio error', e); return '' }
@@ -357,7 +383,7 @@ async function traerHistorial(telefono) {
 
 // ── Cerebro de Iris (Gemini, salida estructurada) ────────────────────────
 async function responderConIris(historial, textoActual, datosNegocio, infoNegocio, sorteo) {
-  const fallback = { respuesta: '¡Hola! 🥩 Gracias por tu mensaje. En un ratito te responde alguien del equipo de Carnicerías Fabricius.', es_pedido: false, resumen_pedido: '', pedido_confirmado: false }
+  const fallback = { respuesta: '¡Hola! 🥩 Gracias por tu mensaje. En un ratito te responde alguien del equipo de Carnicerías Fabricius.', es_pedido: false, resumen_pedido: '', pedido_confirmado: false, escalar: false }
   if (!GEMINI_KEY) return fallback
   // Si no hay historial (o falló), usamos solo el mensaje actual.
   const contents = (Array.isArray(historial) && historial.length)
@@ -404,6 +430,7 @@ async function responderConIris(historial, textoActual, datosNegocio, infoNegoci
       es_pedido: parsed.es_pedido === true,
       resumen_pedido: (parsed.resumen_pedido || '').trim(),
       pedido_confirmado: parsed.pedido_confirmado === true,
+      escalar: parsed.escalar === true,
     }
   } catch (e) { console.error('Gemini WA error', e); return fallback }
 }
