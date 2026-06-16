@@ -204,7 +204,8 @@ export default function ConversacionesWhatsapp() {
                           background: out ? (esIris ? 'rgba(74,222,128,0.15)' : 'rgba(96,165,250,0.18)') : 'var(--surface2)',
                           border: '1px solid var(--border)', color: 'var(--text)' }}>
                           {out && <div style={{ fontSize: 10, fontWeight: 700, marginBottom: 2, color: esIris ? 'var(--green)' : 'var(--blue)' }}>{esIris ? '🤖 Iris' : '🙋 Vos'}</div>}
-                          {m.texto}
+                          {m.media_url && <MediaWa path={m.media_url} tipo={m.tipo} />}
+                          {m.texto && <div style={{ marginTop: m.media_url ? 4 : 0 }}>{m.texto}</div>}
                           <div style={{ fontSize: 9, color: 'var(--muted)', textAlign: 'right', marginTop: 3 }}>{horaCorta(m.created_at)}</div>
                         </div>
                       </div>
@@ -229,6 +230,28 @@ export default function ConversacionesWhatsapp() {
       {cfgAbierta && <ModalConfig onClose={() => setCfgAbierta(false)} />}
     </div>
   )
+}
+
+// Muestra un archivo entrante de WhatsApp (foto/comprobante/audio/documento).
+// El path está en wa_mensajes.media_url; generamos una URL firmada temporal del
+// bucket privado wa-media para verlo. La foto se abre en grande al clickear.
+function MediaWa({ path, tipo }) {
+  const [url, setUrl] = useState(null)
+  const [err, setErr] = useState(false)
+  useEffect(() => {
+    let alive = true
+    setUrl(null); setErr(false)
+    supabase.storage.from('wa-media').createSignedUrl(path, 3600)
+      .then(({ data, error }) => { if (!alive) return; if (error || !data?.signedUrl) setErr(true); else setUrl(data.signedUrl) })
+    return () => { alive = false }
+  }, [path])
+  if (err) return <div style={{ fontSize: 11, color: 'var(--muted)' }}>📎 No se pudo cargar el archivo</div>
+  if (!url) return <div style={{ fontSize: 11, color: 'var(--muted)' }}>⏳ Cargando archivo…</div>
+  if (tipo === 'image' || tipo === 'sticker') {
+    return <a href={url} target="_blank" rel="noreferrer"><img src={url} alt="adjunto" style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 8, display: 'block' }} /></a>
+  }
+  if (tipo === 'audio') return <audio controls src={url} style={{ maxWidth: 240, display: 'block' }} />
+  return <a href={url} target="_blank" rel="noreferrer" style={{ color: 'var(--blue)', fontWeight: 600 }}>📎 Abrir archivo</a>
 }
 
 // ── Modal: Respuestas de Iris (wa_config editable) ──
