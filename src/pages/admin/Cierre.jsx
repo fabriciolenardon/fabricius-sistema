@@ -331,9 +331,9 @@ export default function Cierre() {
   }
 
   async function eliminarCierre(id) {
-    if (!confirm('¿Eliminar este cierre semanal? Esta acción no se puede deshacer.')) return
+    if (!confirm('¿Anular este cierre semanal?\n\nDespués podés volver a cerrar esa semana (Cierre Auto → "Semana anterior", o el botón 🔄 Re-cerrar) y se va a recalcular con los datos actualizados (ej. sueldos ya liquidados).\n\nNota: en vez de anular, también podés usar 🔄 Re-cerrar directamente — actualiza el cierre sin borrarlo.')) return
     await supabase.from('cierres_semanales').delete().eq('id', id)
-    showAlert({ type: 'success', msg: '🗑️ Cierre eliminado' })
+    showAlert({ type: 'success', msg: '🗑️ Cierre anulado — ya podés volver a cerrar esa semana' })
     fetchCierres()
   }
 
@@ -756,11 +756,12 @@ export default function Cierre() {
                       <td style={{ color: c.ganancia >= 0 ? 'var(--gold)' : 'var(--red-light)', fontWeight: 700 }}>{fmt(c.ganancia)}</td>
                       <td>
                         <button className="btn btn-ghost btn-sm"
+                          title="Recalcular esta semana con los datos actuales (ej. sueldos ya liquidados) y volver a guardarla — actualiza el cierre existente"
                           onClick={() => { setDesde(c.semana_inicio); setHasta(c.semana_fin); setTab('semanal') }}>
-                          🔄 Recalcular
+                          🔄 Re-cerrar
                         </button>
-                        <button className="btn btn-ghost btn-sm" onClick={() => eliminarCierre(c.id)} style={{ color: 'var(--red-light)' }}>
-                          🗑️
+                        <button className="btn btn-ghost btn-sm" title="Anular este cierre semanal" onClick={() => eliminarCierre(c.id)} style={{ color: 'var(--red-light)' }}>
+                          🗑️ Anular
                         </button>
                       </td>
                     </tr>
