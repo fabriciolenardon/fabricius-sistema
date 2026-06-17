@@ -65,7 +65,12 @@ export default function ConversacionesWhatsapp() {
     marcarLeido(sel)
     const canal = supabase.channel('wa-msgs-' + sel)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'wa_mensajes', filter: `telefono=eq.${sel}` },
-        payload => { if (selRef.current === sel) setMensajes(m => [...m, payload.new]) })
+        payload => {
+          if (selRef.current !== sel) return
+          // Dedup por id: evita que el mismo mensaje aparezca dos veces si el
+          // evento llega junto con una recarga (o se repite el evento realtime).
+          setMensajes(m => m.some(x => x.id === payload.new.id) ? m : [...m, payload.new])
+        })
       .subscribe()
     return () => supabase.removeChannel(canal)
   }, [sel])
@@ -100,8 +105,8 @@ export default function ConversacionesWhatsapp() {
       const j = await r.json().catch(() => ({}))
       if (!r.ok) { alert('No se pudo enviar: ' + (j.error || r.status)); setEnviando(false); return }
       setTexto('')
-      // el mensaje aparece por realtime; recargamos por las dudas
-      cargarMensajes(sel)
+      // el mensaje aparece solo por realtime (con dedup por id); NO recargamos
+      // acá para no provocar la carrera recarga-vs-realtime que duplicaba.
     } catch (e) { alert('Error: ' + e.message) }
     setEnviando(false)
   }
