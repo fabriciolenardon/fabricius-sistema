@@ -5,10 +5,13 @@ import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import ConversacionesWhatsapp from './ConversacionesWhatsapp'
 import PedidosWhatsapp from './PedidosWhatsapp'
+import CampanasWhatsapp from './CampanasWhatsapp'
+
+const TAB_VALIDA = (t) => (t === 'pedidos' || t === 'campanas') ? t : 'conversaciones'
 
 export default function Whatsapp() {
   const [params, setParams] = useSearchParams()
-  const [tab, setTab] = useState(params.get('tab') === 'pedidos' ? 'pedidos' : 'conversaciones')
+  const [tab, setTab] = useState(TAB_VALIDA(params.get('tab')))
   const [noLeidos, setNoLeidos] = useState(0)
   const [pedidosNuevos, setPedidosNuevos] = useState(0)
 
@@ -31,7 +34,7 @@ export default function Whatsapp() {
 
   function cambiar(t) {
     setTab(t)
-    setParams(t === 'pedidos' ? { tab: 'pedidos' } : {}, { replace: true })
+    setParams(t === 'conversaciones' ? {} : { tab: t }, { replace: true })
   }
 
   return (
@@ -40,9 +43,12 @@ export default function Whatsapp() {
       <div style={{ display: 'flex', gap: 6, marginBottom: 16, borderBottom: '1px solid var(--border)', paddingBottom: 0 }}>
         <TabBtn activo={tab === 'conversaciones'} onClick={() => cambiar('conversaciones')} icon="🗨️" label="Conversaciones" badge={noLeidos} color="var(--blue)" />
         <TabBtn activo={tab === 'pedidos'} onClick={() => cambiar('pedidos')} icon="📥" label="Pedidos minoristas" badge={pedidosNuevos} color="var(--green)" />
+        <TabBtn activo={tab === 'campanas'} onClick={() => cambiar('campanas')} icon="📣" label="Campañas" badge={0} color="var(--gold)" />
       </div>
 
-      {tab === 'conversaciones' ? <ConversacionesWhatsapp /> : <PedidosWhatsapp />}
+      {tab === 'conversaciones' && <ConversacionesWhatsapp />}
+      {tab === 'pedidos' && <PedidosWhatsapp />}
+      {tab === 'campanas' && <CampanasWhatsapp />}
     </div>
   )
 }
