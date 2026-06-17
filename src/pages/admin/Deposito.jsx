@@ -2248,10 +2248,21 @@ async function eliminar(entrada) {
   if (entrada.despostada && entrada.desposte_id) {
     const { data: desposte } = await supabase.from('despostes').select('*').eq('id', entrada.desposte_id).single()
     if (desposte) {
-      if (desposte.tipo_desposte === 'piezas') {
-        // Revertir cada pieza a SU bucket propio (no al genérico).
+      if (desposte.tipo_desposte === 'piezas' || desposte.tipo_desposte === 'cerdo') {
+        // Revertir cada pieza a SU bucket propio (bovino o cerdo, según tipo_stock).
+        // Incluye el desposte de CAPÓN (tipo 'cerdo'): antes no se revertían sus
+        // piezas (pierna/carré/etc.) al anular el ingreso → stock inflado.
         for (const p of (desposte.piezas || [])) {
           await actualizarStock(p.tipo_stock || bucketDePiezaBovina(p.nombre), -(p.kg || 0))
+        }
+        // El desposte de capón además crea una entrada por cada pieza (historial).
+        // Las anulamos para que no queden como ingresos fantasma ni se puedan
+        // re-anular (doble descuento). Match por el id del capón en la descripción.
+        if (desposte.tipo_desposte === 'cerdo') {
+          await supabase.from('entradas_deposito')
+            .update({ eliminado: true, eliminado_por: anuladoPor, eliminado_en: ahora })
+            .ilike('descripcion', `%Capón #${entrada.id}%`)
+            .eq('eliminado', false)
         }
       } else if (desposte.tipo_desposte === 'kilo' || desposte.tipo_desposte === 'pieza_kilo') {
         await actualizarStock('bovino_corte', -(desposte.kg_neto || 0))
