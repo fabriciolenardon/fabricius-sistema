@@ -103,6 +103,10 @@ export default async function handler(req, res) {
     const nombreContacto = value?.contacts?.[0]?.profile?.name || null
     if (!from) return res.status(200).end()
 
+    // Anti-duplicado: si Meta reintenta este mismo mensaje (porque tardamos en
+    // contestar el 200), lo descartamos para no responder/guardar dos veces.
+    if (await yaProcesado(msg.id)) return res.status(200).end()
+
     if (!WA_TOKEN) { console.error('Falta WHATSAPP_TOKEN'); return res.status(200).end() }
 
     // Guardamos el phone_id del negocio para que el envío manual del panel lo use.
@@ -262,6 +266,25 @@ async function getContacto(telefono) {
     const rows = await sbGet(`wa_contactos?telefono=eq.${encodeURIComponent(telefono)}&select=*`, sbHeaders())
     return rows?.[0] || null
   } catch (e) { console.error('getContacto', e); return null }
+}
+
+// Dedup de reintentos de Meta: marca el wamid como procesado de forma atómica
+// (INSERT por PK). Devuelve true si ESE mensaje YA estaba procesado (= reintento,
+// hay que descartarlo) y false si es nuevo o si no se pudo verificar (ante la
+// duda, mejor procesar que dejar al cliente sin respuesta).
+async function yaProcesado(waId) {
+  if (!waId || !SB_URL || !SB_KEY) return false
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/wa_procesados`, {
+      method: 'POST',
+      headers: sbHeaders({ Prefer: 'resolution=ignore-duplicates,return=representation' }),
+      body: JSON.stringify({ wa_id: waId }),
+    })
+    if (!r.ok) return false
+    const filas = await r.json().catch(() => [])
+    // [] = el INSERT chocó con la PK existente → ya estaba procesado (reintento).
+    return Array.isArray(filas) && filas.length === 0
+  } catch { return false }
 }
 
 async function guardarMensaje(telefono, direccion, autor, tipo, texto, mediaUrl = null) {
