@@ -463,30 +463,56 @@ async function responderConIris(historial, textoActual, datosNegocio, infoNegoci
     : `\n\n(No tengo la lista de precios cargada ahora: para precios/stock puntuales, derivá al equipo con amabilidad.)`
 
   try {
-    const ctrl = new AbortController()
-    const timer = setTimeout(() => ctrl.abort(), 22000)
-    let r
-    try {
-      r = await fetch(`${GEMINI_URL}?key=${GEMINI_KEY}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents,
-          systemInstruction: { parts: [{ text: systemText }] },
-          // thinkingBudget:0 desactiva el "pensamiento" de gemini-2.5-flash. Sin
-          // esto, los tokens de thinking se comían el presupuesto de salida y en
-          // mensajes que requieren razonar (tomar un pedido) Gemini devolvía
-          // contenido VACÍO → caíamos al fallback "en un ratito te responde
-          // alguien" (bug 15/06: Iris no tomó el pedido y re-saludaba).
-          generationConfig: { temperature: 0.4, maxOutputTokens: 800, thinkingConfig: { thinkingBudget: 0 }, responseMimeType: 'application/json', responseSchema: SCHEMA_RESPUESTA },
-        }),
-        signal: ctrl.signal,
-      })
-    } finally { clearTimeout(timer) }
-    if (!r.ok) { console.error('Gemini WA', r.status, (await r.text().catch(() => '')).slice(0, 300)); return fallback }
-    const data = await r.json()
-    const cand = data.candidates?.[0]
-    const raw = (cand?.content?.parts || []).map(p => p.text || '').join('').trim()
-    if (!raw) { console.error('Gemini WA vacío — finishReason:', cand?.finishReason, 'block:', data.promptFeedback?.blockReason); return fallback }
+    // REINTENTOS cortos: si Gemini hipa (contenido vacío, error 5xx/429 o
+    // timeout) NO perdemos el pedido — reintentamos hasta 2 veces antes de
+    // caer al fallback. Causa raíz del "no me tomó el pedido" (Tía Paola
+    // 17/06): un único hipo transitorio devolvía el texto de respaldo y el
+    // encargo no se registraba. Los fallos transitorios responden rápido, así
+    // que el 2º intento es casi instantáneo (cabe sobrado en maxDuration 30s).
+    const MAX_INTENTOS = 2
+    let raw = ''
+    for (let intento = 1; intento <= MAX_INTENTOS; intento++) {
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 11000)
+      try {
+        const r = await fetch(`${GEMINI_URL}?key=${GEMINI_KEY}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents,
+            systemInstruction: { parts: [{ text: systemText }] },
+            // thinkingBudget:0 desactiva el "pensamiento" de gemini-2.5-flash. Sin
+            // esto, los tokens de thinking se comían el presupuesto de salida y en
+            // mensajes que requieren razonar (tomar un pedido) Gemini devolvía
+            // contenido VACÍO → caíamos al fallback "en un ratito te responde
+            // alguien" (bug 15/06: Iris no tomó el pedido y re-saludaba).
+            generationConfig: { temperature: 0.4, maxOutputTokens: 800, thinkingConfig: { thinkingBudget: 0 }, responseMimeType: 'application/json', responseSchema: SCHEMA_RESPUESTA },
+          }),
+          signal: ctrl.signal,
+        })
+        if (!r.ok) {
+          const status = r.status
+          console.error('Gemini WA', status, (await r.text().catch(() => '')).slice(0, 300), 'intento', intento)
+          // 5xx/429 suelen ser transitorios → reintento; 4xx (salvo 429) no.
+          if ((status >= 500 || status === 429) && intento < MAX_INTENTOS) continue
+          return fallback
+        }
+        const data = await r.json()
+        const cand = data.candidates?.[0]
+        raw = (cand?.content?.parts || []).map(p => p.text || '').join('').trim()
+        if (raw) break
+        const bloqueo = data.promptFeedback?.blockReason
+        console.error('Gemini WA vacío — finishReason:', cand?.finishReason, 'block:', bloqueo, 'intento', intento)
+        if (bloqueo) return fallback   // bloqueo de seguridad: reintentar no ayuda
+        if (intento < MAX_INTENTOS) continue
+        return fallback
+      } catch (e) {
+        // AbortError (timeout) u otro fallo de red → reintento si queda margen
+        console.error('Gemini WA error intento', intento, e?.name || e)
+        if (intento < MAX_INTENTOS) continue
+        return fallback
+      } finally { clearTimeout(timer) }
+    }
+    if (!raw) return fallback
     let parsed
     try { parsed = JSON.parse(raw) } catch { return { ...fallback, respuesta: raw } }
     return {
