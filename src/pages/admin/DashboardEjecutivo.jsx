@@ -498,11 +498,24 @@ function useRelojARG() {
   }
 }
 
+// ¿Estamos en un celular? (ancho < 768px). El Modo TV tiene una versión
+// vertical pensada para la pantalla del celu del dueño cuando anda en la calle.
+function useEsMovil() {
+  const [m, setM] = useState(() => { try { return window.innerWidth < 768 } catch { return false } })
+  useEffect(() => {
+    const f = () => setM(window.innerWidth < 768)
+    window.addEventListener('resize', f)
+    return () => window.removeEventListener('resize', f)
+  }, [])
+  return m
+}
+
 // ════════════════════════════════════════════════════════════
 // COMPONENTE PRINCIPAL
 // ════════════════════════════════════════════════════════════
 export default function DashboardEjecutivo() {
   const [subTab, setSubTab] = useState('resumen')
+  const esMovil = useEsMovil()
   // ?tv=1 en la URL arranca directo en F.A.B.R.I. — lo usa el comando de
   // voz "modo tv"/"fabri" del asistente (sin gesto no hay fullscreen real,
   // pero el overlay se ve igual; el fullscreen se logra con el botón).
@@ -526,7 +539,9 @@ export default function DashboardEjecutivo() {
     if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {})
   }
 
-  if (modoTV) return <ModoTV onSalir={salirModoTV} />
+  if (modoTV) return esMovil
+    ? <ModoTVMovil onSalir={salirModoTV} />
+    : <ModoTV onSalir={salirModoTV} />
 
   return (
     <div>
@@ -1594,6 +1609,323 @@ function HudGauge({ pct, label, color, size = '7vw', fsValor = '1.7vw', fsLabel 
         <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: fsValor, color, lineHeight: 1 }}>{p.toFixed(0)}%</div>
         <div style={{ fontSize: fsLabel, letterSpacing: 2, color: NEON.muted, fontWeight: 700, textAlign: 'center' }}>{label}</div>
       </div>
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════
+// 📱 MODO TV — versión VERTICAL para el celular del dueño
+// ────────────────────────────────────────────────────────────
+// Mismo F.A.B.R.I. pero amoldado a una pantalla angosta: una sola
+// columna, scrolleable, con tipografías en px (no vw) para que se
+// lea bien en la calle. Reusa los datos/hooks del Modo TV y los
+// paneles que ya tienen versión "no-TV" en px (CurvaDia, BarrasCierres,
+// PanelProveedoresSemana) + HudGauge a tamaño táctil. NO toca el
+// ModoTV de la Smart TV (que va en producción).
+// ════════════════════════════════════════════════════════════
+const mCard = { ...glass, borderRadius: 12, padding: '15px 16px' }
+const mLbl = { fontSize: 12, letterSpacing: 2, color: NEON.cian, fontWeight: 800 }
+const mBig = { fontFamily: "'Bebas Neue',cursive", lineHeight: 1 }
+
+function MTvKpi({ label, valor, sub, color }) {
+  return (
+    <div style={{ ...mCard, flex: 1, minWidth: 0 }}>
+      <div style={{ fontSize: 11, letterSpacing: 2, color: NEON.muted, fontWeight: 800 }}>{label}</div>
+      <div style={{ ...mBig, fontSize: 30, color: color || NEON.cianHi, marginTop: 2 }}>{valor}</div>
+      {sub && <div style={{ fontSize: 11, color: NEON.muted, marginTop: 3, lineHeight: 1.25 }}>{sub}</div>}
+    </div>
+  )
+}
+
+function ModoTVMovil({ onSalir }) {
+  const { data, loading, ultimaAct } = useDashboardData(60000)
+  const { hora, segundos, fecha } = useRelojARG()
+  const anuncio = useAnunciosTV(data)
+  const { feed: feedWa } = useCentroActividad({ notificar: false })
+
+  // Destello cuando entra una venta nueva (mismo efecto que la TV)
+  const [flashVenta, setFlashVenta] = useState(0)
+  const prevTotalRef = useRef(null)
+  useEffect(() => {
+    const t = data?.totalHoy
+    if (t == null) return
+    if (prevTotalRef.current != null && t > prevTotalRef.current) setFlashVenta(f => f + 1)
+    prevTotalRef.current = t
+  }, [data?.totalHoy])
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onSalir() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onSalir])
+
+  const alertas = useMemo(() => data ? calcularAlertas(data) : [], [data])
+  const flecha = (v) => v == null ? '' : v >= 0 ? '▲' : '▼'
+  const signo  = (v) => v == null ? '' : v >= 0 ? '+' : ''
+  const colorVar = (v) => v == null ? NEON.muted : v >= 0 ? NEON.verde : NEON.rojo
+
+  const waCuenta = { conv: 0, min: 0, may: 0 }
+  feedWa.forEach(f => { if (waCuenta[f.tipo] != null) waCuenta[f.tipo]++ })
+
+  const canales = data?.canalesMes
+  const canalItems = canales ? [
+    { label: 'CARNICERÍA',  icono: '🏪', v: Number(canales.carniceria) || 0, c: NEON.cian },
+    { label: 'MAYORISTA',   icono: '🚚', v: Number(canales.mayorista) || 0,  c: NEON.azul },
+    { label: 'FRANQUICIAS', icono: '🏬', v: Number(canales.franquicias) || 0, c: NEON.ambar },
+  ] : []
+  const canalTotal = canalItems.reduce((s, x) => s + x.v, 0)
+  const canalMax = Math.max(...canalItems.map(x => x.v), 0)
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9999, overflowY: 'auto', WebkitOverflowScrolling: 'touch',
+      background: 'radial-gradient(ellipse at 50% 0%, #07182a 0%, #04101d 50%, #010509 100%)',
+      color: NEON.texto, fontFamily: "'DM Sans',sans-serif", padding: '0 13px calc(env(safe-area-inset-bottom, 0px) + 26px)',
+    }}>
+      <style>{ESTILOS_GLOBALES}</style>
+      <div className="hud-rejilla" style={{ position: 'fixed' }} />
+      <AnuncioTV anuncio={anuncio} />
+
+      {/* ── HEADER fijo arriba ── */}
+      <div style={{
+        position: 'sticky', top: 0, zIndex: 20, display: 'flex', alignItems: 'center', gap: 10,
+        padding: 'calc(env(safe-area-inset-top, 0px) + 12px) 2px 10px',
+        background: 'linear-gradient(180deg, #04101dF0 70%, transparent)',
+      }}>
+        <span style={{ ...mBig, fontFamily: "'Bebas Neue',cursive", fontSize: 24, letterSpacing: 3, color: NEON.oro, textShadow: '0 0 12px rgba(255,209,122,0.35)' }}>
+          F.A.B.R.I.
+        </span>
+        <PuntoVivo size={8} />
+        <div style={{ marginLeft: 'auto', textAlign: 'right', lineHeight: 1.1 }}>
+          <div style={{ ...mBig, fontSize: 22, color: NEON.cianHi, textShadow: '0 0 12px rgba(0,212,255,0.5)' }}>
+            {hora}<span style={{ fontSize: 13, color: NEON.muted }}>:{segundos}</span>
+          </div>
+          <div style={{ fontSize: 10, color: NEON.muted, textTransform: 'capitalize' }}>{fecha}</div>
+        </div>
+        <button onClick={onSalir} title="Salir"
+          style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.14)', color: NEON.texto, borderRadius: 9, padding: '8px 12px', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>
+          ✕
+        </button>
+      </div>
+
+      {data?.promoMundial?.activa && (
+        <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 999, textAlign: 'center', background: 'rgba(107,229,255,0.1)', border: '1px solid rgba(107,229,255,0.4)', color: NEON.cian, fontSize: 13, fontWeight: 800, letterSpacing: 1 }}>
+          ⚽ PROMO MUNDIAL −{data.promoMundial.descuento_pct || 10}%
+        </div>
+      )}
+
+      {loading || !data ? (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', color: NEON.muted, fontSize: 16 }}>
+          🦾 F.A.B.R.I. iniciando sistemas…
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {/* ── HERO: FACTURADO HOY ── */}
+          <div className="dej-in hud" style={{ ...mCard, border: '1px solid rgba(0,212,255,0.45)', overflow: 'hidden', position: 'relative' }}>
+            <div style={{ position: 'absolute', top: -90, right: -90, width: 220, height: 220, borderRadius: '50%', background: 'radial-gradient(circle, rgba(0,212,255,0.15), transparent 70%)' }} />
+            <div style={{ ...mLbl, letterSpacing: 4 }}>FACTURADO HOY</div>
+            <div key={flashVenta} style={{ ...mBig, fontSize: 'clamp(54px, 19vw, 96px)', color: NEON.cianHi,
+              animation: flashVenta > 0 ? 'dejFlash 2.2s ease, dejGlow 3s ease-in-out 2.2s infinite' : 'dejGlow 3s ease-in-out infinite' }}>
+              {fmtArs(data.totalHoy)}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', marginTop: 8, fontSize: 14 }}>
+              <span><strong style={{ color: NEON.texto }}>{data.cantHoy}</strong> <span style={{ color: NEON.muted }}>ventas</span></span>
+              <span><span style={{ color: NEON.muted }}>ticket</span> <strong style={{ color: NEON.texto }}>{fmtArs(data.ticketProm)}</strong></span>
+              {data.panelControl.variacionHoyVsAyer != null && (
+                <span style={{ color: colorVar(data.panelControl.variacionHoyVsAyer), fontWeight: 800 }}>
+                  {flecha(data.panelControl.variacionHoyVsAyer)} {signo(data.panelControl.variacionHoyVsAyer)}{data.panelControl.variacionHoyVsAyer.toFixed(0)}% vs ayer
+                </span>
+              )}
+              {data.ultimaVentaHora && (
+                <span style={{ marginLeft: 'auto', color: NEON.muted }}>última {String(data.ultimaVentaHora).slice(0, 5)}</span>
+              )}
+            </div>
+          </div>
+
+          {/* ── 7 días / Este mes ── */}
+          <div style={{ display: 'flex', gap: 12 }}>
+            <MTvKpi label="7 DÍAS" valor={fmtArs(data.totalSemana)} sub={`${fmtArs(data.totalSemana / 7)}/día`} color={NEON.azul} />
+            <MTvKpi label="ESTE MES" valor={fmtArs(data.totalMes)}
+              sub={data.totalMesAnt > 0 ? `${flecha(data.variacion)} ${signo(data.variacion)}${data.variacion.toFixed(0)}% vs mes ant.` : '—'}
+              color={colorVar(data.variacion)} />
+          </div>
+
+          {/* ── MES EN VIVO: V − C − G + saldo ── */}
+          <div className="dej-in hud" style={mCard}>
+            <div style={{ ...mLbl, letterSpacing: 3, marginBottom: 10 }}>💼 MES EN VIVO · 01→{fechaHoyARG().slice(8, 10)}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <HudGauge pct={data.panelControl.pctCobrado} label="COBRADO" size="86px" fsValor="22px" fsLabel="9px"
+                color={data.panelControl.pctCobrado < 50 ? NEON.rojo : data.panelControl.pctCobrado < 75 ? NEON.ambar : NEON.verde} />
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 7 }}>
+                <MtvLinea label="VENTAS" valor={fmtArs(data.mensualVivo.ventas)} color={NEON.cianHi} />
+                <MtvLinea label="COMPRAS" valor={fmtArs(data.mensualVivo.compras)} color={NEON.ambar} />
+                <MtvLinea label="GASTOS" valor={fmtArs(data.mensualVivo.gastos)} color={NEON.rojo} />
+              </div>
+            </div>
+            <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(0,212,255,0.15)', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 12, letterSpacing: 2, color: NEON.muted, fontWeight: 700 }}>SALDO DEL MES</span>
+              <span style={{ ...mBig, fontSize: 38, color: data.mensualVivo.saldo >= 0 ? NEON.verde : NEON.rojo,
+                textShadow: `0 0 14px ${data.mensualVivo.saldo >= 0 ? 'rgba(81,255,176,0.4)' : 'rgba(255,92,108,0.4)'}` }}>
+                {fmtArs(data.mensualVivo.saldo)}
+              </span>
+            </div>
+          </div>
+
+          {/* ── CANALES DEL MES ── */}
+          {canalItems.length > 0 && (
+            <div className="dej-in hud" style={mCard}>
+              <div style={{ ...mLbl, letterSpacing: 3, marginBottom: 10 }}>⚔️ CANALES DEL MES</div>
+              <div style={{ display: 'flex', justifyContent: 'space-around', gap: 8 }}>
+                {canalItems.map(x => {
+                  const lider = canalTotal > 0 && x.v === canalMax
+                  return (
+                    <div key={x.label} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
+                      <HudGauge pct={canalTotal > 0 ? (x.v / canalTotal) * 100 : 0} label={x.icono}
+                        color={lider ? NEON.oro : x.c} size="74px" fsValor="17px" fsLabel="15px" />
+                      <div style={{ fontSize: 9.5, letterSpacing: 1, color: NEON.muted, fontWeight: 800, whiteSpace: 'nowrap' }}>
+                        {lider && '👑'}{x.label}
+                      </div>
+                      <div style={{ ...mBig, fontSize: 18, color: lider ? NEON.oro : x.c, textAlign: 'center',
+                        textShadow: lider ? '0 0 12px rgba(255,209,122,0.45)' : 'none' }}>
+                        {fmtArs(x.v)}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ── CURVA DEL DÍA (reusa la versión px del dashboard) ── */}
+          <CurvaDia hoy={data.curvaHoy} ayer={data.curvaAyer} />
+
+          {/* ── CIERRE SEMANA ANTERIOR + barras ── */}
+          <div className="dej-in hud" style={mCard}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ ...mLbl, letterSpacing: 2 }}>
+                🗓️ SEMANA ANT.{data.cierreSemana ? ` ${fcCorta(data.cierreSemana.semana_inicio)}→${fcCorta(data.cierreSemana.semana_fin)}` : ''}
+              </span>
+              {data.cierreSemana && (
+                <span style={{ marginLeft: 'auto', ...mBig, fontSize: 26,
+                  color: (Number(data.cierreSemana.ganancia) || 0) >= 0 ? NEON.verde : NEON.rojo,
+                  textShadow: `0 0 12px ${(Number(data.cierreSemana.ganancia) || 0) >= 0 ? 'rgba(81,255,176,0.4)' : 'rgba(255,92,108,0.4)'}` }}>
+                  {fmtArs(Number(data.cierreSemana.ganancia) || 0)}
+                </span>
+              )}
+            </div>
+            {data.cierreSemana && (
+              <div style={{ fontSize: 12, color: NEON.muted, marginTop: 4 }}>
+                V {fmtArs(Number(data.cierreSemana.ventas) || 0)} · C {fmtArs(Number(data.cierreSemana.compras) || 0)} · G {fmtArs((Number(data.cierreSemana.gastos) || 0) + (Number(data.cierreSemana.sueldos) || 0))}
+              </div>
+            )}
+            {!data.cierreSemana && <div style={{ color: NEON.muted, fontSize: 13, marginTop: 4 }}>Sin semanas cerradas aún</div>}
+            <BarrasCierres cierres={data.cierresHistorial} />
+          </div>
+
+          {/* ── TOP CLIENTES MAYORISTAS (lista) ── */}
+          {data.topClientesMes && data.topClientesMes.length > 0 && (
+            <div className="dej-in hud" style={mCard}>
+              <div style={{ ...mLbl, letterSpacing: 2, marginBottom: 8 }}>🏆 TOP CLIENTES MAYORISTAS · MES</div>
+              {data.topClientesMes.slice(0, 5).map((c, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 0', borderTop: i ? '1px solid rgba(0,212,255,0.08)' : 'none' }}>
+                  <span style={{ ...mBig, fontSize: 18, color: i === 0 ? NEON.oro : NEON.muted, width: 26, flexShrink: 0 }}>{i + 1}º</span>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: i === 0 ? NEON.oro : NEON.texto, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: i === 0 ? 700 : 500 }}>
+                    {i === 0 && '👑 '}{c.nombre}{c.franquicia ? ' 🏬' : ''}
+                  </span>
+                  <span style={{ ...mBig, fontSize: 18, color: i === 0 ? NEON.oro : NEON.cianHi, flexShrink: 0 }}>{fmtArs(c.total)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── WHATSAPP (pendientes en vivo) ── */}
+          <div className="dej-in hud" style={mCard}>
+            <div style={{ ...mLbl, letterSpacing: 2, display: 'flex', alignItems: 'center', gap: 6 }}>WHATSAPP <PuntoVivo /></div>
+            <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: 8, textAlign: 'center' }}>
+              <MtvWa icono="💬" n={waCuenta.conv} sub="chats" color={NEON.verde} />
+              <MtvWa icono="🛒" n={waCuenta.min} sub="minorista" color={NEON.oro} />
+              <MtvWa icono="📦" n={waCuenta.may} sub="mayorista" color={NEON.cian} />
+            </div>
+          </div>
+
+          {/* ── ALERTAS ── */}
+          <div className="dej-in hud" style={{ ...mCard,
+            borderColor: alertas.some(a => a.tipo === 'danger') ? 'rgba(255,92,108,0.4)' : alertas.length ? 'rgba(255,179,92,0.35)' : 'rgba(81,255,176,0.3)' }}>
+            <div style={{ ...mLbl, letterSpacing: 2, marginBottom: 8,
+              color: alertas.some(a => a.tipo === 'danger') ? NEON.rojo : alertas.length ? NEON.ambar : NEON.verde }}>
+              {alertas.length > 0 ? `🚨 ALERTAS (${alertas.length})` : '✅ TODO EN ORDEN'}
+            </div>
+            {alertas.length === 0 ? (
+              <div style={{ color: NEON.muted, fontSize: 13 }}>No hay alertas activas. El negocio está marchando bien. 🎉</div>
+            ) : (
+              alertas.map((a, i) => (
+                <div key={i} style={{ display: 'flex', gap: 9, alignItems: 'flex-start', padding: '8px 10px', borderRadius: 8, marginBottom: 6,
+                  background: a.tipo === 'danger' ? 'rgba(255,107,129,0.08)' : 'rgba(255,184,107,0.07)' }}>
+                  <span style={{ fontSize: 18 }}>{a.icono}</span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: a.tipo === 'danger' ? NEON.rojo : NEON.ambar }}>{a.titulo}</div>
+                    <div style={{ fontSize: 12, color: NEON.muted }}>{a.detalle}</div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* ── COMPRAS DE LA SEMANA POR PROVEEDOR (versión px) ── */}
+          <PanelProveedoresSemana items={data.comprasSemanaProv} total={data.comprasSemanaTotal} />
+
+          {/* ── ÚLTIMAS VENTAS (lista, en vez de la cinta de la TV) ── */}
+          {data.ultimasVentas && data.ultimasVentas.length > 0 && (
+            <div className="dej-in hud" style={mCard}>
+              <div style={{ ...mLbl, letterSpacing: 2, marginBottom: 8 }}>🎬 ÚLTIMAS VENTAS</div>
+              {data.ultimasVentas.slice(0, 8).map((v, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 0', borderTop: i ? '1px solid rgba(0,212,255,0.08)' : 'none' }}>
+                  <span style={{ fontSize: 12, color: NEON.muted, flexShrink: 0 }}>{v.tipo === 'mayorista' ? '🚚' : '🕐'} {v.hora}</span>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: NEON.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.detalle}</span>
+                  <span style={{ ...mBig, fontSize: 17, color: v.tipo === 'mayorista' ? NEON.ambar : NEON.cianHi, flexShrink: 0 }}>{fmtArs(v.total)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── FOOTER: stats rápidas ── */}
+          <div className="hud" style={{ ...mCard, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 16px', background: 'rgba(0,212,255,0.035)', border: '1px solid rgba(0,212,255,0.15)' }}>
+            <MtvLinea label="CAJAS DISP." valor={`${data.panelControl.cajasInfo.total} · ${fmtKg(data.panelControl.cajasInfo.kg)}`}
+              color={data.panelControl.cajasInfo.viejasCount > 0 ? NEON.ambar : NEON.cian} />
+            <MtvLinea label="CHEQUES 15D" valor={`${data.cheques.length}`} color={NEON.cianHi} />
+            <MtvLinea label="PEND. COBRAR" valor={fmtArs(data.panelControl.saldoPendienteTotal)}
+              color={data.panelControl.saldoPendienteTotal > 500000 ? NEON.ambar : NEON.cianHi} />
+            {data.cuentasConPct[0] && (
+              <MtvLinea label={`MONO: ${data.cuentasConPct[0].nombre.trim().split(' ')[0]}`}
+                valor={`${data.cuentasConPct[0].pctConsumo.toFixed(0)}% tope K`}
+                color={data.cuentasConPct[0].pctConsumo >= 95 ? NEON.rojo : data.cuentasConPct[0].pctConsumo >= 70 ? NEON.ambar : NEON.verde} />
+            )}
+          </div>
+
+          <div style={{ textAlign: 'center', fontSize: 11, color: NEON.muted, padding: '4px 0 8px' }}>
+            {ultimaAct && `Actualizado ${ultimaAct.toLocaleTimeString('es-AR', { timeZone: TZ_ARG, hour: '2-digit', minute: '2-digit' })}`} · se refresca solo
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Línea etiqueta→valor para el Modo TV móvil
+function MtvLinea({ label, valor, color }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, minWidth: 0 }}>
+      <span style={{ fontSize: 11, letterSpacing: 1, color: NEON.muted, fontWeight: 700, flexShrink: 0 }}>{label}</span>
+      <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 19, lineHeight: 1, color: color || NEON.texto, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{valor}</span>
+    </div>
+  )
+}
+function MtvWa({ icono, n, sub, color }) {
+  return (
+    <div style={{ lineHeight: 1.1 }}>
+      <div style={{ fontSize: 18 }}>{icono}</div>
+      <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 30, color: n ? color : NEON.muted }}>{n}</div>
+      <div style={{ fontSize: 10, color: NEON.muted, letterSpacing: 1 }}>{sub}</div>
     </div>
   )
 }
