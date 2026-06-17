@@ -49,6 +49,24 @@ REGLAS (modo "auto con barreras"):
 
 Respondé SIEMPRE en el formato JSON pedido: "respuesta", "es_pedido" (true si está armando/encargando algo concreto), "resumen_pedido" (qué pidió y para cuándo, vacío si no es pedido), "pedido_confirmado" (true SOLO cuando el cliente confirmó que el pedido está completo; false mientras todavía lo está armando o no confirmó) y "escalar" (true cuando no podés responder algo —ej. un precio que no está en la lista— y necesitás que el equipo siga la conversación).`
 
+// Conocimiento de marca para presentar el negocio y captar clientes
+// gastronómicos/mayoristas (sacado de la carpeta comercial de Fabricius SAS).
+// Iris NO recita esto entero: lo conoce y suelta lo que venga al caso, natural
+// y conversado. El brazo mayorista del negocio es "Fabricius SAS – Premium
+// Quality – Abasto de Carnes" (la misma empresa que la carnicería).
+const PERFIL_NEGOCIO = `=== SOBRE FABRICIUS (para presentar el negocio y captar clientes nuevos) ===
+Para la venta mayorista/gastronómica el negocio es "Fabricius SAS – Premium Quality · Abasto de Carnes" (es la misma empresa que la carnicería). Usá esto para presentarte cuando hay un cliente nuevo a captar; no lo recites entero, soltá lo que sume en cada momento.
+
+QUIÉNES SOMOS: Más de 10 años de experiencia en el rubro. Planta propia de 600 m² en Río Primero, Córdoba, con eficiencia y control en cada proceso. Nos especializamos en selección y comercialización de carnes de primera: vacuna, cerdo, pollo y elaborados propios listos para la venta.
+
+POR QUÉ ELEGIRNOS: calidad premium garantizada en cada corte; amplio stock y variedad; precios competitivos para el rubro gastronómico y cárnico; entrega confiable y constante; atención personalizada para cada cliente. Entendemos al sector y trabajamos para que nunca te falte calidad en tu mostrador o cocina.
+
+CÓMO TRABAJAMOS (contá esto cuando pregunten cómo trabajan o cómo es comprar al por mayor): trabajamos con pedidos programados, pidiendo un mínimo de 24 horas de anticipación para garantizar disponibilidad, frescura y cumplimiento en cada entrega. Ofrecemos servicio de desposte y preparación de cortes a medida, adaptándonos a cada cliente. Y damos la posibilidad de trabajar con piezas enteras del animal (pierna, costillar, cuarto pistola, costeletal, entre otros), optimizando costos y personalización.
+
+QUÉ TRABAJAMOS (materia prima de calidad comprobada): Vacuna → ternera y novillito Angus, Hereford y Braford, tipificación A y B (terneza y calidad constante). Cerdo → genética Agroceres PIC (excelente rendimiento y uniformidad). Pollo → de peladeros locales (frescura y disponibilidad continua). Elaborados premium → línea propia de embutidos: salame, bondiola, panceta, chorizo parrillero (tradicional y saborizados), salchicha parrillera y morcillas. Blends para hamburgueserías → mezclas a medida (equilibrio entre sabor, jugosidad y rendimiento).
+
+SOLUCIONES PARA EL NEGOCIO DEL CLIENTE (beneficios concretos, mencioná los que apliquen): cortes listos y estandarizados (menos tiempo de cocina); trabajo por volumen o piezas completas (mejor aprovechamiento y control de costos); envasado al vacío opcional (más conservación y orden de stock); asesoramiento personalizado (comprás lo que realmente necesitás); productos listos para exhibir o cocinar; abastecimiento constante (evitás quiebres de stock); cortes de alta selección para propuestas gastronómicas de alto nivel.`
+
 const SCHEMA_RESPUESTA = {
   type: 'object',
   properties: {
@@ -436,6 +454,7 @@ async function responderConIris(historial, textoActual, datosNegocio, infoNegoci
     : [{ role: 'user', parts: [{ text: textoActual }] }]
 
   let systemText = PROMPT_BASE
+  systemText += `\n\n${PERFIL_NEGOCIO}`
   systemText += `\n\n=== FECHA Y HORA AHORA ===\nAhora es ${fechaHoraARG()} (hora de Argentina). Usá esto para interpretar "hoy", "ayer", "mañana", "esta tarde", "temprano", etc. En el HISTORIAL cada mensaje arranca con su marca de tiempo entre corchetes (ej "[ayer 13:52]", "[hoy 09:46]") — usala para saber CUÁNDO se dijo cada cosa y re-anclar las fechas al día de hoy, pero NUNCA copies esa marca en tu respuesta.`
   if (sorteo) systemText += `\n\n=== SORTEO VIGENTE ===\nHay un SORTEO/RIFA de una media res que maneja ${sorteo} (NO el equipo de la carnicería). Si el cliente menciona el sorteo, la rifa, o quiere comprar/guardar/reservar un NÚMERO (ej. "el número 89", "guardame uno", "cuánto sale el número"), NO lo tomes vos como pedido ni preguntes qué quiere encargar: derivalo con amabilidad a ${sorteo}, que es quien maneja el sorteo y le pasa los datos para participar. En ese caso es_pedido=false.`
   if (infoNegocio) systemText += `\n\n=== INFORMACIÓN DEL NEGOCIO (horarios/dirección/pagos/envíos) ===\n${infoNegocio}`
