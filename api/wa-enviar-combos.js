@@ -40,10 +40,14 @@ export default async function handler(req, res) {
     const destino = normalizarDestino(toRaw)
     if (destino.length < 8) return res.status(400).json({ error: 'destino inválido' })
 
-    // Imágenes de combos activas
-    const imgs = await (await fetch(`${SB_URL}/rest/v1/combos_imagenes?select=url&activo=eq.true&order=orden,creado_at`, { headers: svc })).json()
+    // Categoría a enviar: 'combo' (default), 'oferta_may' u 'oferta_min'.
+    const CATS_OK = ['combo', 'oferta_may', 'oferta_min']
+    const categoria = CATS_OK.includes(body?.categoria) ? body.categoria : 'combo'
+
+    // Imágenes activas de esa categoría
+    const imgs = await (await fetch(`${SB_URL}/rest/v1/combos_imagenes?select=url&activo=eq.true&categoria=eq.${categoria}&order=orden,creado_at`, { headers: svc })).json()
     const urls = (Array.isArray(imgs) ? imgs : []).map(i => i.url).filter(Boolean)
-    if (urls.length === 0) return res.status(400).json({ error: 'No hay fotos de combos cargadas. Subilas en WhatsApp → Combos.' })
+    if (urls.length === 0) return res.status(400).json({ error: 'No hay imágenes cargadas de esa categoría. Subilas en WhatsApp → Combos y ofertas.' })
 
     // phone_id del negocio
     let phoneId = PHONE_FALLBACK
@@ -52,6 +56,8 @@ export default async function handler(req, res) {
       if (cj?.[0]?.valor) phoneId = cj[0].valor
     } catch {}
 
+    const etiqueta = categoria === 'combo' ? 'combo' : 'oferta'
+    const telLimpio = toRaw.replace(/[^0-9]/g, '')
     let enviadas = 0
     for (const url of urls) {
       const wr = await fetch(`https://graph.facebook.com/v21.0/${phoneId}/messages`, {
@@ -62,16 +68,16 @@ export default async function handler(req, res) {
         enviadas++
         fetch(`${SB_URL}/rest/v1/wa_mensajes`, {
           method: 'POST', headers: { ...svc, Prefer: 'return=minimal' },
-          body: JSON.stringify({ telefono: toRaw.replace(/[^0-9]/g, ''), direccion: 'out', autor: 'humano', tipo: 'text', texto: '📷 (combo enviado)' }),
+          body: JSON.stringify({ telefono: telLimpio, direccion: 'out', autor: 'humano', tipo: 'text', texto: `📷 (${etiqueta} enviado)` }),
         }).catch(() => {})
       } else {
         console.error('wa-enviar-combos', wr.status, (await wr.text().catch(() => '')).slice(0, 200))
       }
     }
     if (enviadas > 0) {
-      fetch(`${SB_URL}/rest/v1/wa_contactos?telefono=eq.${toRaw.replace(/[^0-9]/g, '')}`, {
+      fetch(`${SB_URL}/rest/v1/wa_contactos?telefono=eq.${telLimpio}`, {
         method: 'PATCH', headers: { ...svc, Prefer: 'return=minimal' },
-        body: JSON.stringify({ ultimo_mensaje: '📷 Combos', ultimo_at: new Date().toISOString(), no_leidos: 0 }),
+        body: JSON.stringify({ ultimo_mensaje: categoria === 'combo' ? '📷 Combos' : '📷 Ofertas', ultimo_at: new Date().toISOString(), no_leidos: 0 }),
       }).catch(() => {})
     }
 

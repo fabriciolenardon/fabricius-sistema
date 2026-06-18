@@ -45,7 +45,7 @@ export default function Whatsapp() {
         <TabBtn activo={tab === 'conversaciones'} onClick={() => cambiar('conversaciones')} icon="🗨️" label="Conversaciones" badge={noLeidos} color="var(--blue)" />
         <TabBtn activo={tab === 'pedidos'} onClick={() => cambiar('pedidos')} icon="📥" label="Pedidos minoristas" badge={pedidosNuevos} color="var(--green)" />
         <TabBtn activo={tab === 'campanas'} onClick={() => cambiar('campanas')} icon="📣" label="Campañas" badge={0} color="var(--gold)" />
-        <TabBtn activo={tab === 'combos'} onClick={() => cambiar('combos')} icon="📦" label="Combos" badge={0} color="var(--gold)" />
+        <TabBtn activo={tab === 'combos'} onClick={() => cambiar('combos')} icon="📦" label="Combos y ofertas" badge={0} color="var(--gold)" />
       </div>
 
       {tab === 'conversaciones' && <ConversacionesWhatsapp />}
