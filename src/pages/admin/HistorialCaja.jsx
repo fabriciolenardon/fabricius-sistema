@@ -190,11 +190,11 @@ export default function HistorialCaja() {
     }))
   }, [ventas])
 
-  // === Convenio Blanguino: agregado por empleado (control + reintegro) ===
-  const blanguino = useMemo(() => {
+  // === Convenio Blangino: agregado por empleado (control + reintegro) ===
+  const blangino = useMemo(() => {
     const map = new Map() // legajo|empleado → { empleado, legajo, cant, total, descuento }
     for (const v of ventas) {
-      if (v.convenio !== 'blanguino') continue
+      if (v.convenio !== 'blangino') continue
       const legajo = (v.convenio_legajo || '').trim() || '—'
       const empleado = (v.convenio_empleado || '').trim() || '—'
       const key = legajo + '|' + empleado
@@ -289,10 +289,10 @@ export default function HistorialCaja() {
             </div>
           </div>
 
-          {/* CONVENIO BLANGUINO — control de empleados */}
-          {blanguino.filas.length > 0 && (
+          {/* CONVENIO BLANGINO — control de empleados */}
+          {blangino.filas.length > 0 && (
             <div className="card" style={{ marginBottom: 16, borderColor: '#3a6ea5' }}>
-              <div className="card-title" style={{ color: '#7ec8ff' }}>🔵 Convenio Blanguino — empleados que compraron</div>
+              <div className="card-title" style={{ color: '#7ec8ff' }}>🔵 Convenio Blangino — empleados que compraron</div>
               <table style={{ width: '100%' }}>
                 <thead>
                   <tr style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase' }}>
@@ -305,7 +305,7 @@ export default function HistorialCaja() {
                   </tr>
                 </thead>
                 <tbody>
-                  {blanguino.filas.map(f => (
+                  {blangino.filas.map(f => (
                     <tr key={f.legajo + f.empleado} style={{ borderTop: '1px solid var(--border)' }}>
                       <td style={{ padding: '8px 4px', fontWeight: 600 }}>{f.empleado}</td>
                       <td style={{ padding: '8px 4px', color: 'var(--muted)' }}>{f.legajo}</td>
@@ -319,15 +319,15 @@ export default function HistorialCaja() {
                 <tfoot>
                   <tr style={{ borderTop: '2px solid var(--border)', fontWeight: 800 }}>
                     <td style={{ padding: '8px 4px' }} colSpan={2}>TOTAL</td>
-                    <td style={{ textAlign: 'right', padding: '8px 4px' }}>{blanguino.cantVentas}</td>
-                    <td style={{ textAlign: 'right', padding: '8px 4px' }}>{fmt$(blanguino.totalVentas)}</td>
-                    <td style={{ textAlign: 'right', padding: '8px 4px', color: '#7ec8ff' }}>{fmt$(blanguino.totalDescuento)}</td>
-                    <td style={{ textAlign: 'right', padding: '8px 4px', color: '#7dff7d' }}>{fmt$(blanguino.totalDescuento / 2)}</td>
+                    <td style={{ textAlign: 'right', padding: '8px 4px' }}>{blangino.cantVentas}</td>
+                    <td style={{ textAlign: 'right', padding: '8px 4px' }}>{fmt$(blangino.totalVentas)}</td>
+                    <td style={{ textAlign: 'right', padding: '8px 4px', color: '#7ec8ff' }}>{fmt$(blangino.totalDescuento)}</td>
+                    <td style={{ textAlign: 'right', padding: '8px 4px', color: '#7dff7d' }}>{fmt$(blangino.totalDescuento / 2)}</td>
                   </tr>
                 </tfoot>
               </table>
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8, fontStyle: 'italic' }}>
-                El 10% es el descuento al empleado en caja; la empresa reintegra el 5% (la mitad). Usá este detalle para reclamar el reintegro a Blanguino.
+                El 10% es el descuento al empleado en caja; la empresa reintegra el 5% (la mitad). Usá este detalle para reclamar el reintegro a Blangino.
               </div>
             </div>
           )}

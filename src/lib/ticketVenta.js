@@ -38,8 +38,8 @@ export function imprimirTicketVenta(venta) {
     ? `<div class="row" style="color:#000"><span>Descuento${venta.descuento_pct ? ` ${venta.descuento_pct}%` : ''}</span><span>-${fmt$(venta.descuento_monto)}</span></div>`
     : ''
 
-  const convenioLinea = venta?.convenio === 'blanguino'
-    ? `<div class="muted" style="margin:4px 0">Convenio Blanguino · Empleado: ${esc(venta.convenio_empleado || '-')} · Legajo: ${esc(venta.convenio_legajo || '-')}</div>`
+  const convenioLinea = venta?.convenio === 'blangino'
+    ? `<div class="muted" style="margin:4px 0">Convenio Blangino · Empleado: ${esc(venta.convenio_empleado || '-')} · Legajo: ${esc(venta.convenio_legajo || '-')}</div>`
     : ''
 
   const html = `<!doctype html><html><head><meta charset="utf-8">
