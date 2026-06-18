@@ -38,6 +38,10 @@ export function imprimirTicketVenta(venta) {
     ? `<div class="row" style="color:#000"><span>Descuento${venta.descuento_pct ? ` ${venta.descuento_pct}%` : ''}</span><span>-${fmt$(venta.descuento_monto)}</span></div>`
     : ''
 
+  const convenioLinea = venta?.convenio === 'blanguino'
+    ? `<div class="muted" style="margin:4px 0">Convenio Blanguino · Empleado: ${esc(venta.convenio_empleado || '-')} · Legajo: ${esc(venta.convenio_legajo || '-')}</div>`
+    : ''
+
   const html = `<!doctype html><html><head><meta charset="utf-8">
   <style>
     * { box-sizing: border-box; }
@@ -67,6 +71,7 @@ export function imprimirTicketVenta(venta) {
     </table>
     <hr>
     ${descuento}
+    ${convenioLinea}
     <div class="total"><span>TOTAL</span><span>${fmt$(venta?.total)}</span></div>
     ${pagos.length ? '<hr>' + pagos.join('') : ''}
     <div class="foot">COMPROBANTE NO FISCAL · ¡Gracias por su compra!</div>
