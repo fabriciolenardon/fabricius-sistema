@@ -67,6 +67,21 @@ QUÉ TRABAJAMOS (materia prima de calidad comprobada): Vacuna → ternera y novi
 
 SOLUCIONES PARA EL NEGOCIO DEL CLIENTE (beneficios concretos, mencioná los que apliquen): cortes listos y estandarizados (menos tiempo de cocina); trabajo por volumen o piezas completas (mejor aprovechamiento y control de costos); envasado al vacío opcional (más conservación y orden de stock); asesoramiento personalizado (comprás lo que realmente necesitás); productos listos para exhibir o cocinar; abastecimiento constante (evitás quiebres de stock); cortes de alta selección para propuestas gastronómicas de alto nivel.`
 
+// Combos/bolsones armados vigentes. OJO: precios fijos hardcodeados — si Fabricio
+// cambia precios o combos, hay que actualizar acá (idealmente pasarlo a una
+// tabla editable más adelante). La PARRILLADA está NO DISPONIBLE por ahora.
+const COMBOS = `=== COMBOS / BOLSONES ARMADOS (vigentes) ===
+Cuando el cliente pregunte por combos, bolsones o promos, pasale los que apliquen con su precio (no hace falta listar todos si pidió uno puntual). Son a retirar; si quiere encargar, tomá el pedido (el equipo confirma disponibilidad y precio final). Más abajo, si están cargadas, el sistema le manda las FOTOS de los combos.
+- COMBO BOVINO — $79.000: 1kg aguja de costeleta, 1kg molida, 1kg bifes, 1 tapa de nalga completa.
+- COMBO CERDO — $34.500: 1kg milanesas, 1kg costeletas, 1kg chorizo, 1kg hamburguesas.
+- COMBO POLLO — $38.000 (5,5kg aprox.): 1kg pata muslo, 1kg milanesas, 1kg pechuga, 1 pollo entero.
+- COMBO ASADO ECO — $43.000 (5-6 personas, 3,5kg aprox.): 1kg falda, 1kg bocado, 1kg costilla de cerdo, 2 chorizos, 1 morcilla.
+- COMBO ASADO PREMIUM — $47.000 (5-6 personas, 3,5kg aprox.): 1 tira de costilla de ternera, 1 tira de costilla de cerdo, 500g vacío de cerdo, 500g vacío de ternera, 3 chorizos, 2 morcillas.
+- COMBO SALSA — $57.000: 1kg aguja, 1kg molida, 1kg chorizo, 1kg carnaza, 1kg alitas.
+- COMBO FAMILIAR — $93.000 (8,5kg aprox.): 1kg osobuco, 1kg carne molida, 1kg bifes de ternera, 1kg bifes de cerdo, 1kg costeleta de ternera, 1kg costeleta de cerdo, 1 pollo entero.
+- COMBO REBOZADO — $45.000: 1kg mila de ternera, 1kg mila de cerdo, 1kg mila de pollo, 500g patitas JyQ, 500g nuggets.
+- COMBO PARRILLADA (6 personas): por ahora NO DISPONIBLE — si lo piden, avisá que justo no está disponible y ofrecé el Asado Eco o el Asado Premium como alternativa.`
+
 const SCHEMA_RESPUESTA = {
   type: 'object',
   properties: {
@@ -478,6 +493,7 @@ async function responderConIris(historial, textoActual, datosNegocio, infoNegoci
 
   let systemText = PROMPT_BASE
   systemText += `\n\n${PERFIL_NEGOCIO}`
+  systemText += `\n\n${COMBOS}`
   systemText += `\n\n=== FECHA Y HORA AHORA ===\nAhora es ${fechaHoraARG()} (hora de Argentina). Usá esto para interpretar "hoy", "ayer", "mañana", "esta tarde", "temprano", etc. En el HISTORIAL cada mensaje arranca con su marca de tiempo entre corchetes (ej "[ayer 13:52]", "[hoy 09:46]") — usala para saber CUÁNDO se dijo cada cosa y re-anclar las fechas al día de hoy, pero NUNCA copies esa marca en tu respuesta.`
   if (sorteo) systemText += `\n\n=== SORTEO VIGENTE ===\nHay un SORTEO/RIFA de una media res que maneja ${sorteo} (NO el equipo de la carnicería). Si el cliente menciona el sorteo, la rifa, o quiere comprar/guardar/reservar un NÚMERO (ej. "el número 89", "guardame uno", "cuánto sale el número"), NO lo tomes vos como pedido ni preguntes qué quiere encargar: derivalo con amabilidad a ${sorteo}, que es quien maneja el sorteo y le pasa los datos para participar. En ese caso es_pedido=false.`
   if (infoNegocio) systemText += `\n\n=== INFORMACIÓN DEL NEGOCIO (horarios/dirección/pagos/envíos) ===\n${infoNegocio}`
