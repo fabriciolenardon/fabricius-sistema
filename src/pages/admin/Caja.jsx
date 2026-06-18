@@ -70,9 +70,9 @@ export default function Caja() {
   const [mostrarBuscador, setMostrarBuscador] = useState(false)
   const [msg, setMsg] = useState(null)
   const [pago, setPago] = useState({ efectivo: '', debito: '', transferencia: '' })
-  // Descuento Blanguino: convenio con la firma — 10% al empleado, registrando
+  // Descuento Blangino: convenio con la firma — 10% al empleado, registrando
   // nombre + legajo para el control y el reintegro posterior de la empresa.
-  const [blanguino, setBlanguino] = useState({ activo: false, empleado: '', legajo: '' })
+  const [blangino, setBlangino] = useState({ activo: false, empleado: '', legajo: '' })
   const [mostrarCierre, setMostrarCierre] = useState(false)
   const [guardandoVenta, setGuardandoVenta] = useState(false) // Anti-duplicado: bloquea doble click / Enter repetido en cerrarVenta()
   const ventaClientIdRef = useRef(null)                       // UUID generado al abrir cobro — clave de idempotencia en DB
@@ -421,26 +421,26 @@ export default function Caja() {
   // cobra el total completo (la promo no cubre débito).
   const promoPct = Number(promoMundial?.descuento_pct) || 10
   const pagaConDebito = parseNumero(pago.debito) > 0
-  // ── Descuento Blanguino (convenio) ──────────────────────────
-  // Empleado de la firma Blanguino: 10% en CUALQUIER medio de pago.
+  // ── Descuento Blangino (convenio) ──────────────────────────
+  // Empleado de la firma Blangino: 10% en CUALQUIER medio de pago.
   // Pisa la Promo Mundial para no aplicar doble descuento.
-  const BLANGUINO_PCT = 10
-  const blanguinoDescuento = blanguino.activo ? Math.round(total * BLANGUINO_PCT / 100) : 0
+  const BLANGINO_PCT = 10
+  const blanginoDescuento = blangino.activo ? Math.round(total * BLANGINO_PCT / 100) : 0
   // ── Promo Mundial ──────────────────────────────────────────
-  // Aplica SOLO si NO hay Blanguino y el pago es 100% efectivo/transferencia.
-  const promoDescuento = (!blanguino.activo && promoMundial?.activa && !pagaConDebito)
+  // Aplica SOLO si NO hay Blangino y el pago es 100% efectivo/transferencia.
+  const promoDescuento = (!blangino.activo && promoMundial?.activa && !pagaConDebito)
     ? Math.round(total * promoPct / 100)
     : 0
-  const descuentoAplicado = blanguinoDescuento || promoDescuento
-  const descuentoPctAplicado = blanguinoDescuento > 0 ? BLANGUINO_PCT : (promoDescuento > 0 ? promoPct : 0)
-  // Montos para los botones rápidos. Blanguino aplica a todos los medios;
+  const descuentoAplicado = blanginoDescuento || promoDescuento
+  const descuentoPctAplicado = blanginoDescuento > 0 ? BLANGINO_PCT : (promoDescuento > 0 ? promoPct : 0)
+  // Montos para los botones rápidos. Blangino aplica a todos los medios;
   // la Promo Mundial solo a efectivo/transferencia (no a débito).
   const promoFull = promoMundial?.activa ? Math.round(total * promoPct / 100) : 0
-  const fillEfvoTransf = total - (blanguino.activo ? blanguinoDescuento : promoFull)
-  const fillDebito     = total - blanguinoDescuento
+  const fillEfvoTransf = total - (blangino.activo ? blanginoDescuento : promoFull)
+  const fillDebito     = total - blanginoDescuento
   const totalACobrar = total - descuentoAplicado
   const vuelto = cobrado - totalACobrar
-  const blanguinoIncompleto = blanguino.activo && (!blanguino.empleado.trim() || !blanguino.legajo.trim())
+  const blanginoIncompleto = blangino.activo && (!blangino.empleado.trim() || !blangino.legajo.trim())
 
   // Al cerrar el modal (cancelación o éxito) liberamos el client_id
   // para que la próxima venta nazca con un UUID nuevo. Cubre las
@@ -462,8 +462,8 @@ export default function Caja() {
       showMsg('❌ El carrito está vacío', 'error')
       return
     }
-    if (blanguinoIncompleto) {
-      showMsg('❌ Descuento Blanguino: completá nombre y legajo del empleado', 'error', 4000)
+    if (blanginoIncompleto) {
+      showMsg('❌ Descuento Blangino: completá nombre y legajo del empleado', 'error', 4000)
       return
     }
     if (cobrado < totalACobrar) {
@@ -527,10 +527,10 @@ export default function Caja() {
       total: totalACobrar,
       descuento_pct: descuentoAplicado > 0 ? descuentoPctAplicado : null,
       descuento_monto: descuentoAplicado > 0 ? descuentoAplicado : null,
-      // Convenio Blanguino: empleado + legajo para el control y el reintegro.
-      convenio: blanguino.activo ? 'blanguino' : null,
-      convenio_empleado: blanguino.activo ? blanguino.empleado.trim() : null,
-      convenio_legajo: blanguino.activo ? blanguino.legajo.trim() : null,
+      // Convenio Blangino: empleado + legajo para el control y el reintegro.
+      convenio: blangino.activo ? 'blangino' : null,
+      convenio_empleado: blangino.activo ? blangino.empleado.trim() : null,
+      convenio_legajo: blangino.activo ? blangino.legajo.trim() : null,
       efectivo: parseNumero(pago.efectivo),
       debito: parseNumero(pago.debito),
       transferencia: parseNumero(pago.transferencia),
@@ -549,7 +549,7 @@ export default function Caja() {
         showMsg('⚠️ Esta venta ya estaba registrada (anti-duplicado)', 'error', 4000)
         setCarrito([])
         setPago({ efectivo: '', debito: '', transferencia: '' })
-        setBlanguino({ activo: false, empleado: '', legajo: '' })
+        setBlangino({ activo: false, empleado: '', legajo: '' })
         setMostrarCierre(false)
         ventaClientIdRef.current = null
         cargarTodo()
@@ -678,7 +678,7 @@ export default function Caja() {
     setUltimaVenta({ ...venta, vuelto: cobrado - totalACobrar, id: data.id })
     setCarrito([])
     setPago({ efectivo: '', debito: '', transferencia: '' })
-    setBlanguino({ activo: false, empleado: '', legajo: '' })
+    setBlangino({ activo: false, empleado: '', legajo: '' })
     setMostrarCierre(false)
     ventaClientIdRef.current = null  // Liberar el UUID — la próxima venta usa uno nuevo
     cargarTodo()
@@ -1071,11 +1071,11 @@ export default function Caja() {
               </div>
               {ultimaVenta.descuento_monto > 0 && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#7ec8ff', marginBottom: 4 }}>
-                  <span>{ultimaVenta.convenio === 'blanguino' ? '🔵 Descuento Blanguino' : '⚽ Promo Mundial'} −{ultimaVenta.descuento_pct}%:</span>
+                  <span>{ultimaVenta.convenio === 'blangino' ? '🔵 Descuento Blangino' : '⚽ Promo Mundial'} −{ultimaVenta.descuento_pct}%:</span>
                   <span>−{fmt(ultimaVenta.descuento_monto)}</span>
                 </div>
               )}
-              {ultimaVenta.convenio === 'blanguino' && (
+              {ultimaVenta.convenio === 'blangino' && (
                 <div style={{ fontSize: 11, color: '#7ec8ff', marginBottom: 4 }}>
                   👤 {ultimaVenta.convenio_empleado} · Legajo {ultimaVenta.convenio_legajo}
                 </div>
@@ -1300,38 +1300,38 @@ export default function Caja() {
                   <div style={{ fontSize: 16, color: 'var(--muted)', textDecoration: 'line-through' }}>{fmt(total)}</div>
                   <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 48, color: '#7ec8ff' }}>{fmt(totalACobrar)}</div>
                   <div style={{ fontSize: 12, color: '#7ec8ff', fontWeight: 700 }}>
-                    {blanguinoDescuento > 0
-                      ? `🔵 Descuento Blanguino −${BLANGUINO_PCT}%: ahorra ${fmt(blanguinoDescuento)}`
+                    {blanginoDescuento > 0
+                      ? `🔵 Descuento Blangino −${BLANGINO_PCT}%: ahorra ${fmt(blanginoDescuento)}`
                       : `⚽ Promo Mundial −${promoPct}%: ahorra ${fmt(promoDescuento)}`}
                   </div>
                 </>
               ) : (
                 <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 48, color: 'var(--gold)' }}>{fmt(totalACobrar)}</div>
               )}
-              {!blanguino.activo && promoMundial?.activa && pagaConDebito && (
+              {!blangino.activo && promoMundial?.activa && pagaConDebito && (
                 <div style={{ fontSize: 11, color: '#ffb86b', fontWeight: 700, marginTop: 4 }}>
                   ⚠️ Con débito NO aplica la Promo Mundial — se cobra el total completo
                 </div>
               )}
             </div>
 
-            {/* ── Descuento Blanguino (convenio empleados de la firma) ── */}
-            <div style={{ marginBottom: 14, padding: 12, borderRadius: 10, border: `1px solid ${blanguino.activo ? '#3a6ea5' : 'var(--border)'}`, background: blanguino.activo ? 'rgba(122,200,255,0.07)' : 'transparent' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 700, fontSize: 14, color: blanguino.activo ? '#7ec8ff' : 'var(--text)' }}>
-                <input type="checkbox" checked={blanguino.activo}
-                  onChange={e => setBlanguino(b => ({ ...b, activo: e.target.checked }))}
+            {/* ── Descuento Blangino (convenio empleados de la firma) ── */}
+            <div style={{ marginBottom: 14, padding: 12, borderRadius: 10, border: `1px solid ${blangino.activo ? '#3a6ea5' : 'var(--border)'}`, background: blangino.activo ? 'rgba(122,200,255,0.07)' : 'transparent' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 700, fontSize: 14, color: blangino.activo ? '#7ec8ff' : 'var(--text)' }}>
+                <input type="checkbox" checked={blangino.activo}
+                  onChange={e => setBlangino(b => ({ ...b, activo: e.target.checked }))}
                   style={{ width: 18, height: 18, cursor: 'pointer' }} />
-                🔵 Descuento Blanguino (−{BLANGUINO_PCT}%)
+                🔵 Descuento Blangino (−{BLANGINO_PCT}%)
               </label>
-              {blanguino.activo && (
+              {blangino.activo && (
                 <>
                   <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                    <input value={blanguino.empleado} onChange={e => setBlanguino(b => ({ ...b, empleado: e.target.value }))}
+                    <input value={blangino.empleado} onChange={e => setBlangino(b => ({ ...b, empleado: e.target.value }))}
                       placeholder="Nombre del empleado" style={{ ...inp, flex: 2 }} />
-                    <input value={blanguino.legajo} onChange={e => setBlanguino(b => ({ ...b, legajo: e.target.value }))}
+                    <input value={blangino.legajo} onChange={e => setBlangino(b => ({ ...b, legajo: e.target.value }))}
                       placeholder="Legajo" style={{ ...inp, flex: 1 }} />
                   </div>
-                  {blanguinoIncompleto && (
+                  {blanginoIncompleto && (
                     <div style={{ fontSize: 11, color: '#ffb86b', marginTop: 6 }}>
                       Completá nombre y legajo del empleado para confirmar la venta.
                     </div>
@@ -1363,7 +1363,7 @@ export default function Caja() {
             </div>
 
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-              {/* Con Blanguino el 10% aplica a todos los medios; con Promo Mundial
+              {/* Con Blangino el 10% aplica a todos los medios; con Promo Mundial
                   solo a efectivo/transferencia (el débito va sin descuento). */}
               <button onClick={() => setPago(p => ({ ...p, efectivo: fillEfvoTransf.toString(), debito: '', transferencia: '' }))}
                 style={{ flex: 1, padding: 10, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text)', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>

@@ -115,12 +115,12 @@ export default function HistorialDiaCaja({ ventas = [], onChange }) {
                       {Number(v.debito) > 0 && <span>💳 Débito {fmt(v.debito)}</span>}
                       {Number(v.transferencia) > 0 && <span>🏦 Transferencia {fmt(v.transferencia)}</span>}
                       {Number(v.descuento_monto) > 0 && (
-                        <span style={{ color: '#7ec8ff' }}>{v.convenio === 'blanguino' ? '🔵 Blanguino' : '⚽ Descuento'} {v.descuento_pct ? `${v.descuento_pct}% ` : ''}−{fmt(v.descuento_monto)}</span>
+                        <span style={{ color: '#7ec8ff' }}>{v.convenio === 'blangino' ? '🔵 Blangino' : '⚽ Descuento'} {v.descuento_pct ? `${v.descuento_pct}% ` : ''}−{fmt(v.descuento_monto)}</span>
                       )}
                     </div>
-                    {v.convenio === 'blanguino' && (
+                    {v.convenio === 'blangino' && (
                       <div style={{ marginTop: 6, fontSize: 11, color: '#7ec8ff', fontWeight: 600 }}>
-                        🔵 Convenio Blanguino · 👤 {v.convenio_empleado || '—'} · Legajo {v.convenio_legajo || '—'}
+                        🔵 Convenio Blangino · 👤 {v.convenio_empleado || '—'} · Legajo {v.convenio_legajo || '—'}
                       </div>
                     )}
                     {v.notas && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>📝 {v.notas}</div>}
