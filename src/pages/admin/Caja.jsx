@@ -16,6 +16,7 @@ import { kgPorUnidadDeProducto } from '../../lib/stockHelpers'
 import { cargarCajasDisponibles, venderCaja, CATEGORIA_A_TIPO_CAJA } from '../../lib/cajasStock'
 import { fmtPrecio, fmtKg, parseNumero } from '../../lib/formatos'
 import HistorialCaja from './HistorialCaja'
+import HistorialDiaCaja from './HistorialDiaCaja'
 import ArqueoCaja from './ArqueoCaja'
 
 // Wrapper que mantiene la firma vieja `fmt(n)` (precio con $) pero usa el
@@ -954,6 +955,9 @@ export default function Caja() {
               </button>
             </div>
           )}
+
+          {/* Historial del día — cada venta del turno, clickeable para ver el detalle */}
+          <HistorialDiaCaja ventas={ventasHoy} />
         </div>
 
         {/* ============ COLUMNA DERECHA: STATS + ÚLTIMA VENTA ============ */}
