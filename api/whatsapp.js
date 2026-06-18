@@ -71,7 +71,7 @@ SOLUCIONES PARA EL NEGOCIO DEL CLIENTE (beneficios concretos, mencioná los que 
 // cambia precios o combos, hay que actualizar acá (idealmente pasarlo a una
 // tabla editable más adelante). La PARRILLADA está NO DISPONIBLE por ahora.
 const COMBOS = `=== COMBOS / BOLSONES ARMADOS (vigentes) ===
-Cuando el cliente pregunte por combos, bolsones o promos, pasale los que apliquen con su precio (no hace falta listar todos si pidió uno puntual). Son a retirar; si quiere encargar, tomá el pedido (el equipo confirma disponibilidad y precio final). Más abajo, si están cargadas, el sistema le manda las FOTOS de los combos.
+Cuando el cliente pregunte por combos, bolsones o promos, pasale los que apliquen con su precio (no hace falta listar todos si pidió uno puntual). Son a retirar; si quiere encargar, tomá el pedido (el equipo confirma disponibilidad y precio final). IMPORTANTE: cada vez que hables de combos/bolsones/promos (o el cliente pida ver las fotos) poné enviar_combos=true; el sistema le manda automáticamente las FOTOS de los combos, así que tu texto puede ser corto (ej "¡Sí! Mirá, te paso los combos que tenemos 🥩"). No describas foto por foto.
 - COMBO BOVINO — $79.000: 1kg aguja de costeleta, 1kg molida, 1kg bifes, 1 tapa de nalga completa.
 - COMBO CERDO — $34.500: 1kg milanesas, 1kg costeletas, 1kg chorizo, 1kg hamburguesas.
 - COMBO POLLO — $38.000 (5,5kg aprox.): 1kg pata muslo, 1kg milanesas, 1kg pechuga, 1 pollo entero.
@@ -90,6 +90,7 @@ const SCHEMA_RESPUESTA = {
     resumen_pedido: { type: 'string' },
     pedido_confirmado: { type: 'boolean' },
     escalar: { type: 'boolean' },
+    enviar_combos: { type: 'boolean' },
   },
   required: ['respuesta', 'es_pedido'],
 }
@@ -186,6 +187,17 @@ export default async function handler(req, res) {
     const ia = await responderConIris(historial, texto, datosNegocio, infoNegocio, sorteo)
     await enviarWhatsApp(phoneId, from, ia.respuesta)
     await guardarMensaje(from, 'out', 'iris', 'text', ia.respuesta)
+
+    // Consulta por combos/bolsones → mandamos las fotos cargadas en el sistema.
+    if (ia.enviar_combos) {
+      try {
+        const imgs = await traerImagenesCombos()
+        for (const url of imgs) {
+          await enviarImagenWhatsApp(phoneId, from, url)
+          await guardarMensaje(from, 'out', 'iris', 'text', '📷 (combo enviado)')
+        }
+      } catch (e) { console.error('Envío combos WA error', e) }
+    }
 
     // Registramos el pedido SOLO cuando el cliente lo confirmó (pidió que se lo
     // deje así). Mientras lo está armando, Iris pregunta "¿algo más?" y no se pasa
@@ -484,7 +496,7 @@ async function traerHistorial(telefono) {
 
 // ── Cerebro de Iris (Gemini, salida estructurada) ────────────────────────
 async function responderConIris(historial, textoActual, datosNegocio, infoNegocio, sorteo) {
-  const fallback = { respuesta: '¡Hola! 🥩 Gracias por tu mensaje. En un ratito te responde alguien del equipo de Carnicerías Fabricius.', es_pedido: false, resumen_pedido: '', pedido_confirmado: false, escalar: false }
+  const fallback = { respuesta: '¡Hola! 🥩 Gracias por tu mensaje. En un ratito te responde alguien del equipo de Carnicerías Fabricius.', es_pedido: false, resumen_pedido: '', pedido_confirmado: false, escalar: false, enviar_combos: false }
   if (!GEMINI_KEY) return fallback
   // Si no hay historial (o falló), usamos solo el mensaje actual.
   const contents = (Array.isArray(historial) && historial.length)
@@ -560,6 +572,7 @@ async function responderConIris(historial, textoActual, datosNegocio, infoNegoci
       resumen_pedido: (parsed.resumen_pedido || '').trim(),
       pedido_confirmado: parsed.pedido_confirmado === true,
       escalar: parsed.escalar === true,
+      enviar_combos: parsed.enviar_combos === true,
     }
   } catch (e) { console.error('Gemini WA error', e); return fallback }
 }
@@ -625,6 +638,26 @@ async function enviarWhatsApp(phoneId, to, texto) {
     body: JSON.stringify({ messaging_product: 'whatsapp', to: destino, type: 'text', text: { body: String(texto).slice(0, 4000) } }),
   })
   if (!r.ok) console.error('Envío WhatsApp', r.status, await r.text().catch(() => ''))
+}
+
+// Envía una imagen por su URL pública (la usan los combos).
+async function enviarImagenWhatsApp(phoneId, to, link) {
+  const destino = normalizarDestinoAR(to)
+  const r = await fetch(`https://graph.facebook.com/v21.0/${phoneId}/messages`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${WA_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messaging_product: 'whatsapp', to: destino, type: 'image', image: { link } }),
+  })
+  if (!r.ok) console.error('Envío imagen WhatsApp', r.status, await r.text().catch(() => ''))
+  return r.ok
+}
+
+// URLs públicas de las imágenes de combos activas (vacío si no hay).
+async function traerImagenesCombos() {
+  try {
+    const rows = await sbGet('combos_imagenes?select=url&activo=eq.true&order=orden,creado_at', sbHeaders())
+    return (rows || []).map(r => r.url).filter(Boolean)
+  } catch { return [] }
 }
 
 function formatearPesos(n) {

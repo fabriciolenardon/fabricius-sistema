@@ -6,8 +6,9 @@ import { supabase } from '../../lib/supabase'
 import ConversacionesWhatsapp from './ConversacionesWhatsapp'
 import PedidosWhatsapp from './PedidosWhatsapp'
 import CampanasWhatsapp from './CampanasWhatsapp'
+import CombosWhatsapp from './CombosWhatsapp'
 
-const TAB_VALIDA = (t) => (t === 'pedidos' || t === 'campanas') ? t : 'conversaciones'
+const TAB_VALIDA = (t) => (t === 'pedidos' || t === 'campanas' || t === 'combos') ? t : 'conversaciones'
 
 export default function Whatsapp() {
   const [params, setParams] = useSearchParams()
@@ -44,11 +45,13 @@ export default function Whatsapp() {
         <TabBtn activo={tab === 'conversaciones'} onClick={() => cambiar('conversaciones')} icon="🗨️" label="Conversaciones" badge={noLeidos} color="var(--blue)" />
         <TabBtn activo={tab === 'pedidos'} onClick={() => cambiar('pedidos')} icon="📥" label="Pedidos minoristas" badge={pedidosNuevos} color="var(--green)" />
         <TabBtn activo={tab === 'campanas'} onClick={() => cambiar('campanas')} icon="📣" label="Campañas" badge={0} color="var(--gold)" />
+        <TabBtn activo={tab === 'combos'} onClick={() => cambiar('combos')} icon="📦" label="Combos" badge={0} color="var(--gold)" />
       </div>
 
       {tab === 'conversaciones' && <ConversacionesWhatsapp />}
       {tab === 'pedidos' && <PedidosWhatsapp />}
       {tab === 'campanas' && <CampanasWhatsapp />}
+      {tab === 'combos' && <CombosWhatsapp />}
     </div>
   )
 }
