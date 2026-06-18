@@ -190,6 +190,29 @@ export default function HistorialCaja() {
     }))
   }, [ventas])
 
+  // === Convenio Blanguino: agregado por empleado (control + reintegro) ===
+  const blanguino = useMemo(() => {
+    const map = new Map() // legajo|empleado → { empleado, legajo, cant, total, descuento }
+    for (const v of ventas) {
+      if (v.convenio !== 'blanguino') continue
+      const legajo = (v.convenio_legajo || '').trim() || '—'
+      const empleado = (v.convenio_empleado || '').trim() || '—'
+      const key = legajo + '|' + empleado
+      if (!map.has(key)) map.set(key, { empleado, legajo, cant: 0, total: 0, descuento: 0 })
+      const r = map.get(key)
+      r.cant += 1
+      r.total += Number(v.total) || 0
+      r.descuento += Number(v.descuento_monto) || 0
+    }
+    const filas = Array.from(map.values()).sort((a, b) => b.total - a.total)
+    return {
+      filas,
+      cantVentas: filas.reduce((s, f) => s + f.cant, 0),
+      totalVentas: filas.reduce((s, f) => s + f.total, 0),
+      totalDescuento: filas.reduce((s, f) => s + f.descuento, 0),
+    }
+  }, [ventas])
+
   // === Estilos compartidos ===
   const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 16 }
   const kpi = (label, value, sub) => (
@@ -265,6 +288,49 @@ export default function HistorialCaja() {
               </div>
             </div>
           </div>
+
+          {/* CONVENIO BLANGUINO — control de empleados */}
+          {blanguino.filas.length > 0 && (
+            <div className="card" style={{ marginBottom: 16, borderColor: '#3a6ea5' }}>
+              <div className="card-title" style={{ color: '#7ec8ff' }}>🔵 Convenio Blanguino — empleados que compraron</div>
+              <table style={{ width: '100%' }}>
+                <thead>
+                  <tr style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase' }}>
+                    <th style={{ textAlign: 'left' }}>Empleado</th>
+                    <th style={{ textAlign: 'left' }}>Legajo</th>
+                    <th style={{ textAlign: 'right' }}>Compras</th>
+                    <th style={{ textAlign: 'right' }}>Total cobrado</th>
+                    <th style={{ textAlign: 'right' }}>Descuento 10%</th>
+                    <th style={{ textAlign: 'right' }}>Reintegro 5%</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {blanguino.filas.map(f => (
+                    <tr key={f.legajo + f.empleado} style={{ borderTop: '1px solid var(--border)' }}>
+                      <td style={{ padding: '8px 4px', fontWeight: 600 }}>{f.empleado}</td>
+                      <td style={{ padding: '8px 4px', color: 'var(--muted)' }}>{f.legajo}</td>
+                      <td style={{ textAlign: 'right', padding: '8px 4px' }}>{f.cant}</td>
+                      <td style={{ textAlign: 'right', padding: '8px 4px', fontWeight: 700 }}>{fmt$(f.total)}</td>
+                      <td style={{ textAlign: 'right', padding: '8px 4px', color: '#7ec8ff' }}>{fmt$(f.descuento)}</td>
+                      <td style={{ textAlign: 'right', padding: '8px 4px', color: '#7dff7d', fontWeight: 700 }}>{fmt$(f.descuento / 2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr style={{ borderTop: '2px solid var(--border)', fontWeight: 800 }}>
+                    <td style={{ padding: '8px 4px' }} colSpan={2}>TOTAL</td>
+                    <td style={{ textAlign: 'right', padding: '8px 4px' }}>{blanguino.cantVentas}</td>
+                    <td style={{ textAlign: 'right', padding: '8px 4px' }}>{fmt$(blanguino.totalVentas)}</td>
+                    <td style={{ textAlign: 'right', padding: '8px 4px', color: '#7ec8ff' }}>{fmt$(blanguino.totalDescuento)}</td>
+                    <td style={{ textAlign: 'right', padding: '8px 4px', color: '#7dff7d' }}>{fmt$(blanguino.totalDescuento / 2)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8, fontStyle: 'italic' }}>
+                El 10% es el descuento al empleado en caja; la empresa reintegra el 5% (la mitad). Usá este detalle para reclamar el reintegro a Blanguino.
+              </div>
+            </div>
+          )}
 
           {/* CATEGORÍA */}
           <div className="card" style={{ marginBottom: 16 }}>
