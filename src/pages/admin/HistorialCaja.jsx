@@ -13,8 +13,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
-import { kgPorUnidadDeProducto } from '../../lib/stockHelpers'
-import { revertirVentaCaja } from '../../lib/cajasStock'
+import { anularVenta as anularVentaLib } from '../../lib/anularVenta'
 import { useAuth } from '../../context/AuthContext'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
@@ -35,31 +34,6 @@ function grupoDeCategoria(cat) {
   if (cat === 'almacen') return 'almacen'
   if (cat === 'bebidas') return 'bebidas'
   return 'otros'
-}
-
-// Mapeo categoría → tipo en stock_actual (igual al de Caja.jsx para mantener coherencia).
-// Recibe stock_origen opcional para revertir contra el cut específico si la
-// venta original lo guardó (ej. cerdo_bondiola). Sino usa fallback por categoría.
-function mapearStockTipo(cat, stockOrigen) {
-  if (!cat) return null
-  if (stockOrigen) return stockOrigen
-  if (cat === 'bovino_mr')        return 'bovino_mr'
-  if (cat === 'bovino_corte')     return 'bovino_corte'
-  if (cat === 'bovino_pieza')     return 'bovino_pieza'
-  if (cat === 'bovino_brosa')     return 'bovino_brosa'
-  if (cat === 'cerdo')            return 'cerdo'        // capón
-  if (cat === 'cerdo_corte')      return null           // sin origen → no revertir (cerdo_pieza eliminado)
-  if (cat === 'cerdo_pieza')      return null
-  if (cat === 'pollo')            return 'pollo'
-  if (cat === 'pollo_cajon')      return 'pollo'      // se revierte kg×cajón
-  if (cat === 'rebozado')         return 'rebozado'
-  if (cat === 'rebozado_cajon')   return 'rebozado'   // se revierte kg×cajón
-  if (cat === 'embutido')         return 'embutido'
-  if (cat === 'almacen')          return 'almacen'
-  if (cat === 'bebidas')          return 'bebidas'
-  if (cat === 'bovino_caja_cb')   return 'caja_cb'
-  if (cat === 'bovino_caja_pt')   return 'caja_pt'
-  return null
 }
 
 const GRUPOS = {
@@ -134,104 +108,10 @@ export default function HistorialCaja() {
     if (m !== 'custom') setRango(rangoFechas(m))
   }
 
-  // === Anular venta: revertir stock + borrar de ventas_minoristas ===
+  // === Anular venta: revertir stock + borrar (lógica en lib/anularVenta) ===
   async function anularVenta(venta) {
-    if (!isAdmin) {
-      alert('Solo los administradores pueden anular ventas.')
-      return
-    }
-    const total = Number(venta.total) || 0
-    const cantItems = Array.isArray(venta.items) ? venta.items.length : 0
-    if (!confirm(
-      `⚠️ ANULAR VENTA — ACCIÓN IRREVERSIBLE\n\n` +
-      `Venta #${venta.id} del ${venta.fecha}\n` +
-      `Total: ${fmt$(total)}\n` +
-      `Items: ${cantItems}\n\n` +
-      `Se va a:\n` +
-      `  1. Devolver al stock cada item vendido\n` +
-      `  2. Borrar la venta del historial\n\n` +
-      `¿Confirmar?`
-    )) return
-    const conf2 = prompt('Para confirmar, escribí ANULAR en mayúsculas:')
-    if (conf2 !== 'ANULAR') {
-      alert('Cancelado. Texto incorrecto.')
-      return
-    }
-
-    // 1) Reponer stock por cada item
-    // Para cajones (pollo_cajon, rebozado_cajon) hay que multiplicar
-    // las unidades vendidas por los kg que pesa cada cajón para
-    // devolver al stock kg del producto base — mismo cálculo invertido
-    // que hace Caja.jsx al vender. Para cajas individuales (CB/PT) se
-    // llama revertirVentaCaja que vuelve la caja a 'disponible' y suma
-    // sus kg a stock_actual.
-    const items = Array.isArray(venta.items) ? venta.items : []
-    const errores = []
-    for (const item of items) {
-      // Caja individual — revertir y saltar el flujo normal
-      if (item.caja_id) {
-        const { error } = await revertirVentaCaja(item.caja_id)
-        if (error) errores.push(`Caja #${item.caja_id}: ${error}`)
-        continue
-      }
-      // Pieza entera — volver a 'disponible' en piezas_stock Y reponer su kg
-      // en el agregado stock_actual.bovino_pieza (la venta lo había descontado).
-      if (item.pieza_id) {
-        const { error } = await supabase.from('piezas_stock').update({
-          estado: 'disponible',
-          destino: null,
-          cliente_id: null,
-          cliente_nombre: null,
-          precio_venta_kg: null,
-          total_venta: null,
-          fecha_salida: null,
-          notas_salida: null,
-        }).eq('id', item.pieza_id)
-        if (error) errores.push(`Pieza #${item.pieza_id}: ${error.message}`)
-        // Reponer en el bucket PROPIO de la pieza (no en el genérico).
-        let bucketPz = item.stock_origen
-        if (!bucketPz) {
-          const { data: pz } = await supabase.from('piezas_stock').select('tipo_stock').eq('id', item.pieza_id).maybeSingle()
-          bucketPz = pz?.tipo_stock || 'bovino_pieza'
-        }
-        const { data: stkPz } = await supabase.from('stock_actual').select('*').eq('tipo', bucketPz).maybeSingle()
-        if (stkPz) {
-          await supabase.from('stock_actual')
-            .update({ kg_disponible: (Number(stkPz.kg_disponible) || 0) + (Number(item.kg) || 0) })
-            .eq('tipo', bucketPz)
-        }
-        continue
-      }
-      const tipoStock = mapearStockTipo(item.categoria, item.stock_origen)
-      if (!tipoStock) continue
-      try {
-        const esCajonAConvertir = item.categoria === 'pollo_cajon' || item.categoria === 'rebozado_cajon'
-        const cantidad = esCajonAConvertir
-          ? (Number(item.kg) || 0) * (kgPorUnidadDeProducto(item) || 1)
-          : (Number(item.kg) || 0)
-        const { data: stock } = await supabase.from('stock_actual').select('*').eq('tipo', tipoStock).maybeSingle()
-        if (stock) {
-          await supabase.from('stock_actual')
-            .update({ kg_disponible: (Number(stock.kg_disponible) || 0) + cantidad })
-            .eq('tipo', tipoStock)
-        }
-      } catch (e) {
-        errores.push(`${item.descripcion}: ${e.message}`)
-      }
-    }
-
-    // 2) Borrar la venta
-    const { error } = await supabase.from('ventas_minoristas').delete().eq('id', venta.id)
-    if (error) {
-      alert(`❌ Stock revertido pero NO se pudo borrar la venta:\n${error.message}`)
-      await cargar()
-      return
-    }
-
-    let msg = `✅ Venta #${venta.id} anulada — stock devuelto`
-    if (errores.length > 0) msg += `\n\n⚠️ Algunos items tuvieron error al revertir stock:\n${errores.join('\n')}`
-    alert(msg)
-    await cargar()
+    const r = await anularVentaLib(venta, { isAdmin })
+    if (r.ok) await cargar()
   }
 
   // === Cálculos agregados ===

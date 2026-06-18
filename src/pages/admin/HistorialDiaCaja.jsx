@@ -8,6 +8,9 @@
 // ============================================================
 import { useState } from 'react'
 import { fmtPrecio, fmtKg } from '../../lib/formatos'
+import { useAuth } from '../../context/AuthContext'
+import { anularVenta } from '../../lib/anularVenta'
+import { imprimirTicketVenta } from '../../lib/ticketVenta'
 
 const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
 
@@ -38,9 +41,21 @@ function mediosPagoResumen(v) {
   return m.join(' ') || '—'
 }
 
-export default function HistorialDiaCaja({ ventas = [] }) {
+export default function HistorialDiaCaja({ ventas = [], onChange }) {
+  const { isAdmin } = useAuth()
   const [abierta, setAbierta] = useState(null) // id de la venta expandida
+  const [anulando, setAnulando] = useState(null) // id en proceso de anulación
   const totalDia = ventas.reduce((s, v) => s + (Number(v.total) || 0), 0)
+
+  async function onAnular(v) {
+    setAnulando(v.id)
+    try {
+      const r = await anularVenta(v, { isAdmin })
+      if (r.ok) onChange?.()
+    } finally {
+      setAnulando(null)
+    }
+  }
 
   return (
     <div style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
@@ -98,6 +113,21 @@ export default function HistorialDiaCaja({ ventas = [] }) {
                       )}
                     </div>
                     {v.notas && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>📝 {v.notas}</div>}
+                    {/* Acciones por venta */}
+                    <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                      <button onClick={() => imprimirTicketVenta(v)}
+                        title="Imprimir el ticket de esta venta (comprobante no fiscal)"
+                        style={{ padding: '6px 12px', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+                        🖨️ Imprimir
+                      </button>
+                      {isAdmin && (
+                        <button onClick={() => onAnular(v)} disabled={anulando === v.id}
+                          title="Anular venta y devolver el stock"
+                          style={{ padding: '6px 12px', background: 'transparent', border: '1px solid #5a2a2a', color: '#ff8b8b', borderRadius: 6, cursor: anulando === v.id ? 'wait' : 'pointer', fontSize: 12, fontWeight: 600, opacity: anulando === v.id ? 0.5 : 1 }}>
+                          {anulando === v.id ? '⏳ Anulando…' : '🗑️ Anular'}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
