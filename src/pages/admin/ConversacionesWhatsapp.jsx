@@ -37,6 +37,7 @@ export default function ConversacionesWhatsapp() {
   const [mensajes, setMensajes] = useState([])
   const [texto, setTexto] = useState('')
   const [enviando, setEnviando] = useState(false)
+  const [enviandoCombos, setEnviandoCombos] = useState(false)
   const [cargando, setCargando] = useState(true)
   const [cfgAbierta, setCfgAbierta] = useState(false)
   const finRef = useRef(null)
@@ -109,6 +110,28 @@ export default function ConversacionesWhatsapp() {
       // acá para no provocar la carrera recarga-vs-realtime que duplicaba.
     } catch (e) { alert('Error: ' + e.message) }
     setEnviando(false)
+  }
+
+  // Enviar manualmente las fotos de combos a este chat (Iris se lo saltó,
+  // o es un chat viejo de antes de que Iris estuviera configurada).
+  async function enviarCombos() {
+    if (!sel || enviandoCombos) return
+    if (!confirm('¿Enviar las fotos de los combos a este contacto?')) return
+    setEnviandoCombos(true)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+      if (!token) { alert('Sesión expirada, volvé a entrar.'); setEnviandoCombos(false); return }
+      const r = await fetch('/api/wa-enviar-combos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ to: sel }),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) { alert('No se pudieron enviar los combos: ' + (j.error || r.status)) }
+      else if (!j.enviadas) { alert('No se envió ninguna foto.') }
+    } catch (e) { alert('Error: ' + e.message) }
+    setEnviandoCombos(false)
   }
 
   async function togglePausa() {
@@ -221,6 +244,10 @@ export default function ConversacionesWhatsapp() {
 
                 {/* Input */}
                 <div style={{ padding: 10, borderTop: '1px solid var(--border)', display: 'flex', gap: 8 }}>
+                  <button onClick={enviarCombos} disabled={enviandoCombos} title="Enviar las fotos de los combos a este chat"
+                    style={{ background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '0 12px', cursor: 'pointer', fontSize: 16, opacity: enviandoCombos ? 0.5 : 1 }}>
+                    {enviandoCombos ? '…' : '📦'}
+                  </button>
                   <input value={texto} onChange={e => setTexto(e.target.value)} onKeyDown={e => e.key === 'Enter' && enviar()}
                     placeholder={contactoSel?.iris_pausada ? 'Escribí tu respuesta…' : 'Escribí para responder vos (pausá Iris si no querés que conteste encima)'}
                     style={{ flex: 1, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '10px 12px', fontSize: 13, fontFamily: "'DM Sans', sans-serif", outline: 'none' }} />
