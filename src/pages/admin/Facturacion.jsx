@@ -32,6 +32,7 @@ import {
   condIvaAReceptorAfip, comprobanteRecomendado, ES_NOTA_CD, NOTAS_CREDITO, NOTAS_DEBITO,
 } from '../../lib/arca'
 import { imprimirComprobante } from '../../lib/comprobantePdf'
+import TabBalance from './BalanceEjercicio'
 
 const fmt$ = n => fmtPrecio(Math.abs(Number(n) || 0))
 const fmtPct = n => (n || 0).toFixed(1) + '%'
@@ -159,6 +160,7 @@ export default function Facturacion() {
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, marginTop: 8, flexWrap: 'wrap' }}>
         {tabBtn('cuentas', '🏛️ Cuentas')}
         {tabBtn('historial', '📒 Historial')}
+        {tabBtn('balance', '📊 Balance')}
         {tabBtn('facturas', '🧾 Facturas')}
         {tabBtn('impuestos', '💸 Impuestos pagados')}
         {tabBtn('contrapartes', '👥 Contrapartes')}
@@ -178,6 +180,9 @@ export default function Facturacion() {
       )}
       {!loading && tab === 'historial' && (
         <TabHistorial cuentas={cuentas} facturas={facturas} contrapartes={contrapartes} onChange={cargarTodo} />
+      )}
+      {!loading && tab === 'balance' && (
+        <TabBalance cuentas={cuentas} />
       )}
       {!loading && tab === 'facturas' && (
         <TabFacturas cuentas={cuentas} facturas={facturas} contrapartes={contrapartes} onChange={cargarTodo} />
