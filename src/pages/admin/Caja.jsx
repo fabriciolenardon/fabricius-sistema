@@ -957,7 +957,7 @@ export default function Caja() {
           )}
 
           {/* Historial del día — cada venta del turno, clickeable para ver el detalle */}
-          <HistorialDiaCaja ventas={ventasHoy} />
+          <HistorialDiaCaja ventas={ventasHoy} onChange={cargarTodo} />
         </div>
 
         {/* ============ COLUMNA DERECHA: STATS + ÚLTIMA VENTA ============ */}
