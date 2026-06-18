@@ -41,27 +41,31 @@ export function mapearStockTipo(cat, stockOrigen) {
 
 // Anula una venta. Pide doble confirmación (confirm + tipear "ANULAR").
 // Devuelve { ok, cancelled, error, errores } — el caller recarga si ok.
-export async function anularVenta(venta, { isAdmin = false } = {}) {
+// yaConfirmado: cuando la UI ya confirmó con el modal de código de seguridad,
+// se saltea el confirm/prompt nativo (el modal ES la confirmación).
+export async function anularVenta(venta, { isAdmin = false, yaConfirmado = false } = {}) {
   if (!isAdmin) {
     alert('Solo los administradores pueden anular ventas.')
     return { ok: false, cancelled: true }
   }
-  const total = Number(venta.total) || 0
-  const cantItems = Array.isArray(venta.items) ? venta.items.length : 0
-  if (!confirm(
-    `⚠️ ANULAR VENTA — ACCIÓN IRREVERSIBLE\n\n` +
-    `Venta #${venta.id} del ${venta.fecha}\n` +
-    `Total: ${fmt$(total)}\n` +
-    `Items: ${cantItems}\n\n` +
-    `Se va a:\n` +
-    `  1. Devolver al stock cada item vendido\n` +
-    `  2. Borrar la venta del historial\n\n` +
-    `¿Confirmar?`
-  )) return { ok: false, cancelled: true }
-  const conf2 = prompt('Para confirmar, escribí ANULAR en mayúsculas:')
-  if (conf2 !== 'ANULAR') {
-    alert('Cancelado. Texto incorrecto.')
-    return { ok: false, cancelled: true }
+  if (!yaConfirmado) {
+    const total = Number(venta.total) || 0
+    const cantItems = Array.isArray(venta.items) ? venta.items.length : 0
+    if (!confirm(
+      `⚠️ ANULAR VENTA — ACCIÓN IRREVERSIBLE\n\n` +
+      `Venta #${venta.id} del ${venta.fecha}\n` +
+      `Total: ${fmt$(total)}\n` +
+      `Items: ${cantItems}\n\n` +
+      `Se va a:\n` +
+      `  1. Devolver al stock cada item vendido\n` +
+      `  2. Borrar la venta del historial\n\n` +
+      `¿Confirmar?`
+    )) return { ok: false, cancelled: true }
+    const conf2 = prompt('Para confirmar, escribí ANULAR en mayúsculas:')
+    if (conf2 !== 'ANULAR') {
+      alert('Cancelado. Texto incorrecto.')
+      return { ok: false, cancelled: true }
+    }
   }
 
   // 1) Reponer stock por cada item
