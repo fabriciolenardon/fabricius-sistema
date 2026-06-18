@@ -16,6 +16,7 @@ import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
 import { anularVenta as anularVentaLib } from '../../lib/anularVenta'
 import { useAuth } from '../../context/AuthContext'
 import Paginador, { usePaginacion } from '../../components/Paginador'
+import ModalCodigoEliminar from '../../components/ModalCodigoEliminar'
 
 import { fmtPrecio, fmtKg as fmtKgAR } from '../../lib/formatos'
 const fmt$ = n => fmtPrecio(Math.abs(Number(n) || 0))
@@ -74,6 +75,7 @@ export default function HistorialCaja() {
   const [modo, setModo] = useState('hoy')
   const [rango, setRango] = useState(() => rangoFechas('hoy'))
   const [expandido, setExpandido] = useState(null)
+  const [aEliminar, setAEliminar] = useState(null) // venta esperando el código
 
   useEffect(() => { cargar() }, [rango.desde, rango.hasta])
 
@@ -108,9 +110,17 @@ export default function HistorialCaja() {
     if (m !== 'custom') setRango(rangoFechas(m))
   }
 
-  // === Anular venta: revertir stock + borrar (lógica en lib/anularVenta) ===
-  async function anularVenta(venta) {
-    const r = await anularVentaLib(venta, { isAdmin })
+  // === Eliminar venta: el botón abre el modal de código; al confirmar se
+  // revierte el stock y se borra (lógica en lib/anularVenta) ===
+  function anularVenta(venta) {
+    if (!isAdmin) { alert('Solo los administradores pueden anular ventas.'); return }
+    setAEliminar(venta)
+  }
+  async function confirmarEliminar() {
+    const v = aEliminar
+    setAEliminar(null)
+    if (!v) return
+    const r = await anularVentaLib(v, { isAdmin, yaConfirmado: true })
     if (r.ok) await cargar()
   }
 
@@ -365,6 +375,8 @@ export default function HistorialCaja() {
           />
         </>
       )}
+
+      <ModalCodigoEliminar venta={aEliminar} onConfirm={confirmarEliminar} onCancel={() => setAEliminar(null)} />
     </div>
   )
 }

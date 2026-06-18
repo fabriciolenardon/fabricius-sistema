@@ -11,6 +11,7 @@ import { fmtPrecio, fmtKg } from '../../lib/formatos'
 import { useAuth } from '../../context/AuthContext'
 import { anularVenta } from '../../lib/anularVenta'
 import { imprimirTicketVenta } from '../../lib/ticketVenta'
+import ModalCodigoEliminar from '../../components/ModalCodigoEliminar'
 
 const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
 
@@ -45,12 +46,17 @@ export default function HistorialDiaCaja({ ventas = [], onChange }) {
   const { isAdmin } = useAuth()
   const [abierta, setAbierta] = useState(null) // id de la venta expandida
   const [anulando, setAnulando] = useState(null) // id en proceso de anulación
+  const [aEliminar, setAEliminar] = useState(null) // venta esperando el código
   const totalDia = ventas.reduce((s, v) => s + (Number(v.total) || 0), 0)
 
-  async function onAnular(v) {
+  // Confirmado el código en el modal → revertir stock + borrar
+  async function confirmarEliminar() {
+    const v = aEliminar
+    setAEliminar(null)
+    if (!v) return
     setAnulando(v.id)
     try {
-      const r = await anularVenta(v, { isAdmin })
+      const r = await anularVenta(v, { isAdmin, yaConfirmado: true })
       if (r.ok) onChange?.()
     } finally {
       setAnulando(null)
@@ -121,10 +127,10 @@ export default function HistorialDiaCaja({ ventas = [], onChange }) {
                         🖨️ Imprimir
                       </button>
                       {isAdmin && (
-                        <button onClick={() => onAnular(v)} disabled={anulando === v.id}
-                          title="Anular venta y devolver el stock"
+                        <button onClick={() => setAEliminar(v)} disabled={anulando === v.id}
+                          title="Eliminar venta (pide código) y devolver el stock"
                           style={{ padding: '6px 12px', background: 'transparent', border: '1px solid #5a2a2a', color: '#ff8b8b', borderRadius: 6, cursor: anulando === v.id ? 'wait' : 'pointer', fontSize: 12, fontWeight: 600, opacity: anulando === v.id ? 0.5 : 1 }}>
-                          {anulando === v.id ? '⏳ Anulando…' : '🗑️ Anular'}
+                          {anulando === v.id ? '⏳ Eliminando…' : '🗑️ Eliminar'}
                         </button>
                       )}
                     </div>
@@ -135,6 +141,8 @@ export default function HistorialDiaCaja({ ventas = [], onChange }) {
           })}
         </div>
       )}
+
+      <ModalCodigoEliminar venta={aEliminar} onConfirm={confirmarEliminar} onCancel={() => setAEliminar(null)} />
     </div>
   )
 }
