@@ -84,7 +84,7 @@ export default function HistorialDiaCaja({ ventas = [], onChange }) {
             const exp = abierta === v.id
             const nItems = Array.isArray(v.items) ? v.items.length : 0
             return (
-              <div key={v.id} style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', background: 'var(--surface)' }}>
+              <div key={v.id} style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', background: 'var(--surface)', flexShrink: 0 }}>
                 <button
                   onClick={() => setAbierta(exp ? null : v.id)}
                   style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: 'none', border: 'none', color: 'var(--text)', cursor: 'pointer', textAlign: 'left' }}>
