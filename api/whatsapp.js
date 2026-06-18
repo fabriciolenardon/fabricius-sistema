@@ -71,7 +71,7 @@ SOLUCIONES PARA EL NEGOCIO DEL CLIENTE (beneficios concretos, mencioná los que 
 // cambia precios o combos, hay que actualizar acá (idealmente pasarlo a una
 // tabla editable más adelante). La PARRILLADA está NO DISPONIBLE por ahora.
 const COMBOS = `=== COMBOS / BOLSONES ARMADOS (vigentes) ===
-Cuando el cliente pregunte por combos, bolsones o promos, pasale los que apliquen con su precio (no hace falta listar todos si pidió uno puntual). Son a retirar; si quiere encargar, tomá el pedido (el equipo confirma disponibilidad y precio final). IMPORTANTE: cada vez que hables de combos/bolsones/promos (o el cliente pida ver las fotos) poné enviar_combos=true; el sistema le manda automáticamente las FOTOS de los combos, así que tu texto puede ser corto (ej "¡Sí! Mirá, te paso los combos que tenemos 🥩"). No describas foto por foto.
+Cuando el cliente pregunte por combos o bolsones, pasale los que apliquen con su precio (no hace falta listar todos si pidió uno puntual). Son a retirar; si quiere encargar, tomá el pedido (el equipo confirma disponibilidad y precio final). IMPORTANTE: cada vez que hables de combos/bolsones (o el cliente pida ver las fotos de los combos) poné enviar_combos=true; el sistema le manda automáticamente las FOTOS de los combos, así que tu texto puede ser corto (ej "¡Sí! Mirá, te paso los combos que tenemos 🥩"). No describas foto por foto. OJO: los combos (bolsones armados, precio fijo) son DISTINTOS de las OFERTAS de la semana (ver abajo).
 - COMBO BOVINO — $79.000: 1kg aguja de costeleta, 1kg molida, 1kg bifes, 1 tapa de nalga completa.
 - COMBO CERDO — $34.500: 1kg milanesas, 1kg costeletas, 1kg chorizo, 1kg hamburguesas.
 - COMBO POLLO — $38.000 (5,5kg aprox.): 1kg pata muslo, 1kg milanesas, 1kg pechuga, 1 pollo entero.
@@ -82,6 +82,16 @@ Cuando el cliente pregunte por combos, bolsones o promos, pasale los que aplique
 - COMBO REBOZADO — $45.000: 1kg mila de ternera, 1kg mila de cerdo, 1kg mila de pollo, 500g patitas JyQ, 500g nuggets.
 - COMBO PARRILLADA (6 personas): por ahora NO DISPONIBLE — si lo piden, avisá que justo no está disponible y ofrecé el Asado Eco o el Asado Premium como alternativa.`
 
+// Ofertas semanales: placas que CAMBIAN cada semana → Iris NO sabe esos precios
+// (están en la imagen), solo manda la placa que corresponde al tipo de cliente.
+const OFERTAS = `=== OFERTAS DE LA SEMANA (placas que cambian cada semana) ===
+Aparte de los combos, cada semana hay placas de OFERTAS con precios especiales. Esos precios CAMBIAN seguido: NO te los sabés de memoria y NUNCA los inventes — están en la imagen. Hay dos placas: OFERTAS MAYORISTAS y OFERTAS SEMANALES (minorista).
+Cuando el cliente pregunte por ofertas, promociones o precios especiales de la semana, poné el campo enviar_ofertas según quién es:
+- mayorista, gastronómico o carnicero → enviar_ofertas="may"
+- minorista / cliente de mostrador → enviar_ofertas="min"
+- si todavía no sabés qué tipo de cliente es → preguntáselo primero; si igual insiste, poné enviar_ofertas="ambas"
+El sistema le manda la(s) placa(s) con los precios; tu texto va corto (ej "¡Sí! Te paso las ofertas de esta semana 🥩"). Aclará que las ofertas MAYORISTAS son únicamente en efectivo/transferencia y se despachan en la Casa Central (Av. Mitre 670). No mezcles OFERTAS (placas semanales) con COMBOS (bolsones armados): si pide combos → enviar_combos; si pide ofertas → enviar_ofertas.`
+
 const SCHEMA_RESPUESTA = {
   type: 'object',
   properties: {
@@ -91,6 +101,7 @@ const SCHEMA_RESPUESTA = {
     pedido_confirmado: { type: 'boolean' },
     escalar: { type: 'boolean' },
     enviar_combos: { type: 'boolean' },
+    enviar_ofertas: { type: 'string' },
   },
   required: ['respuesta', 'es_pedido'],
 }
@@ -191,12 +202,27 @@ export default async function handler(req, res) {
     // Consulta por combos/bolsones → mandamos las fotos cargadas en el sistema.
     if (ia.enviar_combos) {
       try {
-        const imgs = await traerImagenesCombos()
+        const imgs = await traerImagenesPromo('combo')
         for (const url of imgs) {
           await enviarImagenWhatsApp(phoneId, from, url)
           await guardarMensaje(from, 'out', 'iris', 'text', '📷 (combo enviado)')
         }
       } catch (e) { console.error('Envío combos WA error', e) }
+    }
+
+    // Consulta por ofertas → mandamos la(s) placa(s) según el tipo de cliente.
+    if (ia.enviar_ofertas) {
+      try {
+        const v = ia.enviar_ofertas
+        const cats = v === 'may' ? ['oferta_may'] : v === 'min' ? ['oferta_min'] : (v === 'ambas' ? ['oferta_may', 'oferta_min'] : [])
+        if (cats.length) {
+          const imgs = await traerImagenesPromo(cats)
+          for (const url of imgs) {
+            await enviarImagenWhatsApp(phoneId, from, url)
+            await guardarMensaje(from, 'out', 'iris', 'text', '📷 (oferta enviada)')
+          }
+        }
+      } catch (e) { console.error('Envío ofertas WA error', e) }
     }
 
     // Registramos el pedido SOLO cuando el cliente lo confirmó (pidió que se lo
@@ -496,7 +522,7 @@ async function traerHistorial(telefono) {
 
 // ── Cerebro de Iris (Gemini, salida estructurada) ────────────────────────
 async function responderConIris(historial, textoActual, datosNegocio, infoNegocio, sorteo) {
-  const fallback = { respuesta: '¡Hola! 🥩 Gracias por tu mensaje. En un ratito te responde alguien del equipo de Carnicerías Fabricius.', es_pedido: false, resumen_pedido: '', pedido_confirmado: false, escalar: false, enviar_combos: false }
+  const fallback = { respuesta: '¡Hola! 🥩 Gracias por tu mensaje. En un ratito te responde alguien del equipo de Carnicerías Fabricius.', es_pedido: false, resumen_pedido: '', pedido_confirmado: false, escalar: false, enviar_combos: false, enviar_ofertas: '' }
   if (!GEMINI_KEY) return fallback
   // Si no hay historial (o falló), usamos solo el mensaje actual.
   const contents = (Array.isArray(historial) && historial.length)
@@ -506,6 +532,7 @@ async function responderConIris(historial, textoActual, datosNegocio, infoNegoci
   let systemText = PROMPT_BASE
   systemText += `\n\n${PERFIL_NEGOCIO}`
   systemText += `\n\n${COMBOS}`
+  systemText += `\n\n${OFERTAS}`
   systemText += `\n\n=== FECHA Y HORA AHORA ===\nAhora es ${fechaHoraARG()} (hora de Argentina). Usá esto para interpretar "hoy", "ayer", "mañana", "esta tarde", "temprano", etc. En el HISTORIAL cada mensaje arranca con su marca de tiempo entre corchetes (ej "[ayer 13:52]", "[hoy 09:46]") — usala para saber CUÁNDO se dijo cada cosa y re-anclar las fechas al día de hoy, pero NUNCA copies esa marca en tu respuesta.`
   if (sorteo) systemText += `\n\n=== SORTEO VIGENTE ===\nHay un SORTEO/RIFA de una media res que maneja ${sorteo} (NO el equipo de la carnicería). Si el cliente menciona el sorteo, la rifa, o quiere comprar/guardar/reservar un NÚMERO (ej. "el número 89", "guardame uno", "cuánto sale el número"), NO lo tomes vos como pedido ni preguntes qué quiere encargar: derivalo con amabilidad a ${sorteo}, que es quien maneja el sorteo y le pasa los datos para participar. En ese caso es_pedido=false.`
   if (infoNegocio) systemText += `\n\n=== INFORMACIÓN DEL NEGOCIO (horarios/dirección/pagos/envíos) ===\n${infoNegocio}`
@@ -573,6 +600,7 @@ async function responderConIris(historial, textoActual, datosNegocio, infoNegoci
       pedido_confirmado: parsed.pedido_confirmado === true,
       escalar: parsed.escalar === true,
       enviar_combos: parsed.enviar_combos === true,
+      enviar_ofertas: typeof parsed.enviar_ofertas === 'string' ? parsed.enviar_ofertas.toLowerCase().trim() : '',
     }
   } catch (e) { console.error('Gemini WA error', e); return fallback }
 }
@@ -652,10 +680,13 @@ async function enviarImagenWhatsApp(phoneId, to, link) {
   return r.ok
 }
 
-// URLs públicas de las imágenes de combos activas (vacío si no hay).
-async function traerImagenesCombos() {
+// URLs públicas de las imágenes promocionales activas de una categoría
+// ('combo', 'oferta_may', 'oferta_min'). Acepta un array de categorías.
+async function traerImagenesPromo(categoria) {
   try {
-    const rows = await sbGet('combos_imagenes?select=url&activo=eq.true&order=orden,creado_at', sbHeaders())
+    const cats = Array.isArray(categoria) ? categoria : [categoria]
+    const filtro = cats.length === 1 ? `eq.${cats[0]}` : `in.(${cats.join(',')})`
+    const rows = await sbGet(`combos_imagenes?select=url&activo=eq.true&categoria=${filtro}&order=orden,creado_at`, sbHeaders())
     return (rows || []).map(r => r.url).filter(Boolean)
   } catch { return [] }
 }

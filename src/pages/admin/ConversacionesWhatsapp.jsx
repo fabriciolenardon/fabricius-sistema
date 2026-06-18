@@ -38,6 +38,7 @@ export default function ConversacionesWhatsapp() {
   const [texto, setTexto] = useState('')
   const [enviando, setEnviando] = useState(false)
   const [enviandoCombos, setEnviandoCombos] = useState(false)
+  const [menuPromo, setMenuPromo] = useState(false)
   const [cargando, setCargando] = useState(true)
   const [cfgAbierta, setCfgAbierta] = useState(false)
   const finRef = useRef(null)
@@ -112,11 +113,12 @@ export default function ConversacionesWhatsapp() {
     setEnviando(false)
   }
 
-  // Enviar manualmente las fotos de combos a este chat (Iris se lo saltó,
-  // o es un chat viejo de antes de que Iris estuviera configurada).
-  async function enviarCombos() {
+  // Enviar manualmente las imágenes (combos u ofertas) a este chat: por si
+  // Iris se lo saltó, o para reactivar chats viejos (de antes de Iris).
+  async function enviarPromo(categoria, etiqueta) {
+    setMenuPromo(false)
     if (!sel || enviandoCombos) return
-    if (!confirm('¿Enviar las fotos de los combos a este contacto?')) return
+    if (!confirm(`¿Enviar ${etiqueta} a este contacto?`)) return
     setEnviandoCombos(true)
     try {
       const { data: { session } } = await supabase.auth.getSession()
@@ -125,11 +127,11 @@ export default function ConversacionesWhatsapp() {
       const r = await fetch('/api/wa-enviar-combos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ to: sel }),
+        body: JSON.stringify({ to: sel, categoria }),
       })
       const j = await r.json().catch(() => ({}))
-      if (!r.ok) { alert('No se pudieron enviar los combos: ' + (j.error || r.status)) }
-      else if (!j.enviadas) { alert('No se envió ninguna foto.') }
+      if (!r.ok) { alert('No se pudo enviar: ' + (j.error || r.status)) }
+      else if (!j.enviadas) { alert('No se envió ninguna imagen.') }
     } catch (e) { alert('Error: ' + e.message) }
     setEnviandoCombos(false)
   }
@@ -244,10 +246,19 @@ export default function ConversacionesWhatsapp() {
 
                 {/* Input */}
                 <div style={{ padding: 10, borderTop: '1px solid var(--border)', display: 'flex', gap: 8 }}>
-                  <button onClick={enviarCombos} disabled={enviandoCombos} title="Enviar las fotos de los combos a este chat"
-                    style={{ background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '0 12px', cursor: 'pointer', fontSize: 16, opacity: enviandoCombos ? 0.5 : 1 }}>
-                    {enviandoCombos ? '…' : '📦'}
-                  </button>
+                  <div style={{ position: 'relative' }}>
+                    <button onClick={() => setMenuPromo(v => !v)} disabled={enviandoCombos} title="Enviar combos u ofertas a este chat"
+                      style={{ background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '0 12px', height: '100%', cursor: 'pointer', fontSize: 16, opacity: enviandoCombos ? 0.5 : 1 }}>
+                      {enviandoCombos ? '…' : '📦'}
+                    </button>
+                    {menuPromo && (
+                      <div style={{ position: 'absolute', bottom: 'calc(100% + 6px)', left: 0, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 6, boxShadow: '0 6px 20px rgba(0,0,0,0.3)', zIndex: 30, minWidth: 200 }}>
+                        <button onClick={() => enviarPromo('combo', 'los combos')} style={menuItem}>📦 Combos</button>
+                        <button onClick={() => enviarPromo('oferta_may', 'las ofertas mayoristas')} style={menuItem}>🚚 Ofertas mayoristas</button>
+                        <button onClick={() => enviarPromo('oferta_min', 'las ofertas de la semana')} style={menuItem}>🏪 Ofertas semanales</button>
+                      </div>
+                    )}
+                  </div>
                   <input value={texto} onChange={e => setTexto(e.target.value)} onKeyDown={e => e.key === 'Enter' && enviar()}
                     placeholder={contactoSel?.iris_pausada ? 'Escribí tu respuesta…' : 'Escribí para responder vos (pausá Iris si no querés que conteste encima)'}
                     style={{ flex: 1, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '10px 12px', fontSize: 13, fontFamily: "'DM Sans', sans-serif", outline: 'none' }} />
@@ -338,4 +349,5 @@ function ModalConfig({ onClose }) {
 
 const btnSec = { padding: '8px 12px', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer', background: 'var(--surface)', color: 'var(--text2)', border: '1px solid var(--border)', fontFamily: "'DM Sans', sans-serif" }
 const btnGreen = { padding: '9px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer', background: 'var(--green)', color: '#000', border: 'none', fontFamily: "'DM Sans', sans-serif" }
+const menuItem = { display: 'block', width: '100%', textAlign: 'left', padding: '9px 12px', background: 'transparent', border: 'none', color: 'var(--text)', fontSize: 13, fontWeight: 600, cursor: 'pointer', borderRadius: 6, fontFamily: "'DM Sans', sans-serif" }
 const btnGold = { padding: '8px 13px', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer', background: 'var(--gold)', color: '#000', border: 'none', fontFamily: "'DM Sans', sans-serif" }
