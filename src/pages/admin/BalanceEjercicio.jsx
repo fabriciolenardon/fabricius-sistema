@@ -302,6 +302,30 @@ export default function TabBalance({ cuentas }) {
     }
   }
 
+  // ── eliminar ejercicio (solo abierto) ──
+  async function eliminarEjercicio() {
+    if (!ej || cerrado) return
+    const tieneDatos = lineas.some(l => Number(l.monto) !== 0) ||
+      Number(ej.existencia_inicial) || Number(ej.existencia_final) || Number(ej.impuesto_ganancias)
+    const aviso = tieneDatos
+      ? `Vas a ELIMINAR "${ej.denominacion}" y todo lo cargado en él.\n\nEsto NO se puede deshacer. ¿Seguro?`
+      : `¿Eliminar "${ej.denominacion}"? Está vacío.`
+    if (!window.confirm(aviso)) return
+    setSaving(true); setMsg('')
+    try {
+      // el filtro estado='abierto' es una red extra: nunca borra un ejercicio cerrado
+      const { error } = await supabase.from('ejercicios').delete().eq('id', ej.id).eq('estado', 'abierto')
+      if (error) throw error
+      setEjId(null); setEj(null)
+      await cargarEjercicios(cuentaId)
+      setMsg('✓ Ejercicio eliminado')
+    } catch (err) {
+      setMsg('Error al eliminar: ' + (err.message || err))
+    } finally {
+      setSaving(false); setTimeout(() => setMsg(''), 3000)
+    }
+  }
+
   async function exportarPdf() {
     try {
       await exportarBalancePdf({
@@ -428,6 +452,7 @@ export default function TabBalance({ cuentas }) {
               <button onClick={exportarPdf} style={{ padding: '9px 16px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontWeight: 700, cursor: 'pointer' }}>📄 Exportar PDF</button>
               {!cerrado && <button onClick={() => guardar(false)} disabled={saving} style={{ padding: '9px 16px', borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--gold)', color: 'var(--gold)', fontWeight: 700, cursor: 'pointer' }}>{saving ? '…' : '💾 Guardar'}</button>}
               {!cerrado && <button onClick={cerrar} disabled={saving} style={{ padding: '9px 16px', borderRadius: 8, border: 'none', background: 'var(--gold)', color: '#000', fontWeight: 800, cursor: 'pointer' }}>🔒 Cerrar ejercicio</button>}
+              {!cerrado && <button onClick={eliminarEjercicio} disabled={saving} title="Eliminar este ejercicio" style={{ padding: '9px 14px', borderRadius: 8, border: '1px solid rgba(200,60,60,.5)', background: 'transparent', color: '#c84040', fontWeight: 700, cursor: 'pointer' }}>🗑 Eliminar</button>}
             </div>
           </div>
 
