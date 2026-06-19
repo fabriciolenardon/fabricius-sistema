@@ -205,8 +205,12 @@ export async function calcularCierreAuto(desde, hasta) {
   }, 0)
 
   // ====== PAGADO A PROVEEDORES ======
-  const pagadoProvTotal = pagosProv.reduce((s, p) =>
-    s + (Number(p.importe) || 0) + (Number(p.percepcion) || 0), 0)
+  // Los pagos a proveedores se registran en el libro mayor
+  // (movimientos_proveedores, tipo='pago' → haber). La tabla vieja
+  // `pagos_proveedores` quedó sin uso: si el cierre la leía, daba $0 aunque
+  // se hubiera pagado todo. Tomamos los pagos del período desde el ledger.
+  const pagosProvPeriodo = movProv.filter(m => m.tipo === 'pago')
+  const pagadoProvTotal = pagosProvPeriodo.reduce((s, m) => s + (Number(m.haber) || 0), 0)
 
   // ====== POR PAGAR PROVEEDORES (saldo ledger al cierre) ======
   // Saldo se calcula leyendo TODOS los movimientos hasta `hasta`, no sólo los del período.
@@ -310,7 +314,7 @@ export async function calcularCierreAuto(desde, hasta) {
     },
     pagadoProv: {
       total: pagadoProvTotal,
-      cantPagos: pagosProv.length,
+      cantPagos: pagosProvPeriodo.length,
     },
     porPagarProv: {
       total: totalPorPagar,
