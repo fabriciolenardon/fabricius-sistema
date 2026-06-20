@@ -66,10 +66,15 @@ const LABELS = {
 const TIPOS_POR_UNIDAD = new Set(['almacen', 'bebidas', 'pollo', 'caja_cb', 'caja_pt', 'rebozado'])
 
 const fmt = n => Math.round((Number(n) || 0) * 100) / 100
+const fFecha = s => s ? new Date(s).toLocaleString('es-AR', {
+  day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit',
+  timeZone: 'America/Argentina/Buenos_Aires',
+}) : '—'
 
 export default function AjusteStock() {
   const { isAdmin } = useAuth()
   const [stocks, setStocks] = useState([])
+  const [historial, setHistorial] = useState([])  // ajustes registrados (auditoría) = desfasajes
   const [loading, setLoading] = useState(true)
   const [contados, setContados] = useState({}) // { tipo: 'string del input' }
   const [motivo, setMotivo] = useState('')
@@ -81,12 +86,18 @@ export default function AjusteStock() {
 
   async function cargar() {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('stock_actual')
-      .select('*')
-      .order('tipo')
+    const [{ data, error }, { data: hist }] = await Promise.all([
+      supabase.from('stock_actual').select('*').order('tipo'),
+      // Cada ajuste de stock quedó logueado en auditoría = un desfasaje histórico.
+      supabase.from('auditoria_log')
+        .select('id, fecha, entidad_id, valores_antes, valores_despues, descripcion, usuario_nombre')
+        .eq('entidad', 'stock_actual')
+        .order('fecha', { ascending: false })
+        .limit(500),
+    ])
     if (error) console.error(error)
     setStocks(data || [])
+    setHistorial(hist || [])
     setContados({})
     setLoading(false)
   }
@@ -120,6 +131,34 @@ export default function AjusteStock() {
     if (filtro === 'modificados') return filas.filter(f => f.modificado)
     return filas
   }, [filas, filtro])
+
+  // ── Historial de desfasajes: cada ajuste registrado = un desfasaje (físico − sistema) ──
+  const desfasajes = useMemo(() => (historial || []).map(r => {
+    const tipo = r.entidad_id
+    const antes = Number(r.valores_antes?.kg_disponible) || 0
+    const despues = Number(r.valores_despues?.kg_disponible) || 0
+    return {
+      id: r.id, tipo,
+      label: LABELS[tipo] || tipo,
+      unidad: TIPOS_POR_UNIDAD.has(tipo) ? 'u' : 'kg',
+      antes, despues, dif: despues - antes,
+      motivo: r.valores_despues?.motivo || '—',
+      fecha: r.fecha, usuario: r.usuario_nombre || '—',
+    }
+  }).filter(d => d.tipo), [historial])
+
+  // Acumulado por producto (para detectar desfasajes recurrentes vs puntuales)
+  const resumenDesfasajes = useMemo(() => {
+    const m = new Map()
+    for (const d of desfasajes) {
+      const cur = m.get(d.tipo) || { tipo: d.tipo, label: d.label, unidad: d.unidad, n: 0, total: 0, ultimo: null }
+      cur.n += 1; cur.total += d.dif
+      if (!cur.ultimo || d.fecha > cur.ultimo) cur.ultimo = d.fecha
+      m.set(d.tipo, cur)
+    }
+    return [...m.values()].map(x => ({ ...x, prom: x.n ? x.total / x.n : 0 }))
+      .sort((a, b) => Math.abs(b.total) - Math.abs(a.total))
+  }, [desfasajes])
 
   const cantModificados = filas.filter(f => f.modificado).length
 
@@ -202,6 +241,10 @@ export default function AjusteStock() {
     fontFamily: "'DM Sans',sans-serif", fontSize: 13, width: '100%',
     boxSizing: 'border-box', textAlign: 'right',
   }
+  const thL = { textAlign: 'left', padding: '8px 10px', fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase' }
+  const thR = { ...thL, textAlign: 'right' }
+  const tdR = { padding: '6px 10px', textAlign: 'right' }
+  const colorDif = v => v < 0 ? '#ff8b8b' : v > 0 ? '#7dff7d' : 'var(--muted)'
 
   return (
     <div>
@@ -337,6 +380,66 @@ export default function AjusteStock() {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* HISTORIAL DE DESFASAJES — de los ajustes registrados */}
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="card-title">📉 Historial de desfasajes</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5, marginBottom: 12 }}>
+          Cada ajuste que guardaste (físico vs sistema) queda acá. <b>Diferencia = físico − sistema.</b>{' '}
+          Recurrente del mismo signo = probable <b>merma</b> o tema del sistema · Puntual y grande = probable <b>error de carga</b>.
+        </div>
+
+        {desfasajes.length === 0 ? (
+          <div style={{ color: 'var(--muted)', fontSize: 13, padding: 12 }}>
+            Todavía no hay ajustes registrados. Cuando guardes un conteo físico arriba, aparece acá.
+          </div>
+        ) : (
+          <>
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>📊 Acumulado por producto</div>
+            <div style={{ overflowX: 'auto', marginBottom: 18 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 560 }}>
+                <thead><tr style={{ background: 'var(--surface2)' }}>
+                  <th style={thL}>Producto</th><th style={thR}>Ajustes</th>
+                  <th style={thR}>Desfasaje acum.</th><th style={thR}>Promedio</th><th style={thR}>Último</th>
+                </tr></thead>
+                <tbody>
+                  {resumenDesfasajes.map(r => (
+                    <tr key={r.tipo} style={{ borderTop: '1px solid var(--border)' }}>
+                      <td style={{ padding: '7px 10px', fontWeight: 600 }}>{r.label}</td>
+                      <td style={tdR}>{r.n}</td>
+                      <td style={{ ...tdR, color: colorDif(r.total), fontWeight: 700 }}>{r.total > 0 ? '+' : ''}{fmt(r.total)} {r.unidad}</td>
+                      <td style={{ ...tdR, color: 'var(--muted)' }}>{r.prom > 0 ? '+' : ''}{fmt(r.prom)} {r.unidad}</td>
+                      <td style={{ ...tdR, color: 'var(--muted)', fontSize: 11, whiteSpace: 'nowrap' }}>{fFecha(r.ultimo)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>🕒 Detalle (últimos {Math.min(desfasajes.length, 80)})</div>
+            <div style={{ maxHeight: 380, overflowY: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 660 }}>
+                <thead><tr style={{ background: 'var(--surface2)', position: 'sticky', top: 0 }}>
+                  <th style={thL}>Fecha</th><th style={thL}>Producto</th><th style={thR}>Sistema → Físico</th>
+                  <th style={thR}>Dif.</th><th style={thL}>Motivo</th><th style={thL}>Por</th>
+                </tr></thead>
+                <tbody>
+                  {desfasajes.slice(0, 80).map(d => (
+                    <tr key={d.id} style={{ borderTop: '1px solid var(--border)' }}>
+                      <td style={{ padding: '6px 10px', whiteSpace: 'nowrap', color: 'var(--muted)' }}>{fFecha(d.fecha)}</td>
+                      <td style={{ padding: '6px 10px', fontWeight: 600 }}>{d.label}</td>
+                      <td style={{ ...tdR, whiteSpace: 'nowrap', color: 'var(--muted)' }}>{fmt(d.antes)} → {fmt(d.despues)}</td>
+                      <td style={{ ...tdR, color: colorDif(d.dif), fontWeight: 700, whiteSpace: 'nowrap' }}>{d.dif > 0 ? '+' : ''}{fmt(d.dif)} {d.unidad}</td>
+                      <td style={{ padding: '6px 10px', color: 'var(--muted)' }}>{d.motivo}</td>
+                      <td style={{ padding: '6px 10px', color: 'var(--muted)', whiteSpace: 'nowrap' }}>{d.usuario}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
