@@ -159,7 +159,15 @@ export async function calcularCierreAuto(desde, hasta) {
     (r.cliente_nombre || '').toUpperCase().trim() !== 'MITRE'
   )
   const movCtaCte = movCtaCteR.data || []
-  const entradas = entradasR.data || []
+  // Excluir movimientos INTERNOS de las compras (no son compra a proveedor):
+  //   - 'desposte'    → piezas que salen de despostar una media res YA comprada
+  //   - 'elaboracion' → embutidos elaborados con mercadería YA comprada
+  // Tienen importe 0; el cierre antes las sumaba vía kg×precio e inflaba tanto las
+  // compras totales como "comprado por proveedor" (ej. PRETTO sumaba sus propios
+  // cortes de desposte como si se los hubiéramos vuelto a comprar).
+  const entradas = (entradasR.data || []).filter(
+    e => e.destino !== 'desposte' && e.destino !== 'elaboracion'
+  )
   const pagosProv = pagosProvR.data || []
   const movProv = movProvR.data || []
   // Excluye "solo balance": facturas a nombre de la SAS que paga un tercero
