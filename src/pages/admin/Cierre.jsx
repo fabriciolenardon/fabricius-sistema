@@ -6,6 +6,7 @@ import { fmtPrecio, fmtKg as fmtKgAR, parseNumero } from '../../lib/formatos'
 import { imprimirHTML } from '../../lib/imprimir'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 import { calcularCierreAuto, cierreAutoAFila, lunesDeLaSemana, domingoDeLaSemana } from '../../lib/cierreAuto'
+import { calcularControlSemanal, guardarSnapshotStock, nombreTipo } from '../../lib/controlSemanal'
 
 const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
 const fmtKg = n => fmtKgAR(Number(n) || 0)
@@ -236,6 +237,7 @@ export default function Cierre() {
   const [hasta, setHasta] = useState(domingoDeLaSemana())
   const [cierreAuto, setCierreAuto] = useState(null)   // valores calculados (originales)
   const [cierreEdit, setCierreEdit] = useState(null)   // copia editable (lo que se muestra/guarda)
+  const [control, setControl] = useState(null)         // control semanal (comprado/vendido/stock)
   const [editMode, setEditMode] = useState(false)
 
   // Lo que se renderiza y se guarda: la copia editable si existe, si no la auto.
@@ -285,9 +287,13 @@ export default function Cierre() {
   async function recalcular() {
     setCalculando(true)
     try {
-      const result = await calcularCierreAuto(desde, hasta)
+      const [result, ctrl] = await Promise.all([
+        calcularCierreAuto(desde, hasta),
+        calcularControlSemanal(desde, hasta),
+      ])
       setCierreAuto(result)
       setCierreEdit(JSON.parse(JSON.stringify(result)))  // copia editable fresca
+      setControl(ctrl)
     } catch (e) {
       showAlert({ type: 'error', msg: 'Error calculando: ' + e.message })
     } finally {
@@ -326,7 +332,9 @@ export default function Cierre() {
       showAlert({ type: 'error', msg: 'Error al guardar: ' + error.message })
       return
     }
-    showAlert({ type: 'success', msg: `✅ Cierre guardado (${ya ? 'actualizado' : 'nuevo'})` })
+    // Guardar la foto del stock del cierre (para el Control Semanal histórico).
+    await guardarSnapshotStock(hasta, profile?.nombre)
+    showAlert({ type: 'success', msg: `✅ Cierre guardado (${ya ? 'actualizado' : 'nuevo'}) + foto de stock` })
     fetchCierres()
   }
 
@@ -587,6 +595,74 @@ export default function Cierre() {
                   </div>
                 )}
               </div>
+
+              {/* CONTROL SEMANAL (lun → dom): comprado / vendido / elaborado / stock */}
+              {control && (
+                <div className="card" style={{ marginTop: 16 }}>
+                  <div className="card-title">📋 Control semanal (lun → dom) · {fmtFecha(view.periodo.desde)} al {fmtFecha(view.periodo.hasta)}</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 16 }}>
+
+                    {/* COMPRADO */}
+                    <div>
+                      <div style={{ fontWeight: 700, color: 'var(--gold)', marginBottom: 6 }}>🛒 Comprado (bruto)</div>
+                      {control.comprado.map((x, i) => (
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px dashed var(--border)', fontSize: 12 }}>
+                          <span>{nombreTipo(x.tipo)}</span><span style={{ fontWeight: 600 }}>{fmtKg(x.kg)}</span>
+                        </div>
+                      ))}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0 0', fontWeight: 700 }}>
+                        <span>TOTAL</span><span style={{ color: 'var(--gold)' }}>{fmtKg(control.comprado.reduce((s, x) => s + x.kg, 0))}</span>
+                      </div>
+                    </div>
+
+                    {/* VENDIDO */}
+                    <div>
+                      <div style={{ fontWeight: 700, color: 'var(--green)', marginBottom: 6 }}>🥩 Vendido (mayor. + minor.)</div>
+                      {control.vendido.map((x, i) => (
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px dashed var(--border)', fontSize: 12, gap: 6 }}>
+                          <span>{nombreTipo(x.categoria)}</span>
+                          <span style={{ fontWeight: 600, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                            {fmtKg(x.total)}<br /><span style={{ color: 'var(--muted)', fontSize: 10, fontWeight: 400 }}>{fmtKg(x.may)} may · {fmtKg(x.min)} min</span>
+                          </span>
+                        </div>
+                      ))}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0 0', fontWeight: 700 }}>
+                        <span>TOTAL</span><span style={{ color: 'var(--green)' }}>{fmtKg(control.vendido.reduce((s, x) => s + x.total, 0))}</span>
+                      </div>
+                    </div>
+
+                    {/* ELABORADO / CONVERSIÓN (interno) */}
+                    <div>
+                      <div style={{ fontWeight: 700, color: '#dd9b6c', marginBottom: 6 }}>🌭 Elaborado / interno</div>
+                      {control.elaborado.map((x, i) => (
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px dashed var(--border)', fontSize: 12 }}>
+                          <span>Elaborado: {nombreTipo(x.tipo)}</span><span style={{ fontWeight: 600 }}>{fmtKg(x.kg)}</span>
+                        </div>
+                      ))}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px dashed var(--border)', fontSize: 12, color: 'var(--muted)' }}>
+                        <span>🔪 Conversión a cortes</span><span style={{ fontWeight: 600 }}>{fmtKg(control.conversionInterna)}</span>
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 6 }}>Movimientos internos — no son ventas.</div>
+                    </div>
+
+                    {/* STOCK que debería quedar */}
+                    <div>
+                      <div style={{ fontWeight: 700, color: '#7ec8ff', marginBottom: 6 }}>📦 Stock que debería quedar</div>
+                      <div style={{ maxHeight: 280, overflowY: 'auto' }}>
+                        {control.stock.map((x, i) => (
+                          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px dashed var(--border)', fontSize: 12, color: x.kg < 0 ? '#ff8b8b' : 'inherit' }}>
+                            <span>{nombreTipo(x.tipo)}</span><span style={{ fontWeight: 600 }}>{fmtKg(x.kg)}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 6 }}>
+                        {control.stockEnVivo ? '⚡ Stock en vivo (se congela al guardar el cierre).' : '🔒 Foto guardada al cierre de esa semana.'}
+                      </div>
+                    </div>
+
+                  </div>
+                </div>
+              )}
 
               {/* GUARDAR */}
               <div className="card" style={{ marginTop: 16, textAlign: 'center' }}>
