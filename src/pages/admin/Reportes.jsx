@@ -95,7 +95,10 @@ export function useReportesData(periodo) {
       const salidasReales = (salidas.data || []).filter(s => !esFlujoInterno(s))
 
       setData({
-        entradas: entradas.data || [],
+        // Excluir movimientos internos del depósito (no son compras a proveedor):
+        // 'desposte' = piezas de despostar una media res ya comprada (importe 0),
+        // 'elaboracion' = embutidos elaborados. Si no, inflan los KG comprados.
+        entradas: (entradas.data || []).filter(e => e.destino !== 'desposte' && e.destino !== 'elaboracion'),
         salidas: salidasReales,
         ventasCaja: ventasCaja.data || [],
         pedidos: pedidos.data || [],
