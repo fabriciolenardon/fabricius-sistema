@@ -12,6 +12,7 @@
 //     si existe; si no, el stock_actual en vivo.
 // ============================================================
 import { supabase } from './supabase'
+import { kgPorUnidadDeProducto } from './stockHelpers'
 
 const n = v => Number(v) || 0
 const kgDe = e => n(e.kg_real ?? e.kg)
@@ -19,6 +20,12 @@ const kgDe = e => n(e.kg_real ?? e.kg)
 // Estas categorías se venden/manejan por UNIDAD / pack / bulto, no por kg.
 // No entran al control de kilos (ni suman ni restan).
 const SIN_KG = new Set(['almacen', 'bebidas', 'insumos'])
+
+// Cajones: el campo `kg` guarda UNIDADES (cajones); los kg reales son
+// unidades × kg_por_cajón (ej. cada cajón pesa 20 kg → "X20KG" en el nombre).
+const CAJON = new Set(['pollo_cajon', 'rebozado_cajon'])
+const kgRealCajon = (tipo, kg, ref) =>
+  CAJON.has(tipo) ? n(kg) * (kgPorUnidadDeProducto(ref) || 1) : n(kg)
 
 // Nombres lindos para los tipos técnicos.
 export const NOMBRE_TIPO = {
@@ -44,7 +51,7 @@ export const nombreTipo = t => NOMBRE_TIPO[t] || t || '—'
 export async function calcularControlSemanal(desde, hasta) {
   const [{ data: ent }, { data: sal }, { data: vts }, { data: snap }, { data: stk }] = await Promise.all([
     supabase.from('entradas_deposito').select('tipo, kg, kg_real, destino').eq('eliminado', false).gte('fecha', desde).lte('fecha', hasta),
-    supabase.from('salidas_deposito').select('tipo, kg, cobro, lista, cliente_nombre').gte('fecha', desde).lte('fecha', hasta),
+    supabase.from('salidas_deposito').select('tipo, kg, descripcion, cobro, lista, cliente_nombre').gte('fecha', desde).lte('fecha', hasta),
     supabase.from('ventas_minoristas').select('items').eq('origen', 'caja').gte('fecha', desde).lte('fecha', hasta),
     supabase.from('stock_snapshots').select('stock').eq('fecha', hasta).maybeSingle(),
     supabase.from('stock_actual').select('tipo, kg_disponible'),
@@ -75,7 +82,7 @@ export async function calcularControlSemanal(desde, hasta) {
     if (esMitre(s)) continue
     if (SIN_KG.has(s.tipo)) continue
     const c = vendMap.get(s.tipo) || { may: 0, min: 0 }
-    c.may += n(s.kg); vendMap.set(s.tipo, c)
+    c.may += kgRealCajon(s.tipo, s.kg, s.descripcion); vendMap.set(s.tipo, c)
   }
   for (const v of ventas) {
     const items = Array.isArray(v.items) ? v.items : []
@@ -83,7 +90,7 @@ export async function calcularControlSemanal(desde, hasta) {
       const cat = it.categoria || '(sin cat)'
       if (SIN_KG.has(cat)) continue
       const c = vendMap.get(cat) || { may: 0, min: 0 }
-      c.min += n(it.kg); vendMap.set(cat, c)
+      c.min += kgRealCajon(cat, it.kg, it); vendMap.set(cat, c)
     }
   }
   const vendido = [...vendMap]
