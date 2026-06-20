@@ -62,12 +62,14 @@ async function seleccionar(cliente) {
     const pagHasta = cobPagHasta || cobHasta
     setCobLoading(true)
     const [{ data: rems }, { data: movs }] = await Promise.all([
-      supabase.from('remitos').select('cliente_id, total, fecha').gte('fecha', cobDesde).lte('fecha', cobHasta),
+      supabase.from('remitos').select('cliente_id, total, fecha, eliminado').gte('fecha', cobDesde).lte('fecha', cobHasta),
       supabase.from('movimientos_ctacte').select('cliente_id, haber, fecha').gte('fecha', pagDesde).lte('fecha', pagHasta).gt('haber', 0),
     ])
     const map = {}
     ;(rems || []).forEach(r => {
-      if (!r.cliente_id) return
+      // Excluir remitos ANULADOS: un remito anulado no es una compra (ej. el remito
+      // de Andrea Angaramo de $31,9M por error de tipeo, ya revertido en cta cte/stock).
+      if (!r.cliente_id || r.eliminado) return
       const m = (map[r.cliente_id] = map[r.cliente_id] || { comprado: 0, pagado: 0 })
       m.comprado += Number(r.total) || 0
     })
