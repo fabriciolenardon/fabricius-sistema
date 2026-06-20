@@ -475,6 +475,12 @@ function fechaHoraARG() {
     return new Intl.DateTimeFormat('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date())
   } catch { return '' }
 }
+// Solo el día de la semana en ARG (ej "sábado") — para fijar el horario de HOY.
+function diaSemanaARG() {
+  try {
+    return new Intl.DateTimeFormat('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', weekday: 'long' }).format(new Date())
+  } catch { return '' }
+}
 
 // Marca de tiempo relativa de un mensaje: "hoy 13:52" / "ayer 09:46" / "14/06 10:00".
 // Sirve para que Iris ubique cuándo pasó cada cosa y re-ancle las fechas relativas.
@@ -533,7 +539,7 @@ async function responderConIris(historial, textoActual, datosNegocio, infoNegoci
   systemText += `\n\n${PERFIL_NEGOCIO}`
   systemText += `\n\n${COMBOS}`
   systemText += `\n\n${OFERTAS}`
-  systemText += `\n\n=== FECHA Y HORA AHORA ===\nAhora es ${fechaHoraARG()} (hora de Argentina). Usá esto para interpretar "hoy", "ayer", "mañana", "esta tarde", "temprano", etc. En el HISTORIAL cada mensaje arranca con su marca de tiempo entre corchetes (ej "[ayer 13:52]", "[hoy 09:46]") — usala para saber CUÁNDO se dijo cada cosa y re-anclar las fechas al día de hoy, pero NUNCA copies esa marca en tu respuesta.`
+  systemText += `\n\n=== FECHA Y HORA AHORA ===\n⚠️ HOY ES ${diaSemanaARG().toUpperCase()}. (Fecha y hora exacta: ${fechaHoraARG()}, hora de Argentina.)\nREGLA DE HORARIOS (importante): si te preguntan si "abren hoy" o por el horario de hoy/ahora, usá EXACTAMENTE el horario del día ${diaSemanaARG().toUpperCase()} de la sección INFORMACIÓN DEL NEGOCIO. NUNCA uses el horario de otro día de la semana ni lo inventes. Si ese día una sucursal está cerrada, decí que está cerrada. Verificá el día dos veces antes de responder un horario.\nUsá la fecha/hora también para interpretar "hoy", "ayer", "mañana", "esta tarde", "temprano", etc. En el HISTORIAL cada mensaje arranca con su marca de tiempo entre corchetes (ej "[ayer 13:52]", "[hoy 09:46]") — usala para saber CUÁNDO se dijo cada cosa y re-anclar las fechas al día de hoy, pero NUNCA copies esa marca en tu respuesta.`
   if (sorteo) systemText += `\n\n=== SORTEO VIGENTE ===\nHay un SORTEO/RIFA de una media res que maneja ${sorteo} (NO el equipo de la carnicería). Si el cliente menciona el sorteo, la rifa, o quiere comprar/guardar/reservar un NÚMERO (ej. "el número 89", "guardame uno", "cuánto sale el número"), NO lo tomes vos como pedido ni preguntes qué quiere encargar: derivalo con amabilidad a ${sorteo}, que es quien maneja el sorteo y le pasa los datos para participar. En ese caso es_pedido=false.`
   if (infoNegocio) systemText += `\n\n=== INFORMACIÓN DEL NEGOCIO (horarios/dirección/pagos/envíos) ===\n${infoNegocio}`
   systemText += datosNegocio
