@@ -11,6 +11,9 @@ import { calcularControlSemanal, guardarSnapshotStock, nombreTipo } from '../../
 const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
 const fmtKg = n => fmtKgAR(Number(n) || 0)
 const fmtFecha = s => s ? new Date(s + 'T12:00').toLocaleDateString('es-AR') : '—'
+// Mes operativo: 'YYYY-MM-DD' → 'YYYY-MM' y su etiqueta legible.
+const mesDe = d => String(d || '').substring(0, 7)
+const mesLabelDe = m => m ? new Date(m + '-15T12:00').toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }) : '—'
 
 // ============================================================
 // Excel + Print mensual (idénticos al esquema viejo — siguen
@@ -235,6 +238,9 @@ export default function Cierre() {
   // Estado del cierre auto en curso
   const [desde, setDesde] = useState(lunesDeLaSemana())
   const [hasta, setHasta] = useState(domingoDeLaSemana())
+  // Mes operativo al que se imputa esta semana (default = mes del LUNES; en
+  // semanas de borde se puede mandar al mes vecino para cerrar por semanas enteras).
+  const [mesOperativo, setMesOperativo] = useState(mesDe(lunesDeLaSemana()))
   const [cierreAuto, setCierreAuto] = useState(null)   // valores calculados (originales)
   const [cierreEdit, setCierreEdit] = useState(null)   // copia editable (lo que se muestra/guarda)
   const [control, setControl] = useState(null)         // control semanal (comprado/vendido/stock)
@@ -303,11 +309,29 @@ export default function Cierre() {
 
   function showAlert(a) { setAlert(a); setTimeout(() => setAlert(null), 5000) }
 
+  // Al cambiar la semana, el mes operativo por defecto vuelve al mes del lunes.
+  useEffect(() => { setMesOperativo(mesDe(desde)) }, [desde])
+  // Meses que toca la semana (lunes y domingo): si difieren, es semana de borde.
+  const opcionesMes = [...new Set([mesDe(desde), mesDe(hasta)])]
+
+  // Mover una semana ya cerrada de un mes operativo al otro que toca.
+  async function moverSemanaDeMes(c) {
+    const opts = [...new Set([mesDe(c.semana_inicio), mesDe(c.semana_fin)])]
+    const otro = opts.find(m => m !== c.mes) || opts[0]
+    if (otro === c.mes) return
+    if (!confirm(`¿Mover la semana ${fmtFecha(c.semana_inicio)} → ${fmtFecha(c.semana_fin)}\nde ${mesLabelDe(c.mes)} a ${mesLabelDe(otro)}?`)) return
+    const { error } = await supabase.from('cierres_semanales').update({ mes: otro }).eq('id', c.id)
+    if (error) { showAlert({ type: 'error', msg: 'Error al mover: ' + error.message }); return }
+    showAlert({ type: 'success', msg: `✅ Semana movida a ${mesLabelDe(otro)}` })
+    setMesSelector(otro)
+    fetchCierres()
+  }
+
   async function guardarCierre() {
     if (!view) return
     if (!confirm(`¿Confirmar y guardar cierre del ${fmtFecha(desde)} al ${fmtFecha(hasta)}?${editado ? '\n\n⚠️ Tiene valores EDITADOS A MANO.' : ''}\n\nVentas: ${fmt(view.ventas.total)}\nCompras: ${fmt(view.compras.total)}\nGanancia devengada: ${fmt(view.ganancia.devengada)}`)) return
     setLoading(true)
-    const fila = cierreAutoAFila(view)
+    const fila = cierreAutoAFila(view, mesOperativo)
     // Trazabilidad: dejar registrado si el snapshot fue ajustado manualmente.
     fila.ingresos = { ...fila.ingresos, editado_manual: editado, editado_por: editado ? (profile?.nombre || null) : null }
     // Verificar si ya existe un cierre con esa misma semana
@@ -666,6 +690,19 @@ export default function Cierre() {
 
               {/* GUARDAR */}
               <div className="card" style={{ marginTop: 16, textAlign: 'center' }}>
+                {/* Mes operativo — clave en semanas de borde para cerrar por semanas enteras */}
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ fontSize: 12, color: 'var(--muted)', marginRight: 8 }}>📅 Esta semana cuenta para el mes:</label>
+                  <select value={mesOperativo} onChange={e => setMesOperativo(e.target.value)}
+                    style={{ background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '7px 12px', fontSize: 13, fontWeight: 700, textTransform: 'capitalize' }}>
+                    {opcionesMes.map(m => <option key={m} value={m}>{mesLabelDe(m)}</option>)}
+                  </select>
+                  {opcionesMes.length > 1 && (
+                    <div style={{ fontSize: 11, color: 'var(--gold)', marginTop: 6 }}>
+                      ⚠️ Semana de borde (cae entre {mesLabelDe(opcionesMes[0])} y {mesLabelDe(opcionesMes[1])}). Elegí en qué mes contarla — siempre entera.
+                    </div>
+                  )}
+                </div>
                 <button className="btn btn-primary" onClick={guardarCierre} disabled={loading}
                   style={{ fontSize: 14, padding: '12px 32px' }}>
                   {loading ? 'Guardando…' : '💾 CONFIRMAR Y GUARDAR CIERRE'}
@@ -763,6 +800,7 @@ export default function Cierre() {
                         <th>Kg Carne</th>
                         <th>Kg Pollo</th>
                         <th>Kg Cerdo</th>
+                        <th>Mes</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -777,6 +815,17 @@ export default function Cierre() {
                           <td>{fmtKg(c.kg_carne)}</td>
                           <td>{fmtKg(c.kg_pollo)}</td>
                           <td>{fmtKg(c.kg_cerdo)}</td>
+                          <td>
+                            {(() => {
+                              const otro = [...new Set([mesDe(c.semana_inicio), mesDe(c.semana_fin)])].find(m => m !== c.mes)
+                              return otro ? (
+                                <button className="btn btn-ghost btn-sm" onClick={() => moverSemanaDeMes(c)}
+                                  title={`Mover a ${mesLabelDe(otro)}`} style={{ fontSize: 11, whiteSpace: 'nowrap', textTransform: 'capitalize' }}>
+                                  ↔ {mesLabelDe(otro).split(' ')[0]}
+                                </button>
+                              ) : <span style={{ color: 'var(--muted)' }}>—</span>
+                            })()}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -791,6 +840,7 @@ export default function Cierre() {
                         <td>{fmtKg(totMes.kgCarne)}</td>
                         <td>{fmtKg(totMes.kgPollo)}</td>
                         <td>{fmtKg(totMes.kgCerdo)}</td>
+                        <td></td>
                       </tr>
                     </tfoot>
                   </table>
