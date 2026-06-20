@@ -16,6 +16,10 @@ import { supabase } from './supabase'
 const n = v => Number(v) || 0
 const kgDe = e => n(e.kg_real ?? e.kg)
 
+// Estas categorías se venden/manejan por UNIDAD / pack / bulto, no por kg.
+// No entran al control de kilos (ni suman ni restan).
+const SIN_KG = new Set(['almacen', 'bebidas', 'insumos'])
+
 // Nombres lindos para los tipos técnicos.
 export const NOMBRE_TIPO = {
   bovino_mr: 'Media res', bovino_corte: 'Bovino cortes', bovino_brosa: 'Brosas',
@@ -51,6 +55,7 @@ export async function calcularControlSemanal(desde, hasta) {
   const compMap = new Map()
   for (const e of entradas) {
     if (e.destino === 'desposte' || e.destino === 'elaboracion') continue
+    if (SIN_KG.has(e.tipo)) continue
     compMap.set(e.tipo, (compMap.get(e.tipo) || 0) + kgDe(e))
   }
   const comprado = [...compMap].map(([tipo, kg]) => ({ tipo, kg })).filter(x => x.kg > 0.01).sort((a, b) => b.kg - a.kg)
@@ -68,6 +73,7 @@ export async function calcularControlSemanal(desde, hasta) {
   for (const s of salidas) {
     if (esInterno(s)) { conversionInterna += n(s.kg); continue }
     if (esMitre(s)) continue
+    if (SIN_KG.has(s.tipo)) continue
     const c = vendMap.get(s.tipo) || { may: 0, min: 0 }
     c.may += n(s.kg); vendMap.set(s.tipo, c)
   }
@@ -75,6 +81,7 @@ export async function calcularControlSemanal(desde, hasta) {
     const items = Array.isArray(v.items) ? v.items : []
     for (const it of items) {
       const cat = it.categoria || '(sin cat)'
+      if (SIN_KG.has(cat)) continue
       const c = vendMap.get(cat) || { may: 0, min: 0 }
       c.min += n(it.kg); vendMap.set(cat, c)
     }
@@ -87,7 +94,7 @@ export async function calcularControlSemanal(desde, hasta) {
   const stockEnVivo = !snap
   const stockRaw = snap?.stock || (stk || []).map(r => ({ tipo: r.tipo, kg: n(r.kg_disponible) }))
   const stock = stockRaw.map(r => ({ tipo: r.tipo, kg: n(r.kg) }))
-    .filter(r => Math.abs(r.kg) > 0.01).sort((a, b) => b.kg - a.kg)
+    .filter(r => Math.abs(r.kg) > 0.01 && !SIN_KG.has(r.tipo)).sort((a, b) => b.kg - a.kg)
 
   return { comprado, vendido, elaborado, conversionInterna, stock, stockEnVivo }
 }
