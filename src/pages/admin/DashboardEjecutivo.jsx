@@ -216,7 +216,7 @@ function useDashboardData(refreshMs = 120000) {
     const [ventasHoy, ventasAyer, ventasSemana, ventasMes, ventasMesAnt, ventasAnioPasado,
            salidasMes, cuentas, facturas12m, stock, cheques, clientes,
            gastosMes, sueldosMes, pagosProvMes, movCtacteMes, todasCajas, todosDeudores, promoCfg,
-           comprasMesQ, cierresQ, comprasSemQ, remitosHoyQ] = await Promise.all([
+           comprasMesQ, cierresQ, comprasSemQ, remitosHoyQ, cobranzaQ] = await Promise.all([
       supabase.from('ventas_minoristas').select('total, efectivo, debito, transferencia, items, fecha, hora').eq('origen', 'caja').eq('fecha', hoy),
       // hora incluida: alimenta la curva "hoy vs ayer a esta hora"
       supabase.from('ventas_minoristas').select('total, hora').eq('origen', 'caja').eq('fecha', ayer),
@@ -253,6 +253,9 @@ function useDashboardData(refreshMs = 120000) {
       supabase.from('compras_proveedores').select('proveedor_nombre, importe').gte('fecha', inicioSemanaARG()).lte('fecha', hoy).not('anulado', 'is', true),
       // Remitos/despachos mayoristas de HOY (para el ticker, sin flujos internos)
       supabase.from('remitos').select('numero, cliente_nombre, total, created_at, cobro').eq('fecha', hoy).eq('eliminado', false).neq('cobro', 'interno'),
+      // Vendido / cobrado / por cobrar del mes (FIFO server-side: los pagos cancelan
+      // primero la deuda vieja, así "por cobrar" es solo de ventas del período)
+      supabase.rpc('ventas_cobranza_periodo', { p_desde: mesIni, p_hasta: hoy }),
     ])
 
     const totalHoy  = (ventasHoy.data || []).reduce((s, v) => s + (Number(v.total) || 0), 0)
@@ -450,6 +453,7 @@ function useDashboardData(refreshMs = 120000) {
       topProductosHoy, cuentasConPct, stockCritico,
       ultimaVentaHora,
       mensualVivo,
+      cobranzaMes: (cobranzaQ?.data || [])[0] || null,
       curvaHoy, curvaAyer, ultimasVentas,
       mejorDiaMes, canalesMes, topClientesMes,
       comprasSemanaProv, comprasSemanaTotal,
@@ -647,6 +651,55 @@ function ReportePanelData({ tab, periodo, setPeriodo }) {
 }
 
 // ════════════════════════════════════════════════════════════
+// WIDGET COBRANZA DEL MES — vendido / cobrado / por cobrar + dona %
+// (todo lo emitido desde el 01; por cobrar = solo crédito del período
+//  que aún no se cobró, sin contaminar con deuda vieja — RPC FIFO)
+// ════════════════════════════════════════════════════════════
+function WidgetCobranza({ c }) {
+  if (!c) return null
+  const vendido   = Number(c.vendido) || 0
+  const cobrado   = Math.max(0, Number(c.cobrado) || 0)
+  const porCobrar = Math.max(0, Number(c.por_cobrar) || 0)
+  const pct = vendido > 0 ? Math.min(100, (cobrado / vendido) * 100) : 0
+  const R = 54, CIRC = 2 * Math.PI * R
+  const dash = (pct / 100) * CIRC
+  const filas = [
+    { l: 'VENDIDO · emitido 01→hoy', v: vendido,   c: NEON.cianHi },
+    { l: 'COBRADO',                  v: cobrado,    c: NEON.verde },
+    { l: 'POR COBRAR',               v: porCobrar,  c: NEON.ambar },
+  ]
+  return (
+    <div className="hud" style={{ ...glass, marginTop: 12, padding: 18, display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}>
+      <div style={{ position: 'relative', width: 132, height: 132, flexShrink: 0 }}>
+        <svg width="132" height="132" viewBox="0 0 132 132">
+          <circle cx="66" cy="66" r={R} fill="none" stroke="rgba(255,176,32,0.22)" strokeWidth="13" />
+          <circle cx="66" cy="66" r={R} fill="none" stroke={NEON.verde} strokeWidth="13" strokeLinecap="round"
+            strokeDasharray={`${dash} ${CIRC}`} transform="rotate(-90 66 66)" />
+        </svg>
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 36, color: NEON.verde, lineHeight: 1 }}>{pct.toFixed(0)}%</div>
+          <div style={{ fontSize: 9, letterSpacing: 1.5, color: NEON.muted, fontWeight: 800 }}>COBRADO</div>
+        </div>
+      </div>
+      <div style={{ flex: 1, minWidth: 230 }}>
+        <Etiqueta texto="VENTAS DEL MES · COBRANZA" extra={<PuntoVivo />} />
+        {filas.map(x => (
+          <div key={x.l} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 5 }}>
+            <span style={{ fontSize: 11, letterSpacing: 1.3, color: NEON.muted, fontWeight: 800 }}>{x.l}</span>
+            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 23, color: x.c }}>{fmtArs(x.v)}</span>
+          </div>
+        ))}
+        <div style={{ fontSize: 10, color: NEON.muted, marginTop: 9, lineHeight: 1.5 }}>
+          Todas las ventas emitidas desde el 01 (cobradas o no). Caja y cobros al entregar
+          van 100% cobrados; lo por cobrar es mayorista a cuenta corriente del período
+          (la deuda anterior al 01 no cuenta acá).
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════
 // RESUMEN EJECUTIVO (pantalla normal, rediseñada)
 // ════════════════════════════════════════════════════════════
 function ResumenEjecutivo() {
@@ -701,6 +754,12 @@ function ResumenEjecutivo() {
   if (loading) return <p style={{ color: 'var(--muted)' }}>Cargando resumen...</p>
   if (!data) return null
   const pc = data.panelControl
+  // % cobrado LIMPIO del mes (de las ventas del período, criterio FIFO del RPC).
+  // Reemplaza el viejo % que mezclaba cobranza de deuda vieja y daba >100%.
+  const cm = data.cobranzaMes
+  const pcCobradoLimpio = cm && Number(cm.vendido) > 0
+    ? Math.min(100, (Number(cm.cobrado) / Number(cm.vendido)) * 100)
+    : pc.pctCobrado
 
   const flecha = (v) => v == null ? '' : v >= 0 ? '↗' : '↘'
   const signo  = (v) => v == null ? '' : v >= 0 ? '+' : ''
@@ -761,10 +820,13 @@ function ResumenEjecutivo() {
         </div>
       </div>
 
+      {/* ── Widget cobranza del mes: vendido / cobrado / por cobrar + dona ── */}
+      <WidgetCobranza c={data.cobranzaMes} />
+
       {/* ── Cinta de métricas secundarias ── */}
       <div style={{ ...glass, marginTop: 12, padding: '14px 18px', display: 'flex', flexWrap: 'wrap', gap: '10px 28px', alignItems: 'center' }}>
         <Mini label="FACTURADO MES TOTAL" valor={fmtArs(pc.facturadoMes)} />
-        <Mini label="% COBRADO" valor={`${pc.pctCobrado.toFixed(0)}%`} color={pc.pctCobrado < 50 ? NEON.rojo : pc.pctCobrado < 75 ? NEON.ambar : NEON.verde} />
+        <Mini label="% COBRADO" valor={`${pcCobradoLimpio.toFixed(0)}%`} color={pcCobradoLimpio < 50 ? NEON.rojo : pcCobradoLimpio < 75 ? NEON.ambar : NEON.verde} />
         <Mini label="PEND. COBRAR" valor={fmtArs(pc.saldoPendienteTotal)} color={pc.saldoPendienteTotal > 500000 ? NEON.ambar : NEON.texto} />
         <Mini label={`VS ${new Date().getFullYear() - 1}`} valor={pc.variacionAnioPasado != null ? `${signo(pc.variacionAnioPasado)}${pc.variacionAnioPasado.toFixed(0)}%` : '—'} color={colorVar(pc.variacionAnioPasado)} />
         <Mini label="% SUELDOS" valor={`${pc.pctSueldosFact.toFixed(1)}%`} color={pc.pctSueldosFact > 60 ? NEON.rojo : pc.pctSueldosFact > 40 ? NEON.ambar : NEON.verde} />
