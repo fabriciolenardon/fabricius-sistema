@@ -175,6 +175,25 @@ const ESTILOS_GLOBALES = `
 // - Realtime: cada venta nueva en la caja dispara una recarga
 //   (debounce 1.5s) → la tele se actualiza EN VIVO
 // ════════════════════════════════════════════════════════════
+
+// Trae TODAS las filas de una consulta paginando de a 1000. Supabase corta las
+// respuestas en 1000 filas por defecto: un mes con >1000 salidas/ventas
+// subdeclaraba los totales en silencio (mayorista quedaba ~15M corto y el saldo
+// del mes daba negativo falso). `makeQuery` debe DEVOLVER una consulta nueva en
+// cada llamada para poder aplicarle .range().
+async function fetchAllRows(makeQuery) {
+  const PAGE = 1000
+  let all = [], from = 0
+  for (;;) {
+    const { data, error } = await makeQuery().range(from, from + PAGE - 1)
+    if (error || !data || data.length === 0) break
+    all = all.concat(data)
+    if (data.length < PAGE) break
+    from += PAGE
+  }
+  return { data: all }
+}
+
 function useDashboardData(refreshMs = 120000) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -203,13 +222,14 @@ function useDashboardData(refreshMs = 120000) {
       supabase.from('ventas_minoristas').select('total, hora').eq('origen', 'caja').eq('fecha', ayer),
       supabase.from('ventas_minoristas').select('total, fecha').eq('origen', 'caja').gte('fecha', hace7).lte('fecha', hoy),
       // fecha incluida: detecta el mejor día del mes (para el RÉCORD en vivo)
-      supabase.from('ventas_minoristas').select('total, fecha').eq('origen', 'caja').gte('fecha', mesIni).lte('fecha', hoy),
+      fetchAllRows(() => supabase.from('ventas_minoristas').select('total, fecha').eq('origen', 'caja').gte('fecha', mesIni).lte('fecha', hoy)),
       // Mes anterior recortado al MISMO período (01 → mismo día), no el mes completo
-      supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').gte('fecha', mesAntIni).lte('fecha', mesAntMismoDia),
-      supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').gte('fecha', anioPasadoMesIni).lte('fecha', anioPasadoHoy),
+      fetchAllRows(() => supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').gte('fecha', mesAntIni).lte('fecha', mesAntMismoDia)),
+      fetchAllRows(() => supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').gte('fecha', anioPasadoMesIni).lte('fecha', anioPasadoHoy)),
       // Mayorista del mes (con filtro de flujos internos); cliente_nombre
-      // alimenta el podio de clientes y la separación mayorista/franquicias
-      supabase.from('salidas_deposito').select('total, cobro, cliente_nombre').gte('fecha', mesIni).lte('fecha', hoy),
+      // alimenta el podio de clientes y la separación mayorista/franquicias.
+      // Paginado: un mes supera las 1000 salidas y se truncaba (saldo negativo falso).
+      fetchAllRows(() => supabase.from('salidas_deposito').select('total, cobro, cliente_nombre').gte('fecha', mesIni).lte('fecha', hoy)),
       supabase.from('cuentas_fiscales').select('*').eq('activa', true).then(r => r).catch(() => ({ data: null })),
       supabase.from('facturas').select('cuenta_id, monto_total, fecha').eq('tipo', 'emitida').gte('fecha', fechaHaceDias(365)).then(r => r).catch(() => ({ data: null })),
       supabase.from('stock_actual').select('*'),
@@ -219,7 +239,7 @@ function useDashboardData(refreshMs = 120000) {
       supabase.from('gastos').select('tipo, monto, fecha, solo_balance').gte('fecha', mesIni).lte('fecha', hoy),
       supabase.from('liquidaciones_sueldos').select('neto, semana_fin').gte('semana_inicio', mesIni).lte('semana_fin', hoy),
       supabase.from('pagos_proveedores').select('importe, percepcion, fecha').gte('fecha', mesIni).lte('fecha', hoy),
-      supabase.from('movimientos_ctacte').select('tipo, haber, fecha').gte('fecha', mesIni).lte('fecha', hoy),
+      fetchAllRows(() => supabase.from('movimientos_ctacte').select('tipo, haber, fecha').gte('fecha', mesIni).lte('fecha', hoy)),
       supabase.from('cajas_stock').select('id, tipo_caja, kg, fecha_ingreso').eq('estado', 'disponible'),
       supabase.from('clientes').select('saldo').gt('saldo', 0),
       supabase.from('config_sistema').select('valor').eq('clave', 'promo_mundial').maybeSingle(),
