@@ -349,10 +349,22 @@ function MenuMobile({ onClose }) {
   )
 }
 
-// NAV DESKTOP — 4 menús desplegables por categoría (se abren al pasar el mouse)
+// NAV DESKTOP — 4 menús desplegables por categoría. Se abren/cierran con CLICK
+// (el hover daba problemas: al cruzar el huequito hacia el menú se cerraba, y el
+//  click lo volvía a minimizar). Se cierra al clickear afuera o al cambiar de ruta.
 function NavDesktop({ userEmail, badges }) {
   const location = useLocation()
   const [openGroup, setOpenGroup] = useState(null)
+  const navRef = useRef(null)
+
+  // Cerrar al clickear fuera de la barra
+  useEffect(() => {
+    function cerrar(e) { if (navRef.current && !navRef.current.contains(e.target)) setOpenGroup(null) }
+    document.addEventListener('mousedown', cerrar)
+    return () => document.removeEventListener('mousedown', cerrar)
+  }, [])
+  // Cerrar al navegar a otra pantalla
+  useEffect(() => { setOpenGroup(null) }, [location.pathname])
 
   const badgeFor = (to) => {
     if (to === '/admin/pedidos')  return badges.pedidos
@@ -367,15 +379,13 @@ function NavDesktop({ userEmail, badges }) {
   }))
 
   return (
-    <nav style={{ display: 'flex', gap: 4, flex: 1, alignItems: 'center' }}>
+    <nav ref={navRef} style={{ display: 'flex', gap: 4, flex: 1, alignItems: 'center' }}>
       {grupos.map((g, gi) => {
         const activo   = g.items.some(it => location.pathname.startsWith(it.to))
         const abierto  = openGroup === gi
         const grpBadge = g.items.reduce((s, it) => s + badgeFor(it.to), 0)
         return (
-          <div key={g.label} style={{ position: 'relative' }}
-            onMouseEnter={() => setOpenGroup(gi)}
-            onMouseLeave={() => setOpenGroup(null)}>
+          <div key={g.label} style={{ position: 'relative' }}>
             <button onClick={() => setOpenGroup(abierto ? null : gi)}
               style={{
                 display: 'flex', alignItems: 'center', gap: 7, padding: '8px 14px',
