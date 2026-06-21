@@ -234,7 +234,7 @@ function useDashboardData(refreshMs = 120000) {
       supabase.from('facturas').select('cuenta_id, monto_total, fecha').eq('tipo', 'emitida').gte('fecha', fechaHaceDias(365)).then(r => r).catch(() => ({ data: null })),
       supabase.from('stock_actual').select('*'),
       supabase.from('cheques').select('*').gte('fecha_pago', hoy).lte('fecha_pago', fechaHaceDias(-15)),
-      supabase.from('clientes').select('nombre, saldo').gt('saldo', 100000).order('saldo', { ascending: false }).limit(5),
+      supabase.from('clientes').select('nombre, saldo').gt('saldo', 0).order('saldo', { ascending: false }).limit(15),
       // solo_balance: facturas a nombre de la SAS que paga un tercero — no son gasto nuestro
       supabase.from('gastos').select('tipo, monto, fecha, solo_balance').gte('fecha', mesIni).lte('fecha', hoy),
       supabase.from('liquidaciones_sueldos').select('neto, semana_fin').gte('semana_inicio', mesIni).lte('semana_fin', hoy),
@@ -911,16 +911,31 @@ function ResumenEjecutivo() {
         </div>
 
         <div style={{ ...glass, padding: 18 }}>
-          <Etiqueta texto="💳 DEUDA ALTA DE CLIENTES" />
+          <Etiqueta texto="💳 TOP 15 DEUDORES · EN VIVO" extra={<PuntoVivo />} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', margin: '4px 0 10px' }}>
+            <span style={{ fontSize: 10, letterSpacing: 1.5, color: NEON.muted, fontWeight: 800 }}>TOTAL EN LA CALLE</span>
+            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 25, color: NEON.rojo }}>{fmtArs(pc.saldoPendienteTotal)}</span>
+          </div>
           {data.clientesDeudores.length === 0 ? (
-            <p style={{ color: NEON.muted, fontSize: 13 }}>Sin clientes con deuda mayor a $100k.</p>
+            <p style={{ color: NEON.muted, fontSize: 13 }}>Nadie con deuda. 🎉</p>
           ) : (
-            data.clientesDeudores.map((c, i) => (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid rgba(255,255,255,0.06)', fontSize: 12 }}>
-                <span style={{ color: NEON.texto }}>{c.nombre}</span>
-                <strong style={{ color: NEON.rojo }}>{fmtArs(c.saldo)}</strong>
-              </div>
-            ))
+            data.clientesDeudores.map((c, i) => {
+              const maxDeuda = Number(data.clientesDeudores[0]?.saldo) || 1
+              const pctBar = Math.max(3, (Number(c.saldo) / maxDeuda) * 100)
+              return (
+                <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontSize: 12, marginBottom: 4 }}>
+                    <span style={{ color: NEON.texto }}>
+                      <span style={{ color: NEON.muted, fontWeight: 800, marginRight: 7 }}>{i + 1}</span>{c.nombre}
+                    </span>
+                    <strong style={{ color: NEON.rojo, flexShrink: 0, marginLeft: 8 }}>{fmtArs(c.saldo)}</strong>
+                  </div>
+                  <div style={{ height: 4, borderRadius: 4, background: 'rgba(255,255,255,0.06)' }}>
+                    <div style={{ height: '100%', width: `${pctBar}%`, borderRadius: 4, background: NEON.rojo, opacity: 0.65 }} />
+                  </div>
+                </div>
+              )
+            })
           )}
         </div>
       </div>
