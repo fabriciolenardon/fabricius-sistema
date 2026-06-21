@@ -408,6 +408,24 @@ function useDashboardData(refreshMs = 120000) {
     // ── SALDO PENDIENTE TOTAL CLIENTES ──
     const saldoPendienteTotal = (todosDeudores.data || []).reduce((s, c) => s + (Number(c.saldo) || 0), 0)
 
+    // ── GANANCIA ACUMULADA EN VIVO (pedido de Fabricio) ──
+    // = todo lo que nos deben (saldo cliente TOTAL, incluida deuda vieja)
+    //   − lo comprado a proveedores esta semana − gastos y sueldos de la semana.
+    // Mismo criterio de período que el Cierre para los costos (lunes → hoy).
+    const inicioSem = inicioSemanaARG()
+    const gastosSemana = (gastosMes.data || [])
+      .filter(g => !g.solo_balance && g.fecha >= inicioSem && (g.tipo === 'fijo' || g.tipo === 'variable' || g.tipo === 'socio'))
+      .reduce((s, g) => s + (Number(g.monto) || 0), 0)
+    const sueldosSemana = (sueldosMes.data || [])
+      .filter(l => l.semana_fin >= inicioSem)
+      .reduce((s, l) => s + (Number(l.neto) || 0), 0)
+    const gananciaAcum = {
+      deben: saldoPendienteTotal,
+      compras: comprasSemanaTotal,
+      gastos: gastosSemana + sueldosSemana,
+      resultado: saldoPendienteTotal - comprasSemanaTotal - (gastosSemana + sueldosSemana),
+    }
+
     // Top productos hoy
     const acc = {}
     ;(ventasHoy.data || []).forEach(v => (v.items || []).forEach(i => {
@@ -454,6 +472,7 @@ function useDashboardData(refreshMs = 120000) {
       ultimaVentaHora,
       mensualVivo,
       cobranzaMes: (cobranzaQ?.data || [])[0] || null,
+      gananciaAcum,
       curvaHoy, curvaAyer, ultimasVentas,
       mejorDiaMes, canalesMes, topClientesMes,
       comprasSemanaProv, comprasSemanaTotal,
@@ -651,48 +670,55 @@ function ReportePanelData({ tab, periodo, setPeriodo }) {
 }
 
 // ════════════════════════════════════════════════════════════
-// WIDGET COBRANZA DEL MES — vendido / cobrado / por cobrar + dona %
-// (todo lo emitido desde el 01; por cobrar = solo crédito del período
-//  que aún no se cobró, sin contaminar con deuda vieja — RPC FIFO)
+// WIDGET GANANCIA ACUMULADA EN VIVO (pedido de Fabricio)
+// = todo lo que nos deben (saldo cliente TOTAL, deuda vieja incluida)
+//   − comprado a proveedores esta semana (pagado o no)
+//   − gastos y sueldos de la semana.
+// El círculo muestra el MARGEN (ganancia sobre lo que nos deben).
 // ════════════════════════════════════════════════════════════
-function WidgetCobranza({ c }) {
-  if (!c) return null
-  const vendido   = Number(c.vendido) || 0
-  const cobrado   = Math.max(0, Number(c.cobrado) || 0)
-  const porCobrar = Math.max(0, Number(c.por_cobrar) || 0)
-  const pct = vendido > 0 ? Math.min(100, (cobrado / vendido) * 100) : 0
+function WidgetGananciaAcum({ g }) {
+  if (!g) return null
+  const deben    = Number(g.deben) || 0
+  const compras  = Number(g.compras) || 0
+  const gastos   = Number(g.gastos) || 0
+  const ganancia = Number(g.resultado) || 0
+  const pct = deben > 0 ? Math.max(0, Math.min(100, (ganancia / deben) * 100)) : 0
   const R = 54, CIRC = 2 * Math.PI * R
   const dash = (pct / 100) * CIRC
+  const col = ganancia >= 0 ? NEON.verde : NEON.rojo
   const filas = [
-    { l: 'VENDIDO · emitido 01→hoy', v: vendido,   c: NEON.cianHi },
-    { l: 'COBRADO',                  v: cobrado,    c: NEON.verde },
-    { l: 'POR COBRAR',               v: porCobrar,  c: NEON.ambar },
+    { l: 'TE DEBEN · todo (incl. deuda vieja)', v: deben,   c: NEON.cianHi },
+    { l: '−  COMPRADO ESTA SEMANA',             v: compras, c: NEON.ambar },
+    { l: '−  GASTOS Y SUELDOS (semana)',        v: gastos,  c: NEON.rojo },
   ]
   return (
     <div className="hud" style={{ ...glass, marginTop: 12, padding: 18, display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}>
       <div style={{ position: 'relative', width: 132, height: 132, flexShrink: 0 }}>
         <svg width="132" height="132" viewBox="0 0 132 132">
-          <circle cx="66" cy="66" r={R} fill="none" stroke="rgba(255,176,32,0.22)" strokeWidth="13" />
-          <circle cx="66" cy="66" r={R} fill="none" stroke={NEON.verde} strokeWidth="13" strokeLinecap="round"
+          <circle cx="66" cy="66" r={R} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="13" />
+          <circle cx="66" cy="66" r={R} fill="none" stroke={col} strokeWidth="13" strokeLinecap="round"
             strokeDasharray={`${dash} ${CIRC}`} transform="rotate(-90 66 66)" />
         </svg>
         <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 36, color: NEON.verde, lineHeight: 1 }}>{pct.toFixed(0)}%</div>
-          <div style={{ fontSize: 9, letterSpacing: 1.5, color: NEON.muted, fontWeight: 800 }}>COBRADO</div>
+          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 34, color: col, lineHeight: 1 }}>{pct.toFixed(0)}%</div>
+          <div style={{ fontSize: 9, letterSpacing: 1.5, color: NEON.muted, fontWeight: 800 }}>MARGEN</div>
         </div>
       </div>
-      <div style={{ flex: 1, minWidth: 230 }}>
-        <Etiqueta texto="VENTAS DEL MES · COBRANZA" extra={<PuntoVivo />} />
+      <div style={{ flex: 1, minWidth: 240 }}>
+        <Etiqueta texto="GANANCIA ACUMULADA · EN VIVO" extra={<PuntoVivo />} />
         {filas.map(x => (
           <div key={x.l} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 5 }}>
-            <span style={{ fontSize: 11, letterSpacing: 1.3, color: NEON.muted, fontWeight: 800 }}>{x.l}</span>
-            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 23, color: x.c }}>{fmtArs(x.v)}</span>
+            <span style={{ fontSize: 11, letterSpacing: 1.0, color: NEON.muted, fontWeight: 800 }}>{x.l}</span>
+            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: x.c }}>{fmtArs(x.v)}</span>
           </div>
         ))}
-        <div style={{ fontSize: 10, color: NEON.muted, marginTop: 9, lineHeight: 1.5 }}>
-          Todas las ventas emitidas desde el 01 (cobradas o no). Caja y cobros al entregar
-          van 100% cobrados; lo por cobrar es mayorista a cuenta corriente del período
-          (la deuda anterior al 01 no cuenta acá).
+        <div style={{ borderTop: '1px solid rgba(0,212,255,0.25)', marginTop: 8, paddingTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <span style={{ fontSize: 12, letterSpacing: 1.2, color: NEON.muted, fontWeight: 800 }}>= GANANCIA</span>
+          <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 30, color: col }}>{fmtArs(ganancia)}</span>
+        </div>
+        <div style={{ fontSize: 10, color: NEON.muted, marginTop: 8, lineHeight: 1.5 }}>
+          Todo lo que te deben (deuda vieja incluida) menos lo comprado a proveedores
+          esta semana (pagado o no) menos gastos y sueldos de la semana.
         </div>
       </div>
     </div>
@@ -820,8 +846,8 @@ function ResumenEjecutivo() {
         </div>
       </div>
 
-      {/* ── Widget cobranza del mes: vendido / cobrado / por cobrar + dona ── */}
-      <WidgetCobranza c={data.cobranzaMes} />
+      {/* ── Widget ganancia acumulada en vivo: lo que te deben − compras sem − gastos sem ── */}
+      <WidgetGananciaAcum g={data.gananciaAcum} />
 
       {/* ── Cinta de métricas secundarias ── */}
       <div style={{ ...glass, marginTop: 12, padding: '14px 18px', display: 'flex', flexWrap: 'wrap', gap: '10px 28px', alignItems: 'center' }}>
