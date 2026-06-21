@@ -1326,21 +1326,15 @@ export async function ejecutarFuncion(nombre, args) {
       }
 
       case 'consultar_facturacion_monotributo': {
-        // Facturado emitido por cuenta (12m) server-side (RPC): hay ~14k facturas,
-        // traerlas al cliente para sumarlas chocaría con el corte de 1000 filas de
-        // PostgREST y sub-declararía el % del tope (lo calcula la misma RPC que usa
-        // la pantalla de Facturación).
-        const [cuentas, facturado] = await Promise.all([
+        const [cuentas, facturas] = await Promise.all([
           supabase.from('cuentas_fiscales').select('id, nombre, tipo').eq('activa', true),
-          supabase.rpc('facturado_cuentas_12m'),
+          supabase.from('facturas').select('cuenta_id, monto_total').eq('tipo', 'emitida').gte('fecha', fechaRelativaARG(-365)),
         ])
         if (cuentas.error) throw cuentas.error
-        const factPorCuenta = {}
-        ;(facturado.data || []).forEach(r => { factPorCuenta[r.cuenta_id] = Number(r.emitido) || 0 })
         const monos = (cuentas.data || []).filter(c => c.tipo === 'monotributo')
         if (monos.length === 0) return { resultado: 'No hay cuentas de monotributo activas.' }
         const lista = monos.map(c => {
-          const fact = factPorCuenta[c.id] || 0
+          const fact = sumar((facturas.data || []).filter(f => f.cuenta_id === c.id), 'monto_total')
           const pct = (fact / TOPE_MONO_K) * 100
           const icono = pct >= 95 ? '🚨' : pct >= 70 ? '⚠️' : '✅'
           return `${icono} ${c.nombre}: ${formatearPesos(fact)} en 12 meses → ${pct.toFixed(1)}% del tope K`
