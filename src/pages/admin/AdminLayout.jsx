@@ -42,6 +42,36 @@ const navItems = [
   { to: '/admin/auditoria',   icon: '🔍', label: 'Auditoría' },
 ]
 
+// Desktop: los módulos agrupados en 4 menús desplegables (más prolijo que 17
+// botones en una fila con scroll). El badge de cada item "sube" al menú padre.
+const NAV_GRUPOS = [
+  { label: 'Operación', icon: '🛒', items: [
+    { to: '/admin/caja',      icon: '💵', label: 'Caja' },
+    { to: '/admin/ventas',    icon: '📋', label: 'Mayorista' },
+    { to: '/admin/deposito',  icon: '🏭', label: 'Depósito' },
+    { to: '/admin/pedidos',   icon: '📥', label: 'Pedidos Mayoristas' },
+    { to: '/admin/whatsapp',  icon: '💬', label: 'WhatsApp' },
+  ] },
+  { label: 'Comercial', icon: '🏷️', items: [
+    { to: '/admin/precios',     icon: '💲', label: 'Precios' },
+    { to: '/admin/etiquetas',   icon: '🏷️', label: 'Etiquetas' },
+    { to: '/admin/clientes',    icon: '👥', label: 'Clientes' },
+    { to: '/admin/franquicias', icon: '🏪', label: 'Franquicias' },
+  ] },
+  { label: 'Finanzas', icon: '💰', items: [
+    { to: '/admin/cheques',     icon: '📄', label: 'Cheques' },
+    { to: '/admin/sueldos',     icon: '💰', label: 'Sueldos' },
+    { to: '/admin/gastos',      icon: '💸', label: 'Gastos' },
+    { to: '/admin/facturacion', icon: '📑', label: 'Facturación' },
+  ] },
+  { label: 'Dirección', icon: '📈', items: [
+    { to: '/admin/ejecutivo', icon: '⚡', label: 'Ejecutivo', ceoOnly: true },
+    { to: '/admin/dashboard', icon: '📊', label: 'Dashboard' },
+    { to: '/admin/cierre',    icon: '📋', label: 'Cierre' },
+    { to: '/admin/auditoria', icon: '🔍', label: 'Auditoría' },
+  ] },
+]
+
 function useNotificaciones() {
   const [notifs, setNotifs] = useState([])
   useEffect(() => {
@@ -319,6 +349,82 @@ function MenuMobile({ onClose }) {
   )
 }
 
+// NAV DESKTOP — 4 menús desplegables por categoría (se abren al pasar el mouse)
+function NavDesktop({ userEmail, badges }) {
+  const location = useLocation()
+  const [openGroup, setOpenGroup] = useState(null)
+
+  const badgeFor = (to) => {
+    if (to === '/admin/pedidos')  return badges.pedidos
+    if (to === '/admin/whatsapp') return badges.whatsapp
+    if (to === '/admin/deposito') return badges.deposito
+    return 0
+  }
+  const esCeo = userEmail === 'fabriciolenardon@gmail.com'
+  const grupos = NAV_GRUPOS.map(g => ({
+    ...g,
+    items: g.items.filter(it => !it.ceoOnly || esCeo),
+  }))
+
+  return (
+    <nav style={{ display: 'flex', gap: 4, flex: 1, alignItems: 'center' }}>
+      {grupos.map((g, gi) => {
+        const activo   = g.items.some(it => location.pathname.startsWith(it.to))
+        const abierto  = openGroup === gi
+        const grpBadge = g.items.reduce((s, it) => s + badgeFor(it.to), 0)
+        return (
+          <div key={g.label} style={{ position: 'relative' }}
+            onMouseEnter={() => setOpenGroup(gi)}
+            onMouseLeave={() => setOpenGroup(null)}>
+            <button onClick={() => setOpenGroup(abierto ? null : gi)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 7, padding: '8px 14px',
+                borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                fontFamily: "'DM Sans', sans-serif", whiteSpace: 'nowrap',
+                border: '1px solid ' + (activo ? 'rgba(212,175,55,0.45)' : 'transparent'),
+                background: activo ? 'rgba(212,175,55,0.12)' : (abierto ? 'var(--surface2)' : 'transparent'),
+                color: activo ? 'var(--gold)' : 'var(--text2)', transition: 'all 0.15s',
+              }}>
+              <span style={{ fontSize: 15 }}>{g.icon}</span>
+              {g.label}
+              <span style={{ fontSize: 9, opacity: 0.55, transform: abierto ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>▼</span>
+              {grpBadge > 0 && (
+                <span style={{ background: '#ef4444', color: '#fff', borderRadius: '50%', minWidth: 17, height: 17, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px' }}>{grpBadge}</span>
+              )}
+            </button>
+            {abierto && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 6, minWidth: 224, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: '0 12px 32px rgba(0,0,0,0.55)', padding: 6, zIndex: 250 }}>
+                {g.items.map(it => {
+                  const itemBadge = badgeFor(it.to)
+                  const itActivo = location.pathname.startsWith(it.to)
+                  return (
+                    <NavLink key={it.to} to={it.to} onClick={() => setOpenGroup(null)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
+                        borderRadius: 8, fontSize: 13, fontWeight: 600, textDecoration: 'none',
+                        whiteSpace: 'nowrap', transition: 'background 0.12s',
+                        background: itActivo ? 'var(--gold)' : 'transparent',
+                        color: itActivo ? '#000' : 'var(--text2)',
+                      }}
+                      onMouseOver={e => { if (!itActivo) e.currentTarget.style.background = 'var(--surface2)' }}
+                      onMouseOut={e => { if (!itActivo) e.currentTarget.style.background = 'transparent' }}>
+                      <span style={{ fontSize: 16 }}>{it.icon}</span>
+                      <span style={{ flex: 1 }}>{it.label}</span>
+                      {itemBadge > 0 && (
+                        <span style={{ background: '#ef4444', color: '#fff', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{itemBadge}</span>
+                      )}
+                    </NavLink>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </nav>
+  )
+}
+
 export default function AdminLayout() {
   const { user } = useAuth()
   const notifs = useNotificaciones()
@@ -372,23 +478,10 @@ export default function AdminLayout() {
               <LogoFabricius size="small" />
             </div>
             <div style={{ width: 1, height: 24, background: 'var(--border)' }} />
-            <nav style={{ display: 'flex', gap: 2, flex: 1, overflowX: 'auto' }}>
-              {navItems.filter(it => it.to !== '/admin/ejecutivo' || user?.email === 'fabriciolenardon@gmail.com').map(item => (
-                <NavLink key={item.to} to={item.to}
-                  style={({ isActive }) => ({ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 11px', borderRadius: 8, fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', textDecoration: 'none', transition: 'all 0.2s', border: '1px solid transparent', background: isActive ? 'var(--gold)' : 'transparent', color: isActive ? '#000' : 'var(--muted)', position: 'relative' })}>
-                  <span>{item.icon}</span>{item.label}
-                  {item.to === '/admin/pedidos' && pedidosPendientes > 0 && (
-                    <span style={{ background: 'var(--red-light)', color: '#fff', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{pedidosPendientes}</span>
-                  )}
-                  {item.to === '/admin/whatsapp' && (pedidosWaNuevos + waNoLeidos) > 0 && (
-                    <span style={{ background: 'var(--green)', color: '#000', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{pedidosWaNuevos + waNoLeidos}</span>
-                  )}
-                  {item.to === '/admin/deposito' && flujosPendientes > 0 && (
-                    <span title="Flujos de desposte pendientes" style={{ background: '#ef4444', color: '#fff', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{flujosPendientes}</span>
-                  )}
-                </NavLink>
-              ))}
-            </nav>
+            <NavDesktop
+              userEmail={user?.email}
+              badges={{ pedidos: pedidosPendientes, whatsapp: pedidosWaNuevos + waNoLeidos, deposito: flujosPendientes }}
+            />
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>
               <BotonAvisos />
               <CampanaNotificaciones notifs={notifs} />
