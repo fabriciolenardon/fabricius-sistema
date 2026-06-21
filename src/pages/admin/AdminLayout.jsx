@@ -2,7 +2,6 @@ import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
-import { fetchAllRows } from '../../lib/fetchAllRows'
 import { useFlujoNotificaciones } from '../../lib/useFlujoNotificaciones'
 import { fechaHoyARG } from '../../lib/fechas'
 import { fmtPrecio, fmtKg } from '../../lib/formatos'
@@ -53,9 +52,8 @@ function useNotificaciones() {
       // de cheques quedaban con la ventana corrida un día.
       const hoyStr = fechaHoyARG(hoy)
       const en15Str = fechaHoyARG(en15)
-      const haceUnAno = new Date(hoy.getFullYear() - 1, hoy.getMonth(), hoy.getDate())
 
-      const [{ data: cheques }, { data: chequesEmitidos }, { data: clientes }, { data: cierres }, { data: stockData }, { data: cuentasFiscales }, { data: facturasRecientes }, { data: impuestosRecientes }] = await Promise.all([
+      const [{ data: cheques }, { data: chequesEmitidos }, { data: clientes }, { data: cierres }, { data: stockData }, { data: cuentasFiscales }, { data: facturado12m }, { data: impuestosRecientes }] = await Promise.all([
         supabase.from('cheques').select('*').neq('origen', 'emitido').gte('fecha_pago', hoyStr).lte('fecha_pago', en15Str),
         // Cheques propios pendientes de imputar que se debitan en ≤7 días (o ya vencieron)
         supabase.from('cheques').select('*').eq('origen', 'emitido').neq('estado', 'imputado').lte('fecha_pago', fechaHoyARG(new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + 7))),
@@ -63,10 +61,10 @@ function useNotificaciones() {
         supabase.from('cierres_semanales').select('*').order('semana_inicio', { ascending: false }).limit(1),
         supabase.from('stock_actual').select('*'),
         supabase.from('cuentas_fiscales').select('*').eq('activa', true).then(r => r).catch(() => ({ data: null })),
-        // Paginado: un año de facturas emitidas (todas las cuentas) supera las
-        // 1000 filas; sin paginar el facturado por cuenta quedaba corto y el
-        // semáforo del tope de monotributo sub-alertaba (ver lib/fetchAllRows.js).
-        fetchAllRows(() => supabase.from('facturas').select('cuenta_id, monto_total, fecha').eq('tipo', 'emitida').gte('fecha', fechaHoyARG(haceUnAno))).catch(() => ({ data: null })),
+        // Facturado emitido por cuenta (12m móviles) para el semáforo del tope de
+        // monotributo: lo calcula el servidor (RPC), así no hay que traer ~14k
+        // facturas al cliente ni chocar con el corte de 1000 filas de PostgREST.
+        supabase.rpc('facturado_cuentas_12m').then(r => r).catch(() => ({ data: null })),
         supabase.from('impuestos_pagados').select('cuenta_id, concepto, periodo_anio, periodo_mes').then(r => r).catch(() => ({ data: null })),
       ])
 
@@ -103,15 +101,18 @@ function useNotificaciones() {
       }
 
       // ── Avisos de Facturación ──
-      if (cuentasFiscales && facturasRecientes) {
+      if (cuentasFiscales && facturado12m) {
         const mesActual = hoy.getMonth() + 1
         const anioActual = hoy.getFullYear()
         const diaActual = hoy.getDate()
+        // emitido por cuenta (12m) que devuelve el RPC; numeric vuelve como string
+        const emitidoPorCuenta = {}
+        ;(facturado12m || []).forEach(r => { emitidoPorCuenta[r.cuenta_id] = Number(r.emitido) || 0 })
         cuentasFiscales.forEach(cf => {
           if (cf.tipo !== 'monotributo') return
           // Tope absoluto cat K = $108.357.084 (vigente 2026)
           const TOPE_K = 108357084.05
-          const facturado = (facturasRecientes || []).filter(f => f.cuenta_id === cf.id).reduce((s, f) => s + (Number(f.monto_total) || 0), 0)
+          const facturado = emitidoPorCuenta[cf.id] || 0
           const pct = (facturado / TOPE_K) * 100
           if (pct >= 95) {
             nuevas.push({ tipo: 'danger', icono: '🚨', titulo: `${cf.nombre} al ${pct.toFixed(0)}% del tope mono`, sub: 'Riesgo crítico de exclusión', link: '/admin/facturacion' })
