@@ -104,7 +104,7 @@ export async function calcularCierreAuto(desde, hasta) {
     // Entradas al depósito (compras)
     supabase
       .from('entradas_deposito')
-      .select('id, fecha, tipo, descripcion, proveedor_nombre, kg, kg_real, precio_kg, importe')
+      .select('id, fecha, tipo, descripcion, proveedor_nombre, kg, kg_real, precio_kg, importe, destino')
       .eq('eliminado', false)   // los ingresos anulados no cuentan como compra
       .gte('fecha', desde)
       .lte('fecha', hasta),
