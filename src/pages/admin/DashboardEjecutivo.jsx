@@ -16,6 +16,7 @@ import { supabase } from '../../lib/supabase'
 import { enviarWhatsapp, fmtArs } from '../../lib/whatsapp'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
 import { fmtKg } from '../../lib/formatos'
+import { fetchAllRows } from '../../lib/fetchAllRows'
 import { useCentroActividad } from '../../lib/useCentroActividad'
 import {
   useReportesData, SelectorPeriodo,
@@ -175,24 +176,6 @@ const ESTILOS_GLOBALES = `
 // - Realtime: cada venta nueva en la caja dispara una recarga
 //   (debounce 1.5s) → la tele se actualiza EN VIVO
 // ════════════════════════════════════════════════════════════
-
-// Trae TODAS las filas de una consulta paginando de a 1000. Supabase corta las
-// respuestas en 1000 filas por defecto: un mes con >1000 salidas/ventas
-// subdeclaraba los totales en silencio (mayorista quedaba ~15M corto y el saldo
-// del mes daba negativo falso). `makeQuery` debe DEVOLVER una consulta nueva en
-// cada llamada para poder aplicarle .range().
-async function fetchAllRows(makeQuery) {
-  const PAGE = 1000
-  let all = [], from = 0
-  for (;;) {
-    const { data, error } = await makeQuery().range(from, from + PAGE - 1)
-    if (error || !data || data.length === 0) break
-    all = all.concat(data)
-    if (data.length < PAGE) break
-    from += PAGE
-  }
-  return { data: all }
-}
 
 function useDashboardData(refreshMs = 120000) {
   const [data, setData] = useState(null)

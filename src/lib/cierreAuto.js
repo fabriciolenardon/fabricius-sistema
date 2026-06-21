@@ -20,6 +20,7 @@
 
 import { supabase } from './supabase'
 import { fechaHoyARG } from './fechas'
+import { fetchAllRows } from './fetchAllRows'
 
 // Devuelve el lunes de la semana que contiene `base` (en ARG), formato YYYY-MM-DD.
 // dia 0 = domingo, 1 = lunes, ...
@@ -76,76 +77,81 @@ export async function calcularCierreAuto(desde, hasta) {
     clientesR,
     proveedoresR,
   ] = await Promise.all([
+    // Todas las consultas con ventana de fechas van paginadas (fetchAllRows): un
+    // cierre puede correrse sobre un MES entero (botón "mes" de Cierre.jsx) y un
+    // mes de ventas de caja supera las 1000 filas → Supabase cortaba en 1000 y el
+    // cierre subdeclaraba ventas/cobrado/ganancia en silencio (ver PR #170).
     // Ventas minoristas (caja) — sólo origen='caja' (cliente cta cte ya cuenta como cobranza)
-    supabase
+    fetchAllRows(() => supabase
       .from('ventas_minoristas')
       .select('id, fecha, total, efectivo, debito, transferencia, origen')
       .eq('origen', 'caja')
       .gte('fecha', desde)
-      .lte('fecha', hasta),
+      .lte('fecha', hasta)),
 
     // Remitos emitidos en el período (mayorista). El cierre usa los REMITOS como
     // fuente de las ventas mayoristas: 1 remito = 1 venta a un cliente, con su
     // fecha de emisión (editable). Es lo que valida en qué semana cae la venta.
     // Excluye anulados y MITRE (casa central, no cliente).
-    supabase
+    fetchAllRows(() => supabase
       .from('remitos')
       .select('id, numero, fecha, total, cobro, cliente_nombre, eliminado')
       .gte('fecha', desde)
-      .lte('fecha', hasta),
+      .lte('fecha', hasta)),
 
     // Movimientos cta cte clientes — cobranzas (pago / cheque)
-    supabase
+    fetchAllRows(() => supabase
       .from('movimientos_ctacte')
       .select('id, fecha, tipo, debe, haber, cliente_id, cliente_nombre')
       .gte('fecha', desde)
-      .lte('fecha', hasta),
+      .lte('fecha', hasta)),
 
     // Entradas al depósito (compras)
-    supabase
+    fetchAllRows(() => supabase
       .from('entradas_deposito')
       .select('id, fecha, tipo, descripcion, proveedor_nombre, kg, kg_real, precio_kg, importe, destino')
       .eq('eliminado', false)   // los ingresos anulados no cuentan como compra
       .gte('fecha', desde)
-      .lte('fecha', hasta),
+      .lte('fecha', hasta)),
 
     // Pagos a proveedores
-    supabase
+    fetchAllRows(() => supabase
       .from('pagos_proveedores')
       .select('id, fecha, proveedor_nombre, importe, percepcion, tipo, medio')
       .gte('fecha', desde)
-      .lte('fecha', hasta),
+      .lte('fecha', hasta)),
 
     // Movimientos cuenta corriente proveedores (extracto ledger)
-    supabase
+    fetchAllRows(() => supabase
       .from('movimientos_proveedores')
       .select('id, fecha, proveedor_id, proveedor_nombre, tipo, debe, haber')
       .gte('fecha', desde)
-      .lte('fecha', hasta),
+      .lte('fecha', hasta)),
 
     // Gastos del período
-    supabase
+    fetchAllRows(() => supabase
       .from('gastos')
       .select('id, fecha, tipo, categoria, monto, socio, descripcion, solo_balance')
       .gte('fecha', desde)
-      .lte('fecha', hasta),
+      .lte('fecha', hasta)),
 
     // Sueldos liquidados con semana cerrada dentro del período
-    supabase
+    fetchAllRows(() => supabase
       .from('liquidaciones_sueldos')
       .select('id, semana_inicio, semana_fin, neto, empleado_nombre')
       .gte('semana_fin', desde)
-      .lte('semana_fin', hasta),
+      .lte('semana_fin', hasta)),
 
-    // Clientes con saldo (snapshot al momento — no es histórico al cierre)
-    supabase
+    // Clientes con saldo (snapshot al momento — no es histórico al cierre).
+    // Paginado: el total "por cobrar" suma el saldo de TODOS los clientes.
+    fetchAllRows(() => supabase
       .from('clientes')
-      .select('id, nombre, saldo, tipo'),
+      .select('id, nombre, saldo, tipo')),
 
     // Proveedores — pero saldo se computa desde movimientos_proveedores
-    supabase
+    fetchAllRows(() => supabase
       .from('proveedores')
-      .select('id, nombre'),
+      .select('id, nombre')),
   ])
 
   const ventasCaja = ventasCajaR.data || []
@@ -221,11 +227,13 @@ export async function calcularCierreAuto(desde, hasta) {
   const pagadoProvTotal = pagosProvPeriodo.reduce((s, m) => s + (Number(m.haber) || 0), 0)
 
   // ====== POR PAGAR PROVEEDORES (saldo ledger al cierre) ======
-  // Saldo se calcula leyendo TODOS los movimientos hasta `hasta`, no sólo los del período.
-  const { data: todosMovProv } = await supabase
+  // Saldo se calcula leyendo TODOS los movimientos hasta `hasta`, no sólo los del
+  // período. Paginado: este ledger crece sin techo y al sumarlo entero hay que
+  // traer todas las filas (Supabase corta en 1000).
+  const { data: todosMovProv } = await fetchAllRows(() => supabase
     .from('movimientos_proveedores')
     .select('proveedor_id, proveedor_nombre, debe, haber, fecha')
-    .lte('fecha', hasta)
+    .lte('fecha', hasta))
 
   const saldosProvMap = new Map()
   for (const m of (todosMovProv || [])) {

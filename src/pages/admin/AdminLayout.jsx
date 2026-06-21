@@ -2,6 +2,7 @@ import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
+import { fetchAllRows } from '../../lib/fetchAllRows'
 import { useFlujoNotificaciones } from '../../lib/useFlujoNotificaciones'
 import { fechaHoyARG } from '../../lib/fechas'
 import { fmtPrecio, fmtKg } from '../../lib/formatos'
@@ -62,7 +63,10 @@ function useNotificaciones() {
         supabase.from('cierres_semanales').select('*').order('semana_inicio', { ascending: false }).limit(1),
         supabase.from('stock_actual').select('*'),
         supabase.from('cuentas_fiscales').select('*').eq('activa', true).then(r => r).catch(() => ({ data: null })),
-        supabase.from('facturas').select('cuenta_id, monto_total, fecha').eq('tipo', 'emitida').gte('fecha', fechaHoyARG(haceUnAno)).then(r => r).catch(() => ({ data: null })),
+        // Paginado: un año de facturas emitidas (todas las cuentas) supera las
+        // 1000 filas; sin paginar el facturado por cuenta quedaba corto y el
+        // semáforo del tope de monotributo sub-alertaba (ver lib/fetchAllRows.js).
+        fetchAllRows(() => supabase.from('facturas').select('cuenta_id, monto_total, fecha').eq('tipo', 'emitida').gte('fecha', fechaHoyARG(haceUnAno))).catch(() => ({ data: null })),
         supabase.from('impuestos_pagados').select('cuenta_id, concepto, periodo_anio, periodo_mes').then(r => r).catch(() => ({ data: null })),
       ])
 
