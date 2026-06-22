@@ -410,10 +410,12 @@ function useDashboardData(refreshMs = 120000) {
     // ── SALDO PENDIENTE TOTAL CLIENTES ──
     const saldoPendienteTotal = (todosDeudores.data || []).reduce((s, c) => s + (Number(c.saldo) || 0), 0)
 
-    // ── GANANCIA ACUMULADA EN VIVO (pedido de Fabricio) ──
-    // = todo lo que nos deben (saldo cliente TOTAL, incluida deuda vieja)
-    //   − lo comprado a proveedores esta semana − gastos y sueldos de la semana.
-    // Mismo criterio de período que el Cierre para los costos (lunes → hoy).
+    // ── MARGEN ESTIMADO DE LA SEMANA EN VIVO (pedido de Fabricio) ──
+    // TODO de la MISMA semana (lunes → hoy): ventas (mayorista emitido + minorista
+    // contado en arqueo) − compras a proveedores − gastos y sueldos.
+    // Es un ESTIMADO: parte de la carne comprada queda en stock para la semana
+    // siguiente (no se vende todo lo comprado), así que no es ganancia cerrada.
+    // NO arrastra deuda vieja: la cuenta corriente acumulada queda fuera a propósito.
     const inicioSem = inicioSemanaARG()
     const gastosSemana = (gastosMes.data || [])
       .filter(g => !g.solo_balance && g.fecha >= inicioSem && (g.tipo === 'fijo' || g.tipo === 'variable' || g.tipo === 'socio'))
@@ -429,14 +431,14 @@ function useDashboardData(refreshMs = 120000) {
       .filter(s => s.cobro !== 'interno' && s.fecha >= inicioSem)
       .reduce((s, x) => s + (Number(x.total) || 0), 0)
     const costosSemana = gastosSemana + sueldosSemana
-    const gananciaAcum = {
-      deben: saldoPendienteTotal,
+    const ventasSemanaTotal = mayoristaVendidoSemana + minoristaArqueoSemana
+    const margenSemana = {
+      mayorista: mayoristaVendidoSemana,
       minorista: minoristaArqueoSemana,
+      ventas: ventasSemanaTotal,
       compras: comprasSemanaTotal,
       gastos: costosSemana,
-      // ventasSemana = base REAL para el margen (lo vendido esta semana: may + min)
-      ventasSemana: mayoristaVendidoSemana + minoristaArqueoSemana,
-      resultado: saldoPendienteTotal + minoristaArqueoSemana - comprasSemanaTotal - costosSemana,
+      resultado: ventasSemanaTotal - comprasSemanaTotal - costosSemana,
     }
 
     // Top productos hoy
@@ -485,7 +487,7 @@ function useDashboardData(refreshMs = 120000) {
       ultimaVentaHora,
       mensualVivo,
       cobranzaMes: (cobranzaQ?.data || [])[0] || null,
-      gananciaAcum,
+      margenSemana,
       curvaHoy, curvaAyer, ultimasVentas,
       mejorDiaMes, canalesMes, topClientesMes,
       comprasSemanaProv, comprasSemanaTotal,
@@ -683,30 +685,30 @@ function ReportePanelData({ tab, periodo, setPeriodo }) {
 }
 
 // ════════════════════════════════════════════════════════════
-// WIDGET GANANCIA ACUMULADA EN VIVO (pedido de Fabricio)
-// = todo lo que nos deben (saldo cliente TOTAL, deuda vieja incluida)
-//   − comprado a proveedores esta semana (pagado o no)
-//   − gastos y sueldos de la semana.
-// El círculo muestra el MARGEN (ganancia sobre lo que nos deben).
+// WIDGET MARGEN DE LA SEMANA · ESTIMADO (pedido de Fabricio)
+// TODO de la MISMA semana (lunes → hoy):
+//   ventas (mayorista emitido + minorista de arqueo) − compras − gastos/sueldos.
+// Es un ESTIMADO: queda carne en stock para la semana siguiente, no se vende
+// todo lo comprado. NO arrastra deuda vieja (la cta cte acumulada queda fuera).
+// El círculo = margen (ganancia ÷ ventas de la semana).
 // ════════════════════════════════════════════════════════════
-function WidgetGananciaAcum({ g }) {
+function WidgetMargenSemana({ g }) {
   if (!g) return null
-  const deben     = Number(g.deben) || 0
+  const mayorista = Number(g.mayorista) || 0
   const minorista = Number(g.minorista) || 0
+  const ventas    = Number(g.ventas) || 0
   const compras   = Number(g.compras) || 0
   const gastos    = Number(g.gastos) || 0
   const ganancia  = Number(g.resultado) || 0
-  // Margen REAL = ganancia sobre lo vendido esta semana (mayorista emitido + minorista arqueo)
-  const ventasSemana = Number(g.ventasSemana) || 0
-  const pct = ventasSemana > 0 ? Math.max(0, Math.min(100, (ganancia / ventasSemana) * 100)) : 0
+  const pct = ventas > 0 ? Math.max(-100, Math.min(100, (ganancia / ventas) * 100)) : 0
   const R = 54, CIRC = 2 * Math.PI * R
-  const dash = (pct / 100) * CIRC
+  const dash = (Math.abs(pct) / 100) * CIRC
   const col = ganancia >= 0 ? NEON.verde : NEON.rojo
   const filas = [
-    { l: 'TE DEBEN · mayorista (incl. viejo)', v: deben,     c: NEON.cianHi },
-    { l: '+  MINORISTA · arqueo (semana)',     v: minorista, c: NEON.verde },
-    { l: '−  COMPRADO ESTA SEMANA',            v: compras,   c: NEON.ambar },
-    { l: '−  GASTOS Y SUELDOS (semana)',       v: gastos,    c: NEON.rojo },
+    { l: 'MAYORISTA · vendido (semana)', v: mayorista, c: NEON.cianHi },
+    { l: '+  MINORISTA · arqueo (semana)', v: minorista, c: NEON.cian },
+    { l: '−  COMPRADO ESTA SEMANA',        v: compras,   c: NEON.ambar },
+    { l: '−  GASTOS Y SUELDOS (semana)',   v: gastos,    c: NEON.rojo },
   ]
   return (
     <div className="hud" style={{ ...glass, marginTop: 12, padding: 18, display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -722,7 +724,7 @@ function WidgetGananciaAcum({ g }) {
         </div>
       </div>
       <div style={{ flex: 1, minWidth: 240 }}>
-        <Etiqueta texto="GANANCIA ACUMULADA · EN VIVO" extra={<PuntoVivo />} />
+        <Etiqueta texto="MARGEN DE LA SEMANA · ESTIMADO" extra={<PuntoVivo />} />
         {filas.map(x => (
           <div key={x.l} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 5 }}>
             <span style={{ fontSize: 11, letterSpacing: 1.0, color: NEON.muted, fontWeight: 800 }}>{x.l}</span>
@@ -730,13 +732,13 @@ function WidgetGananciaAcum({ g }) {
           </div>
         ))}
         <div style={{ borderTop: '1px solid rgba(0,212,255,0.25)', marginTop: 8, paddingTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <span style={{ fontSize: 12, letterSpacing: 1.2, color: NEON.muted, fontWeight: 800 }}>= GANANCIA</span>
+          <span style={{ fontSize: 12, letterSpacing: 1.2, color: NEON.muted, fontWeight: 800 }}>= GANANCIA ESTIMADA</span>
           <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 30, color: col }}>{fmtArs(ganancia)}</span>
         </div>
         <div style={{ fontSize: 10, color: NEON.muted, marginTop: 8, lineHeight: 1.5 }}>
-          Lo que te deben los mayoristas (saldo en vivo, deuda vieja incluida) + lo minorista
-          contado en el arqueo de la semana − comprado a proveedores − gastos y sueldos.
-          En vivo: cada venta, compra, gasto, sueldo y arqueo lo mueve.
+          Todo de la misma semana: ventas (mayorista + minorista de arqueo) − compras − gastos/sueldos.
+          Es un ESTIMADO: queda carne en stock para la semana que viene, no se vende todo lo comprado.
+          No arrastra deuda vieja. En vivo: cada venta, compra, gasto, sueldo y arqueo lo mueve.
         </div>
       </div>
     </div>
@@ -864,8 +866,8 @@ function ResumenEjecutivo() {
         </div>
       </div>
 
-      {/* ── Widget ganancia acumulada en vivo: lo que te deben − compras sem − gastos sem ── */}
-      <WidgetGananciaAcum g={data.gananciaAcum} />
+      {/* ── Widget margen estimado de la semana: ventas sem − compras sem − gastos sem ── */}
+      <WidgetMargenSemana g={data.margenSemana} />
 
       {/* ── Cinta de métricas secundarias ── */}
       <div style={{ ...glass, marginTop: 12, padding: '14px 18px', display: 'flex', flexWrap: 'wrap', gap: '10px 28px', alignItems: 'center' }}>
