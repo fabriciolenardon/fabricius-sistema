@@ -229,7 +229,7 @@ function useDashboardData(refreshMs = 120000) {
       // Mayorista del mes (con filtro de flujos internos); cliente_nombre
       // alimenta el podio de clientes y la separación mayorista/franquicias.
       // Paginado: un mes supera las 1000 salidas y se truncaba (saldo negativo falso).
-      fetchAllRows(() => supabase.from('salidas_deposito').select('total, cobro, cliente_nombre').gte('fecha', mesIni).lte('fecha', hoy)),
+      fetchAllRows(() => supabase.from('salidas_deposito').select('total, cobro, cliente_nombre, fecha').gte('fecha', mesIni).lte('fecha', hoy)),
       supabase.from('cuentas_fiscales').select('*').eq('activa', true).then(r => r).catch(() => ({ data: null })),
       supabase.from('facturas').select('cuenta_id, monto_total, fecha').eq('tipo', 'emitida').gte('fecha', fechaHaceDias(365)).then(r => r).catch(() => ({ data: null })),
       supabase.from('stock_actual').select('*'),
@@ -424,12 +424,18 @@ function useDashboardData(refreshMs = 120000) {
     // Minorista REAL de la semana = lo contado en los arqueos (efectivo+débito+transf)
     const minoristaArqueoSemana = (arqueosSemQ.data || []).reduce((s, a) =>
       s + (Number(a.total_contado) || 0) + (Number(a.debito_real) || 0) + (Number(a.transferencia_real) || 0), 0)
+    // Mayorista vendido esta semana (remitos/salidas emitidos lunes→hoy, sin flujos internos)
+    const mayoristaVendidoSemana = (salidasMes.data || [])
+      .filter(s => s.cobro !== 'interno' && s.fecha >= inicioSem)
+      .reduce((s, x) => s + (Number(x.total) || 0), 0)
     const costosSemana = gastosSemana + sueldosSemana
     const gananciaAcum = {
       deben: saldoPendienteTotal,
       minorista: minoristaArqueoSemana,
       compras: comprasSemanaTotal,
       gastos: costosSemana,
+      // ventasSemana = base REAL para el margen (lo vendido esta semana: may + min)
+      ventasSemana: mayoristaVendidoSemana + minoristaArqueoSemana,
       resultado: saldoPendienteTotal + minoristaArqueoSemana - comprasSemanaTotal - costosSemana,
     }
 
@@ -690,8 +696,9 @@ function WidgetGananciaAcum({ g }) {
   const compras   = Number(g.compras) || 0
   const gastos    = Number(g.gastos) || 0
   const ganancia  = Number(g.resultado) || 0
-  const base = deben + minorista
-  const pct = base > 0 ? Math.max(0, Math.min(100, (ganancia / base) * 100)) : 0
+  // Margen REAL = ganancia sobre lo vendido esta semana (mayorista emitido + minorista arqueo)
+  const ventasSemana = Number(g.ventasSemana) || 0
+  const pct = ventasSemana > 0 ? Math.max(0, Math.min(100, (ganancia / ventasSemana) * 100)) : 0
   const R = 54, CIRC = 2 * Math.PI * R
   const dash = (pct / 100) * CIRC
   const col = ganancia >= 0 ? NEON.verde : NEON.rojo
