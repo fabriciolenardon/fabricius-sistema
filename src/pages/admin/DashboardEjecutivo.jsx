@@ -216,7 +216,7 @@ function useDashboardData(refreshMs = 120000) {
     const [ventasHoy, ventasAyer, ventasSemana, ventasMes, ventasMesAnt, ventasAnioPasado,
            salidasMes, cuentas, facturas12m, stock, cheques, clientes,
            gastosMes, sueldosMes, pagosProvMes, movCtacteMes, todasCajas, todosDeudores, promoCfg,
-           comprasMesQ, cierresQ, comprasSemQ, remitosHoyQ, cobranzaQ] = await Promise.all([
+           comprasMesQ, cierresQ, comprasSemQ, remitosHoyQ, cobranzaQ, arqueosSemQ] = await Promise.all([
       supabase.from('ventas_minoristas').select('total, efectivo, debito, transferencia, items, fecha, hora').eq('origen', 'caja').eq('fecha', hoy),
       // hora incluida: alimenta la curva "hoy vs ayer a esta hora"
       supabase.from('ventas_minoristas').select('total, hora').eq('origen', 'caja').eq('fecha', ayer),
@@ -256,6 +256,8 @@ function useDashboardData(refreshMs = 120000) {
       // Vendido / cobrado / por cobrar del mes (FIFO server-side: los pagos cancelan
       // primero la deuda vieja, así "por cobrar" es solo de ventas del período)
       supabase.rpc('ventas_cobranza_periodo', { p_desde: mesIni, p_hasta: hoy }),
+      // Arqueos de la semana (lunes→hoy) — minorista REAL contado: efectivo+débito+transf
+      supabase.from('arqueos_caja').select('total_contado, debito_real, transferencia_real, fecha').gte('fecha', inicioSemanaARG()).lte('fecha', hoy),
     ])
 
     const totalHoy  = (ventasHoy.data || []).reduce((s, v) => s + (Number(v.total) || 0), 0)
@@ -419,11 +421,16 @@ function useDashboardData(refreshMs = 120000) {
     const sueldosSemana = (sueldosMes.data || [])
       .filter(l => l.semana_fin >= inicioSem)
       .reduce((s, l) => s + (Number(l.neto) || 0), 0)
+    // Minorista REAL de la semana = lo contado en los arqueos (efectivo+débito+transf)
+    const minoristaArqueoSemana = (arqueosSemQ.data || []).reduce((s, a) =>
+      s + (Number(a.total_contado) || 0) + (Number(a.debito_real) || 0) + (Number(a.transferencia_real) || 0), 0)
+    const costosSemana = gastosSemana + sueldosSemana
     const gananciaAcum = {
       deben: saldoPendienteTotal,
+      minorista: minoristaArqueoSemana,
       compras: comprasSemanaTotal,
-      gastos: gastosSemana + sueldosSemana,
-      resultado: saldoPendienteTotal - comprasSemanaTotal - (gastosSemana + sueldosSemana),
+      gastos: costosSemana,
+      resultado: saldoPendienteTotal + minoristaArqueoSemana - comprasSemanaTotal - costosSemana,
     }
 
     // Top productos hoy
@@ -513,7 +520,7 @@ function useDashboardData(refreshMs = 120000) {
     // INSERT) es clave para la AUTOCORRECCIÓN: si se anula un remito mal cargado
     // o se elimina una compra errónea, el número se corrige EN VIVO (sin esperar
     // el refresh de 2 min). Requiere que estas tablas estén en supabase_realtime.
-    const TABLAS_LIVE = ['ventas_minoristas', 'remitos', 'salidas_deposito', 'entradas_deposito', 'gastos', 'liquidaciones_sueldos', 'config_sistema']
+    const TABLAS_LIVE = ['ventas_minoristas', 'remitos', 'salidas_deposito', 'entradas_deposito', 'gastos', 'liquidaciones_sueldos', 'config_sistema', 'arqueos_caja', 'compras_proveedores', 'movimientos_ctacte', 'clientes']
     let canal = supabase.channel('dashboard-ejecutivo-live')
     TABLAS_LIVE.forEach(t => { canal = canal.on('postgres_changes', { event: '*', schema: 'public', table: t }, debounced) })
     canal.subscribe()
@@ -678,18 +685,21 @@ function ReportePanelData({ tab, periodo, setPeriodo }) {
 // ════════════════════════════════════════════════════════════
 function WidgetGananciaAcum({ g }) {
   if (!g) return null
-  const deben    = Number(g.deben) || 0
-  const compras  = Number(g.compras) || 0
-  const gastos   = Number(g.gastos) || 0
-  const ganancia = Number(g.resultado) || 0
-  const pct = deben > 0 ? Math.max(0, Math.min(100, (ganancia / deben) * 100)) : 0
+  const deben     = Number(g.deben) || 0
+  const minorista = Number(g.minorista) || 0
+  const compras   = Number(g.compras) || 0
+  const gastos    = Number(g.gastos) || 0
+  const ganancia  = Number(g.resultado) || 0
+  const base = deben + minorista
+  const pct = base > 0 ? Math.max(0, Math.min(100, (ganancia / base) * 100)) : 0
   const R = 54, CIRC = 2 * Math.PI * R
   const dash = (pct / 100) * CIRC
   const col = ganancia >= 0 ? NEON.verde : NEON.rojo
   const filas = [
-    { l: 'TE DEBEN · todo (incl. deuda vieja)', v: deben,   c: NEON.cianHi },
-    { l: '−  COMPRADO ESTA SEMANA',             v: compras, c: NEON.ambar },
-    { l: '−  GASTOS Y SUELDOS (semana)',        v: gastos,  c: NEON.rojo },
+    { l: 'TE DEBEN · mayorista (incl. viejo)', v: deben,     c: NEON.cianHi },
+    { l: '+  MINORISTA · arqueo (semana)',     v: minorista, c: NEON.verde },
+    { l: '−  COMPRADO ESTA SEMANA',            v: compras,   c: NEON.ambar },
+    { l: '−  GASTOS Y SUELDOS (semana)',       v: gastos,    c: NEON.rojo },
   ]
   return (
     <div className="hud" style={{ ...glass, marginTop: 12, padding: 18, display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -717,8 +727,9 @@ function WidgetGananciaAcum({ g }) {
           <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 30, color: col }}>{fmtArs(ganancia)}</span>
         </div>
         <div style={{ fontSize: 10, color: NEON.muted, marginTop: 8, lineHeight: 1.5 }}>
-          Todo lo que te deben (deuda vieja incluida) menos lo comprado a proveedores
-          esta semana (pagado o no) menos gastos y sueldos de la semana.
+          Lo que te deben los mayoristas (saldo en vivo, deuda vieja incluida) + lo minorista
+          contado en el arqueo de la semana − comprado a proveedores − gastos y sueldos.
+          En vivo: cada venta, compra, gasto, sueldo y arqueo lo mueve.
         </div>
       </div>
     </div>
