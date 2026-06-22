@@ -218,6 +218,73 @@ function FilaDesglose({ label, value, color, indent, editable, onCommit, esKg })
 }
 
 // ============================================================
+// CONFIG MESES OPERATIVOS — inicio y cierre de cada mes a mano
+// (como se cierra por semanas enteras, el mes operativo no coincide
+//  con el calendario). El "Mensual en vivo" del Ejecutivo usa estas fechas.
+// ============================================================
+function ConfigMesesOperativos() {
+  const [meses, setMeses] = useState([])
+  const [nuevo, setNuevo] = useState({ etiqueta: '', fecha_inicio: '', fecha_cierre: '' })
+  const [msg, setMsg] = useState(null)
+
+  async function cargar() {
+    const { data } = await supabase.from('meses_operativos').select('*').order('fecha_inicio', { ascending: false })
+    setMeses(data || [])
+  }
+  useEffect(() => { cargar() }, [])
+  function aviso(m) { setMsg(m); setTimeout(() => setMsg(null), 4000) }
+  function setFila(id, campo, val) { setMeses(ms => ms.map(m => m.id === id ? { ...m, [campo]: val } : m)) }
+
+  async function guardarFila(m) {
+    if (!m.fecha_inicio || !m.fecha_cierre) return aviso('⚠️ Cargá inicio y cierre')
+    const { error } = await supabase.from('meses_operativos')
+      .update({ etiqueta: m.etiqueta, fecha_inicio: m.fecha_inicio, fecha_cierre: m.fecha_cierre, mes: String(m.fecha_inicio).substring(0, 7) })
+      .eq('id', m.id)
+    aviso(error ? '❌ ' + error.message : '✅ Guardado'); if (!error) cargar()
+  }
+  async function borrar(id) {
+    if (!window.confirm('¿Borrar este mes operativo?')) return
+    const { error } = await supabase.from('meses_operativos').delete().eq('id', id)
+    aviso(error ? '❌ ' + error.message : '🗑️ Borrado'); if (!error) cargar()
+  }
+  async function agregar() {
+    if (!nuevo.etiqueta || !nuevo.fecha_inicio || !nuevo.fecha_cierre) return aviso('⚠️ Completá nombre, inicio y cierre')
+    const { error } = await supabase.from('meses_operativos').insert({ ...nuevo, mes: String(nuevo.fecha_inicio).substring(0, 7) })
+    if (error) return aviso('❌ ' + error.message)
+    setNuevo({ etiqueta: '', fecha_inicio: '', fecha_cierre: '' }); aviso('✅ Mes agregado'); cargar()
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card-title">📆 Meses operativos — inicio y cierre manual</div>
+      <p style={{ fontSize: 12, color: 'var(--muted)', margin: '-4px 0 14px' }}>
+        Como cerrás por semanas enteras (lun→dom), el mes no coincide con el calendario.
+        Definí desde y hasta qué fecha va cada mes. El <b>Mensual en vivo</b> del Ejecutivo cierra con estas fechas.
+      </p>
+      {msg && <div style={{ marginBottom: 10, fontWeight: 600, color: msg[0] === '✅' || msg[0] === '🗑' ? '#7dff7d' : '#ffb86b' }}>{msg}</div>}
+      {meses.map(m => (
+        <div key={m.id} style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap', marginBottom: 8, borderBottom: '1px solid var(--border)', paddingBottom: 8 }}>
+          <div className="form-group" style={{ flex: '1 1 150px', margin: 0 }}>
+            <label>Mes</label>
+            <input value={m.etiqueta || ''} onChange={e => setFila(m.id, 'etiqueta', e.target.value)} />
+          </div>
+          <div className="form-group" style={{ margin: 0 }}><label>Inicio</label><input type="date" value={m.fecha_inicio || ''} onChange={e => setFila(m.id, 'fecha_inicio', e.target.value)} /></div>
+          <div className="form-group" style={{ margin: 0 }}><label>Cierre</label><input type="date" value={m.fecha_cierre || ''} onChange={e => setFila(m.id, 'fecha_cierre', e.target.value)} /></div>
+          <button className="btn btn-sm" onClick={() => guardarFila(m)}>💾 Guardar</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => borrar(m.id)} title="Borrar">🗑️</button>
+        </div>
+      ))}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap', marginTop: 14, paddingTop: 12, borderTop: '1px dashed var(--border)' }}>
+        <div className="form-group" style={{ flex: '1 1 150px', margin: 0 }}><label>Nuevo mes</label><input placeholder="Ej: Agosto 2026" value={nuevo.etiqueta} onChange={e => setNuevo({ ...nuevo, etiqueta: e.target.value })} /></div>
+        <div className="form-group" style={{ margin: 0 }}><label>Inicio</label><input type="date" value={nuevo.fecha_inicio} onChange={e => setNuevo({ ...nuevo, fecha_inicio: e.target.value })} /></div>
+        <div className="form-group" style={{ margin: 0 }}><label>Cierre</label><input type="date" value={nuevo.fecha_cierre} onChange={e => setNuevo({ ...nuevo, fecha_cierre: e.target.value })} /></div>
+        <button className="btn btn-sm" onClick={agregar}>➕ Agregar mes</button>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================
 // Pantalla principal
 // ============================================================
 
@@ -722,6 +789,7 @@ export default function Cierre() {
       {/* ====================================================== */}
       {tab === 'mensual' && (
         <div>
+          <ConfigMesesOperativos />
           <div className="card">
             <div className="card-title">📅 Cierres por mes</div>
             <div className="form-row">

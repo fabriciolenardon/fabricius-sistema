@@ -206,7 +206,14 @@ function useDashboardData(refreshMs = 120000) {
     const hoy = hoyISO()
     const ayer = fechaHaceDias(1)
     const hace7 = fechaHaceDias(6)
-    const mesIni = inicioMes()
+    // Mes OPERATIVO: las fechas de inicio/cierre que define Fabricio a mano (Cierre →
+    // Por Mes). Si hoy cae dentro de un mes operativo, "este mes" arranca en su
+    // fecha_inicio (no el 01 calendario). Fallback al mes calendario si no hay config.
+    const { data: mesesOpData } = await supabase.from('meses_operativos')
+      .select('etiqueta, fecha_inicio, fecha_cierre').order('fecha_inicio', { ascending: false })
+    const mesOpActual = (mesesOpData || []).find(m => hoy >= m.fecha_inicio && hoy <= m.fecha_cierre) || null
+    const mesIni = mesOpActual ? mesOpActual.fecha_inicio : inicioMes()
+    const mesOpLabel = mesOpActual ? mesOpActual.etiqueta : null
     const mesAntIni = inicioMesAnterior()
     const mesAntMismoDia = mismoDiaMesAnterior() // período comparable: 01→mismo día
     const hoyDt = new Date(hoy + 'T12:00')
@@ -521,6 +528,7 @@ function useDashboardData(refreshMs = 120000) {
       topProductosHoy, cuentasConPct, stockCritico,
       ultimaVentaHora,
       mensualVivo,
+      mesOpLabel,
       cobranzaMes: (cobranzaQ?.data || [])[0] || null,
       margenSemana,
       margenHistorico,
@@ -564,7 +572,7 @@ function useDashboardData(refreshMs = 120000) {
     // INSERT) es clave para la AUTOCORRECCIÓN: si se anula un remito mal cargado
     // o se elimina una compra errónea, el número se corrige EN VIVO (sin esperar
     // el refresh de 2 min). Requiere que estas tablas estén en supabase_realtime.
-    const TABLAS_LIVE = ['ventas_minoristas', 'remitos', 'salidas_deposito', 'entradas_deposito', 'gastos', 'liquidaciones_sueldos', 'config_sistema', 'arqueos_caja', 'compras_proveedores', 'movimientos_ctacte', 'clientes']
+    const TABLAS_LIVE = ['ventas_minoristas', 'remitos', 'salidas_deposito', 'entradas_deposito', 'gastos', 'liquidaciones_sueldos', 'config_sistema', 'arqueos_caja', 'compras_proveedores', 'movimientos_ctacte', 'clientes', 'meses_operativos']
     let canal = supabase.channel('dashboard-ejecutivo-live')
     TABLAS_LIVE.forEach(t => { canal = canal.on('postgres_changes', { event: '*', schema: 'public', table: t }, debounced) })
     canal.subscribe()
@@ -880,7 +888,7 @@ function ResumenEjecutivo() {
           sub="Remitos a clientes y franquicias" />
         {/* MENSUAL EN VIVO — los 3 parámetros que pidió Fabricio: V − C − G */}
         <div className="hud" style={{ ...glass, padding: 18 }}>
-          <Etiqueta texto={`MENSUAL EN VIVO · 01→${fechaHoyARG().slice(8, 10)}`} extra={<PuntoVivo />} />
+          <Etiqueta texto={data.mesOpLabel ? `MENSUAL EN VIVO · ${data.mesOpLabel}` : `MENSUAL EN VIVO · 01→${fechaHoyARG().slice(8, 10)}`} extra={<PuntoVivo />} />
           {[
             { l: 'VENTAS',  v: data.mensualVivo.ventas,  c: NEON.cianHi },
             { l: 'COMPRAS', v: data.mensualVivo.compras, c: NEON.ambar },
