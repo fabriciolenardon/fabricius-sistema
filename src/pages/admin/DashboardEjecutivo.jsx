@@ -432,6 +432,7 @@ function useDashboardData(refreshMs = 120000) {
       .reduce((s, x) => s + (Number(x.total) || 0), 0)
     const costosSemana = gastosSemana + sueldosSemana
     const ventasSemanaTotal = mayoristaVendidoSemana + minoristaArqueoSemana
+    // LADO IZQUIERDO — margen de la SEMANA (todo de la misma semana, sin deuda vieja)
     const margenSemana = {
       mayorista: mayoristaVendidoSemana,
       minorista: minoristaArqueoSemana,
@@ -439,6 +440,17 @@ function useDashboardData(refreshMs = 120000) {
       compras: comprasSemanaTotal,
       gastos: costosSemana,
       resultado: ventasSemanaTotal - comprasSemanaTotal - costosSemana,
+    }
+    // LADO DERECHO — margen HISTÓRICO en vivo: lo que te deben (saldo mayorista
+    // acumulado, deuda vieja incluida) + minorista de arqueo de la semana − compras
+    // − gastos. SOLO LECTURA del saldo de cta cte (no se toca ningún saldo).
+    const margenHistorico = {
+      deben: saldoPendienteTotal,
+      minorista: minoristaArqueoSemana,
+      ventas: ventasSemanaTotal,
+      compras: comprasSemanaTotal,
+      gastos: costosSemana,
+      resultado: saldoPendienteTotal + minoristaArqueoSemana - comprasSemanaTotal - costosSemana,
     }
 
     // Top productos hoy
@@ -488,6 +500,7 @@ function useDashboardData(refreshMs = 120000) {
       mensualVivo,
       cobranzaMes: (cobranzaQ?.data || [])[0] || null,
       margenSemana,
+      margenHistorico,
       curvaHoy, curvaAyer, ultimasVentas,
       mejorDiaMes, canalesMes, topClientesMes,
       comprasSemanaProv, comprasSemanaTotal,
@@ -685,61 +698,57 @@ function ReportePanelData({ tab, periodo, setPeriodo }) {
 }
 
 // ════════════════════════════════════════════════════════════
-// WIDGET MARGEN DE LA SEMANA · ESTIMADO (pedido de Fabricio)
-// TODO de la MISMA semana (lunes → hoy):
-//   ventas (mayorista emitido + minorista de arqueo) − compras − gastos/sueldos.
-// Es un ESTIMADO: queda carne en stock para la semana siguiente, no se vende
-// todo lo comprado. NO arrastra deuda vieja (la cta cte acumulada queda fuera).
-// El círculo = margen (ganancia ÷ ventas de la semana).
+// WIDGET MARGEN — genérico para los dos paneles:
+//   modo 'semana'    → margen de la semana (mayorista vendido + minorista arqueo)
+//   modo 'historico' → margen histórico en vivo (lo que te deben + minorista arqueo)
+// En ambos: − compras − gastos/sueldos de la semana. Margen = ganancia ÷ ventas sem.
 // ════════════════════════════════════════════════════════════
-function WidgetMargenSemana({ g }) {
+function WidgetMargen({ titulo, g, modo, estimado, nota }) {
   if (!g) return null
-  const mayorista = Number(g.mayorista) || 0
   const minorista = Number(g.minorista) || 0
   const ventas    = Number(g.ventas) || 0
   const compras   = Number(g.compras) || 0
   const gastos    = Number(g.gastos) || 0
   const ganancia  = Number(g.resultado) || 0
   const pct = ventas > 0 ? Math.max(-100, Math.min(100, (ganancia / ventas) * 100)) : 0
-  const R = 54, CIRC = 2 * Math.PI * R
+  const R = 50, CIRC = 2 * Math.PI * R
   const dash = (Math.abs(pct) / 100) * CIRC
   const col = ganancia >= 0 ? NEON.verde : NEON.rojo
+  const primera = modo === 'historico'
+    ? { l: 'TE DEBEN · mayorista (en vivo)', v: Number(g.deben) || 0, c: NEON.cianHi }
+    : { l: 'MAYORISTA · vendido (semana)',   v: Number(g.mayorista) || 0, c: NEON.cianHi }
   const filas = [
-    { l: 'MAYORISTA · vendido (semana)', v: mayorista, c: NEON.cianHi },
+    primera,
     { l: '+  MINORISTA · arqueo (semana)', v: minorista, c: NEON.cian },
     { l: '−  COMPRADO ESTA SEMANA',        v: compras,   c: NEON.ambar },
     { l: '−  GASTOS Y SUELDOS (semana)',   v: gastos,    c: NEON.rojo },
   ]
   return (
-    <div className="hud" style={{ ...glass, marginTop: 12, padding: 18, display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}>
-      <div style={{ position: 'relative', width: 132, height: 132, flexShrink: 0 }}>
-        <svg width="132" height="132" viewBox="0 0 132 132">
-          <circle cx="66" cy="66" r={R} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="13" />
-          <circle cx="66" cy="66" r={R} fill="none" stroke={col} strokeWidth="13" strokeLinecap="round"
-            strokeDasharray={`${dash} ${CIRC}`} transform="rotate(-90 66 66)" />
+    <div className="hud" style={{ ...glass, padding: 16, display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+      <div style={{ position: 'relative', width: 116, height: 116, flexShrink: 0 }}>
+        <svg width="116" height="116" viewBox="0 0 120 120">
+          <circle cx="60" cy="60" r={R} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="12" />
+          <circle cx="60" cy="60" r={R} fill="none" stroke={col} strokeWidth="12" strokeLinecap="round"
+            strokeDasharray={`${dash} ${CIRC}`} transform="rotate(-90 60 60)" />
         </svg>
         <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 34, color: col, lineHeight: 1 }}>{pct.toFixed(0)}%</div>
+          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 30, color: col, lineHeight: 1 }}>{pct.toFixed(0)}%</div>
           <div style={{ fontSize: 9, letterSpacing: 1.5, color: NEON.muted, fontWeight: 800 }}>MARGEN</div>
         </div>
       </div>
-      <div style={{ flex: 1, minWidth: 240 }}>
-        <Etiqueta texto="MARGEN DE LA SEMANA · ESTIMADO" extra={<PuntoVivo />} />
+      <div style={{ flex: 1, minWidth: 210 }}>
+        <Etiqueta texto={titulo} extra={<PuntoVivo />} />
         {filas.map(x => (
-          <div key={x.l} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 5 }}>
-            <span style={{ fontSize: 11, letterSpacing: 1.0, color: NEON.muted, fontWeight: 800 }}>{x.l}</span>
-            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: x.c }}>{fmtArs(x.v)}</span>
+          <div key={x.l} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 4 }}>
+            <span style={{ fontSize: 10.5, letterSpacing: 0.8, color: NEON.muted, fontWeight: 800 }}>{x.l}</span>
+            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: x.c }}>{fmtArs(x.v)}</span>
           </div>
         ))}
-        <div style={{ borderTop: '1px solid rgba(0,212,255,0.25)', marginTop: 8, paddingTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <span style={{ fontSize: 12, letterSpacing: 1.2, color: NEON.muted, fontWeight: 800 }}>= GANANCIA ESTIMADA</span>
-          <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 30, color: col }}>{fmtArs(ganancia)}</span>
+        <div style={{ borderTop: '1px solid rgba(0,212,255,0.25)', marginTop: 7, paddingTop: 7, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <span style={{ fontSize: 11, letterSpacing: 1, color: NEON.muted, fontWeight: 800 }}>{estimado ? '= GANANCIA ESTIMADA' : '= GANANCIA'}</span>
+          <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 27, color: col }}>{fmtArs(ganancia)}</span>
         </div>
-        <div style={{ fontSize: 10, color: NEON.muted, marginTop: 8, lineHeight: 1.5 }}>
-          Todo de la misma semana: ventas (mayorista + minorista de arqueo) − compras − gastos/sueldos.
-          Es un ESTIMADO: queda carne en stock para la semana que viene, no se vende todo lo comprado.
-          No arrastra deuda vieja. En vivo: cada venta, compra, gasto, sueldo y arqueo lo mueve.
-        </div>
+        <div style={{ fontSize: 9.5, color: NEON.muted, marginTop: 7, lineHeight: 1.5 }}>{nota}</div>
       </div>
     </div>
   )
@@ -866,8 +875,13 @@ function ResumenEjecutivo() {
         </div>
       </div>
 
-      {/* ── Widget margen estimado de la semana: ventas sem − compras sem − gastos sem ── */}
-      <WidgetMargenSemana g={data.margenSemana} />
+      {/* ── Dos paneles: margen de la semana (izq) + margen histórico en vivo (der) ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 12, marginTop: 12 }}>
+        <WidgetMargen titulo="MARGEN DE LA SEMANA · ESTIMADO" g={data.margenSemana} modo="semana" estimado
+          nota="Todo de la misma semana: ventas (mayorista + minorista de arqueo) − compras − gastos/sueldos. Es un ESTIMADO: queda carne en stock para la semana que viene. No arrastra deuda vieja." />
+        <WidgetMargen titulo="MARGEN HISTÓRICO · EN VIVO" g={data.margenHistorico} modo="historico"
+          nota="Lo que te deben los mayoristas (saldo en vivo, deuda vieja incluida) + minorista de arqueo de la semana − compras − gastos. Solo lectura del saldo: no se toca ningún saldo de cuenta corriente." />
+      </div>
 
       {/* ── Cinta de métricas secundarias ── */}
       <div style={{ ...glass, marginTop: 12, padding: '14px 18px', display: 'flex', flexWrap: 'wrap', gap: '10px 28px', alignItems: 'center' }}>
