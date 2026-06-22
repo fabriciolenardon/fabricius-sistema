@@ -212,11 +212,17 @@ function useDashboardData(refreshMs = 120000) {
     const hoyDt = new Date(hoy + 'T12:00')
     const anioPasadoMesIni = `${hoyDt.getFullYear() - 1}-${String(hoyDt.getMonth() + 1).padStart(2, '0')}-01`
     const anioPasadoHoy    = `${hoyDt.getFullYear() - 1}-${String(hoyDt.getMonth() + 1).padStart(2, '0')}-${String(hoyDt.getDate()).padStart(2, '0')}`
+    // Ventana del MARGEN HISTÓRICO: arranca el lunes de la semana PASADA (acumula
+    // desde ahí, no resetea cada lunes), así conserva las compras viejas y les va
+    // restando las nuevas a medida que llegan.
+    const histDt = new Date(inicioSemanaARG() + 'T12:00'); histDt.setDate(histDt.getDate() - 7)
+    const histStart = fechaHoyARG(histDt)
 
     const [ventasHoy, ventasAyer, ventasSemana, ventasMes, ventasMesAnt, ventasAnioPasado,
            salidasMes, cuentas, facturas12m, stock, cheques, clientes,
            gastosMes, sueldosMes, pagosProvMes, movCtacteMes, todasCajas, todosDeudores, promoCfg,
-           comprasMesQ, cierresQ, comprasSemQ, remitosHoyQ, cobranzaQ, arqueosSemQ] = await Promise.all([
+           comprasMesQ, cierresQ, comprasSemQ, remitosHoyQ, cobranzaQ, arqueosSemQ,
+           histArqQ, histCompQ] = await Promise.all([
       supabase.from('ventas_minoristas').select('total, efectivo, debito, transferencia, items, fecha, hora').eq('origen', 'caja').eq('fecha', hoy),
       // hora incluida: alimenta la curva "hoy vs ayer a esta hora"
       supabase.from('ventas_minoristas').select('total, hora').eq('origen', 'caja').eq('fecha', ayer),
@@ -258,6 +264,9 @@ function useDashboardData(refreshMs = 120000) {
       supabase.rpc('ventas_cobranza_periodo', { p_desde: mesIni, p_hasta: hoy }),
       // Arqueos de la semana (lunes→hoy) — minorista REAL contado: efectivo+débito+transf
       supabase.from('arqueos_caja').select('total_contado, debito_real, transferencia_real, fecha').gte('fecha', inicioSemanaARG()).lte('fecha', hoy),
+      // Ventana HISTÓRICA (desde el lunes de la semana pasada): arqueos + compras
+      supabase.from('arqueos_caja').select('total_contado, debito_real, transferencia_real').gte('fecha', histStart).lte('fecha', hoy),
+      supabase.from('compras_proveedores').select('importe').gte('fecha', histStart).lte('fecha', hoy).not('anulado', 'is', true),
     ])
 
     const totalHoy  = (ventasHoy.data || []).reduce((s, v) => s + (Number(v.total) || 0), 0)
@@ -441,16 +450,30 @@ function useDashboardData(refreshMs = 120000) {
       gastos: costosSemana,
       resultado: ventasSemanaTotal - comprasSemanaTotal - costosSemana,
     }
-    // LADO DERECHO — margen HISTÓRICO en vivo: lo que te deben (saldo mayorista
-    // acumulado, deuda vieja incluida) + minorista de arqueo de la semana − compras
-    // − gastos. SOLO LECTURA del saldo de cta cte (no se toca ningún saldo).
+    // LADO DERECHO — margen HISTÓRICO en vivo. ACUMULA desde el lunes de la semana
+    // pasada (histStart): conserva las compras/ventas viejas y les va restando las
+    // compras nuevas que llegan. = lo que te deben (saldo mayorista acumulado, deuda
+    // vieja incluida) + minorista de arqueo + ventas mayoristas − compras − gastos,
+    // todo sobre la ventana histórica. SOLO LECTURA del saldo de cta cte.
+    const minoristaHist = (histArqQ.data || []).reduce((s, a) =>
+      s + (Number(a.total_contado) || 0) + (Number(a.debito_real) || 0) + (Number(a.transferencia_real) || 0), 0)
+    const comprasHist = (histCompQ.data || []).reduce((s, c) => s + (Number(c.importe) || 0), 0)
+    const gastosHist = (gastosMes.data || [])
+      .filter(g => !g.solo_balance && g.fecha >= histStart && (g.tipo === 'fijo' || g.tipo === 'variable' || g.tipo === 'socio'))
+      .reduce((s, g) => s + (Number(g.monto) || 0), 0)
+    const sueldosHist = (sueldosMes.data || [])
+      .filter(l => l.semana_fin >= histStart)
+      .reduce((s, l) => s + (Number(l.neto) || 0), 0)
+    const mayoristaHist = (salidasMes.data || [])
+      .filter(s => s.cobro !== 'interno' && s.fecha >= histStart)
+      .reduce((s, x) => s + (Number(x.total) || 0), 0)
     const margenHistorico = {
       deben: saldoPendienteTotal,
-      minorista: minoristaArqueoSemana,
-      ventas: ventasSemanaTotal,
-      compras: comprasSemanaTotal,
-      gastos: costosSemana,
-      resultado: saldoPendienteTotal + minoristaArqueoSemana - comprasSemanaTotal - costosSemana,
+      minorista: minoristaHist,
+      ventas: mayoristaHist + minoristaHist,
+      compras: comprasHist,
+      gastos: gastosHist + sueldosHist,
+      resultado: saldoPendienteTotal + minoristaHist - comprasHist - (gastosHist + sueldosHist),
     }
 
     // Top productos hoy
@@ -714,14 +737,16 @@ function WidgetMargen({ titulo, g, modo, estimado, nota }) {
   const R = 50, CIRC = 2 * Math.PI * R
   const dash = (Math.abs(pct) / 100) * CIRC
   const col = ganancia >= 0 ? NEON.verde : NEON.rojo
-  const primera = modo === 'historico'
+  const hist = modo === 'historico'
+  const sfx = hist ? '(acum.)' : '(semana)'
+  const primera = hist
     ? { l: 'TE DEBEN · mayorista (en vivo)', v: Number(g.deben) || 0, c: NEON.cianHi }
     : { l: 'MAYORISTA · vendido (semana)',   v: Number(g.mayorista) || 0, c: NEON.cianHi }
   const filas = [
     primera,
-    { l: '+  MINORISTA · arqueo (semana)', v: minorista, c: NEON.cian },
-    { l: '−  COMPRADO ESTA SEMANA',        v: compras,   c: NEON.ambar },
-    { l: '−  GASTOS Y SUELDOS (semana)',   v: gastos,    c: NEON.rojo },
+    { l: `+  MINORISTA · arqueo ${sfx}`, v: minorista, c: NEON.cian },
+    { l: `−  COMPRADO ${hist ? '(acumulado)' : 'ESTA SEMANA'}`, v: compras, c: NEON.ambar },
+    { l: `−  GASTOS Y SUELDOS ${sfx}`,   v: gastos,    c: NEON.rojo },
   ]
   return (
     <div className="hud" style={{ ...glass, padding: 16, display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -880,7 +905,7 @@ function ResumenEjecutivo() {
         <WidgetMargen titulo="MARGEN DE LA SEMANA · ESTIMADO" g={data.margenSemana} modo="semana" estimado
           nota="Todo de la misma semana: ventas (mayorista + minorista de arqueo) − compras − gastos/sueldos. Es un ESTIMADO: queda carne en stock para la semana que viene. No arrastra deuda vieja." />
         <WidgetMargen titulo="MARGEN HISTÓRICO · EN VIVO" g={data.margenHistorico} modo="historico"
-          nota="Lo que te deben los mayoristas (saldo en vivo, deuda vieja incluida) + minorista de arqueo de la semana − compras − gastos. Solo lectura del saldo: no se toca ningún saldo de cuenta corriente." />
+          nota="Acumula: lo que te deben los mayoristas (saldo en vivo, deuda vieja incluida) + minorista de arqueo − compras − gastos, desde la semana pasada. No resetea: conserva lo viejo y le resta las compras nuevas que llegan. Solo lectura del saldo." />
       </div>
 
       {/* ── Cinta de métricas secundarias ── */}
