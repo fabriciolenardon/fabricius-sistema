@@ -3168,6 +3168,12 @@ for (const item of items) {
       })
       // El saldo (del movimiento y del cliente) lo fija el recálculo desde el ledger.
       await recomputarSaldoCliente(clienteId)
+      // Snapshot del saldo resultante en el remito (solo lectura) para imprimirlo.
+      const { data: cliSaldo } = await supabase.from('clientes').select('saldo').eq('id', clienteId).maybeSingle()
+      if (remitoData?.id && cliSaldo) {
+        await supabase.from('remitos').update({ saldo_cta_cte: cliSaldo.saldo }).eq('id', remitoData.id)
+        remitoData.saldo_cta_cte = cliSaldo.saldo
+      }
     }
 
     showAlert({ type: 'success', msg: '✅ Despacho registrado — Stock descontado — Remito generado' })
@@ -3804,12 +3810,22 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
     cargarRemitos()
   }
 
-  function imprimir(remito) {
+  async function imprimir(remito) {
     const items = remito.items || []
     // Título = nombre por defecto al "Guardar como PDF". Sin puntos/barras (que el
     // sistema interpreta como extensión) y con cliente + fecha para que salga listo.
     const cli = String(remito.cliente_nombre || 'cliente').replace(/[^\wáéíóúñ\s-]/gi, '').trim() || 'cliente'
     const tituloPdf = `Remito ${cli} ${remito.fecha} N${String(remito.numero).padStart(5, '0')}`
+    // Saldo de cuenta corriente: snapshot guardado al emitir; si es viejo (sin
+    // snapshot), lo leo en vivo. Solo lectura — no toca ningún saldo.
+    let saldoCta = remito.saldo_cta_cte
+    if (saldoCta == null && remito.cliente_id) {
+      const { data: cliSal } = await supabase.from('clientes').select('saldo').eq('id', remito.cliente_id).maybeSingle()
+      saldoCta = cliSal?.saldo
+    }
+    const saldoHtml = (remito.cliente_id && saldoCta != null)
+      ? `<div style="margin-top:8px;text-align:right"><span style="font-size:12px;border:1px dashed #000;padding:5px 12px;display:inline-block">Saldo cuenta corriente: <strong>$${Math.round(Number(saldoCta)).toLocaleString('es-AR')}</strong></span></div>`
+      : ''
     const html = `<html><head><title>${tituloPdf}</title>
       <style>* { margin: 0; padding: 0; box-sizing: border-box; } body { font-family: Arial, sans-serif; font-size: 12px; padding: 20px; max-width: 400px; margin: 0 auto; } .header { display: flex; justify-content: space-between; margin-bottom: 16px; border-bottom: 2px solid #000; padding-bottom: 12px; } table { width: 100%; border-collapse: collapse; margin: 12px 0; } th { border: 1px solid #000; padding: 4px; text-align: center; font-size: 10px; font-weight: 700; background: #f0f0f0; } td { border: 1px solid #000; padding: 4px; text-align: center; font-size: 11px; } td.desc { text-align: left; } .total-box { border: 1px solid #000; padding: 6px 12px; font-size: 13px; font-weight: 700; } .firma { margin-top: 40px; border-top: 1px solid #000; padding-top: 4px; text-align: center; font-size: 10px; } @media print { body { padding: 10px; } }</style></head>
       <body>
@@ -3819,6 +3835,7 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
         <table><thead><tr><th style="width:40%">DESCRIPCIÓN</th><th style="width:15%">KG</th><th style="width:22%">PRECIO UNITARIO</th><th style="width:23%">IMPORTE</th></tr></thead>
         <tbody>${items.map(item => `<tr><td class="desc">${item.descripcion}</td><td>${item.kg}</td><td>$${Math.round(item.precio).toLocaleString('es-AR')}</td><td>$${Math.round(item.importe).toLocaleString('es-AR')}</td></tr>`).join('')}${Array(Math.max(0, 10 - items.length)).fill('<tr><td>&nbsp;</td><td></td><td></td><td></td></tr>').join('')}</tbody></table>
         <div style="display:flex;justify-content:flex-end;margin-top:8px"><div class="total-box">TOTAL: $${Math.round(remito.total).toLocaleString('es-AR')}</div></div>
+        ${saldoHtml}
         <div class="firma">Firma y aclaración: ________________________________</div>
       </body></html>`
     imprimirHTML(html)
