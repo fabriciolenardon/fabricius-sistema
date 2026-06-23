@@ -1,6 +1,6 @@
 // Cheques.jsx
 import { useEffect, useState } from 'react'
-import { supabase } from '../../lib/supabase'
+import { supabase, fetchAllRows } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
 import { parseNumero, fmtPrecio } from '../../lib/formatos'
 import Paginador, { usePaginacion } from '../../components/Paginador'
@@ -46,7 +46,7 @@ export default function Cheques() {
   useEffect(() => { fetchCheques(); fetchClientes() }, [])
 
   function fetchCheques() {
-    supabase.from('cheques').select('*').order('fecha_recepcion', { ascending: false }).then(({ data }) => setCheques(data || []))
+    fetchAllRows(() => supabase.from('cheques').select('*').order('fecha_recepcion', { ascending: false })).then(({ data }) => setCheques(data || []))
   }
   function fetchClientes() {
     supabase.from('clientes').select('id, nombre').order('nombre').then(({ data }) => setClientes(data || []))

@@ -14,18 +14,19 @@
 //   saldo = Σdebe − Σhaber
 //     > 0  le debemos · < 0  saldo a favor · = 0  al día
 // ============================================================
-import { supabase } from './supabase'
+import { supabase, fetchAllRows } from './supabase'
 
-// Trae todos los movimientos de un proveedor, MÁS antiguos primero
-// (para poder recalcular el saldo corriente acumulando en orden).
+// Trae TODOS los movimientos de un proveedor, MÁS antiguos primero (para poder
+// recalcular el saldo corriente acumulando en orden). Paginado de a 1000: si se
+// cortara en 1000, el saldo recalculado quedaría mal (subdeclarado).
 export async function cargarMovimientos(proveedorId) {
   if (!proveedorId) return []
-  const { data } = await supabase
+  const { data } = await fetchAllRows(() => supabase
     .from('movimientos_proveedores')
     .select('*')
     .eq('proveedor_id', proveedorId)
     .order('fecha', { ascending: true })
-    .order('id', { ascending: true })
+    .order('id', { ascending: true }))
   return data || []
 }
 

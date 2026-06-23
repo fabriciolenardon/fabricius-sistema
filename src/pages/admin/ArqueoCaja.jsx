@@ -7,7 +7,7 @@
 // la diferencia (sobrante, faltante o cuadrado).
 // ============================================================
 import { useState, useEffect, useMemo } from 'react'
-import { supabase } from '../../lib/supabase'
+import { supabase, fetchAllRows } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import { fechaHoyARG, horaHoyARG } from '../../lib/fechas'
 import { parseNumero, fmtPrecio } from '../../lib/formatos'
@@ -71,7 +71,7 @@ export default function ArqueoCaja() {
     setLoading(true)
     const [{ data: ventas }, { data: arqueos }] = await Promise.all([
       supabase.from('ventas_minoristas').select('efectivo, debito, transferencia').eq('origen', 'caja').eq('fecha', fechaArqueo),
-      supabase.from('arqueos_caja').select('*').order('fecha', { ascending: false }).order('hora', { ascending: false }).limit(100),
+      fetchAllRows(() => supabase.from('arqueos_caja').select('*').order('fecha', { ascending: false }).order('hora', { ascending: false })),
     ])
     const arr = ventas || []
     const totalEf = arr.reduce((s, v) => s + (Number(v.efectivo) || 0), 0)

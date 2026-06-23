@@ -19,14 +19,17 @@
 // escribe las filas que cambian, así que es barato cuando el ledger ya está sano
 // (un alta normal solo toca la última fila). Llamarlo DESPUÉS de cada operación que
 // toque el ledger, en vez de ajustar el saldo a mano.
-import { supabase } from './supabase'
+import { supabase, fetchAllRows } from './supabase'
 
 export async function recomputarSaldoCliente(clienteId) {
   if (!clienteId) return 0
-  const { data: movs, error } = await supabase
+  // fetchAllRows: pagina de a 1000. Sin esto, un cliente con +1000 movimientos
+  // recalcularía el saldo MAL (Supabase corta en 1000) — y el saldo de cta cte
+  // es la fuente de verdad de quién/cuánto debe. NUNCA truncar acá.
+  const { data: movs, error } = await fetchAllRows(() => supabase
     .from('movimientos_ctacte')
     .select('id, debe, haber, saldo, created_at, fecha')
-    .eq('cliente_id', clienteId)
+    .eq('cliente_id', clienteId))
   if (error) { console.warn('recomputarSaldoCliente:', error.message); return null }
 
   // Orden cronológico estable: como se fueron creando (created_at), fecha desempata.

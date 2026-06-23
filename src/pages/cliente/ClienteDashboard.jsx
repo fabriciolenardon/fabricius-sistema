@@ -1,6 +1,6 @@
 // ClienteDashboard.jsx - Vistas del portal del cliente mayorista
 import { useEffect, useState } from 'react'
-import { supabase } from '../../lib/supabase'
+import { supabase, fetchAllRows } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
@@ -166,10 +166,10 @@ export function ClienteCtaCte() {
 
   useEffect(() => {
     if (!cliente) return
-    supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id).order('fecha', { ascending: false }).then(({ data }) => setMovimientos(data || []))
+    fetchAllRows(() => supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id).order('fecha', { ascending: false })).then(({ data }) => setMovimientos(data || []))
     const canal = supabase.channel('ctacte-cliente')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'movimientos_ctacte', filter: `cliente_id=eq.${cliente.id}` }, () => {
-        supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id).order('fecha', { ascending: false }).then(({ data }) => setMovimientos(data || []))
+        fetchAllRows(() => supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id).order('fecha', { ascending: false })).then(({ data }) => setMovimientos(data || []))
       }).subscribe()
     return () => supabase.removeChannel(canal)
   }, [cliente])
@@ -225,10 +225,10 @@ export function ClienteRemitos() {
 
   useEffect(() => {
     if (!cliente) return
-    supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false }).then(({ data }) => setRemitos(data || []))
+    fetchAllRows(() => supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false })).then(({ data }) => setRemitos(data || []))
     const canal = supabase.channel('remitos-cliente-lista')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'remitos', filter: `cliente_id=eq.${cliente.id}` }, () => {
-        supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false }).then(({ data }) => setRemitos(data || []))
+        fetchAllRows(() => supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false })).then(({ data }) => setRemitos(data || []))
       }).subscribe()
     return () => supabase.removeChannel(canal)
   }, [cliente])
