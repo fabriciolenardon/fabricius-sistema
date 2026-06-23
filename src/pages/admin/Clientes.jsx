@@ -2,7 +2,7 @@
 // CLIENTES & CUENTA CORRIENTE
 // =============================================
 import { useEffect, useState, useMemo } from 'react'
-import { supabase } from '../../lib/supabase'
+import { supabase, fetchAllRows } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
 import { parseNumero, fmtPrecio } from '../../lib/formatos'
 import { imprimirHTML } from '../../lib/imprimir'
@@ -46,10 +46,11 @@ async function seleccionar(cliente) {
     setSeleccionado(cliente)
     setShowPago(false)
     setShowForm(false)
-    const { data: movs } = await supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id).order('fecha', { ascending: false })
+    // fetchAllRows: pagina de a 1000 → muestra TODO el historial del cliente aunque
+    // tenga miles de movimientos/remitos (Supabase corta en 1000 sin esto).
+    const { data: movs } = await fetchAllRows(() => supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id).order('fecha', { ascending: false }))
     setMovimientos(movs || [])
-    // Sin .limit — paginamos en cliente para mostrar todo el historial del cliente
-    const { data: rems } = await supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false })
+    const { data: rems } = await fetchAllRows(() => supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false }))
     setRemitos(rems || [])
   }
   // Reporte de cobranzas por período: suma, por cliente, los remitos (compras) y
@@ -62,8 +63,8 @@ async function seleccionar(cliente) {
     const pagHasta = cobPagHasta || cobHasta
     setCobLoading(true)
     const [{ data: rems }, { data: movs }] = await Promise.all([
-      supabase.from('remitos').select('cliente_id, total, fecha, eliminado').gte('fecha', cobDesde).lte('fecha', cobHasta),
-      supabase.from('movimientos_ctacte').select('cliente_id, haber, fecha').gte('fecha', pagDesde).lte('fecha', pagHasta).gt('haber', 0),
+      fetchAllRows(() => supabase.from('remitos').select('cliente_id, total, fecha, eliminado').gte('fecha', cobDesde).lte('fecha', cobHasta)),
+      fetchAllRows(() => supabase.from('movimientos_ctacte').select('cliente_id, haber, fecha').gte('fecha', pagDesde).lte('fecha', pagHasta).gt('haber', 0)),
     ])
     const map = {}
     ;(rems || []).forEach(r => {

@@ -18,7 +18,7 @@
 // Cada item es expandible para ver el detalle de piezas y notas.
 // ============================================================
 import { useState, useEffect } from 'react'
-import { supabase } from '../../lib/supabase'
+import { supabase, fetchAllRows } from '../../lib/supabase'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 import { fmtKg } from '../../lib/formatos'
 
@@ -50,8 +50,8 @@ export default function DesposteHistorial() {
   async function cargar() {
     setLoading(true)
     const [{ data: despostes }, { data: flujo }] = await Promise.all([
-      supabase.from('despostes').select('*').order('created_at', { ascending: false }).limit(200),
-      supabase.from('flujo_deposito').select('*').order('created_at', { ascending: false }).limit(200),
+      fetchAllRows(() => supabase.from('despostes').select('*').order('created_at', { ascending: false })),
+      fetchAllRows(() => supabase.from('flujo_deposito').select('*').order('created_at', { ascending: false })),
     ])
 
     // Si un flujo ya fue aprobado y creó un desposte, no duplicamos.

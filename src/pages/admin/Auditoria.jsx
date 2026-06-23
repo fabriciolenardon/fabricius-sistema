@@ -6,7 +6,7 @@
 // los snapshots JSON (antes/después).
 // ============================================================
 import { useState, useEffect, useMemo } from 'react'
-import { supabase } from '../../lib/supabase'
+import { supabase, fetchAllRows } from '../../lib/supabase'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
 const fmtFechaHora = d => d ? new Date(d).toLocaleString('es-AR') : '—'
@@ -44,10 +44,15 @@ export default function Auditoria() {
 
   async function cargar() {
     setLoading(true)
-    let q = supabase.from('auditoria_log').select('*').order('fecha', { ascending: false }).limit(500)
-    if (filtroDesde) q = q.gte('fecha', filtroDesde)
-    if (filtroHasta) q = q.lte('fecha', filtroHasta + 'T23:59:59')
-    const { data } = await q
+    // fetchAllRows: trae TODOS los registros (paginado), no solo los últimos 500.
+    // El filtro de fechas acota el volumen si hace falta.
+    const make = () => {
+      let q = supabase.from('auditoria_log').select('*').order('fecha', { ascending: false })
+      if (filtroDesde) q = q.gte('fecha', filtroDesde)
+      if (filtroHasta) q = q.lte('fecha', filtroHasta + 'T23:59:59')
+      return q
+    }
+    const { data } = await fetchAllRows(make)
     setLogs(data || [])
     setLoading(false)
   }

@@ -1,6 +1,6 @@
 // Sueldos.jsx
 import { useEffect, useState } from 'react'
-import { supabase } from '../../lib/supabase'
+import { supabase, fetchAllRows } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
@@ -124,7 +124,7 @@ export default function Sueldos() {
 
   async function fetchLiquidaciones() {
     // Sin .limit() — paginamos en cliente con usePaginacion para mostrar TODAS las semanas
-    const { data } = await supabase.from('liquidaciones_sueldos').select('*').order('semana_inicio', { ascending: false })
+    const { data } = await fetchAllRows(() => supabase.from('liquidaciones_sueldos').select('*').order('semana_inicio', { ascending: false }))
     setLiquidaciones(data || [])
   }
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { supabase } from '../../lib/supabase'
+import { supabase, fetchAllRows } from '../../lib/supabase'
 import { fechaHoyARG, fechaRelativaARG, esFechaFutura } from '../../lib/fechas'
 import { lunesDeLaSemana, domingoDeLaSemana } from '../../lib/cierreAuto'
 import { resolverDescuentoStock } from '../../lib/stockHelpers'
@@ -3611,9 +3611,9 @@ export function RemitosTab({ remitoActual }) {
     // Orden por FECHA DE EMISIÓN (no por created_at): así un remito cargado hoy
     // pero con fecha de la semana pasada cae en su lugar cronológico, que es lo
     // que valida el cierre semanal. Más nuevo arriba; created_at desempata.
-    const { data } = await supabase.from('remitos').select('*')
+    const { data } = await fetchAllRows(() => supabase.from('remitos').select('*')
       .order('fecha', { ascending: false })
-      .order('created_at', { ascending: false })
+      .order('created_at', { ascending: false }))
     setRemitos(data || [])
   }
   async function eliminarRemito(remito) {
@@ -4081,13 +4081,14 @@ function ProveedoresTab() {
   async function fetchAll() {
     // Sin .limit — paginamos en cliente para mostrar todo el historial
     const [{ data: c }, { data: p }, { data: prov }, { data: ent }, { data: movs }] = await Promise.all([
-      supabase.from('compras_proveedores').select('*').order('fecha', { ascending: false }),
-      supabase.from('pagos_proveedores_semanal').select('*').order('fecha', { ascending: false }),
+      fetchAllRows(() => supabase.from('compras_proveedores').select('*').order('fecha', { ascending: false })),
+      fetchAllRows(() => supabase.from('pagos_proveedores_semanal').select('*').order('fecha', { ascending: false })),
       supabase.from('proveedores').select('*').eq('activo', true).order('nombre'),
-      supabase.from('entradas_deposito').select('*').not('proveedor_nombre', 'is', null).order('fecha', { ascending: false }),
-      // Cuenta corriente: movimientos completos para totales debe/haber,
-      // saber quién está inicializado, y el historial global de pagos.
-      supabase.from('movimientos_proveedores').select('*').order('fecha', { ascending: false }).order('id', { ascending: false }).then(r => r).catch(() => ({ data: null })),
+      fetchAllRows(() => supabase.from('entradas_deposito').select('*').not('proveedor_nombre', 'is', null).order('fecha', { ascending: false })),
+      // Cuenta corriente: movimientos completos para totales debe/haber, saber quién
+      // está inicializado, y el historial global. Paginado: si se cortara en 1000,
+      // los saldos por proveedor (tot) quedarían mal.
+      fetchAllRows(() => supabase.from('movimientos_proveedores').select('*').order('fecha', { ascending: false }).order('id', { ascending: false })),
     ])
     setCompras(c || [])
     setPagos(p || [])
