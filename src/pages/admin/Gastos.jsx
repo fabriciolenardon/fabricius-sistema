@@ -332,9 +332,11 @@ export default function Gastos() {
   const totalEgresos = totVar + totFijo + totSocio
   const balance = totIngreso - totalEgresos
 
-  // Totales ACUMULADOS hasta la fecha (TODOS los gastos, sin importar el filtro
-  // de período). Socio separado por Fabri / Ariel. Para el panel bajo el formulario.
-  const acum = (gastos || []).filter(g => !g.solo_balance)
+  // Totales del MES en curso (del día 01 hasta hoy), sin importar el filtro de
+  // período de la lista. Socio separado por Fabri / Ariel. Panel bajo el formulario.
+  const mesIniGastos = fechaHoyARG().slice(0, 8) + '01'
+  const hoyGastos = fechaHoyARG()
+  const acum = (gastos || []).filter(g => !g.solo_balance && g.fecha >= mesIniGastos && g.fecha <= hoyGastos)
   const acumVar   = acum.filter(g => g.tipo === 'variable').reduce((s, g) => s + (Number(g.monto) || 0), 0)
   const acumFijo  = acum.filter(g => g.tipo === 'fijo').reduce((s, g) => s + (Number(g.monto) || 0), 0)
   const acumFabri = acum.filter(g => g.tipo === 'socio' && g.socio === 'fabricio').reduce((s, g) => s + (Number(g.monto) || 0), 0)
@@ -599,7 +601,7 @@ export default function Gastos() {
           {/* ── Totales por categoría hasta la fecha ── */}
           <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
             <div style={{ fontSize: 11, letterSpacing: 1.5, color: 'var(--muted)', fontWeight: 700, marginBottom: 12 }}>
-              📊 TOTAL DE GASTOS HASTA LA FECHA
+              📊 GASTOS DEL MES (01 → HOY)
             </div>
             {[
               { l: '💸 Gastos variables',     v: acumVar,   c: 'var(--red-light)' },
