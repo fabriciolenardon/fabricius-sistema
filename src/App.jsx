@@ -174,9 +174,10 @@ export default function App() {
         </Route>
       </Routes>
       </Suspense>
-      {/* El asistente Iris (holograma flotante) tiene acceso total al sistema:
-          solo lo ve el CEO. NUNCA clientes, franquicias ni otros roles. */}
-      {user && profile?.rol === 'admin' && user.email === 'fabriciolenardon@gmail.com' && <AsistenteIA />}
+      {/* El asistente Iris (holograma flotante) tiene acceso total al sistema.
+          Lo ve el CEO y todo admin con iris_habilitado=true en su perfil.
+          NUNCA clientes, franquicias ni otros roles. */}
+      {user && profile?.rol === 'admin' && (user.email === 'fabriciolenardon@gmail.com' || profile?.iris_habilitado) && <AsistenteIA />}
     </>
   )
 }
