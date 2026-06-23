@@ -332,6 +332,14 @@ export default function Gastos() {
   const totalEgresos = totVar + totFijo + totSocio
   const balance = totIngreso - totalEgresos
 
+  // Totales ACUMULADOS hasta la fecha (TODOS los gastos, sin importar el filtro
+  // de período). Socio separado por Fabri / Ariel. Para el panel bajo el formulario.
+  const acum = (gastos || []).filter(g => !g.solo_balance)
+  const acumVar   = acum.filter(g => g.tipo === 'variable').reduce((s, g) => s + (Number(g.monto) || 0), 0)
+  const acumFijo  = acum.filter(g => g.tipo === 'fijo').reduce((s, g) => s + (Number(g.monto) || 0), 0)
+  const acumFabri = acum.filter(g => g.tipo === 'socio' && g.socio === 'fabricio').reduce((s, g) => s + (Number(g.monto) || 0), 0)
+  const acumAriel = acum.filter(g => g.tipo === 'socio' && g.socio === 'ariel').reduce((s, g) => s + (Number(g.monto) || 0), 0)
+
   // Meses disponibles
   const mesesDisp = [...new Set(gastos.map(g => g.fecha?.substring(0, 7)))].filter(Boolean).sort().reverse()
 
@@ -586,6 +594,28 @@ export default function Gastos() {
             <button className="btn btn-gold" onClick={guardar} disabled={guardando} style={{ flex: 1, opacity: guardando ? 0.6 : 1 }}>
               {guardando ? '⏳ Guardando…' : editandoId ? '💾 Guardar cambios' : '✅ Registrar'}
             </button>
+          </div>
+
+          {/* ── Totales por categoría hasta la fecha ── */}
+          <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+            <div style={{ fontSize: 11, letterSpacing: 1.5, color: 'var(--muted)', fontWeight: 700, marginBottom: 12 }}>
+              📊 TOTAL DE GASTOS HASTA LA FECHA
+            </div>
+            {[
+              { l: '💸 Gastos variables',     v: acumVar,   c: 'var(--red-light)' },
+              { l: '📌 Gastos fijos',         v: acumFijo,  c: 'var(--blue)' },
+              { l: '👤 Gasto socio Fabri',    v: acumFabri, c: 'var(--gold)' },
+              { l: '👤 Gasto socio Ariel',    v: acumAriel, c: 'var(--gold)' },
+            ].map(x => (
+              <div key={x.l} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '9px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                <span style={{ fontSize: 13, color: 'var(--text2)' }}>{x.l}</span>
+                <span style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 19, color: x.c }}>{fmt(x.v)}</span>
+              </div>
+            ))}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', paddingTop: 11, marginTop: 4, borderTop: '1px solid var(--border)' }}>
+              <span style={{ fontSize: 12, letterSpacing: 1, color: 'var(--muted)', fontWeight: 700 }}>TOTAL EGRESOS</span>
+              <span style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 23, color: 'var(--red-light)' }}>{fmt(acumVar + acumFijo + acumFabri + acumAriel)}</span>
+            </div>
           </div>
         </div>
 
