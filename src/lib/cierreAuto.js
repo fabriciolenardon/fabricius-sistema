@@ -187,9 +187,10 @@ export async function calcularCierreAuto(desde, hasta) {
   const cobradoEfectivo = sum(ventasCaja, 'efectivo')
   const cobradoDebito = sum(ventasCaja, 'debito')
   const cobradoTransferencia = sum(ventasCaja, 'transferencia')
-  // Cobranzas de cta cte: pago y cheque tienen haber > 0
+  // Cobranzas de cta cte: SOLO pagos reales (efectivo/transferencia). Los cheques
+  // NO son cobro nuestro — se endosan a proveedores, no se cobran (no van al flujo).
   const cobranzasCta = movCtaCte
-    .filter(m => m.tipo === 'pago' || m.tipo === 'cheque')
+    .filter(m => m.tipo === 'pago')
     .reduce((s, m) => s + (Number(m.haber) || 0), 0)
   // Mayorista cobrada al despachar (remitos con cobro != 'cta_cte')
   const cobradoMayorista = remitos

@@ -375,8 +375,10 @@ function useDashboardData(refreshMs = 120000) {
 
     // ── INGRESOS REALES DEL MES (cobranzas, no facturación) ──
     const ingresoCajaMes = totalCajaMes
+    // Los cheques NO cuentan como cobro nuestro: se endosan a proveedores, no se
+    // cobran. Solo cuentan los pagos reales (efectivo/transferencia) → tipo 'pago'.
     const cobranzasCtacte = (movCtacteMes.data || [])
-      .filter(m => m.tipo === 'pago' || m.tipo === 'cheque')
+      .filter(m => m.tipo === 'pago')
       .reduce((s, m) => s + (Number(m.haber) || 0), 0)
     const ingresoExtras = (gastosMes.data || []).filter(g => g.tipo === 'ingreso')
       .reduce((s, g) => s + (Number(g.monto) || 0), 0)
@@ -984,7 +986,7 @@ function ResumenEjecutivo() {
       {/* ── Cheques + deudores ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 12, marginTop: 12 }}>
         <div style={{ ...glass, padding: 18 }}>
-          <Etiqueta texto="📄 CHEQUES A COBRAR (15 DÍAS)" />
+          <Etiqueta texto="📄 CHEQUES · VENCIMIENTOS (15 DÍAS)" />
           {data.cheques.length === 0 ? (
             <p style={{ color: NEON.muted, fontSize: 13 }}>Sin cheques próximos.</p>
           ) : (

@@ -67,16 +67,9 @@ export default function Cheques() {
       monto: parseNumero(form.monto), destino: form.destino, proveedor_nombre: form.proveedor, notas: form.notas
     })
     if (error) { setAlert({ type: 'error', msg: error.message }); return }
-    if (form.destino === 'ctacte') {
-      const { data: clienteActual } = await supabase.from('clientes').select('saldo').eq('id', form.clienteId).single()
-      const nuevoSaldo = (clienteActual?.saldo || 0) - parseNumero(form.monto)
-      await supabase.from('movimientos_ctacte').insert({
-        fecha: form.fechaRec, cliente_id: form.clienteId,
-        tipo: 'cheque', descripcion: `${tipo === 'echeq' ? 'E-cheq' : 'Cheque'} Nro. ${form.numero}${form.banco ? ' — ' + form.banco : ''}`,
-        debe: 0, haber: parseNumero(form.monto), saldo: nuevoSaldo
-      })
-      await supabase.from('clientes').update({ saldo: nuevoSaldo }).eq('id', form.clienteId)
-    }
+    // Los cheques recibidos son SOLO un historial: no tocan la cuenta corriente
+    // del cliente ni cuentan como cobro nuestro (se endosan a proveedores, no se
+    // cobran). Por eso acá NO se crea movimiento de cta cte ni se ajusta el saldo.
     showAlert(`✅ ${tipo === 'echeq' ? 'E-cheq' : 'Cheque'} #${form.numero} registrado`)
     setForm(f => ({ ...f, numero: '', monto: '', notas: '', banco: '' }))
     fetchCheques()
@@ -218,10 +211,10 @@ export default function Cheques() {
           <div className="form-group"><label>Monto ($)</label>
             <input type="number" value={form.monto} onChange={e => setForm(f => ({ ...f, monto: e.target.value }))} />
           </div>
-          <div className="form-group"><label>Destino</label>
+          <div className="form-group"><label>¿Qué hacés con el cheque?</label>
             <select value={form.destino} onChange={e => setForm(f => ({ ...f, destino: e.target.value }))}>
-              <option value="ctacte">💳 Imputar a cuenta corriente del cliente</option>
-              <option value="endoso">🔄 Endosar a proveedor</option>
+              <option value="ctacte">📥 Lo tengo en cartera</option>
+              <option value="endoso">🔄 Lo endoso a un proveedor</option>
             </select>
           </div>
           {form.destino === 'endoso' && (
@@ -251,7 +244,7 @@ export default function Cheques() {
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 22, color: 'var(--green)' }}>{fmt(ch.monto)}</div>
                   <span className={`badge ${ch.destino === 'endoso' ? 'badge-amber' : 'badge-teal'}`}>
-                    {ch.destino === 'endoso' ? '→ ' + ch.proveedor_nombre : 'Cta. Cte.'}
+                    {ch.destino === 'endoso' ? '→ ' + ch.proveedor_nombre : 'En cartera'}
                   </span>
                 </div>
               </div>
