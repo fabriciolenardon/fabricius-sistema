@@ -470,21 +470,15 @@ export default function Caja() {
       showMsg(`❌ Falta cobrar ${fmt(totalACobrar - cobrado)}`, 'error')
       return
     }
-    // TOPE DURO anti-typo (NO se puede saltear): ninguna venta de mostrador tiene
-    // un pago de más de $50.000.000. Un monto así es seguro un error de tipeo
-    // (ej. $2.000.000.000 de efectivo en una venta de $13.392). Se bloquea y listo.
-    const TOPE_PAGO = 50000000
-    const pagoMax = Math.max(parseNumero(pago.efectivo), parseNumero(pago.debito), parseNumero(pago.transferencia))
-    if (pagoMax > TOPE_PAGO) {
-      showMsg(`🚫 Monto demasiado alto: ${fmt(pagoMax)}. Parece un error de tipeo — ninguna venta de mostrador supera los ${fmt(TOPE_PAGO)}. Corregí el monto.`, 'error', 7000)
-      return
-    }
-    // Guardia anti-typo: si lo cargado supera al total por un vuelto absurdo
-    // (> $1.000.000), casi seguro es un error de tipeo en el monto (ej. una venta
-    // de $10.279 con $2.000.000.000 de efectivo). Pedimos confirmación para que el
-    // cajero lo revise antes de guardar un número disparatado que ensucia la caja.
-    if (vuelto > 1000000) {
-      if (!confirm(`⚠️ Cargaste ${fmt(cobrado)} para una venta de ${fmt(totalACobrar)}.\nEl vuelto sería ${fmt(vuelto)}.\n\n¿Es correcto? Si te equivocaste, cancelá y corregí el monto.`)) return
+    // TOPE de seguridad: una venta de mostrador de más de $1.000.000 pide el CÓDIGO
+    // de seguridad (240697) para confirmar. Cubre tanto ventas grandes legítimas (se
+    // confirman con el código) como errores de tipeo en el monto (ej. $2.000.000.000
+    // de efectivo en una venta de $13.392): un typo no va a tener el código.
+    const TOPE_CAJA = 1000000
+    const montoMax = Math.max(totalACobrar, cobrado, parseNumero(pago.efectivo), parseNumero(pago.debito), parseNumero(pago.transferencia))
+    if (montoMax > TOPE_CAJA) {
+      const codigo = prompt(`⚠️ Esta venta supera $1.000.000 (${fmt(montoMax)}).\n\nIngresá el código de seguridad para confirmar:`)
+      if (codigo !== '240697') { showMsg('🚫 Código incorrecto — la venta NO se registró.', 'error', 6000); return }
     }
 
     setGuardandoVenta(true)
