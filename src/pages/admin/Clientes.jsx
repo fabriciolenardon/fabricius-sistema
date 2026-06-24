@@ -821,10 +821,40 @@ async function eliminarMovimiento(mov) {
 // Sub-componente: lista paginada de remitos del cliente seleccionado.
 // Antes mostraba 20 remitos máx; ahora pagina todos.
 function RemitosCliente({ remitos, imprimirRemito }) {
-  const pag = usePaginacion(remitos || [], 20)
+  const [desde, setDesde] = useState('')
+  const [hasta, setHasta] = useState('')
+  const lista = remitos || []
+  const hayFiltro = !!(desde || hasta)
+  // Filtra por rango de fecha de emisión del remito.
+  const filtrados = hayFiltro
+    ? lista.filter(r => (!desde || r.fecha >= desde) && (!hasta || r.fecha <= hasta))
+    : lista
+  // Total a cobrar del rango: SOLO remitos no anulados (un anulado no es una compra).
+  const noAnulados = filtrados.filter(r => !r.eliminado)
+  const totalRango = noAnulados.reduce((s, r) => s + (Number(r.total) || 0), 0)
+  const pag = usePaginacion(filtrados, 20)
+  const inpF = { padding: '7px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 13 }
   return (
     <div className="card" style={{ marginBottom: 16 }}>
-      <div className="card-title">🧾 Remitos ({(remitos || []).length})</div>
+      <div className="card-title">🧾 Remitos ({lista.length})</div>
+      {/* Buscador por fecha + total a cobrar del rango (para no sumar a mano) */}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 14, padding: 12, background: 'var(--surface2)', borderRadius: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <label style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 700 }}>DESDE</label>
+          <input type="date" value={desde} onChange={e => setDesde(e.target.value)} style={inpF} />
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <label style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 700 }}>HASTA</label>
+          <input type="date" value={hasta} onChange={e => setHasta(e.target.value)} style={inpF} />
+        </div>
+        {hayFiltro && <button className="btn btn-ghost btn-sm" onClick={() => { setDesde(''); setHasta('') }}>Limpiar</button>}
+        <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
+          <div style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 700, letterSpacing: 0.5 }}>
+            {hayFiltro ? `TOTAL A COBRAR DEL RANGO · ${noAnulados.length} boleta${noAnulados.length === 1 ? '' : 's'}` : `TOTAL · ${noAnulados.length} boleta${noAnulados.length === 1 ? '' : 's'}`}
+          </div>
+          <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 26, color: 'var(--gold)', lineHeight: 1 }}>${Math.round(totalRango).toLocaleString('es-AR')}</div>
+        </div>
+      </div>
       <table>
         <thead><tr><th>N° Remito</th><th>Fecha</th><th>Total</th><th>Imprimir</th></tr></thead>
         <tbody>
@@ -839,7 +869,7 @@ function RemitosCliente({ remitos, imprimirRemito }) {
               <td>{!r.eliminado && <button onClick={() => imprimirRemito(r)} style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>🖨️</button>}</td>
             </tr>
           ))}
-          {(remitos || []).length === 0 && <tr><td colSpan={4} className="empty">Sin remitos</td></tr>}
+          {filtrados.length === 0 && <tr><td colSpan={4} className="empty">{hayFiltro ? 'Sin remitos en ese rango' : 'Sin remitos'}</td></tr>}
         </tbody>
       </table>
       <Paginador {...pag.controles} label="remitos" />
