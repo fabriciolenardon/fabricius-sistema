@@ -1152,8 +1152,9 @@ export function ReporteFlujo({ data }) {
   //   - pagos recibidos de clientes (movimientos_ctacte tipo='pago')
   //   - ingresos extras cargados como gastos.tipo='ingreso'
   const ingresos = useMemo(() => {
-    const caja = data.ventasCaja.reduce((s, v) =>
-      s + (Number(v.efectivo) || 0) + (Number(v.debito) || 0) + (Number(v.transferencia) || 0), 0)
+    // Usa el TOTAL de la venta (no el desglose por medio de pago): es el importe
+    // real vendido y es inmune a un typo en efectivo/débito/transferencia.
+    const caja = data.ventasCaja.reduce((s, v) => s + (Number(v.total) || 0), 0)
     // Cheques NO cuentan como ingreso: se endosan a proveedores, no se cobran.
     const cobranzasCtacte = data.movimientosCtacte
       .filter(m => m.tipo === 'pago')
@@ -1196,8 +1197,7 @@ export function ReporteFlujo({ data }) {
       if (!acc[fecha]) acc[fecha] = { fecha, ingresos: 0, egresos: 0 }
       acc[fecha][key] += Number(monto) || 0
     }
-    data.ventasCaja.forEach(v => sumar(v.fecha, 'ingresos',
-      (Number(v.efectivo) || 0) + (Number(v.debito) || 0) + (Number(v.transferencia) || 0)))
+    data.ventasCaja.forEach(v => sumar(v.fecha, 'ingresos', Number(v.total) || 0))
     data.movimientosCtacte.filter(m => m.tipo === 'pago')
       .forEach(m => sumar(m.fecha, 'ingresos', Number(m.haber) || 0))
     data.gastos.filter(g => g.tipo === 'ingreso').forEach(g => sumar(g.fecha, 'ingresos', g.monto))

@@ -470,6 +470,15 @@ export default function Caja() {
       showMsg(`❌ Falta cobrar ${fmt(totalACobrar - cobrado)}`, 'error')
       return
     }
+    // TOPE DURO anti-typo (NO se puede saltear): ninguna venta de mostrador tiene
+    // un pago de más de $50.000.000. Un monto así es seguro un error de tipeo
+    // (ej. $2.000.000.000 de efectivo en una venta de $13.392). Se bloquea y listo.
+    const TOPE_PAGO = 50000000
+    const pagoMax = Math.max(parseNumero(pago.efectivo), parseNumero(pago.debito), parseNumero(pago.transferencia))
+    if (pagoMax > TOPE_PAGO) {
+      showMsg(`🚫 Monto demasiado alto: ${fmt(pagoMax)}. Parece un error de tipeo — ninguna venta de mostrador supera los ${fmt(TOPE_PAGO)}. Corregí el monto.`, 'error', 7000)
+      return
+    }
     // Guardia anti-typo: si lo cargado supera al total por un vuelto absurdo
     // (> $1.000.000), casi seguro es un error de tipeo en el monto (ej. una venta
     // de $10.279 con $2.000.000.000 de efectivo). Pedimos confirmación para que el
