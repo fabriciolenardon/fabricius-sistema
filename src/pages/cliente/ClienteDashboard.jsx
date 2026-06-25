@@ -7,6 +7,7 @@ import Paginador, { usePaginacion } from '../../components/Paginador'
 import { fmtPrecio, fmtKg } from '../../lib/formatos'
 import { imprimirHTML } from '../../lib/imprimir'
 import { getLista } from '../../lib/listasPrecios'
+import { conSaldoCorriente } from '../../lib/ctaCorriente'
 function fmt(n) { return fmtPrecio(Math.abs(Number(n) || 0)) }
 
 // Hook compartido: trae el cliente vinculado al profile actual
@@ -61,11 +62,13 @@ export function ClienteDashboard() {
   async function cargarDatos() {
     if (!cliente) return
     const [{ data: movs }, { data: rems }] = await Promise.all([
-      supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id).order('fecha', { ascending: false }).limit(5),
-      supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false }).limit(3)
+      fetchAllRows(() => supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id)),
+      fetchAllRows(() => supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false }))
     ])
-    setMovimientos(movs || [])
-    setRemitos(rems || [])
+    // Saldo corriente recalculado EN ORDEN DE FECHA (para que la columna cierre
+    // bien con remitos cargados con fecha vieja). Más nuevo primero, hasta 1000.
+    setMovimientos(conSaldoCorriente(movs).slice(0, 1000))
+    setRemitos((rems || []).slice(0, 1000))
   }
 
   const saldo = cliente?.saldo || 0
@@ -146,7 +149,7 @@ export function ClienteDashboard() {
                 <td>{m.descripcion}</td>
                 <td style={{ color: 'var(--red-light)' }}>{m.debe > 0 ? fmt(m.debe) : '—'}</td>
                 <td style={{ color: 'var(--green)' }}>{m.haber > 0 ? fmt(m.haber) : '—'}</td>
-                <td style={{ fontWeight: 600, color: m.saldo > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(m.saldo)}</td>
+                <td style={{ fontWeight: 600, color: m.saldoCalc > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(m.saldoCalc)}</td>
               </tr>
             ))}
             {movimientos.length === 0 && <tr><td colSpan={6} className="empty">Sin movimientos</td></tr>}
@@ -166,10 +169,10 @@ export function ClienteCtaCte() {
 
   useEffect(() => {
     if (!cliente) return
-    fetchAllRows(() => supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id).order('fecha', { ascending: false })).then(({ data }) => setMovimientos(data || []))
+    fetchAllRows(() => supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id)).then(({ data }) => setMovimientos(conSaldoCorriente(data)))
     const canal = supabase.channel('ctacte-cliente')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'movimientos_ctacte', filter: `cliente_id=eq.${cliente.id}` }, () => {
-        fetchAllRows(() => supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id).order('fecha', { ascending: false })).then(({ data }) => setMovimientos(data || []))
+        fetchAllRows(() => supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id)).then(({ data }) => setMovimientos(conSaldoCorriente(data)))
       }).subscribe()
     return () => supabase.removeChannel(canal)
   }, [cliente])
@@ -203,7 +206,7 @@ export function ClienteCtaCte() {
                 <td>{m.descripcion}</td>
                 <td style={{ color: 'var(--red-light)' }}>{m.debe > 0 ? fmt(m.debe) : '—'}</td>
                 <td style={{ color: 'var(--green)' }}>{m.haber > 0 ? fmt(m.haber) : '—'}</td>
-                <td style={{ fontWeight: 600, color: m.saldo > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(m.saldo)}</td>
+                <td style={{ fontWeight: 600, color: m.saldoCalc > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(m.saldoCalc)}</td>
               </tr>
             ))}
             {movimientos.length === 0 && <tr><td colSpan={6} className="empty">Sin movimientos registrados</td></tr>}
