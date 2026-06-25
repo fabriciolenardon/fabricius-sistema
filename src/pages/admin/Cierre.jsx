@@ -298,6 +298,8 @@ export default function Cierre() {
   const [tab, setTab] = useState('semanal')
   const [cierres, setCierres] = useState([])
   const [remitosHist, setRemitosHist] = useState([]) // para detectar cierres desactualizados
+  const [gastosHist, setGastosHist] = useState([])
+  const [entradasHist, setEntradasHist] = useState([])
   const [loading, setLoading] = useState(false)
   const [calculando, setCalculando] = useState(false)
   const [alert, setAlert] = useState(null)
@@ -360,9 +362,14 @@ export default function Cierre() {
     // les cargaron remitos DESPUÉS (snapshot desactualizado).
     if (data?.length) {
       const minIni = data.map(c => c.semana_inicio).filter(Boolean).sort()[0]
-      const { data: rems } = await fetchAllRows(() => supabase.from('remitos')
-        .select('fecha, total, created_at, eliminado, cobro, cliente_nombre').gte('fecha', minIni))
-      setRemitosHist(rems || [])
+      const [rems, gas, ent] = await Promise.all([
+        fetchAllRows(() => supabase.from('remitos').select('fecha, total, created_at, eliminado, cobro, cliente_nombre').gte('fecha', minIni)),
+        fetchAllRows(() => supabase.from('gastos').select('fecha, monto, created_at, solo_balance, tipo').gte('fecha', minIni)),
+        fetchAllRows(() => supabase.from('entradas_deposito').select('fecha, importe, kg, kg_real, precio_kg, created_at, eliminado, destino').gte('fecha', minIni)),
+      ])
+      setRemitosHist(rems.data || [])
+      setGastosHist(gas.data || [])
+      setEntradasHist(ent.data || [])
     }
   }
 
@@ -420,7 +427,9 @@ export default function Cierre() {
 
     let error
     if (ya) {
-      const r = await supabase.from('cierres_semanales').update(fila).eq('id', ya.id)
+      // Bump created_at: marca "recerrado ahora" para que el aviso de desactualizado
+      // se limpie (compara datos cargados DESPUÉS de la fecha del cierre).
+      const r = await supabase.from('cierres_semanales').update({ ...fila, created_at: new Date().toISOString() }).eq('id', ya.id)
       error = r.error
     } else {
       const r = await supabase.from('cierres_semanales').insert(fila)
@@ -464,16 +473,24 @@ export default function Cierre() {
   const meses = [...new Set(cierres.map(c => c.mes))].sort().reverse()
   const semanasMes = cierres.filter(c => c.mes === mesSelector)
 
-  // Monto de remitos cargados DESPUÉS de cerrar una semana (snapshot desactualizado).
-  // Si > 0, la ganancia guardada quedó vieja y conviene recalcular y reguardar.
-  function montoCargadoDespues(c) {
-    if (!c.created_at) return 0
-    return remitosHist
-      .filter(r => !r.eliminado && r.cobro !== 'interno'
-        && String(r.cliente_nombre || '').trim().toUpperCase() !== 'MITRE'
-        && r.fecha >= c.semana_inicio && r.fecha <= c.semana_fin
-        && r.created_at > c.created_at)
+  // Impacto en la ganancia de datos cargados DESPUÉS de cerrar la semana (snapshot
+  // desactualizado): + ventas nuevas (remitos) − gastos nuevos − compras nuevas.
+  // Si hubo cambios, la ganancia guardada quedó vieja → conviene recalcular y reguardar.
+  function impactoPost(c) {
+    if (!c.created_at) return { hay: false, delta: 0 }
+    const ini = c.semana_inicio, fin = c.semana_fin, ts = c.created_at
+    const enRango = (f) => f >= ini && f <= fin
+    const ventasN = remitosHist
+      .filter(r => !r.eliminado && r.cobro !== 'interno' && String(r.cliente_nombre || '').trim().toUpperCase() !== 'MITRE' && enRango(r.fecha) && r.created_at > ts)
       .reduce((s, r) => s + (Number(r.total) || 0), 0)
+    const gastosN = gastosHist
+      .filter(g => !g.solo_balance && ['fijo', 'variable', 'socio'].includes(g.tipo) && enRango(g.fecha) && g.created_at > ts)
+      .reduce((s, g) => s + (Number(g.monto) || 0), 0)
+    const comprasN = entradasHist
+      .filter(e => !e.eliminado && e.destino !== 'desposte' && e.destino !== 'elaboracion' && enRango(e.fecha) && e.created_at > ts)
+      .reduce((s, e) => s + (Number(e.importe) > 0 ? Number(e.importe) : (Number(e.kg_real || e.kg) || 0) * (Number(e.precio_kg) || 0)), 0)
+    const movido = ventasN + gastosN + comprasN
+    return { hay: movido > 1, delta: ventasN - gastosN - comprasN }
   }
   const totMes = { ventas: 0, compras: 0, gastos: 0, sueldos: 0, ganancia: 0, kgCarne: 0, kgPollo: 0, kgCerdo: 0, ventasCtacte: 0 }
   semanasMes.forEach(c => {
@@ -894,13 +911,13 @@ export default function Cierre() {
                     </thead>
                     <tbody>
                       {semanasMes.map(c => {
-                        const pendiente = montoCargadoDespues(c)
+                        const desact = impactoPost(c)
                         return (
                         <tr key={c.id}>
                           <td>{fmtFecha(c.semana_inicio)} → {fmtFecha(c.semana_fin)}
-                            {pendiente > 1 && (
-                              <div title="Se cargaron remitos con fecha de esta semana DESPUÉS de cerrarla. Recalculá y reguardá el cierre para actualizar la ganancia." style={{ fontSize: 10, color: 'var(--amber)', fontWeight: 700, marginTop: 3 }}>
-                                ⚠️ +{fmt(pendiente)} cargado después · recalculá
+                            {desact.hay && (
+                              <div title="Se cargaron ventas, gastos o compras con fecha de esta semana DESPUÉS de cerrarla. Recalculá y reguardá el cierre para actualizar la ganancia." style={{ fontSize: 10, color: 'var(--amber)', fontWeight: 700, marginTop: 3 }}>
+                                ⚠️ desactualizado · ganancia real {desact.delta >= 0 ? '+' : '−'}{fmt(desact.delta)} · recalculá
                               </div>
                             )}
                           </td>
