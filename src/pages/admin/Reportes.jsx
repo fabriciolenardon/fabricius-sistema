@@ -15,7 +15,7 @@
 // Todos los reportes usan fmtPrecio (formato AR uniforme).
 // ============================================================
 import { useState, useEffect, useMemo } from 'react'
-import { supabase } from '../../lib/supabase'
+import { supabase, fetchAllRows } from '../../lib/supabase'
 import { fmtPrecio, fmtKg } from '../../lib/formatos'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
 
@@ -58,21 +58,23 @@ export function useReportesData(periodo) {
       const [entradas, salidas, ventasCaja, pedidos, clientes,
              despostesCosto, cajasCosto, preciosLookup, entradasCosto,
              gastos, sueldos, pagosProveedores, movimientosCtacte] = await Promise.all([
-        supabase.from('entradas_deposito').select('*').eq('eliminado', false).gte('fecha', desde).lte('fecha', hoy),
-        supabase.from('salidas_deposito').select('*').gte('fecha', desde).lte('fecha', hoy),
-        supabase.from('ventas_minoristas').select('*').eq('origen', 'caja').gte('fecha', desde).lte('fecha', hoy),
-        supabase.from('pedidos').select('*').gte('dia_entrega', desde).lte('dia_entrega', hoy).eq('estado', 'confirmado'),
-        supabase.from('clientes').select('id, nombre, tipo, lista_precios, saldo'),
+        // fetchAllRows: pagina de a 1000 → en períodos largos (Año en curso) ningún
+        // total se corta. Las transaccionales superan fácil las 1000 filas.
+        fetchAllRows(() => supabase.from('entradas_deposito').select('*').eq('eliminado', false).gte('fecha', desde).lte('fecha', hoy)),
+        fetchAllRows(() => supabase.from('salidas_deposito').select('*').gte('fecha', desde).lte('fecha', hoy)),
+        fetchAllRows(() => supabase.from('ventas_minoristas').select('*').eq('origen', 'caja').gte('fecha', desde).lte('fecha', hoy)),
+        fetchAllRows(() => supabase.from('pedidos').select('*').gte('dia_entrega', desde).lte('dia_entrega', hoy).eq('estado', 'confirmado')),
+        fetchAllRows(() => supabase.from('clientes').select('id, nombre, tipo, lista_precios, saldo')),
         // Cost data (ventana 180d)
-        supabase.from('despostes').select('piezas, fecha').gte('fecha', desdeCosto).lte('fecha', hoy),
-        supabase.from('cajas_stock').select('producto_id, precio_costo_kg, kg, fecha_ingreso').gte('fecha_ingreso', desdeCosto),
+        fetchAllRows(() => supabase.from('despostes').select('piezas, fecha').gte('fecha', desdeCosto).lte('fecha', hoy)),
+        fetchAllRows(() => supabase.from('cajas_stock').select('producto_id, precio_costo_kg, kg, fecha_ingreso').gte('fecha_ingreso', desdeCosto)),
         supabase.from('precios').select('id, nombre, categoria, kg_por_unidad, precio_minorista, precio_mayorista, precio_carniceria'),
-        supabase.from('entradas_deposito').select('descripcion, tipo, kg, precio_kg, fecha').eq('eliminado', false).gte('fecha', desdeCosto).lte('fecha', hoy),
+        fetchAllRows(() => supabase.from('entradas_deposito').select('descripcion, tipo, kg, precio_kg, fecha').eq('eliminado', false).gte('fecha', desdeCosto).lte('fecha', hoy)),
         // Finanzas (Flujo / Gastos)
-        supabase.from('gastos').select('*').gte('fecha', desde).lte('fecha', hoy),
-        supabase.from('liquidaciones_sueldos').select('*').gte('semana_inicio', desde).lte('semana_fin', hoy),
-        supabase.from('pagos_proveedores').select('*').gte('fecha', desde).lte('fecha', hoy),
-        supabase.from('movimientos_ctacte').select('*').gte('fecha', desde).lte('fecha', hoy),
+        fetchAllRows(() => supabase.from('gastos').select('*').gte('fecha', desde).lte('fecha', hoy)),
+        fetchAllRows(() => supabase.from('liquidaciones_sueldos').select('*').gte('semana_inicio', desde).lte('semana_fin', hoy)),
+        fetchAllRows(() => supabase.from('pagos_proveedores').select('*').gte('fecha', desde).lte('fecha', hoy)),
+        fetchAllRows(() => supabase.from('movimientos_ctacte').select('*').gte('fecha', desde).lte('fecha', hoy)),
       ])
 
       if (cancelado) return
@@ -220,7 +222,7 @@ export function ReporteCajas({ periodo }) {
     async function cargar() {
       setLoading(true)
       const [{ data: cjs }, { data: prods }] = await Promise.all([
-        supabase.from('cajas_stock').select('*'),
+        fetchAllRows(() => supabase.from('cajas_stock').select('*')),
         supabase.from('precios').select('id, nombre, categoria')
           .in('categoria', ['bovino_caja_cb', 'bovino_caja_pt']),
       ])
@@ -1479,13 +1481,14 @@ export function ReporteInteranual() {
       const hastaAnt   = `${anioAnt}-12-31`
 
       // Cargamos ventas + salidas + pedidos para los 2 años
+      // fetchAllRows: un año de ventas/salidas supera de sobra las 1000 filas.
       const [vc1, vc2, sa1, sa2, pe1, pe2] = await Promise.all([
-        supabase.from('ventas_minoristas').select('total, fecha').eq('origen', 'caja').gte('fecha', desdeEste).lte('fecha', hastaEste),
-        supabase.from('ventas_minoristas').select('total, fecha').eq('origen', 'caja').gte('fecha', desdeAnt).lte('fecha', hastaAnt),
-        supabase.from('salidas_deposito').select('total, fecha, cobro').gte('fecha', desdeEste).lte('fecha', hastaEste),
-        supabase.from('salidas_deposito').select('total, fecha, cobro').gte('fecha', desdeAnt).lte('fecha', hastaAnt),
-        supabase.from('pedidos').select('total_estimado, dia_entrega').eq('estado', 'confirmado').gte('dia_entrega', desdeEste).lte('dia_entrega', hastaEste),
-        supabase.from('pedidos').select('total_estimado, dia_entrega').eq('estado', 'confirmado').gte('dia_entrega', desdeAnt).lte('dia_entrega', hastaAnt),
+        fetchAllRows(() => supabase.from('ventas_minoristas').select('total, fecha').eq('origen', 'caja').gte('fecha', desdeEste).lte('fecha', hastaEste)),
+        fetchAllRows(() => supabase.from('ventas_minoristas').select('total, fecha').eq('origen', 'caja').gte('fecha', desdeAnt).lte('fecha', hastaAnt)),
+        fetchAllRows(() => supabase.from('salidas_deposito').select('total, fecha, cobro').gte('fecha', desdeEste).lte('fecha', hastaEste)),
+        fetchAllRows(() => supabase.from('salidas_deposito').select('total, fecha, cobro').gte('fecha', desdeAnt).lte('fecha', hastaAnt)),
+        fetchAllRows(() => supabase.from('pedidos').select('total_estimado, dia_entrega').eq('estado', 'confirmado').gte('dia_entrega', desdeEste).lte('dia_entrega', hastaEste)),
+        fetchAllRows(() => supabase.from('pedidos').select('total_estimado, dia_entrega').eq('estado', 'confirmado').gte('dia_entrega', desdeAnt).lte('dia_entrega', hastaAnt)),
       ])
 
       if (cancelado) return
