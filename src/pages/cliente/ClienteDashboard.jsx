@@ -74,6 +74,9 @@ export function ClienteDashboard() {
   const saldo = cliente?.saldo || 0
   const totCompras = movimientos.filter(m => m.debe > 0).reduce((s, m) => s + m.debe, 0)
   const totPagado = movimientos.filter(m => m.haber > 0).reduce((s, m) => s + m.haber, 0)
+  // Paginar para que las listas no sean un scroll infinito (los datos siguen completos)
+  const pagMovs = usePaginacion(movimientos, 10)
+  const pagRems = usePaginacion(remitos, 5)
 
   if (loading) return <div style={{ padding: 40, color: 'var(--muted)', textAlign: 'center' }}>Cargando...</div>
   if (!cliente) return <div style={{ padding: 40, color: 'var(--muted)', textAlign: 'center' }}>Tu perfil de cliente no pudo cargarse. Contactá al administrador.</div>
@@ -117,7 +120,7 @@ export function ClienteDashboard() {
       {remitos.length > 0 && (
         <div className="card" style={{ marginBottom: 16, borderColor: 'var(--gold)' }}>
           <div className="card-title">🧾 Últimos remitos recibidos</div>
-          {remitos.map(r => (
+          {pagRems.items.map(r => (
             <div key={r.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                 <div>
@@ -134,6 +137,7 @@ export function ClienteDashboard() {
               ))}
             </div>
           ))}
+          <Paginador {...pagRems.controles} label="remitos" />
         </div>
       )}
 
@@ -142,7 +146,7 @@ export function ClienteDashboard() {
         <table>
           <thead><tr><th>Fecha</th><th>Tipo</th><th>Descripción</th><th>Debe</th><th>Haber</th><th>Saldo</th></tr></thead>
           <tbody>
-            {movimientos.map(m => (
+            {pagMovs.items.map(m => (
               <tr key={m.id}>
                 <td>{m.fecha}</td>
                 <td><span className={`badge ${m.tipo === 'compra' ? 'badge-red' : 'badge-green'}`}>{m.tipo}</span></td>
@@ -155,6 +159,7 @@ export function ClienteDashboard() {
             {movimientos.length === 0 && <tr><td colSpan={6} className="empty">Sin movimientos</td></tr>}
           </tbody>
         </table>
+        <Paginador {...pagMovs.controles} label="movimientos" />
       </div>
     </div>
   )
