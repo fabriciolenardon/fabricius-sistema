@@ -6,7 +6,7 @@ import { supabase, fetchAllRows } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
 import { parseNumero, fmtPrecio } from '../../lib/formatos'
 import { imprimirHTML } from '../../lib/imprimir'
-import { recomputarSaldoCliente } from '../../lib/ctaCorriente'
+import { recomputarSaldoCliente, conSaldoCorriente } from '../../lib/ctaCorriente'
 import { getEtiquetaLista } from '../../lib/listasPrecios'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
@@ -48,8 +48,8 @@ async function seleccionar(cliente) {
     setShowForm(false)
     // fetchAllRows: pagina de a 1000 → muestra TODO el historial del cliente aunque
     // tenga miles de movimientos/remitos (Supabase corta en 1000 sin esto).
-    const { data: movs } = await fetchAllRows(() => supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id).order('fecha', { ascending: false }))
-    setMovimientos(movs || [])
+    const { data: movs } = await fetchAllRows(() => supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id))
+    setMovimientos(conSaldoCorriente(movs))
     const { data: rems } = await fetchAllRows(() => supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false }))
     setRemitos(rems || [])
   }
@@ -120,8 +120,8 @@ async function eliminarMovimiento(mov) {
   // Recalcular el saldo desde el ledger (antes se ajustaba a mano; el caso del
   // pago hacía `saldo + mov.haber`, que con numeric=string CONCATENA en vez de sumar).
   const nuevoSaldo = await recomputarSaldoCliente(seleccionado.id)
-  const { data: movs } = await supabase.from('movimientos_ctacte').select('*').eq('cliente_id', seleccionado.id).order('fecha', { ascending: false })
-  setMovimientos(movs || [])
+  const { data: movs } = await fetchAllRows(() => supabase.from('movimientos_ctacte').select('*').eq('cliente_id', seleccionado.id))
+  setMovimientos(conSaldoCorriente(movs))
   setSeleccionado(prev => ({ ...prev, saldo: nuevoSaldo }))
   setClientes(prev => prev.map(c => c.id === seleccionado.id ? { ...c, saldo: nuevoSaldo } : c))
 }
@@ -661,6 +661,7 @@ async function eliminarMovimiento(mov) {
               })()}
             </div>
 
+            <MovimientosCliente movimientos={movimientos} fmt={fmt} />
             <RemitosCliente remitos={remitos} imprimirRemito={imprimirRemito} />
             <PagosCliente movimientos={movimientos} onAnular={anularPago} fmt={fmt} />
 {false && (
@@ -977,6 +978,34 @@ function ListaClientes({ clientes, seleccionado, onSeleccionar, onEditar, onElim
 // para verlos ni anularlos. Solo aparecían sumarizados en "TOTAL PAGADO".
 // Ahora se muestran en una tabla espejo de la de remitos: paginada,
 // con botón 🗑️ Anular que revierte el saldo al cliente.
+// Cuenta corriente completa: debe / haber / saldo corrido (en orden de fecha,
+// igual que el portal del cliente). 10 filas por página.
+function MovimientosCliente({ movimientos, fmt }) {
+  const pag = usePaginacion(movimientos, 10)
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card-title">📒 Cuenta corriente ({movimientos.length} movimientos)</div>
+      <table>
+        <thead><tr><th>Fecha</th><th>Tipo</th><th>Descripción</th><th style={{ textAlign: 'right' }}>Debe</th><th style={{ textAlign: 'right' }}>Haber</th><th style={{ textAlign: 'right' }}>Saldo</th></tr></thead>
+        <tbody>
+          {pag.items.map(m => (
+            <tr key={m.id}>
+              <td>{m.fecha}</td>
+              <td><span className={`badge ${m.tipo === 'compra' ? 'badge-red' : 'badge-green'}`}>{m.tipo}</span></td>
+              <td>{m.descripcion || '—'}</td>
+              <td style={{ textAlign: 'right', color: 'var(--red-light)' }}>{m.debe > 0 ? fmt(m.debe) : '—'}</td>
+              <td style={{ textAlign: 'right', color: 'var(--green)' }}>{m.haber > 0 ? fmt(m.haber) : '—'}</td>
+              <td style={{ textAlign: 'right', fontWeight: 700, color: m.saldoCalc > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(m.saldoCalc)}</td>
+            </tr>
+          ))}
+          {movimientos.length === 0 && <tr><td colSpan={6} className="empty">Sin movimientos</td></tr>}
+        </tbody>
+      </table>
+      <Paginador {...pag.controles} label="movimientos" />
+    </div>
+  )
+}
+
 function PagosCliente({ movimientos, onAnular, fmt }) {
   const pagos = useMemo(() =>
     (movimientos || []).filter(m => m.tipo === 'pago' || m.tipo === 'cheque'),
