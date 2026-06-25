@@ -32,11 +32,17 @@ export async function recomputarSaldoCliente(clienteId) {
     .eq('cliente_id', clienteId))
   if (error) { console.warn('recomputarSaldoCliente:', error.message); return null }
 
-  // Orden cronológico estable: como se fueron creando (created_at), fecha desempata.
+  // Orden cronológico por FECHA del movimiento (no por cuándo se cargó). Así un
+  // remito back-dated (cargado días después con fecha vieja) se acomoda en su fila
+  // por fecha y el saldo acumulado cierra bien al leerlo por fecha. created_at e id
+  // desempatan movimientos del mismo día. El saldo final (la deuda) es el mismo
+  // sea cual sea el orden — solo cambia el acumulado intermedio.
   const lista = (movs || []).slice().sort((a, b) => {
+    const fa = String(a.fecha || ''), fb = String(b.fecha || '')
+    if (fa !== fb) return fa < fb ? -1 : 1
     const ca = String(a.created_at || ''), cb = String(b.created_at || '')
     if (ca !== cb) return ca < cb ? -1 : 1
-    return String(a.fecha || '') < String(b.fecha || '') ? -1 : 1
+    return (a.id || 0) - (b.id || 0)
   })
 
   let acc = 0
