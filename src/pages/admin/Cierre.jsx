@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../../lib/supabase'
+import { supabase, fetchAllRows } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
 import { fmtPrecio, fmtKg as fmtKgAR, parseNumero } from '../../lib/formatos'
@@ -297,6 +297,7 @@ export default function Cierre() {
 
   const [tab, setTab] = useState('semanal')
   const [cierres, setCierres] = useState([])
+  const [remitosHist, setRemitosHist] = useState([]) // para detectar cierres desactualizados
   const [loading, setLoading] = useState(false)
   const [calculando, setCalculando] = useState(false)
   const [alert, setAlert] = useState(null)
@@ -355,6 +356,14 @@ export default function Cierre() {
       .order('semana_inicio', { ascending: false })
     setCierres(data || [])
     if (data?.length && !mesSelector) setMesSelector(data[0].mes)
+    // Remitos desde el primer cierre, para detectar semanas cerradas a las que se
+    // les cargaron remitos DESPUÉS (snapshot desactualizado).
+    if (data?.length) {
+      const minIni = data.map(c => c.semana_inicio).filter(Boolean).sort()[0]
+      const { data: rems } = await fetchAllRows(() => supabase.from('remitos')
+        .select('fecha, total, created_at, eliminado, cobro, cliente_nombre').gte('fecha', minIni))
+      setRemitosHist(rems || [])
+    }
   }
 
   async function recalcular() {
@@ -454,6 +463,18 @@ export default function Cierre() {
   // ====== Datos para el tab Por Mes ======
   const meses = [...new Set(cierres.map(c => c.mes))].sort().reverse()
   const semanasMes = cierres.filter(c => c.mes === mesSelector)
+
+  // Monto de remitos cargados DESPUÉS de cerrar una semana (snapshot desactualizado).
+  // Si > 0, la ganancia guardada quedó vieja y conviene recalcular y reguardar.
+  function montoCargadoDespues(c) {
+    if (!c.created_at) return 0
+    return remitosHist
+      .filter(r => !r.eliminado && r.cobro !== 'interno'
+        && String(r.cliente_nombre || '').trim().toUpperCase() !== 'MITRE'
+        && r.fecha >= c.semana_inicio && r.fecha <= c.semana_fin
+        && r.created_at > c.created_at)
+      .reduce((s, r) => s + (Number(r.total) || 0), 0)
+  }
   const totMes = { ventas: 0, compras: 0, gastos: 0, sueldos: 0, ganancia: 0, kgCarne: 0, kgPollo: 0, kgCerdo: 0, ventasCtacte: 0 }
   semanasMes.forEach(c => {
     totMes.ventas += c.ventas || 0
@@ -872,9 +893,17 @@ export default function Cierre() {
                       </tr>
                     </thead>
                     <tbody>
-                      {semanasMes.map(c => (
+                      {semanasMes.map(c => {
+                        const pendiente = montoCargadoDespues(c)
+                        return (
                         <tr key={c.id}>
-                          <td>{fmtFecha(c.semana_inicio)} → {fmtFecha(c.semana_fin)}</td>
+                          <td>{fmtFecha(c.semana_inicio)} → {fmtFecha(c.semana_fin)}
+                            {pendiente > 1 && (
+                              <div title="Se cargaron remitos con fecha de esta semana DESPUÉS de cerrarla. Recalculá y reguardá el cierre para actualizar la ganancia." style={{ fontSize: 10, color: 'var(--amber)', fontWeight: 700, marginTop: 3 }}>
+                                ⚠️ +{fmt(pendiente)} cargado después · recalculá
+                              </div>
+                            )}
+                          </td>
                           <td style={{ color: 'var(--green)' }}>{fmt(c.ventas)}</td>
                           <td style={{ color: 'var(--red-light)' }}>{fmt(c.compras)}</td>
                           <td style={{ color: 'var(--amber)' }}>{fmt(c.gastos)}</td>
@@ -895,7 +924,8 @@ export default function Cierre() {
                             })()}
                           </td>
                         </tr>
-                      ))}
+                        )
+                      })}
                     </tbody>
                     <tfoot>
                       <tr className="total-row">
