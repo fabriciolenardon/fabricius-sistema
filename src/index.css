@@ -189,8 +189,9 @@ tr:hover td { background: var(--surface2); }
   .grid2, .grid3, .grid4 { grid-template-columns: 1fr; gap: 12px; }
   .form-row, .form-row3, .form-row4 { grid-template-columns: 1fr; }
 
-  /* Cards */
-  .card { padding: 14px; border-radius: 10px; }
+  /* Cards — overflow-x para que las tablas (min-width 520) scrolleen ADENTRO de
+     la tarjeta en celular, en vez de desbordar y romper la página. */
+  .card { padding: 14px; border-radius: 10px; overflow-x: auto; }
 
   /* Page title */
   .page-title { font-size: 24px; }

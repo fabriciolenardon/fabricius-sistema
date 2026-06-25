@@ -101,7 +101,7 @@ export function ClienteDashboard() {
         })()}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 14, marginBottom: 24 }}>
         <div style={{ background: saldo > 0 ? '#3a1a1a' : '#1a3a27', border: `2px solid ${saldo > 0 ? 'var(--red-light)' : 'var(--green)'}`, borderRadius: 12, padding: 20, textAlign: 'center' }}>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8, letterSpacing: 2 }}>SALDO ACTUAL</div>
           <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 40, color: saldo > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(saldo)}</div>
@@ -182,7 +182,7 @@ export function ClienteCtaCte() {
     <div>
       <div className="page-title">MI CUENTA CORRIENTE</div>
       <div className="page-sub">Historial completo de compras y pagos</div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 14, marginBottom: 20 }}>
         <div style={{ background: saldo > 0 ? '#3a1a1a' : '#1a3a27', border: `2px solid ${saldo > 0 ? 'var(--red-light)' : 'var(--green)'}`, borderRadius: 12, padding: 20, textAlign: 'center' }}>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>SALDO ACTUAL</div>
           <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 48, color: saldo > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(saldo)}</div>
