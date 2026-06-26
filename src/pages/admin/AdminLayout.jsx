@@ -12,15 +12,9 @@ import UserDropdown from '../../components/UserDropdown'
 import CambiarPasswordModal from '../../components/CambiarPasswordModal'
 import BotonAvisos from '../../components/BotonAvisos'
 
-// En el CELULAR, el CEO solo ve lo que usa en la calle: Ejecutivo, Modo TV,
-// los pedidos (para coordinarlos con Iris) y WhatsApp. El resto lo resuelve
-// pidiéndoselo a Iris (no necesita la app completa en el teléfono).
-const NAV_MOVIL_CEO = [
-  { to: '/admin/ejecutivo',      icon: '⚡', label: 'Ejecutivo' },
-  { to: '/admin/ejecutivo?tv=1', icon: '📺', label: 'Modo TV (F.A.B.R.I.)' },
-  { to: '/admin/pedidos',        icon: '📥', label: 'Pedidos Mayoristas' },
-  { to: '/admin/whatsapp',       icon: '💬', label: 'WhatsApp' },
-]
+// Entrada extra solo-CEO para el menú del celular: el Modo TV (F.A.B.R.I.) no
+// es una ruta aparte de navItems, así que se agrega a mano para el CEO.
+const NAV_MOVIL_TV = { to: '/admin/ejecutivo?tv=1', icon: '📺', label: 'Modo TV (F.A.B.R.I.)' }
 
 const navItems = [
   { to: '/admin/dashboard',   icon: '📊', label: 'Dashboard' },
@@ -311,9 +305,14 @@ function MenuMobile({ onClose }) {
           </div>
         </div>
 
-        {/* Nav items */}
+        {/* Nav items — TODOS los módulos en el celular (igual que en la compu).
+            El Ejecutivo y el Modo TV son solo para el CEO; el resto lo ven todos
+            los admin. Antes el CEO tenía un menú recortado, ahora ve todo. */}
         <nav style={{ flex: 1, overflowY: 'auto', padding: '10px 12px' }}>
-          {(user?.email === 'fabriciolenardon@gmail.com' ? NAV_MOVIL_CEO : navItems).filter(it => it.to !== '/admin/ejecutivo' || window.__ceoEmail === 'fabriciolenardon@gmail.com').map(item => {
+          {(user?.email === 'fabriciolenardon@gmail.com'
+            ? [...navItems, NAV_MOVIL_TV]
+            : navItems.filter(it => it.to !== '/admin/ejecutivo')
+          ).map(item => {
             const isActive = location.pathname === item.to
             return (
               <NavLink key={item.to} to={item.to} onClick={onClose}
