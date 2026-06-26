@@ -29,6 +29,7 @@ const navItems = [
   { to: '/admin/ventas', icon: '📋', label: 'Mayorista' },
   { to: '/admin/deposito',    icon: '🏭', label: 'Depósito' },
   { to: '/admin/precios',     icon: '💲', label: 'Precios' },
+  { to: '/admin/presupuestos', icon: '📋', label: 'Presupuestos' },
   { to: '/admin/etiquetas',   icon: '🏷️', label: 'Etiquetas' },
   { to: '/admin/clientes',    icon: '👥', label: 'Clientes' },
   { to: '/admin/pedidos',     icon: '📥', label: 'Pedidos Mayoristas' },
@@ -53,10 +54,11 @@ const NAV_GRUPOS = [
     { to: '/admin/whatsapp',  icon: '💬', label: 'WhatsApp' },
   ] },
   { label: 'Comercial', icon: '🏷️', items: [
-    { to: '/admin/precios',     icon: '💲', label: 'Precios' },
-    { to: '/admin/etiquetas',   icon: '🏷️', label: 'Etiquetas' },
-    { to: '/admin/clientes',    icon: '👥', label: 'Clientes' },
-    { to: '/admin/franquicias', icon: '🏪', label: 'Franquicias' },
+    { to: '/admin/precios',      icon: '💲', label: 'Precios' },
+    { to: '/admin/presupuestos', icon: '📋', label: 'Presupuestos' },
+    { to: '/admin/etiquetas',    icon: '🏷️', label: 'Etiquetas' },
+    { to: '/admin/clientes',     icon: '👥', label: 'Clientes' },
+    { to: '/admin/franquicias',  icon: '🏪', label: 'Franquicias' },
   ] },
   { label: 'Finanzas', icon: '💰', items: [
     { to: '/admin/cheques',     icon: '📄', label: 'Cheques' },
