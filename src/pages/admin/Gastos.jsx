@@ -4,6 +4,7 @@ import { supabase, fetchAllRows } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
 import { parseNumero } from '../../lib/formatos'
 import Paginador, { usePaginacion } from '../../components/Paginador'
+import { useEsMovil } from '../../lib/useEsMovil'
 
 // Display de precio con formato AR (incluye centavos si tiene)
 import { fmtPrecio } from '../../lib/formatos'
@@ -83,6 +84,7 @@ function cargarPdfLib() {
 }
 
 export default function Gastos() {
+  const esMovil = useEsMovil()
   const [gastos, setGastos] = useState([])
   const [tipo, setTipo] = useState('variable')
   const [form, setForm] = useState(FORM_VACIO)
@@ -449,7 +451,7 @@ export default function Gastos() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : '1fr 1.5fr', gap: 16 }}>
         {/* FORMULARIO */}
         <div className="card">
           <div className="card-title">{editandoId ? '✏️ Editando registro' : 'Cargar registro'}</div>

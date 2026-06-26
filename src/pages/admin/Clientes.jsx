@@ -8,6 +8,7 @@ import { parseNumero, fmtPrecio } from '../../lib/formatos'
 import { imprimirHTML } from '../../lib/imprimir'
 import { recomputarSaldoCliente, conSaldoCorriente } from '../../lib/ctaCorriente'
 import { getEtiquetaLista } from '../../lib/listasPrecios'
+import { useEsMovil } from '../../lib/useEsMovil'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
 // URL publica de produccion del portal — NO usar window.location.origin para evitar URLs de preview de Vercel
@@ -366,6 +367,7 @@ async function eliminarMovimiento(mov) {
   }
 
   const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
+  const esMovil = useEsMovil()
   const totalDeuda = clientes.filter(c => c.saldo > 0).reduce((s, c) => s + c.saldo, 0)
   const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }
 
@@ -412,7 +414,7 @@ async function eliminarMovimiento(mov) {
             const tPendiente = cobData.reduce((s, f) => s + f.pendiente, 0)
             return (
               <>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
                   <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, textAlign: 'center' }}>
                     <div style={{ fontSize: 10, color: 'var(--muted)' }}>COMPRARON EN EL PERÍODO</div>
                     <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 26, color: 'var(--amber)' }}>{fmt(tComprado)}</div>
@@ -511,7 +513,7 @@ async function eliminarMovimiento(mov) {
         <div className="stat"><div className="stat-label">Clientes registrados</div><div className="stat-value" style={{ color: 'var(--gold)' }}>{clientes.length}</div></div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: seleccionado ? '1fr 2fr' : '1fr', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : (seleccionado ? '1fr 2fr' : '1fr'), gap: 16 }}>
         <ListaClientes
           clientes={clientes}
           seleccionado={seleccionado}
@@ -539,7 +541,7 @@ async function eliminarMovimiento(mov) {
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr 1fr' : '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
                 {[
                   { label: 'CUIT', val: seleccionado.cuit || '—' },
                   { label: 'Teléfono', val: seleccionado.telefono || '—' },
@@ -579,7 +581,7 @@ async function eliminarMovimiento(mov) {
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
                 <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, textAlign: 'center' }}>
                   <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>SALDO</div>
                   <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 24, color: seleccionado.saldo > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(seleccionado.saldo)}</div>
@@ -602,7 +604,7 @@ async function eliminarMovimiento(mov) {
                 const saldoDespues = (seleccionado.saldo || 0) - importeParseado
                 return (
                   <div style={{ marginTop: 16, padding: 16, background: 'var(--surface2)', borderRadius: 8 }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : '1fr 1fr', gap: 8, marginBottom: 8 }}>
                       <div className="form-group">
                         <label>Importe ($)</label>
                         <input
