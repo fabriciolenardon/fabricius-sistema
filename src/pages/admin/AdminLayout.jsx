@@ -80,7 +80,7 @@ function useNotificaciones() {
       const en15Str = fechaHoyARG(en15)
       const haceUnAno = new Date(hoy.getFullYear() - 1, hoy.getMonth(), hoy.getDate())
 
-      const [{ data: cheques }, { data: chequesEmitidos }, { data: clientes }, { data: cierres }, { data: stockData }, { data: cuentasFiscales }, { data: facturasRecientes }, { data: impuestosRecientes }] = await Promise.all([
+      const [{ data: cheques }, { data: chequesEmitidos }, { data: clientes }, { data: cierres }, { data: stockData }, { data: cuentasFiscales }, { data: facturasRecientes }, { data: impuestosRecientes }, { data: productosStock }] = await Promise.all([
         supabase.from('cheques').select('*').neq('origen', 'emitido').gte('fecha_pago', hoyStr).lte('fecha_pago', en15Str),
         // Cheques propios pendientes de imputar que se debitan en ≤7 días (o ya vencieron)
         supabase.from('cheques').select('*').eq('origen', 'emitido').neq('estado', 'imputado').lte('fecha_pago', fechaHoyARG(new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + 7))),
@@ -90,6 +90,8 @@ function useNotificaciones() {
         supabase.from('cuentas_fiscales').select('*').eq('activa', true).then(r => r).catch(() => ({ data: null })),
         supabase.from('facturas').select('cuenta_id, monto_total, fecha').eq('tipo', 'emitida').gte('fecha', fechaHoyARG(haceUnAno)).then(r => r).catch(() => ({ data: null })),
         supabase.from('impuestos_pagados').select('cuenta_id, concepto, periodo_anio, periodo_mes').then(r => r).catch(() => ({ data: null })),
+        // Productos "huérfanos": cerdo/embutido sin stock_origen y sin marca "no descuenta"
+        supabase.from('precios').select('nombre, categoria, stock_origen, stock_no_aplica').in('categoria', ['cerdo_corte', 'cerdo_pieza', 'embutido']).then(r => r).catch(() => ({ data: null })),
       ])
 
       const nuevas = []
@@ -158,6 +160,18 @@ function useNotificaciones() {
         if ((s.bovino_mr || 0) < 100) nuevas.push({ tipo: 'danger', icono: '📦', titulo: `Stock bovino bajo: ${fmtKg(s.bovino_mr || 0)}`, sub: 'Pedí más mercadería', link: '/admin/deposito' })
         if ((s.pollo || 0) < 100) nuevas.push({ tipo: 'warning', icono: '📦', titulo: `Stock pollo bajo: ${fmtKg(s.pollo || 0)}`, sub: 'Pedí más mercadería', link: '/admin/deposito' })
         if ((s.cerdo || 0) < 50) nuevas.push({ tipo: 'warning', icono: '📦', titulo: `Stock cerdo bajo: ${fmtKg(s.cerdo || 0)}`, sub: 'Pedí más mercadería', link: '/admin/deposito' })
+      }
+
+      // ── Productos huérfanos: cerdo/embutido sin stock asignado (se venden pero
+      // no descuentan stock). Recordatorio para enlazarlos en Precios. ──
+      const orfanos = (productosStock || []).filter(p => !p.stock_origen && !p.stock_no_aplica)
+      if (orfanos.length > 0) {
+        nuevas.push({
+          tipo: 'warning', icono: '📦',
+          titulo: `${orfanos.length} producto${orfanos.length === 1 ? '' : 's'} sin stock asignado`,
+          sub: `Se vende${orfanos.length === 1 ? '' : 'n'} pero no descuenta${orfanos.length === 1 ? '' : 'n'} stock — enlazalos en Precios`,
+          link: '/admin/precios',
+        })
       }
 
       setNotifs(nuevas)
