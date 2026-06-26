@@ -8,6 +8,7 @@ import { fechaHoyARG } from '../../lib/fechas'
 import { fmtPrecio, fmtKg, fmtUnidades } from '../../lib/formatos'
 import { LISTAS, getLista, getCampoPrecio } from '../../lib/listasPrecios'
 import { abrirVentanaImprimible } from '../../lib/pdfPrintable'
+import { useEsMovil } from '../../lib/useEsMovil'
 
 // Etiquetas de categoría (mismo set que Precios.jsx) — solo para mostrar de
 // qué categoría es cada producto en el buscador.
@@ -50,6 +51,7 @@ function validoPorDefecto() {
 const FORM_VACIO = () => ({ editandoId: null, clienteNombre: '', lista: 'may', items: [], notas: '', validoHasta: validoPorDefecto() })
 
 export default function Presupuestos() {
+  const esMovil = useEsMovil()
   const [tab, setTab] = useState('nuevo')
   const [precios, setPrecios] = useState([])
   const [presupuestos, setPresupuestos] = useState([])
@@ -240,7 +242,7 @@ export default function Presupuestos() {
           {/* Datos del cliente */}
           <div className="card" style={{ marginBottom: 20 }}>
             <div className="card-title">👤 Datos del presupuesto</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : '2fr 1fr 1fr', gap: 12 }}>
               <div>
                 <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Nombre del cliente</label>
                 <input value={form.clienteNombre} onChange={e => setForm(f => ({ ...f, clienteNombre: e.target.value }))} placeholder="Ej: Rotisería La Esquina" style={inp} />
@@ -264,7 +266,7 @@ export default function Presupuestos() {
           {/* Adder de productos */}
           <div className="card" style={{ marginBottom: 20, borderColor: 'var(--gold)' }}>
             <div className="card-title">➕ Agregar producto</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '2.4fr 1fr 1fr 1.2fr auto', gap: 10, alignItems: 'end' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : '2.4fr 1fr 1fr 1.2fr auto', gap: 10, alignItems: 'end' }}>
               <div style={{ position: 'relative' }}>
                 <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Producto</label>
                 <input
