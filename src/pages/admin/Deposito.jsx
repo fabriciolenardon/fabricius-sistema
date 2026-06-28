@@ -3046,6 +3046,16 @@ const item = {
     if (items.length === 0) { showAlert({ type: 'error', msg: 'Agregá al menos un producto' }); return }
     if (!form.destino) { showAlert({ type: 'error', msg: 'Elegí un destino antes de despachar' }); return }
     if (esFechaFutura(form.fecha)) { showAlert({ type: 'error', msg: `⛔ La fecha no puede ser futura (hoy es ${fechaHoyARG()})` }); return }
+    // Venta a CUENTA CORRIENTE: exige un cliente REGISTRADO elegido de la lista.
+    // Si se tipea el nombre sin seleccionarlo del buscador, el remito queda con
+    // cliente_id null y la venta NO se imputa a la cuenta corriente (bug MONTE
+    // CRISTO 27/06: remito #680 quedó suelto, $3.373.835 sin cargar a la deuda
+    // porque el nombre se escribió a mano y no matcheaba "MONTE CRISTO CARNICERIA").
+    // Las franquicias resuelven el cliente automáticamente más abajo → se excluyen.
+    if (form.cobro === 'cta_cte' && !esFranquicia && !form.clienteId) {
+      showAlert({ type: 'error', msg: '⛔ Venta a CUENTA CORRIENTE: elegí el cliente de la lista (tiene que aparecer "✅ Cliente vinculado"). Escribir el nombre a mano NO lo imputa a su cuenta corriente.' })
+      return
+    }
     // Guardia anti-"media res sin media física": una media res debe venderse
     // ELIGIÉNDOLA de la lista de "Medias Reses disponibles" (eso marca la MR-XXX
     // física como vendida y la saca del stock). Si se carga como producto genérico
