@@ -3260,10 +3260,10 @@ for (const item of items) {
           <div className="form-group"><label>Destino</label>
             <select value={form.destino} onChange={e => setForm(f => ({ ...f, destino: e.target.value, clienteId: '', clienteNombre: '' }))}>
               <option value="">— Seleccioná destino —</option>
-              <option value="CENTRO">🏪 Centro — Alvear (Roxana)</option>
-              <option value="MONTE CRISTO">🏪 Monte Cristo (Agustín)</option>
-              <option value="carniceria">Carnicería cliente</option>
-              <option value="mayorista">Gastronómico / Mayorista</option>
+              <option value="CENTRO">🏪 Suc. Alvear (franquicia)</option>
+              <option value="MONTE CRISTO">🏪 Suc. Monte Cristo (franquicia)</option>
+              <option value="carniceria">Cliente Carnicería / Minorista</option>
+              <option value="mayorista">Cliente Mayorista / Gastronómico</option>
             </select>
           </div>
           <div className="form-group"><label>Fecha</label>
