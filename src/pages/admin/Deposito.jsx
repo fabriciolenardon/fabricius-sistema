@@ -3102,13 +3102,25 @@ const item = {
 
     if (esFranquicia) {
       const nombreBuscar = DESTINOS_FRANQUICIA[form.destino]
-      const { data: clienteFranquicia } = await supabase.from('clientes').select('*').ilike('nombre', `%${nombreBuscar}%`).single()
+      // Puede haber VARIOS clientes cuyo nombre contiene el término (ej. "MONTE
+      // CRISTO CARNICERIA" y "Eliana Monte Cristo"). Antes esto usaba .single(),
+      // que ERRORA con 2+ coincidencias → el cliente quedaba sin resolver y el
+      // remito se guardaba SIN imputar a la cuenta corriente (bug MONTE CRISTO
+      // #680, $3.373.835 sueltos). Filtramos por tipo 'carniceria' (las
+      // franquicias lo son) y tomamos el primero, de forma determinística.
+      const { data: matchesFranq } = await supabase.from('clientes').select('*')
+        .ilike('nombre', `%${nombreBuscar}%`).eq('tipo', 'carniceria').order('nombre')
+      const clienteFranquicia = (matchesFranq || [])[0]
       if (clienteFranquicia) {
         clienteId = clienteFranquicia.id
         clienteNombre = clienteFranquicia.nombre
         domicilio = clienteFranquicia.domicilio || form.destino
         telefono  = clienteFranquicia.telefono  || telefono
         localidad = clienteFranquicia.localidad || localidad
+      } else {
+        // Sin cliente de franquicia resoluble: NO guardar un remito huérfano.
+        showAlert({ type: 'error', msg: `⛔ No encuentro el cliente registrado de la franquicia "${form.destino}". Verificá que exista un cliente tipo "carnicería" con ese nombre antes de despachar.` })
+        return
       }
     }
 
