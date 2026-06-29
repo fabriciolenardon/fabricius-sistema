@@ -411,6 +411,7 @@ export default function Cierre() {
 
   const [tab, setTab] = useState('semanal')
   const [cierres, setCierres] = useState([])
+  const [mesesOp, setMesesOp] = useState([])   // meses operativos (inicio/cierre manual)
   const [remitosHist, setRemitosHist] = useState([]) // para detectar cierres desactualizados
   const [gastosHist, setGastosHist] = useState([])
   const [entradasHist, setEntradasHist] = useState([])
@@ -459,6 +460,11 @@ export default function Cierre() {
   }
 
   useEffect(() => { fetchCierres() }, [])
+  // Meses operativos: los usa "Mes en curso" para respetar inicio/cierre manual.
+  useEffect(() => {
+    supabase.from('meses_operativos').select('*').order('fecha_inicio', { ascending: false })
+      .then(({ data }) => setMesesOp(data || []))
+  }, [])
   // Recalcular cuando cambia el período
   useEffect(() => {
     if (desde && hasta && desde <= hasta) recalcular()
@@ -579,8 +585,12 @@ export default function Cierre() {
   }
   function setMesActual() {
     const hoy = fechaHoyARG()
-    const primerDiaMes = hoy.substring(0, 7) + '-01'
-    setDesde(primerDiaMes); setHasta(hoy)
+    // Usar el MES OPERATIVO que contiene hoy (inicio/cierre manual), no el del
+    // calendario: así no mezcla los días de fin de mes (29/30) que ya pasan al
+    // mes siguiente. Fallback al calendario si no hay mes operativo definido.
+    const op = mesesOp.find(m => m.fecha_inicio && m.fecha_cierre && m.fecha_inicio <= hoy && hoy <= m.fecha_cierre)
+    if (op) { setDesde(op.fecha_inicio); setHasta(op.fecha_cierre) }
+    else { setDesde(hoy.substring(0, 7) + '-01'); setHasta(hoy) }
   }
 
   // ====== Datos para el tab Por Mes ======
