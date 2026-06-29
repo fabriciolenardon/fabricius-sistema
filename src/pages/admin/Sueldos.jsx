@@ -108,6 +108,8 @@ export default function Sueldos() {
   const [empleados, setEmpleados] = useState(EMPLEADOS_DEFAULT)
   const [editHora, setEditHora] = useState({})     // valor_hora tipeado en la pestaña Empleados
   const [guardandoEmp, setGuardandoEmp] = useState(null)
+  const [nuevoEmp, setNuevoEmp] = useState({ apellido: '', nombre: '', valor_hora: '', cbu: '' })
+  const [guardandoNuevo, setGuardandoNuevo] = useState(false)
 
   useEffect(() => {
     fetchLiquidaciones()
@@ -146,6 +148,29 @@ export default function Sueldos() {
     if (error) { setAlert({ type: 'error', msg: error.message }); return }
     setEditHora(h => { const n = { ...h }; delete n[emp.id]; return n })
     setAlert({ type: 'success', msg: `✅ Valor hora de ${emp.nombre} actualizado a ${fmt(v)}` })
+    cargarEmpleados()
+    setTimeout(() => setAlert(null), 3500)
+  }
+
+  // Alta de un nuevo empleado (pestaña Empleados). La tabla empleados_sueldos
+  // no tiene default en `id`, así que calculamos el próximo a mano (max+1).
+  async function agregarEmpleado() {
+    const apellido = nuevoEmp.apellido.trim().toUpperCase()
+    const nombre = nuevoEmp.nombre.trim().toUpperCase()
+    const valor = parseFloat(nuevoEmp.valor_hora)
+    if (!apellido || !nombre) { setAlert({ type: 'error', msg: 'Cargá apellido y nombre' }); return }
+    if (!(valor > 0)) { setAlert({ type: 'error', msg: 'Ingresá un valor hora válido' }); return }
+    setGuardandoNuevo(true)
+    const { data: maxRow } = await supabase.from('empleados_sueldos').select('id').order('id', { ascending: false }).limit(1)
+    const nuevoId = (maxRow?.[0]?.id || 0) + 1
+    const { error } = await supabase.from('empleados_sueldos').insert({
+      id: nuevoId, apellido, nombre, valor_hora: valor,
+      modalidad: 'hora', cbu: nuevoEmp.cbu.trim(), activo: true,
+    })
+    setGuardandoNuevo(false)
+    if (error) { setAlert({ type: 'error', msg: error.message }); return }
+    setNuevoEmp({ apellido: '', nombre: '', valor_hora: '', cbu: '' })
+    setAlert({ type: 'success', msg: `✅ ${apellido}, ${nombre} agregado` })
     cargarEmpleados()
     setTimeout(() => setAlert(null), 3500)
   }
@@ -537,6 +562,25 @@ export default function Sueldos() {
             </div>
             )
           })}
+
+          {/* Tarjeta de ALTA de empleado */}
+          <div className="card" style={{ border: '1px dashed #7c3aed', background: 'var(--surface)' }}>
+            <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: '#a78bfa', marginBottom: 10 }}>➕ NUEVO EMPLEADO</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <input style={inp} placeholder="Apellido" value={nuevoEmp.apellido}
+                onChange={e => setNuevoEmp(n => ({ ...n, apellido: e.target.value }))} />
+              <input style={inp} placeholder="Nombre" value={nuevoEmp.nombre}
+                onChange={e => setNuevoEmp(n => ({ ...n, nombre: e.target.value }))} />
+              <input type="number" step="100" style={inp} placeholder="Valor hora ($)" value={nuevoEmp.valor_hora}
+                onChange={e => setNuevoEmp(n => ({ ...n, valor_hora: e.target.value }))} />
+              <input style={inp} placeholder="CBU / alias (opcional)" value={nuevoEmp.cbu}
+                onChange={e => setNuevoEmp(n => ({ ...n, cbu: e.target.value }))} />
+              <button onClick={agregarEmpleado} disabled={guardandoNuevo}
+                style={{ padding: '10px 12px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 8, cursor: guardandoNuevo ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 13 }}>
+                {guardandoNuevo ? '⏳ Agregando...' : '➕ Agregar empleado'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
