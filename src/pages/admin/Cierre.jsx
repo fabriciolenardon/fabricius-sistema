@@ -616,9 +616,11 @@ export default function Cierre() {
     const movido = ventasN + gastosN + comprasN
     return { hay: movido > 1, delta: ventasN - gastosN - comprasN }
   }
-  const totMes = { ventas: 0, compras: 0, gastos: 0, sueldos: 0, ganancia: 0, kgCarne: 0, kgPollo: 0, kgCerdo: 0, ventasCtacte: 0 }
+  const totMes = { ventas: 0, ventasMin: 0, ventasMay: 0, compras: 0, gastos: 0, sueldos: 0, ganancia: 0, kgCarne: 0, kgPollo: 0, kgCerdo: 0, ventasCtacte: 0 }
   semanasMes.forEach(c => {
     totMes.ventas += c.ventas || 0
+    totMes.ventasMin += Number(c.ingresos?.ventas_caja) || 0
+    totMes.ventasMay += Number(c.ingresos?.ventas_mayorista) || 0
     totMes.compras += c.compras || 0
     totMes.gastos += c.gastos || 0
     totMes.sueldos += c.sueldos || 0
@@ -1002,6 +1004,8 @@ export default function Cierre() {
               {/* KPIs DEL MES */}
               <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 16 }}>
                 <MetricCard label="Ventas del mes" value={fmt(totMes.ventas)} color="var(--green)" big />
+                <MetricCard label="Vtas. Minorista (caja)" value={fmt(totMes.ventasMin)} color="var(--green)" />
+                <MetricCard label="Vtas. Mayorista" value={fmt(totMes.ventasMay)} color="var(--green)" />
                 <MetricCard label="Compras" value={fmt(totMes.compras)} color="var(--red-light)" />
                 <MetricCard label="Gastos + Sueldos" value={fmt(totMes.gastos + totMes.sueldos)} color="var(--amber)" />
                 <MetricCard label="Ganancia neta" value={fmt(totMes.ganancia)} color={totMes.ganancia >= 0 ? 'var(--gold)' : 'var(--red-light)'} big />
@@ -1034,7 +1038,8 @@ export default function Cierre() {
                     <thead>
                       <tr>
                         <th>Período</th>
-                        <th>Ventas</th>
+                        <th>Vtas. Minorista</th>
+                        <th>Vtas. Mayorista</th>
                         <th>Compras</th>
                         <th>Gastos</th>
                         <th>Sueldos</th>
@@ -1057,7 +1062,8 @@ export default function Cierre() {
                               </div>
                             )}
                           </td>
-                          <td style={{ color: 'var(--green)' }}>{fmt(c.ventas)}</td>
+                          <td style={{ color: 'var(--green)' }}>{fmt(c.ingresos?.ventas_caja || 0)}</td>
+                          <td style={{ color: 'var(--green)' }}>{fmt(c.ingresos?.ventas_mayorista || 0)}</td>
                           <td style={{ color: 'var(--red-light)' }}>{fmt(c.compras)}</td>
                           <td style={{ color: 'var(--amber)' }}>{fmt(c.gastos)}</td>
                           <td style={{ color: 'var(--blue)' }}>{fmt(c.sueldos)}</td>
@@ -1083,7 +1089,8 @@ export default function Cierre() {
                     <tfoot>
                       <tr className="total-row">
                         <td>TOTAL</td>
-                        <td style={{ color: 'var(--green)' }}>{fmt(totMes.ventas)}</td>
+                        <td style={{ color: 'var(--green)' }}>{fmt(totMes.ventasMin)}</td>
+                        <td style={{ color: 'var(--green)' }}>{fmt(totMes.ventasMay)}</td>
                         <td style={{ color: 'var(--red-light)' }}>{fmt(totMes.compras)}</td>
                         <td style={{ color: 'var(--amber)' }}>{fmt(totMes.gastos)}</td>
                         <td style={{ color: 'var(--blue)' }}>{fmt(totMes.sueldos)}</td>
