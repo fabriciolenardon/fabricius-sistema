@@ -11,6 +11,7 @@ import LogoFabricius from '../../components/LogoFabricius'
 import UserDropdown from '../../components/UserDropdown'
 import CambiarPasswordModal from '../../components/CambiarPasswordModal'
 import BotonAvisos from '../../components/BotonAvisos'
+import RecordatorioPagos from '../../components/RecordatorioPagos'
 
 // Entrada extra solo-CEO para el menú del celular: el Modo TV (F.A.B.R.I.) no
 // es una ruta aparte de navItems, así que se agrega a mano para el CEO.
@@ -521,6 +522,9 @@ export default function AdminLayout() {
 
       {/* Widget de actividad en vivo (conversaciones + pedidos) con notificaciones */}
       <CentroActividad />
+
+      {/* Recordatorio JUE/VIE/SÁB/DOM para que el CEO cargue los pagos a proveedores */}
+      {user?.email === 'fabriciolenardon@gmail.com' && <RecordatorioPagos />}
 
       {/* CONTENIDO */}
       <main style={{ paddingTop: 56, minHeight: '100vh' }}>
