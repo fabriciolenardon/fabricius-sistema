@@ -89,6 +89,10 @@ async function imprimirCierreMensual(semanasMes, totMes, mesLabel, trendMeses = 
         <tfoot><tr class="total-row"><td>TOTAL MES</td>${socios.map(s => `<td class="rojo">${fmtPrecio(totalSocio[s])}</td>`).join('')}<td class="rojo">${fmtPrecio(totalRetiros)}</td></tr></tfoot>
       </table>` : ''
 
+  // Totales de ventas minorista / mayorista del mes (de cada snapshot semanal).
+  const totMin = semanasMes.reduce((s, c) => s + (Number(c.ingresos?.ventas_caja) || 0), 0)
+  const totMay = semanasMes.reduce((s, c) => s + (Number(c.ingresos?.ventas_mayorista) || 0), 0)
+
   // ── Gráficos (van abajo de la distribución por socio) ──
   const serieSem = [{ nombre: 'Ventas', color: CHART_COLORS.ventas }, { nombre: 'Compras', color: CHART_COLORS.compras }, { nombre: 'Ganancia', color: CHART_COLORS.ganancia }]
   const gruposSem = semanasMes.map(c => ({ label: fmtFechaCorta(c.semana_inicio), valores: [c.ventas || 0, c.compras || 0, c.ganancia || 0] }))
@@ -118,8 +122,8 @@ async function imprimirCierreMensual(semanasMes, totMes, mesLabel, trendMeses = 
       .sub { font-size: 11px; color: #555; }
       .titulo { font-size: 16px; font-weight: 700; margin: 12px 0 4px; }
       table { width: 100%; border-collapse: collapse; margin: 12px 0; }
-      th { background: #000; color: #fff; padding: 6px 8px; text-align: center; font-size: 10px; }
-      td { border: 1px solid #ccc; padding: 6px 8px; text-align: center; font-size: 11px; }
+      th { background: #000; color: #fff; padding: 5px 4px; text-align: center; font-size: 9px; }
+      td { border: 1px solid #ccc; padding: 5px 4px; text-align: center; font-size: 9.5px; }
       td:first-child { text-align: left; font-weight: 600; }
       .total-row td { background: #f0f0f0; font-weight: 700; border-top: 2px solid #000; }
       .verde { color: #1a7a1a; } .rojo { color: #c0392b; } .oro { color: #b8860b; font-weight: 700; }
@@ -139,12 +143,13 @@ async function imprimirCierreMensual(semanasMes, totMes, mesLabel, trendMeses = 
       </div>
       <table>
         <thead><tr>
-          <th>Período</th><th>Ventas</th><th>Vtas.CtaCte</th><th>Compras</th><th>Gastos</th><th>Sueldos</th><th>Ganancia</th><th>Kg Carne</th><th>Kg Pollo</th><th>Kg Cerdo</th>
+          <th>Período</th><th>Vtas. Minorista</th><th>Vtas. Mayorista</th><th>Vtas. Cta Cte</th><th>Compras</th><th>Gastos</th><th>Sueldos</th><th>Ganancia</th><th>Kg Carne</th><th>Kg Pollo</th><th>Kg Cerdo</th>
         </tr></thead>
         <tbody>
           ${semanasMes.map(c => `<tr>
             <td>${new Date(c.semana_inicio + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })} → ${new Date(c.semana_fin + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })}</td>
-            <td class="verde">${fmtPrecio(c.ventas)}</td>
+            <td class="verde">${fmtPrecio(c.ingresos?.ventas_caja || 0)}</td>
+            <td class="verde">${fmtPrecio(c.ingresos?.ventas_mayorista || 0)}</td>
             <td>${fmtPrecio(c.ventas_ctacte || 0)}</td>
             <td class="rojo">${fmtPrecio(c.compras)}</td>
             <td>${fmtPrecio(c.gastos)}</td>
@@ -158,7 +163,8 @@ async function imprimirCierreMensual(semanasMes, totMes, mesLabel, trendMeses = 
         <tfoot>
           <tr class="total-row">
             <td>TOTAL</td>
-            <td class="verde">${fmtPrecio(totMes.ventas)}</td>
+            <td class="verde">${fmtPrecio(totMin)}</td>
+            <td class="verde">${fmtPrecio(totMay)}</td>
             <td>${fmtPrecio(totMes.ventasCtacte)}</td>
             <td class="rojo">${fmtPrecio(totMes.compras)}</td>
             <td>${fmtPrecio(totMes.gastos)}</td>
