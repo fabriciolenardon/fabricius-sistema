@@ -264,6 +264,80 @@ function FilaDesglose({ label, value, color, indent, editable, onCommit, esKg })
 // (como se cierra por semanas enteras, el mes operativo no coincide
 //  con el calendario). El "Mensual en vivo" del Ejecutivo usa estas fechas.
 // ============================================================
+// ============================================================
+// GRÁFICOS — SVG liviano, sin librería externa
+// ============================================================
+const CHART_COLORS = { ventas: '#22c55e', compras: '#ef4444', ganancia: '#d4af37', sueldos: '#4a7ac0', gastos: '#f59e0b' }
+const fmtFechaCorta = d => d ? new Date(d + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' }) : ''
+
+// Barras agrupadas. grupos: [{ label, valores:[...] }]; series: [{ nombre, color }]
+function GraficoBarras({ grupos, series, alto = 200 }) {
+  if (!grupos.length) return null
+  const W = 560, H = alto, mTop = 16, mBot = 28, mL = 10, mR = 10
+  const innerH = H - mTop - mBot, innerW = W - mL - mR
+  const todos = grupos.flatMap(g => g.valores)
+  const maxV = Math.max(1, ...todos.map(v => Math.max(0, v)))
+  const minV = Math.min(0, ...todos.map(v => Math.min(0, v)))
+  const rango = (maxV - minV) || 1
+  const yOf = v => mTop + ((maxV - v) / rango) * innerH
+  const y0 = yOf(0)
+  const gW = innerW / grupos.length
+  const nS = series.length, gap = 3
+  const bW = Math.max(2, (gW - gap * (nS + 1)) / nS)
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
+      <line x1={mL} y1={y0} x2={W - mR} y2={y0} stroke="#444" strokeWidth="1" />
+      {grupos.map((g, gi) => {
+        const gx = mL + gi * gW
+        return (
+          <g key={gi}>
+            {g.valores.map((v, si) => {
+              const yv = yOf(v)
+              const x = gx + gap + si * (bW + gap)
+              return <rect key={si} x={x} y={Math.min(yv, y0)} width={bW} height={Math.max(1, Math.abs(yv - y0))} rx="2" fill={series[si].color} />
+            })}
+            <text x={gx + gW / 2} y={H - 12} textAnchor="middle" fontSize="11" fill="#999">{g.label}</text>
+          </g>
+        )
+      })}
+    </svg>
+  )
+}
+
+function LeyendaChart({ series }) {
+  return (
+    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', justifyContent: 'center', marginTop: 4 }}>
+      {series.map(s => (
+        <div key={s.nombre} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--muted)' }}>
+          <span style={{ width: 12, height: 12, borderRadius: 3, background: s.color }} />{s.nombre}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// Barra horizontal de composición (a dónde se fue la plata sobre las ventas).
+function BarraComposicion({ segmentos }) {
+  const total = segmentos.reduce((s, x) => s + Math.max(0, x.valor), 0) || 1
+  return (
+    <div>
+      <div style={{ display: 'flex', height: 30, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border)' }}>
+        {segmentos.filter(s => s.valor > 0).map(s => (
+          <div key={s.nombre} title={`${s.nombre}: ${fmtPrecio(s.valor)}`} style={{ width: `${(s.valor / total) * 100}%`, background: s.color }} />
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 8 }}>
+        {segmentos.map(s => (
+          <div key={s.nombre} style={{ fontSize: 12, color: 'var(--text2)', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 12, height: 12, borderRadius: 3, background: s.color }} />
+            {s.nombre}: <strong>{fmtPrecio(s.valor)}</strong> <span style={{ color: 'var(--muted)' }}>({((Math.max(0, s.valor) / total) * 100).toFixed(0)}%)</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function ConfigMesesOperativos() {
   const [meses, setMeses] = useState([])
   const [nuevo, setNuevo] = useState({ etiqueta: '', fecha_inicio: '', fecha_cierre: '' })
@@ -547,6 +621,17 @@ export default function Cierre() {
     totMes.ventasCtacte += c.ventas_ctacte || 0
   })
   const mesLabel = mesSelector ? new Date(mesSelector + '-15').toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }) : ''
+
+  // Histórico mensual (Ventas vs Compras por mes) — para el gráfico de tendencia.
+  // Usa ventas/compras porque están cargadas en TODOS los cierres (la ganancia
+  // sólo se computa en los recientes). Mes seleccionado resaltado más fuerte.
+  const trendMeses = [...new Set(cierres.map(c => c.mes).filter(Boolean))].sort().map(m => {
+    const ws = cierres.filter(c => c.mes === m)
+    return {
+      label: new Date(m + '-15').toLocaleDateString('es-AR', { month: 'short' }).replace('.', ''),
+      valores: [ws.reduce((s, c) => s + (c.ventas || 0), 0), ws.reduce((s, c) => s + (c.compras || 0), 0)],
+    }
+  })
 
   return (
     <div>
@@ -931,6 +1016,41 @@ export default function Cierre() {
                     </div>
                   </div>
                 </div>
+              </div>
+
+              {/* GRÁFICOS DEL MES */}
+              <div className="card">
+                <div className="card-title">📊 Gráficos</div>
+
+                <div style={{ marginBottom: 22 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text2)', marginBottom: 8 }}>Semana a semana — Ventas / Compras / Ganancia</div>
+                  <GraficoBarras
+                    grupos={semanasMes.map(c => ({ label: fmtFechaCorta(c.semana_inicio), valores: [c.ventas || 0, c.compras || 0, c.ganancia || 0] }))}
+                    series={[{ nombre: 'Ventas', color: CHART_COLORS.ventas }, { nombre: 'Compras', color: CHART_COLORS.compras }, { nombre: 'Ganancia', color: CHART_COLORS.ganancia }]}
+                  />
+                  <LeyendaChart series={[{ nombre: 'Ventas', color: CHART_COLORS.ventas }, { nombre: 'Compras', color: CHART_COLORS.compras }, { nombre: 'Ganancia', color: CHART_COLORS.ganancia }]} />
+                </div>
+
+                <div style={{ marginBottom: 22 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text2)', marginBottom: 8 }}>¿A dónde fue la plata? — sobre ventas de {fmt(totMes.ventas)}</div>
+                  <BarraComposicion segmentos={[
+                    { nombre: 'Compras', valor: totMes.compras, color: CHART_COLORS.compras },
+                    { nombre: 'Sueldos', valor: totMes.sueldos, color: CHART_COLORS.sueldos },
+                    { nombre: 'Gastos', valor: totMes.gastos, color: CHART_COLORS.gastos },
+                    { nombre: 'Ganancia', valor: totMes.ganancia, color: CHART_COLORS.ganancia },
+                  ]} />
+                </div>
+
+                {trendMeses.length > 1 && (
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text2)', marginBottom: 8 }}>Histórico mensual — Ventas vs Compras</div>
+                    <GraficoBarras
+                      grupos={trendMeses}
+                      series={[{ nombre: 'Ventas', color: CHART_COLORS.ventas }, { nombre: 'Compras', color: CHART_COLORS.compras }]}
+                    />
+                    <LeyendaChart series={[{ nombre: 'Ventas', color: CHART_COLORS.ventas }, { nombre: 'Compras', color: CHART_COLORS.compras }]} />
+                  </div>
+                )}
               </div>
 
               {/* TABLA SEMANAS */}
