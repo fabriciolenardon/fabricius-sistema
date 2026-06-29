@@ -771,9 +771,9 @@ function WidgetMargenMes({ m }) {
   return (
     <div className="hud" style={{ ...glass, padding: 18, marginTop: 12 }}>
       <Etiqueta texto={`MARGEN DEL MES · ${(m.label || '').toUpperCase()}`} />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap', marginTop: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 28, flexWrap: 'wrap', marginTop: 8 }}>
         <DonutSVG segmentos={seg} centroTop={`${m.margenPct.toFixed(1).replace('.', ',')}%`} centroBot="margen" />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1, minWidth: 220 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
           {seg.map(s => (
             <div key={s.nombre} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ width: 14, height: 14, borderRadius: 4, background: s.color, flexShrink: 0 }} />
@@ -783,6 +783,22 @@ function WidgetMargenMes({ m }) {
           ))}
           <div style={{ fontSize: 11, color: NEON.muted, marginTop: 2 }}>
             Sobre ventas de {fmtArs(m.ventas)} · gastos incluye sueldos y retiros de socios
+          </div>
+        </div>
+
+        {/* Ganancia neta del mes + reparto de socios — llena la derecha */}
+        <div style={{ marginLeft: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, paddingLeft: 20, borderLeft: '1px solid rgba(0,212,255,0.18)', minWidth: 240 }}>
+          <span style={{ fontSize: 10, letterSpacing: 2, color: NEON.muted, fontWeight: 800 }}>GANANCIA NETA DEL MES</span>
+          <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 40, lineHeight: 1, color: m.ganancia >= 0 ? NEON.verde : NEON.rojo }}>{fmtArs(m.ganancia)}</span>
+          <div style={{ display: 'flex', gap: 22, marginTop: 10, justifyContent: 'flex-end' }}>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 11, color: NEON.muted }}>👑 Fabricio · 85%</div>
+              <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: '#ffd17a' }}>{fmtArs(m.ganancia * 0.85)}</div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 11, color: NEON.muted }}>🤝 Ariel · 15%</div>
+              <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: NEON.cian }}>{fmtArs(m.ganancia * 0.15)}</div>
+            </div>
           </div>
         </div>
       </div>
