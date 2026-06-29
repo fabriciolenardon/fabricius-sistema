@@ -1150,7 +1150,7 @@ export default function Cierre() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(pagCierres?.itemsActuales || []).filter(Boolean).map(c => (
+                  {(pagCierres?.items || []).filter(Boolean).map(c => (
                     <tr key={c.id}>
                       <td>{fmtFecha(c.semana_inicio)} → {fmtFecha(c.semana_fin)}</td>
                       <td style={{ color: 'var(--green)' }}>{fmt(c.ventas)}</td>
@@ -1173,7 +1173,7 @@ export default function Cierre() {
                 </tbody>
               </table>
             </div>
-            <Paginador {...pagCierres} />
+            <Paginador {...pagCierres.controles} label="cierres" />
           </div>
         </div>
       )}
