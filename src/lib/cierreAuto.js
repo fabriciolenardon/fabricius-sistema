@@ -9,7 +9,9 @@
 //   - POR COBRAR → saldo total de clientes con deuda al cierre
 //   - COMPRAS → entradas al depósito en el período (a precio costo)
 //   - PAGADO PROV → lo que efectivamente pagamos a proveedores
-//   - POR PAGAR  → saldo pendiente con proveedores al cierre
+//   - POR PAGAR  → lo comprado a proveedores en el período (se les paga a
+//                  la semana siguiente, así que la deuda "al cierre" = compras
+//                  del período, NO el saldo acumulado del libro mayor)
 //   - GASTOS  → fijos + variables + retiros socios
 //   - SUELDOS → liquidaciones cuya semana cae en el período
 //
@@ -54,7 +56,7 @@ const sum = (arr, k) => (arr || []).reduce((s, r) => s + (Number(r?.[k]) || 0), 
  *   porCobrar: { totalSaldoClientes },
  *   compras: { entradas, total },
  *   pagadoProv: { pagos, total },
- *   porPagarProv: { totalSaldoProveedores },
+ *   porPagarProv: { total, proveedores } (= compras del período por proveedor),
  *   gastos: { fijos, variables, socios, total },
  *   sueldos: { total },
  *   kg: { carne, pollo, cerdo, embutidos },
@@ -63,6 +65,19 @@ const sum = (arr, k) => (arr || []).reduce((s, r) => s + (Number(r?.[k]) || 0), 
  * }
  */
 export async function calcularCierreAuto(desde, hasta) {
+  // Mes en curso (para los acumulados mensuales) = mes de `hasta`.
+  const mesDesde = hasta.substring(0, 7) + '-01'
+  // Fin de la "primera semana del mes" = domingo de la semana (lun→dom) que
+  // contiene el 1° del mes. Los pagos a proveedores de esa primera semana
+  // corresponden a compras del MES ANTERIOR (se paga con ~1 semana de desfasaje),
+  // así que NO se suman al "pagado del mes". Regla de Fabricio (29/06/2026).
+  const primeraSemFin = (() => {
+    const [y, m] = mesDesde.split('-').map(Number)
+    const jsDow = new Date(Date.UTC(y, m - 1, 1)).getUTCDay() // 0=domingo
+    const diasAlDomingo = jsDow === 0 ? 0 : 7 - jsDow
+    return new Date(Date.UTC(y, m - 1, 1 + diasAlDomingo)).toISOString().slice(0, 10)
+  })()
+
   // Lanzamos todas las queries en paralelo
   const [
     ventasCajaR,
@@ -75,6 +90,8 @@ export async function calcularCierreAuto(desde, hasta) {
     sueldosR,
     clientesR,
     proveedoresR,
+    entradasMesR,
+    pagosMesR,
   ] = await Promise.all([
     // Ventas minoristas (caja) — sólo origen='caja' (cliente cta cte ya cuenta como cobranza)
     supabase
@@ -146,6 +163,25 @@ export async function calcularCierreAuto(desde, hasta) {
     supabase
       .from('proveedores')
       .select('id, nombre'),
+
+    // Compras del MES (acumulado): desde el 1° del mes de `hasta` hasta `hasta`.
+    // Se usa para la tarjeta "Comprado en el mes" (acumulado mensual, no semanal).
+    supabase
+      .from('entradas_deposito')
+      .select('fecha, kg, kg_real, precio_kg, importe, destino')
+      .eq('eliminado', false)
+      .gte('fecha', mesDesde)
+      .lte('fecha', hasta),
+
+    // Pagos a proveedores del MES (acumulado), para la tarjeta "Pagado a
+    // proveedores". Se traen todos los del mes; la primera semana se excluye
+    // después (ver primeraSemFin).
+    supabase
+      .from('movimientos_proveedores')
+      .select('fecha, haber, tipo, anulado')
+      .eq('tipo', 'pago')
+      .gte('fecha', mesDesde)
+      .lte('fecha', hasta),
   ])
 
   const ventasCaja = ventasCajaR.data || []
@@ -213,6 +249,26 @@ export async function calcularCierreAuto(desde, hasta) {
     return s + (kg * pkg)
   }, 0)
 
+  // ====== COMPRAS DEL MES (acumulado mensual) ======
+  // Mismo criterio que comprasTotal (importe o kg×precio, excluye internas), pero
+  // sobre todo el mes de `hasta`. Alimenta la tarjeta "Comprado en el mes".
+  const comprasMesTotal = (entradasMesR.data || [])
+    .filter(e => e.destino !== 'desposte' && e.destino !== 'elaboracion')
+    .reduce((s, e) => {
+      if (Number(e.importe) > 0) return s + Number(e.importe)
+      const kg = Number(e.kg_real || e.kg) || 0
+      const pkg = Number(e.precio_kg) || 0
+      return s + (kg * pkg)
+    }, 0)
+
+  // ====== PAGADO A PROVEEDORES DEL MES (acumulado, sin la 1ª semana) ======
+  // Suma los pagos del mes EXCLUYENDO la primera semana (≤ primeraSemFin), porque
+  // esos pagos cubren compras del mes anterior (desfasaje de ~1 semana). Excluye
+  // anulados.
+  const pagadoMesTotal = (pagosMesR.data || [])
+    .filter(m => !m.anulado && m.fecha > primeraSemFin)
+    .reduce((s, m) => s + (Number(m.haber) || 0), 0)
+
   // ====== PAGADO A PROVEEDORES ======
   // Los pagos a proveedores se registran en el libro mayor
   // (movimientos_proveedores, tipo='pago' → haber). La tabla vieja
@@ -221,25 +277,10 @@ export async function calcularCierreAuto(desde, hasta) {
   const pagosProvPeriodo = movProv.filter(m => m.tipo === 'pago')
   const pagadoProvTotal = pagosProvPeriodo.reduce((s, m) => s + (Number(m.haber) || 0), 0)
 
-  // ====== POR PAGAR PROVEEDORES (saldo ledger al cierre) ======
-  // Saldo se calcula leyendo TODOS los movimientos hasta `hasta`, no sólo los del período.
-  const { data: todosMovProv } = await supabase
-    .from('movimientos_proveedores')
-    .select('proveedor_id, proveedor_nombre, debe, haber, fecha')
-    .lte('fecha', hasta)
-
-  const saldosProvMap = new Map()
-  for (const m of (todosMovProv || [])) {
-    const key = m.proveedor_id || m.proveedor_nombre || 'desconocido'
-    const cur = saldosProvMap.get(key) || { nombre: m.proveedor_nombre, saldo: 0 }
-    cur.saldo += (Number(m.debe) || 0) - (Number(m.haber) || 0)
-    cur.nombre = m.proveedor_nombre || cur.nombre
-    saldosProvMap.set(key, cur)
-  }
-  const proveedoresConDeuda = Array.from(saldosProvMap.values())
-    .filter(p => p.saldo > 0.01)
-    .sort((a, b) => b.saldo - a.saldo)
-  const totalPorPagar = proveedoresConDeuda.reduce((s, p) => s + p.saldo, 0)
+  // ====== POR PAGAR PROVEEDORES (lo comprado en el período) ======
+  // Se calcula más abajo, a partir de `comprasPorProveedor` (necesita estar
+  // definido primero). Decisión de negocio: ver bloque "POR PAGAR" tras los
+  // desgloses por proveedor.
 
   // ====== GASTOS ======
   const gastosFijos = gastos.filter(g => g.tipo === 'fijo').reduce((s, g) => s + (Number(g.monto) || 0), 0)
@@ -291,6 +332,17 @@ export async function calcularCierreAuto(desde, hasta) {
     .filter(p => p.total > 0)
     .sort((a, b) => b.total - a.total)
 
+  // ====== POR PAGAR PROVEEDORES (lo comprado en el período) ======
+  // A los proveedores se les paga a la semana siguiente, así que lo que se les
+  // debe "al cierre" es lo COMPRADO en este período — no el saldo acumulado del
+  // libro mayor. El saldo histórico (movimientos_proveedores debe−haber) venía
+  // arrastrando saldos iniciales viejos y pagos que no siempre se registran como
+  // 'pago', lo que inflaba el número (ej: $76,7M cuando la deuda real es la de la
+  // semana). Decidido con Fabricio el 29/06/2026. Por eso "Por pagar al cierre" =
+  // "Compras del período", desglosado por proveedor.
+  const proveedoresConDeuda = comprasPorProveedor.map(p => ({ nombre: p.nombre, saldo: p.total }))
+  const totalPorPagar = comprasTotal
+
   // ====== GANANCIAS ======
   // Devengada: facturado - todos los costos del período (a precio de compra)
   const gananciaDevengada = ventasTotal - comprasTotal - gastosTotal - sueldosTotal
@@ -320,10 +372,12 @@ export async function calcularCierreAuto(desde, hasta) {
     compras: {
       total: comprasTotal,
       cantEntradas: entradas.length,
+      mes: comprasMesTotal,
     },
     pagadoProv: {
       total: pagadoProvTotal,
       cantPagos: pagosProvPeriodo.length,
+      mes: pagadoMesTotal,
     },
     porPagarProv: {
       total: totalPorPagar,

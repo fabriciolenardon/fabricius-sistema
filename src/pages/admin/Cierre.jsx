@@ -611,11 +611,13 @@ export default function Cierre() {
                   sub={`${view.porCobrar.clientes.length} clientes con deuda`} />
                 <MetricCard label="🛒 Compras" value={fmt(view.compras.total)} color="var(--red-light)" big
                   editable={editableNow} rawValue={view.compras.total} onCommit={v => commitLeaf('compras.total', v)} />
-                <MetricCard label="💳 Pagado a proveedores" value={fmt(view.pagadoProv.total)} color="#c084fc"
-                  editable={editableNow} rawValue={view.pagadoProv.total} onCommit={v => commitLeaf('pagadoProv.total', v)} />
+                <MetricCard label="📆 Comprado en el mes" value={fmt(view.compras.mes || 0)} color="#f0883e"
+                  sub="acumulado del mes en curso" />
+                <MetricCard label="💳 Pagado a proveedores" value={fmt(view.pagadoProv.mes || 0)} color="#c084fc"
+                  sub="acumulado del mes (sin 1ª semana)" />
                 <MetricCard label="📥 Por pagar al cierre" value={fmt(view.porPagarProv.total)} color="var(--amber)"
                   editable={editableNow} rawValue={view.porPagarProv.total} onCommit={v => commitLeaf('porPagarProv.total', v)}
-                  sub={`${view.porPagarProv.proveedores.length} proveedores con saldo`} />
+                  sub={`${view.porPagarProv.proveedores.length} proveedores · compras del período`} />
               </div>
 
               {/* GANANCIA (siempre derivada de los valores de arriba) */}
