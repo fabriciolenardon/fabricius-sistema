@@ -86,7 +86,7 @@ function calcularHorasTurno(fichadas) {
   return Math.round(horas * 2) / 2 // redondear a 0.5
 }
 
-import { fmtPrecio } from '../../lib/formatos'
+import { fmtPrecio, parseNumero } from '../../lib/formatos'
 function fmt(n) { return fmtPrecio(Number(n) || 0) }
 const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }
 
@@ -110,6 +110,9 @@ export default function Sueldos() {
   const [guardandoEmp, setGuardandoEmp] = useState(null)
   const [nuevoEmp, setNuevoEmp] = useState({ apellido: '', nombre: '', valor_hora: '', cbu: '' })
   const [guardandoNuevo, setGuardandoNuevo] = useState(false)
+  const [editLiqId, setEditLiqId] = useState(null)   // id de la liquidación que se está editando en Historial
+  const [liqDraft, setLiqDraft] = useState({ horas: '', bruto: '', viaticos: '', adelantos: '', boletas: '' })
+  const [guardandoLiq, setGuardandoLiq] = useState(false)
 
   useEffect(() => {
     fetchLiquidaciones()
@@ -172,6 +175,56 @@ export default function Sueldos() {
     setNuevoEmp({ apellido: '', nombre: '', valor_hora: '', cbu: '' })
     setAlert({ type: 'success', msg: `✅ ${apellido}, ${nombre} agregado` })
     cargarEmpleados()
+    setTimeout(() => setAlert(null), 3500)
+  }
+
+  // ── Edición de una liquidación guardada (pestaña Historial) ──
+  // Valor hora usado en esa liquidación: lo deducimos del propio registro
+  // (bruto/horas), así al editar las horas el bruto se recalcula con la tarifa
+  // de ESA semana. Fallback al valor hora actual del empleado.
+  function tarifaLiq(l) {
+    if (Number(l.horas) > 0 && Number(l.bruto) > 0) return Number(l.bruto) / Number(l.horas)
+    const emp = empleados.find(e => `${e.apellido}, ${e.nombre}` === l.empleado_nombre)
+    return emp ? (Number(emp.valor_hora) || 0) : 0
+  }
+  const netoDeDraft = d => Math.max(0,
+    (parseNumero(d.bruto) || 0) + (parseNumero(d.viaticos) || 0) - (parseNumero(d.adelantos) || 0) - (parseNumero(d.boletas) || 0))
+
+  function empezarEditarLiq(l) {
+    setEditLiqId(l.id)
+    setLiqDraft({
+      horas: String(l.horas ?? ''), bruto: String(l.bruto ?? ''),
+      viaticos: String(l.viaticos ?? ''), adelantos: String(l.adelantos ?? ''), boletas: String(l.boletas ?? ''),
+    })
+  }
+  // Al cambiar las horas, recalcula el bruto con la tarifa de esa liquidación
+  // (el bruto igual queda editable a mano si hace falta).
+  function cambiarDraftLiq(l, campo, valor) {
+    setLiqDraft(d => {
+      const next = { ...d, [campo]: valor }
+      if (campo === 'horas') {
+        const r = tarifaLiq(l)
+        if (r > 0) next.bruto = String(Math.round((parseNumero(valor) || 0) * r))
+      }
+      return next
+    })
+  }
+  async function guardarLiq(l) {
+    const upd = {
+      horas: parseNumero(liqDraft.horas) || 0,
+      bruto: parseNumero(liqDraft.bruto) || 0,
+      viaticos: parseNumero(liqDraft.viaticos) || 0,
+      adelantos: parseNumero(liqDraft.adelantos) || 0,
+      boletas: parseNumero(liqDraft.boletas) || 0,
+    }
+    upd.neto = Math.max(0, upd.bruto + upd.viaticos - upd.adelantos - upd.boletas)
+    setGuardandoLiq(true)
+    const { error } = await supabase.from('liquidaciones_sueldos').update(upd).eq('id', l.id)
+    setGuardandoLiq(false)
+    if (error) { setAlert({ type: 'error', msg: error.message }); return }
+    setEditLiqId(null)
+    setAlert({ type: 'success', msg: `✅ Liquidación de ${l.empleado_nombre} actualizada` })
+    fetchLiquidaciones()   // recarga → el TOTAL de la semana se recalcula solo
     setTimeout(() => setAlert(null), 3500)
   }
 
@@ -598,19 +651,43 @@ export default function Sueldos() {
                   <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>TOTAL: {fmt(totalSemana)}</div>
                 </div>
                 <table>
-                  <thead><tr><th>Empleado</th><th>Horas</th><th>Bruto</th><th>Viáticos</th><th>Adelantos</th><th>Boletas</th><th>Neto</th></tr></thead>
+                  <thead><tr><th>Empleado</th><th>Horas</th><th>Bruto</th><th>Viáticos</th><th>Adelantos</th><th>Boletas</th><th>Neto</th><th></th></tr></thead>
                   <tbody>
-                    {liqSemana.map(l => (
-                      <tr key={l.id}>
-                        <td><strong>{l.empleado_nombre}</strong></td>
-                        <td>{l.horas > 0 ? l.horas + 'h' : '—'}</td>
-                        <td style={{ color: '#a78bfa' }}>{fmt(l.bruto)}</td>
-                        <td style={{ color: '#22c55e' }}>{l.viaticos > 0 ? '+' + fmt(l.viaticos) : '—'}</td>
-                        <td style={{ color: 'var(--red-light)' }}>{l.adelantos > 0 ? '-' + fmt(l.adelantos) : '—'}</td>
-                        <td style={{ color: 'var(--red-light)' }}>{l.boletas > 0 ? '-' + fmt(l.boletas) : '—'}</td>
-                        <td style={{ color: 'var(--gold)', fontWeight: 700 }}>{fmt(l.neto)}</td>
-                      </tr>
-                    ))}
+                    {liqSemana.map(l => {
+                      const editando = editLiqId === l.id
+                      if (editando) {
+                        const cell = { ...inp, padding: '4px 6px', fontSize: 13, textAlign: 'right' }
+                        const btn = { padding: '4px 8px', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: 13 }
+                        return (
+                          <tr key={l.id} style={{ background: 'rgba(124,58,237,0.10)' }}>
+                            <td><strong>{l.empleado_nombre}</strong></td>
+                            <td><input type="number" step="0.5" style={{ ...cell, width: 64 }} value={liqDraft.horas} onChange={e => cambiarDraftLiq(l, 'horas', e.target.value)} /></td>
+                            <td><input type="number" step="100" style={{ ...cell, width: 92 }} value={liqDraft.bruto} onChange={e => cambiarDraftLiq(l, 'bruto', e.target.value)} /></td>
+                            <td><input type="number" step="100" style={{ ...cell, width: 84 }} value={liqDraft.viaticos} onChange={e => cambiarDraftLiq(l, 'viaticos', e.target.value)} /></td>
+                            <td><input type="number" step="100" style={{ ...cell, width: 84 }} value={liqDraft.adelantos} onChange={e => cambiarDraftLiq(l, 'adelantos', e.target.value)} /></td>
+                            <td><input type="number" step="100" style={{ ...cell, width: 84 }} value={liqDraft.boletas} onChange={e => cambiarDraftLiq(l, 'boletas', e.target.value)} /></td>
+                            <td style={{ color: 'var(--gold)', fontWeight: 700 }}>{fmt(netoDeDraft(liqDraft))}</td>
+                            <td style={{ whiteSpace: 'nowrap' }}>
+                              <button onClick={() => guardarLiq(l)} disabled={guardandoLiq} style={{ ...btn, background: '#7c3aed', color: '#fff', marginRight: 4 }}>{guardandoLiq ? '⏳' : '💾'}</button>
+                              <button onClick={() => setEditLiqId(null)} style={{ ...btn, background: 'var(--surface2)', color: 'var(--muted)' }}>✕</button>
+                            </td>
+                          </tr>
+                        )
+                      }
+                      return (
+                        <tr key={l.id}>
+                          <td><strong>{l.empleado_nombre}</strong></td>
+                          <td>{l.horas > 0 ? l.horas + 'h' : '—'}</td>
+                          <td style={{ color: '#a78bfa' }}>{fmt(l.bruto)}</td>
+                          <td style={{ color: '#22c55e' }}>{l.viaticos > 0 ? '+' + fmt(l.viaticos) : '—'}</td>
+                          <td style={{ color: 'var(--red-light)' }}>{l.adelantos > 0 ? '-' + fmt(l.adelantos) : '—'}</td>
+                          <td style={{ color: 'var(--red-light)' }}>{l.boletas > 0 ? '-' + fmt(l.boletas) : '—'}</td>
+                          <td style={{ color: 'var(--gold)', fontWeight: 700 }}>{fmt(l.neto)}</td>
+                          <td><button onClick={() => empezarEditarLiq(l)} title="Editar liquidación"
+                            style={{ padding: '4px 8px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>✏️</button></td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
