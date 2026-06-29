@@ -184,13 +184,14 @@ export async function calcularCierreAuto(desde, hasta) {
       .gte('fecha', mesDesde)
       .lte('fecha', hasta),
 
-    // Cuenta corriente COMPLETA hasta `hasta`: para "Por pagar al cierre" =
-    // saldo real de cada proveedor (Σdebe − Σhaber), con los favores/adelantos
-    // ya netos por proveedor (igual que la pantalla Proveedores).
+    // Movimientos de proveedores hasta HOY: para "Por pagar al cierre" =
+    // saldo real de cada cta cte tomando las COMPRAS hasta el cierre (`hasta`)
+    // pero TODOS los pagos hasta hoy (ver saldoProvMap). Paginado: suma todo el
+    // histórico, así que sin fetchAllRows se cortaría en 1000 filas.
     fetchAllRows(() => supabase
       .from('movimientos_proveedores')
-      .select('proveedor_id, proveedor_nombre, debe, haber, anulado')
-      .lte('fecha', hasta)),
+      .select('proveedor_id, proveedor_nombre, fecha, debe, haber, anulado')
+      .lte('fecha', fechaHoyARG())),
   ])
 
   const ventasCaja = ventasCajaR.data || []
@@ -342,19 +343,23 @@ export async function calcularCierreAuto(desde, hasta) {
     .sort((a, b) => b.total - a.total)
 
   // ====== POR PAGAR PROVEEDORES (saldo real de la cuenta corriente) ======
-  // Decisión Fabricio (29/06/2026): lo que se debe "al cierre" = la suma del
-  // SALDO REAL de cada proveedor al cierre (Σdebe − Σhaber hasta `hasta`), que
-  // es la misma cuenta corriente de la pantalla Proveedores. Esto netea por
-  // proveedor los favores/adelantos (ej: CUBALA muestra $240.905, no la compra
-  // bruta de $268.880 porque ya se le adelantó parte). Antes daba $76,7M porque
-  // faltaban pagos sin registrar; al cargarlos, queda en su valor real (~$40M).
-  // Se suman solo los saldos POSITIVOS (lo que se debe); los negativos son
+  // Decisión Fabricio (29/06/2026): lo que se debe "al cierre" = saldo real de
+  // cada proveedor, contando las COMPRAS hasta el cierre (`hasta`) y TODOS los
+  // pagos hasta HOY. Así:
+  //   - las compras del mes nuevo (post-cierre) NO inflan el número, y
+  //   - si pagás algo DESPUÉS del cierre (ej. saldás a CEIBA al día siguiente),
+  //     baja solo al recalcular (el pago del 29/6 se descuenta aunque el cierre
+  //     sea al 28/6).
+  // Netea por proveedor los favores/adelantos (ej: CUBALA $240.905, no la compra
+  // bruta $268.880). Se suman solo los saldos POSITIVOS; los negativos son
   // crédito a favor con ESE proveedor y no restan deuda de los demás.
   const saldoProvMap = new Map()
   for (const m of (saldoProvR.data || [])) {
     if (m.anulado) continue
     const key = m.proveedor_id || m.proveedor_nombre || 'desconocido'
-    saldoProvMap.set(key, (saldoProvMap.get(key) || 0) + (Number(m.debe) || 0) - (Number(m.haber) || 0))
+    const debe = (m.fecha && m.fecha <= hasta) ? (Number(m.debe) || 0) : 0  // compras: solo hasta el cierre
+    const haber = Number(m.haber) || 0                                       // pagos: todos hasta hoy
+    saldoProvMap.set(key, (saldoProvMap.get(key) || 0) + debe - haber)
   }
   const totalPorPagar = Array.from(saldoProvMap.values())
     .filter(s => s > 0.01)
