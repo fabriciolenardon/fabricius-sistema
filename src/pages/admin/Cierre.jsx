@@ -616,7 +616,7 @@ export default function Cierre() {
                 <MetricCard label="💳 Pagado a proveedores" value={fmt(view.pagadoProv.mes || 0)} color="#c084fc"
                   sub="acumulado del mes (sin 1ª semana)" />
                 <MetricCard label="📥 Por pagar al cierre" value={fmt(view.porPagarProv.total)} color="var(--amber)"
-                  sub="comprado del mes − pagado del mes" />
+                  sub="saldo real cta. cte. al cierre" />
               </div>
 
               {/* GANANCIA (siempre derivada de los valores de arriba) */}

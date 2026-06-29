@@ -20,7 +20,7 @@
 //   - CAJA REAL  = cobrado − pagado prov − gastos − sueldos
 // ============================================================
 
-import { supabase } from './supabase'
+import { supabase, fetchAllRows } from './supabase'
 import { fechaHoyARG } from './fechas'
 
 // Devuelve el lunes de la semana que contiene `base` (en ARG), formato YYYY-MM-DD.
@@ -92,6 +92,7 @@ export async function calcularCierreAuto(desde, hasta) {
     proveedoresR,
     entradasMesR,
     pagosMesR,
+    saldoProvR,
   ] = await Promise.all([
     // Ventas minoristas (caja) — sólo origen='caja' (cliente cta cte ya cuenta como cobranza)
     supabase
@@ -182,6 +183,14 @@ export async function calcularCierreAuto(desde, hasta) {
       .eq('tipo', 'pago')
       .gte('fecha', mesDesde)
       .lte('fecha', hasta),
+
+    // Cuenta corriente COMPLETA hasta `hasta`: para "Por pagar al cierre" =
+    // saldo real de cada proveedor (Σdebe − Σhaber), con los favores/adelantos
+    // ya netos por proveedor (igual que la pantalla Proveedores).
+    fetchAllRows(() => supabase
+      .from('movimientos_proveedores')
+      .select('proveedor_id, proveedor_nombre, debe, haber, anulado')
+      .lte('fecha', hasta)),
   ])
 
   const ventasCaja = ventasCajaR.data || []
@@ -332,16 +341,24 @@ export async function calcularCierreAuto(desde, hasta) {
     .filter(p => p.total > 0)
     .sort((a, b) => b.total - a.total)
 
-  // ====== POR PAGAR PROVEEDORES (saldo real pendiente) ======
-  // Decisión Fabricio (29/06/2026): lo que se debe a proveedores "al cierre" =
-  // lo COMPRADO en el mes − lo PAGADO en el mes (este último sin la 1ª semana,
-  // ver pagadoMesTotal). Como se paga con ~1 semana de desfasaje, cuando los
-  // pagos están al día esto converge a ~1 semana (la última que falta pagar); si
-  // falta cargar un pago, el número lo refleja (sirve de control). NO se usa el
-  // saldo acumulado del libro mayor (movimientos_proveedores debe−haber), que
-  // arrastraba saldos iniciales y pagos no registrados e inflaba la cifra (daba
-  // $76,7M).
-  const totalPorPagar = comprasMesTotal - pagadoMesTotal
+  // ====== POR PAGAR PROVEEDORES (saldo real de la cuenta corriente) ======
+  // Decisión Fabricio (29/06/2026): lo que se debe "al cierre" = la suma del
+  // SALDO REAL de cada proveedor al cierre (Σdebe − Σhaber hasta `hasta`), que
+  // es la misma cuenta corriente de la pantalla Proveedores. Esto netea por
+  // proveedor los favores/adelantos (ej: CUBALA muestra $240.905, no la compra
+  // bruta de $268.880 porque ya se le adelantó parte). Antes daba $76,7M porque
+  // faltaban pagos sin registrar; al cargarlos, queda en su valor real (~$40M).
+  // Se suman solo los saldos POSITIVOS (lo que se debe); los negativos son
+  // crédito a favor con ESE proveedor y no restan deuda de los demás.
+  const saldoProvMap = new Map()
+  for (const m of (saldoProvR.data || [])) {
+    if (m.anulado) continue
+    const key = m.proveedor_id || m.proveedor_nombre || 'desconocido'
+    saldoProvMap.set(key, (saldoProvMap.get(key) || 0) + (Number(m.debe) || 0) - (Number(m.haber) || 0))
+  }
+  const totalPorPagar = Array.from(saldoProvMap.values())
+    .filter(s => s > 0.01)
+    .reduce((s, v) => s + v, 0)
 
   // ====== GANANCIAS ======
   // Devengada: facturado - todos los costos del período (a precio de compra)
