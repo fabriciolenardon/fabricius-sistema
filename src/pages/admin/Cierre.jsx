@@ -47,7 +47,7 @@ function exportarExcel(semanasMes, totMes, mesLabel) {
   URL.revokeObjectURL(url)
 }
 
-async function imprimirCierreMensual(semanasMes, totMes, mesLabel) {
+async function imprimirCierreMensual(semanasMes, totMes, mesLabel, trendMeses = []) {
   const fechaCorta = d => new Date(d + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })
   const capSocio = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : 'Otros'
 
@@ -89,10 +89,29 @@ async function imprimirCierreMensual(semanasMes, totMes, mesLabel) {
         <tfoot><tr class="total-row"><td>TOTAL MES</td>${socios.map(s => `<td class="rojo">${fmtPrecio(totalSocio[s])}</td>`).join('')}<td class="rojo">${fmtPrecio(totalRetiros)}</td></tr></tfoot>
       </table>` : ''
 
+  // ── Gráficos (van abajo de la distribución por socio) ──
+  const serieSem = [{ nombre: 'Ventas', color: CHART_COLORS.ventas }, { nombre: 'Compras', color: CHART_COLORS.compras }, { nombre: 'Ganancia', color: CHART_COLORS.ganancia }]
+  const gruposSem = semanasMes.map(c => ({ label: fmtFechaCorta(c.semana_inicio), valores: [c.ventas || 0, c.compras || 0, c.ganancia || 0] }))
+  const serieTrend = [{ nombre: 'Ventas', color: CHART_COLORS.ventas }, { nombre: 'Compras', color: CHART_COLORS.compras }]
+  const composicion = [
+    { nombre: 'Compras', valor: totMes.compras, color: CHART_COLORS.compras },
+    { nombre: 'Sueldos', valor: totMes.sueldos, color: CHART_COLORS.sueldos },
+    { nombre: 'Gastos', valor: totMes.gastos, color: CHART_COLORS.gastos },
+    { nombre: 'Ganancia', valor: totMes.ganancia, color: CHART_COLORS.ganancia },
+  ]
+  const graficos = `
+      <div class="titulo" style="font-size:15px;margin-top:22px;border-top:1px solid #ccc;padding-top:14px;">📊 Gráficos del mes</div>
+      <div class="chart-sub">Semana a semana — Ventas / Compras / Ganancia</div>
+      ${svgBarrasStr(gruposSem, serieSem)}
+      ${leyendaStr(serieSem)}
+      <div class="chart-sub">¿A dónde fue la plata? — sobre ventas de ${fmtPrecio(totMes.ventas)}</div>
+      ${composicionStr(composicion)}
+      ${trendMeses.length > 1 ? `<div class="chart-sub">Histórico mensual — Ventas vs Compras</div>${svgBarrasStr(trendMeses, serieTrend)}${leyendaStr(serieTrend)}` : ''}`
+
   const html = `
     <html><head><title>Cierre Mensual — ${mesLabel}</title>
     <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
+      * { margin: 0; padding: 0; box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       body { font-family: Arial, sans-serif; font-size: 12px; padding: 24px; color: #000; }
       .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 12px; }
       .logo { font-size: 28px; font-weight: 900; letter-spacing: 3px; }
@@ -108,6 +127,7 @@ async function imprimirCierreMensual(semanasMes, totMes, mesLabel) {
       .socio { flex: 1; border: 1px solid #000; padding: 12px; text-align: center; }
       .socio-nombre { font-weight: 700; font-size: 13px; }
       .socio-valor { font-size: 22px; font-weight: 900; margin-top: 4px; }
+      .chart-sub { font-size: 12px; font-weight: 700; margin: 12px 0 4px; }
       @media print { body { padding: 10px; } }
     </style></head>
     <body>
@@ -161,6 +181,7 @@ async function imprimirCierreMensual(semanasMes, totMes, mesLabel) {
           <div class="socio-valor" style="color:#1a3a7a">${fmtPrecio(totMes.ganancia * 0.15)}</div>
         </div>
       </div>
+      ${graficos}
     </body></html>
   `
   imprimirHTML(html)
@@ -265,15 +286,16 @@ function FilaDesglose({ label, value, color, indent, editable, onCommit, esKg })
 //  con el calendario). El "Mensual en vivo" del Ejecutivo usa estas fechas.
 // ============================================================
 // ============================================================
-// GRÁFICOS — SVG liviano, sin librería externa
+// GRÁFICOS DEL PRINT — generan SVG/HTML como string (van en la impresión
+// del cierre mensual, no en la pantalla)
 // ============================================================
-const CHART_COLORS = { ventas: '#22c55e', compras: '#ef4444', ganancia: '#d4af37', sueldos: '#4a7ac0', gastos: '#f59e0b' }
+const CHART_COLORS = { ventas: '#22c55e', compras: '#ef4444', ganancia: '#b8860b', sueldos: '#4a7ac0', gastos: '#f59e0b' }
 const fmtFechaCorta = d => d ? new Date(d + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' }) : ''
 
-// Barras agrupadas. grupos: [{ label, valores:[...] }]; series: [{ nombre, color }]
-function GraficoBarras({ grupos, series, alto = 200 }) {
-  if (!grupos.length) return null
-  const W = 560, H = alto, mTop = 16, mBot = 28, mL = 10, mR = 10
+// Barras agrupadas como string SVG. grupos: [{ label, valores:[...] }]; series: [{ nombre, color }]
+function svgBarrasStr(grupos, series, alto = 170) {
+  if (!grupos.length) return ''
+  const W = 720, H = alto, mTop = 12, mBot = 24, mL = 10, mR = 10
   const innerH = H - mTop - mBot, innerW = W - mL - mR
   const todos = grupos.flatMap(g => g.valores)
   const maxV = Math.max(1, ...todos.map(v => Math.max(0, v)))
@@ -284,58 +306,30 @@ function GraficoBarras({ grupos, series, alto = 200 }) {
   const gW = innerW / grupos.length
   const nS = series.length, gap = 3
   const bW = Math.max(2, (gW - gap * (nS + 1)) / nS)
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
-      <line x1={mL} y1={y0} x2={W - mR} y2={y0} stroke="#444" strokeWidth="1" />
-      {grupos.map((g, gi) => {
-        const gx = mL + gi * gW
-        return (
-          <g key={gi}>
-            {g.valores.map((v, si) => {
-              const yv = yOf(v)
-              const x = gx + gap + si * (bW + gap)
-              return <rect key={si} x={x} y={Math.min(yv, y0)} width={bW} height={Math.max(1, Math.abs(yv - y0))} rx="2" fill={series[si].color} />
-            })}
-            <text x={gx + gW / 2} y={H - 12} textAnchor="middle" fontSize="11" fill="#999">{g.label}</text>
-          </g>
-        )
-      })}
-    </svg>
-  )
+  let body = ''
+  grupos.forEach((g, gi) => {
+    const gx = mL + gi * gW
+    g.valores.forEach((v, si) => {
+      const yv = yOf(v)
+      const x = gx + gap + si * (bW + gap)
+      body += `<rect x="${x.toFixed(1)}" y="${Math.min(yv, y0).toFixed(1)}" width="${bW.toFixed(1)}" height="${Math.max(1, Math.abs(yv - y0)).toFixed(1)}" rx="2" fill="${series[si].color}"/>`
+    })
+    body += `<text x="${(gx + gW / 2).toFixed(1)}" y="${H - 9}" text-anchor="middle" font-size="11" fill="#555">${g.label}</text>`
+  })
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">
+    <line x1="${mL}" y1="${y0.toFixed(1)}" x2="${W - mR}" y2="${y0.toFixed(1)}" stroke="#bbb" stroke-width="1"/>${body}</svg>`
 }
 
-function LeyendaChart({ series }) {
-  return (
-    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', justifyContent: 'center', marginTop: 4 }}>
-      {series.map(s => (
-        <div key={s.nombre} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--muted)' }}>
-          <span style={{ width: 12, height: 12, borderRadius: 3, background: s.color }} />{s.nombre}
-        </div>
-      ))}
-    </div>
-  )
+function leyendaStr(series) {
+  return `<div style="display:flex;gap:18px;justify-content:center;margin-top:4px;font-size:11px;color:#555;">${series.map(s => `<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:11px;height:11px;border-radius:2px;background:${s.color};display:inline-block;"></span>${s.nombre}</span>`).join('')}</div>`
 }
 
 // Barra horizontal de composición (a dónde se fue la plata sobre las ventas).
-function BarraComposicion({ segmentos }) {
+function composicionStr(segmentos) {
   const total = segmentos.reduce((s, x) => s + Math.max(0, x.valor), 0) || 1
-  return (
-    <div>
-      <div style={{ display: 'flex', height: 30, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border)' }}>
-        {segmentos.filter(s => s.valor > 0).map(s => (
-          <div key={s.nombre} title={`${s.nombre}: ${fmtPrecio(s.valor)}`} style={{ width: `${(s.valor / total) * 100}%`, background: s.color }} />
-        ))}
-      </div>
-      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 8 }}>
-        {segmentos.map(s => (
-          <div key={s.nombre} style={{ fontSize: 12, color: 'var(--text2)', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ width: 12, height: 12, borderRadius: 3, background: s.color }} />
-            {s.nombre}: <strong>{fmtPrecio(s.valor)}</strong> <span style={{ color: 'var(--muted)' }}>({((Math.max(0, s.valor) / total) * 100).toFixed(0)}%)</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
+  const barras = segmentos.filter(s => s.valor > 0).map(s => `<div style="width:${((s.valor / total) * 100).toFixed(2)}%;background:${s.color};"></div>`).join('')
+  const refs = segmentos.map(s => `<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;margin-right:14px;"><span style="width:11px;height:11px;border-radius:2px;background:${s.color};display:inline-block;"></span>${s.nombre}: <b>${fmtPrecio(s.valor)}</b> (${((Math.max(0, s.valor) / total) * 100).toFixed(0)}%)</span>`).join('')
+  return `<div style="display:flex;height:26px;border:1px solid #000;border-radius:6px;overflow:hidden;">${barras}</div><div style="margin-top:6px;">${refs}</div>`
 }
 
 function ConfigMesesOperativos() {
@@ -972,7 +966,7 @@ export default function Cierre() {
               <div className="form-group">
                 <label>&nbsp;</label>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn btn-ghost btn-sm" onClick={() => imprimirCierreMensual(semanasMes, totMes, mesLabel)} disabled={!semanasMes.length}>
+                  <button className="btn btn-ghost btn-sm" onClick={() => imprimirCierreMensual(semanasMes, totMes, mesLabel, trendMeses)} disabled={!semanasMes.length}>
                     🖨️ Imprimir
                   </button>
                   <button className="btn btn-ghost btn-sm" onClick={() => exportarExcel(semanasMes, totMes, mesLabel)} disabled={!semanasMes.length}>
@@ -1016,41 +1010,6 @@ export default function Cierre() {
                     </div>
                   </div>
                 </div>
-              </div>
-
-              {/* GRÁFICOS DEL MES */}
-              <div className="card">
-                <div className="card-title">📊 Gráficos</div>
-
-                <div style={{ marginBottom: 22 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text2)', marginBottom: 8 }}>Semana a semana — Ventas / Compras / Ganancia</div>
-                  <GraficoBarras
-                    grupos={semanasMes.map(c => ({ label: fmtFechaCorta(c.semana_inicio), valores: [c.ventas || 0, c.compras || 0, c.ganancia || 0] }))}
-                    series={[{ nombre: 'Ventas', color: CHART_COLORS.ventas }, { nombre: 'Compras', color: CHART_COLORS.compras }, { nombre: 'Ganancia', color: CHART_COLORS.ganancia }]}
-                  />
-                  <LeyendaChart series={[{ nombre: 'Ventas', color: CHART_COLORS.ventas }, { nombre: 'Compras', color: CHART_COLORS.compras }, { nombre: 'Ganancia', color: CHART_COLORS.ganancia }]} />
-                </div>
-
-                <div style={{ marginBottom: 22 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text2)', marginBottom: 8 }}>¿A dónde fue la plata? — sobre ventas de {fmt(totMes.ventas)}</div>
-                  <BarraComposicion segmentos={[
-                    { nombre: 'Compras', valor: totMes.compras, color: CHART_COLORS.compras },
-                    { nombre: 'Sueldos', valor: totMes.sueldos, color: CHART_COLORS.sueldos },
-                    { nombre: 'Gastos', valor: totMes.gastos, color: CHART_COLORS.gastos },
-                    { nombre: 'Ganancia', valor: totMes.ganancia, color: CHART_COLORS.ganancia },
-                  ]} />
-                </div>
-
-                {trendMeses.length > 1 && (
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text2)', marginBottom: 8 }}>Histórico mensual — Ventas vs Compras</div>
-                    <GraficoBarras
-                      grupos={trendMeses}
-                      series={[{ nombre: 'Ventas', color: CHART_COLORS.ventas }, { nombre: 'Compras', color: CHART_COLORS.compras }]}
-                    />
-                    <LeyendaChart series={[{ nombre: 'Ventas', color: CHART_COLORS.ventas }, { nombre: 'Compras', color: CHART_COLORS.compras }]} />
-                  </div>
-                )}
               </div>
 
               {/* TABLA SEMANAS */}
