@@ -361,6 +361,10 @@ const [piezasCerdo, setPiezasCerdo] = useState({
 })
 const [tipoElaboracion, setTipoElaboracion] = useState('embutido')
 const [tipoEmbutido, setTipoEmbutido] = useState('chorizo_parrillero')
+// Salame multi-variedad: kg NETOS que entran al secado por cada variedad.
+// Una misma tanda puede tener común, holanda y/o rockeford; al secarse se
+// carga el peso final de cada una y va a su bucket (emb_salame_*).
+const [salameNeto, setSalameNeto] = useState({ salame_comun: '', salame_rockeford: '', salame_holanda: '' })
 const [piezasEmbutido, setPiezasEmbutido] = useState({
   cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '',
   cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: ''
@@ -691,6 +695,11 @@ async function confirmarElaboracionEmbutido() {
 async function confirmarElaboracionSalame() {
     const kgCerdo = Object.values(piezasEmbutido).reduce((s, v) => s + (parseFloat(v) || 0), 0)
     if (kgCerdo === 0) { showAlert('Ingresá al menos una pieza de cerdo', 'error'); return }
+    // Variedades de salame de esta tanda (kg netos que entran al secado por cada una)
+    const variedades = Object.entries(salameNeto)
+      .filter(([, v]) => parseNumero(v) > 0)
+      .map(([tipo, v]) => ({ tipo, kg_neto: parseNumero(v) }))
+    if (variedades.length === 0) { showAlert('Cargá los kg de al menos una variedad de salame (común/holanda/rockeford)', 'error'); return }
     setLoading(true)
     try {
       // kg netos = suma de piezas de cerdo + bovino + queso. NO se aplica
@@ -701,12 +710,15 @@ async function confirmarElaboracionSalame() {
         .filter(([, v]) => parseFloat(v) > 0)
         .map(([tipo, v]) => ({ tipo, kg: parseFloat(v) }))
       await supabase.from('elaboraciones_embutidos').insert({
-        fecha, tipo: 'salame', tipo_embutido: tipoEmbutido,
+        // tipo_embutido = variedad principal (compat con vistas viejas); el
+        // detalle por variedad va en productos_finales [{tipo, kg_neto}].
+        fecha, tipo: 'salame', tipo_embutido: variedades[0].tipo,
         piezas_usadas: piezasUsadas,
         kg_carne_cerdo: kgCerdo,
         kg_carne_bovina: parseNumero(kgCarneBovinaEmbutido),
         kg_queso: parseNumero(kgQuesoEmbutido),
         kg_elaborado: kgTotal, pct_aumento: 0,
+        productos_finales: variedades,
         kg_final: 0, maduracion_completa: false,
         fecha_fin_maduracion: null,
         notas
@@ -721,8 +733,10 @@ async function confirmarElaboracionSalame() {
         const { error } = await actualizarStock('bovino_corte', -parseNumero(kgCarneBovinaEmbutido))
         if (error) throw new Error(`No se descontó bovino_corte: ${error.message}`)
       }
-      showAlert(`✅ Salame registrado en secado — ${kgTotal.toFixed(1)} kg netos. Cargá el peso final cuando esté seco.`)
+      const detalleVar = variedades.map(v => `${NOMBRE_EMBUTIDO[v.tipo] || v.tipo}: ${v.kg_neto.toFixed(1)} kg`).join(' · ')
+      showAlert(`✅ Salame registrado en secado — ${detalleVar} (${kgTotal.toFixed(1)} kg netos). Cargá el peso final de cada uno cuando esté seco.`)
       setPiezasEmbutido({ cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '', cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: '' })
+      setSalameNeto({ salame_comun: '', salame_rockeford: '', salame_holanda: '' })
       setKgCarneBovinaEmbutido(''); setKgQuesoEmbutido(''); setNotas('')
       await cargarDatos(); onSaved()
     } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
@@ -734,30 +748,44 @@ async function confirmarElaboracionSalame() {
   // (solo se descontaron las piezas de cerdo/bovino). Recién acá, con el peso
   // seco real en mano, se suma al stock. Ese peso queda en kg_final, la merma
   // real se calcula sola (kg_final vs kg netos) y la elaboración pasa a completa.
-  async function finalizarMaduracionSalame(elab, kgFinalesStr) {
-    const kgFinales = parseNumero(kgFinalesStr)
-    if (!(kgFinales > 0)) { showAlert('Ingresá los kg finales pesados después del secado', 'error'); return }
+  async function finalizarMaduracionSalame(elab, finales) {
+    // `finales`: objeto { [tipo_salame]: kgFinalString } con el peso SECO de cada
+    // variedad. Las variedades salen de productos_finales (multi-variedad nuevo);
+    // si es una elaboración vieja de una sola variedad, se usa tipo_embutido.
+    const vars = Array.isArray(elab.productos_finales) && elab.productos_finales.length
+      ? elab.productos_finales
+      : [{ tipo: elab.tipo_embutido || 'salame_comun', kg_neto: Number(elab.kg_elaborado) || 0 }]
+    const finalizados = vars.map(v => ({
+      tipo: v.tipo,
+      kg_neto: Number(v.kg_neto) || 0,
+      kg_final: parseNumero(finales?.[v.tipo]),
+    }))
+    const totalFinal = finalizados.reduce((s, v) => s + (v.kg_final || 0), 0)
+    if (!(totalFinal > 0)) { showAlert('Ingresá los kg finales (pesados secos) de al menos una variedad', 'error'); return }
     setLoading(true)
     try {
-      // Sumar al bucket del tipo de salame (mig 60e) con verificación
-      // (mismo patrón anti-error que la elaboración de embutidos).
-      await sumarStockVerificado(BUCKET_EMBUTIDO[elab.tipo_embutido] || 'emb_salame_comun', kgFinales)
-      // Marcar la elaboración como completa guardando el peso final seco.
-      // pct_aumento = merma real (negativa) calculada con el peso exacto.
-      const pct = elab.kg_elaborado > 0 ? parseFloat(((kgFinales / elab.kg_elaborado - 1) * 100).toFixed(2)) : 0
+      // Sumar cada variedad a SU bucket (mig 60e) con verificación.
+      for (const v of finalizados) {
+        if (v.kg_final > 0) {
+          await sumarStockVerificado(BUCKET_EMBUTIDO[v.tipo] || 'emb_salame_comun', v.kg_final)
+        }
+      }
+      // pct_aumento = merma real (negativa) sobre el total de la tanda.
+      const pct = elab.kg_elaborado > 0 ? parseFloat(((totalFinal / elab.kg_elaborado - 1) * 100).toFixed(2)) : 0
       const { error: errUpd } = await supabase.from('elaboraciones_embutidos')
-        .update({ kg_final: kgFinales, maduracion_completa: true, pct_aumento: pct })
+        .update({ kg_final: totalFinal, maduracion_completa: true, pct_aumento: pct, productos_finales: finalizados })
         .eq('id', elab.id)
       if (errUpd) throw new Error(`No se actualizó la elaboración: ${errUpd.message}`)
+      const detalle = finalizados.filter(v => v.kg_final > 0)
+        .map(v => `${NOMBRE_EMBUTIDO[v.tipo] || v.tipo}: ${v.kg_final.toFixed(1)} kg`).join(' · ')
       // Entrada informativa para que figure junto a las compras y en el Dashboard.
-      const nombreSal = NOMBRE_EMBUTIDO[elab.tipo_embutido] || 'Salame'
       const { error: errEnt } = await supabase.from('entradas_deposito').insert({
         fecha: fechaHoyARG(),
         tipo: 'embutido',
         proveedor_nombre: 'Elaboración propia',
-        descripcion: `${nombreSal} seco finalizado — ${kgFinales.toFixed(1)} kg finales (de ${Number(elab.kg_elaborado || 0).toFixed(1)} kg netos · merma ${pct.toFixed(1)}%)`,
-        kg: kgFinales,
-        kg_real: kgFinales,
+        descripcion: `Salame seco finalizado — ${detalle} (de ${Number(elab.kg_elaborado || 0).toFixed(1)} kg netos · merma ${pct.toFixed(1)}%)`,
+        kg: totalFinal,
+        kg_real: totalFinal,
         merma_pct: 0,
         precio_kg: 0,
         importe: 0,
@@ -765,7 +793,7 @@ async function confirmarElaboracionSalame() {
         cantidad: 1,
       })
       if (errEnt) console.warn('No se registró la entrada del salame finalizado:', errEnt.message)
-      showAlert(`✅ Salame seco finalizado — ${kgFinales.toFixed(1)} kg al stock de ${NOMBRE_EMBUTIDO[elab.tipo_embutido] || 'Salame Común'}`)
+      showAlert(`✅ Salame seco finalizado — ${detalle} (cada uno a su stock)`)
       await cargarDatos(); onSaved()
     } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
     setLoading(false)
@@ -1358,14 +1386,22 @@ async function confirmarDesposteCerdo() {
         )}
         {tipoElaboracion === 'salame' && (
           <div>
-            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>Tipo de salame</label>
-            <select value={tipoEmbutido} onChange={e => setTipoEmbutido(e.target.value)} style={{ ...inp, marginBottom: 10 }}>
-              <option value="salame_comun">🥩 Salame Común</option>
-              <option value="salame_rockeford">🥩 Salame Rockeford</option>
-              <option value="salame_holanda">🥩 Salame Holanda (con queso)</option>
-            </select>
-            <div style={{ background: '#1a1a2a', border: '1px solid #2a2a5a', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#7db5ff' }}>
-              ℹ️ Registrás los <strong>kg netos</strong> que entran al secado (descuentan de cada pieza). <strong>No se aplica ninguna merma automática.</strong> El salame queda "🔒 en proceso de secado" y NO suma al stock de embutidos hasta que, una vez seco, lo peses y cargues los <strong>kg finales</strong> reales desde el historial.
+            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>Variedades de salame — kg netos que entran al secado</label>
+            {[
+              { id: 'salame_comun', label: '🥩 Salame Común' },
+              { id: 'salame_rockeford', label: '🧀 Salame Rockeford' },
+              { id: 'salame_holanda', label: '🧀 Salame Holanda (con queso)' },
+            ].map(s => (
+              <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                <span style={{ fontSize: 13 }}>{s.label}</span>
+                <input type="number" step="0.1" min="0" placeholder="0 kg"
+                  value={salameNeto[s.id]}
+                  onChange={e => setSalameNeto(prev => ({ ...prev, [s.id]: e.target.value }))}
+                  style={{ ...inp, width: 120, borderColor: salameNeto[s.id] ? 'var(--gold)' : 'var(--border)' }} />
+              </div>
+            ))}
+            <div style={{ background: '#1a1a2a', border: '1px solid #2a2a5a', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#7db5ff', marginTop: 4 }}>
+              ℹ️ Cargá los <strong>kg netos de cada variedad</strong> que se hicieron en esta tanda. <strong>No se aplica merma automática.</strong> Quedan "🔒 en proceso de secado" y NO suman al stock hasta que, una vez secos, peses y cargues los <strong>kg finales</strong> de cada variedad desde el historial — ahí cada uno va a su stock (común/holanda/rockeford).
             </div>
           </div>
         )}
@@ -1475,7 +1511,7 @@ async function confirmarDesposteCerdo() {
           </div>
         )
       })()}
-      {tipoElaboracion === 'salame' && tipoEmbutido === 'salame_holanda' && (
+      {tipoElaboracion === 'salame' && parseNumero(salameNeto.salame_holanda) > 0 && (
         <div className="form-group" style={{ marginBottom: 10 }}>
           <label>🧀 Queso Holanda (kg)</label>
           <input type="number" step="0.1" placeholder="0" value={kgQuesoEmbutido} onChange={e => setKgQuesoEmbutido(e.target.value)} style={{ ...inp, borderColor: 'var(--amber)' }} />
@@ -1589,7 +1625,7 @@ async function confirmarDesposteCerdo() {
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
                   {(e.productos_finales || []).filter(Boolean).map((p, i) => (
                     <span key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, padding: '2px 8px', fontSize: 11, color: 'var(--text2)' }}>
-                      {NOMBRE_EMBUTIDO[p.tipo] || p.tipo}: {(Number(p.kg) || 0).toFixed(1)} kg
+                      {NOMBRE_EMBUTIDO[p.tipo] || p.tipo}: {(Number(p.kg_final ?? p.kg_neto ?? p.kg) || 0).toFixed(1)} kg{(p.kg_final == null && p.kg_neto != null) ? ' netos' : ''}
                     </span>
                   ))}
                 </div>
@@ -1767,9 +1803,9 @@ function HistorialDespostes({ despostes }) {
 
 function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, loading }) {
   const pag = usePaginacion(elaboraciones || [], 15)
-  // id del salame cuyo candado está abierto + kg finales tipeados
+  // id del salame cuyo candado está abierto + kg finales tipeados por variedad
   const [finId, setFinId] = useState(null)
-  const [kgFinalInput, setKgFinalInput] = useState('')
+  const [kgFinales, setKgFinales] = useState({})  // { [tipo_salame]: kg }
   return (
     <div className="card">
       <div className="card-title">🌭 Historial de elaboraciones ({(elaboraciones || []).length})</div>
@@ -1790,7 +1826,7 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, loading }) {
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
                     {(e.productos_finales || []).filter(Boolean).map((p, i) => (
                       <span key={i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, padding: '2px 8px', fontSize: 11, color: 'var(--text2)' }}>
-                        {NOMBRE_EMBUTIDO[p.tipo] || p.tipo}: {(Number(p.kg) || 0).toFixed(1)} kg
+                        {NOMBRE_EMBUTIDO[p.tipo] || p.tipo}: {(Number(p.kg_final ?? p.kg_neto ?? p.kg) || 0).toFixed(1)} kg{(p.kg_final == null && p.kg_neto != null) ? ' netos' : ''}
                       </span>
                     ))}
                   </div>
@@ -1818,31 +1854,41 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, loading }) {
                 cargan los kg finales reales (pesados secos) y recién ahí suben
                 al stock de embutidos. */}
             {e.tipo === 'salame' && !e.maduracion_completa && onFinalizarSalame && (
-              finId === e.id ? (
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 16 }}>🔓</span>
-                  <input
-                    type="number" step="0.1" min="0" autoFocus
-                    value={kgFinalInput}
-                    onChange={ev => setKgFinalInput(ev.target.value)}
-                    placeholder="kg finales (pesados secos)"
-                    style={{ background: 'var(--surface)', border: '1px solid var(--gold)', color: 'var(--text)', borderRadius: 8, padding: '7px 10px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, width: 180, boxSizing: 'border-box' }}
-                  />
-                  <button
-                    className="btn btn-gold"
-                    disabled={loading}
-                    onClick={async () => { await onFinalizarSalame(e, kgFinalInput); setFinId(null); setKgFinalInput('') }}
-                    style={{ fontSize: 12 }}
-                  >
-                    {loading ? '⏳' : '✅ Confirmar y sumar al stock'}
-                  </button>
-                  <button className="btn" onClick={() => { setFinId(null); setKgFinalInput('') }} style={{ fontSize: 12 }}>Cancelar</button>
-                </div>
-              ) : (
+              finId === e.id ? (() => {
+                // Variedades a finalizar: de productos_finales (multi) o el tipo único (legacy)
+                const vars = Array.isArray(e.productos_finales) && e.productos_finales.length
+                  ? e.productos_finales
+                  : [{ tipo: e.tipo_embutido || 'salame_comun' }]
+                return (
+                  <div style={{ marginTop: 8, padding: 10, background: 'var(--surface2)', borderRadius: 8 }}>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>🔓 Peso final pesado seco de cada variedad — cada uno va a su stock:</div>
+                    {vars.map(v => (
+                      <div key={v.tipo} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                        <span style={{ fontSize: 13 }}>{NOMBRE_EMBUTIDO[v.tipo] || v.tipo}{Number(v.kg_neto) > 0 ? ` · ${Number(v.kg_neto).toFixed(1)} kg netos` : ''}</span>
+                        <input
+                          type="number" step="0.1" min="0"
+                          value={kgFinales[v.tipo] || ''}
+                          onChange={ev => setKgFinales(prev => ({ ...prev, [v.tipo]: ev.target.value }))}
+                          placeholder="kg finales"
+                          style={{ background: 'var(--surface)', border: '1px solid var(--gold)', color: 'var(--text)', borderRadius: 8, padding: '7px 10px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, width: 130, boxSizing: 'border-box' }}
+                        />
+                      </div>
+                    ))}
+                    <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                      <button className="btn btn-gold" disabled={loading}
+                        onClick={async () => { await onFinalizarSalame(e, kgFinales); setFinId(null); setKgFinales({}) }}
+                        style={{ fontSize: 12 }}>
+                        {loading ? '⏳' : '✅ Confirmar y sumar al stock'}
+                      </button>
+                      <button className="btn" onClick={() => { setFinId(null); setKgFinales({}) }} style={{ fontSize: 12 }}>Cancelar</button>
+                    </div>
+                  </div>
+                )
+              })() : (
                 <button
                   className="btn"
                   title="Desbloquear para cargar el peso final del salame seco"
-                  onClick={() => { setFinId(e.id); setKgFinalInput('') }}
+                  onClick={() => { setFinId(e.id); setKgFinales({}) }}
                   style={{ fontSize: 12, marginTop: 6, borderColor: 'var(--gold)', color: 'var(--gold)' }}
                 >
                   🔒 Cargar peso final (secado listo)
@@ -2998,6 +3044,16 @@ const item = {
     if (items.length === 0) { showAlert({ type: 'error', msg: 'Agregá al menos un producto' }); return }
     if (!form.destino) { showAlert({ type: 'error', msg: 'Elegí un destino antes de despachar' }); return }
     if (esFechaFutura(form.fecha)) { showAlert({ type: 'error', msg: `⛔ La fecha no puede ser futura (hoy es ${fechaHoyARG()})` }); return }
+    // Venta a CUENTA CORRIENTE: exige un cliente REGISTRADO elegido de la lista.
+    // Si se tipea el nombre sin seleccionarlo del buscador, el remito queda con
+    // cliente_id null y la venta NO se imputa a la cuenta corriente (bug MONTE
+    // CRISTO 27/06: remito #680 quedó suelto, $3.373.835 sin cargar a la deuda
+    // porque el nombre se escribió a mano y no matcheaba "MONTE CRISTO CARNICERIA").
+    // Las franquicias resuelven el cliente automáticamente más abajo → se excluyen.
+    if (form.cobro === 'cta_cte' && !esFranquicia && !form.clienteId) {
+      showAlert({ type: 'error', msg: '⛔ Venta a CUENTA CORRIENTE: elegí el cliente de la lista (tiene que aparecer "✅ Cliente vinculado"). Escribir el nombre a mano NO lo imputa a su cuenta corriente.' })
+      return
+    }
     // Guardia anti-"media res sin media física": una media res debe venderse
     // ELIGIÉNDOLA de la lista de "Medias Reses disponibles" (eso marca la MR-XXX
     // física como vendida y la saca del stock). Si se carga como producto genérico
@@ -3044,13 +3100,25 @@ const item = {
 
     if (esFranquicia) {
       const nombreBuscar = DESTINOS_FRANQUICIA[form.destino]
-      const { data: clienteFranquicia } = await supabase.from('clientes').select('*').ilike('nombre', `%${nombreBuscar}%`).single()
+      // Puede haber VARIOS clientes cuyo nombre contiene el término (ej. "MONTE
+      // CRISTO CARNICERIA" y "Eliana Monte Cristo"). Antes esto usaba .single(),
+      // que ERRORA con 2+ coincidencias → el cliente quedaba sin resolver y el
+      // remito se guardaba SIN imputar a la cuenta corriente (bug MONTE CRISTO
+      // #680, $3.373.835 sueltos). Filtramos por tipo 'carniceria' (las
+      // franquicias lo son) y tomamos el primero, de forma determinística.
+      const { data: matchesFranq } = await supabase.from('clientes').select('*')
+        .ilike('nombre', `%${nombreBuscar}%`).eq('tipo', 'carniceria').order('nombre')
+      const clienteFranquicia = (matchesFranq || [])[0]
       if (clienteFranquicia) {
         clienteId = clienteFranquicia.id
         clienteNombre = clienteFranquicia.nombre
         domicilio = clienteFranquicia.domicilio || form.destino
         telefono  = clienteFranquicia.telefono  || telefono
         localidad = clienteFranquicia.localidad || localidad
+      } else {
+        // Sin cliente de franquicia resoluble: NO guardar un remito huérfano.
+        showAlert({ type: 'error', msg: `⛔ No encuentro el cliente registrado de la franquicia "${form.destino}". Verificá que exista un cliente tipo "carnicería" con ese nombre antes de despachar.` })
+        return
       }
     }
 
@@ -3202,10 +3270,10 @@ for (const item of items) {
           <div className="form-group"><label>Destino</label>
             <select value={form.destino} onChange={e => setForm(f => ({ ...f, destino: e.target.value, clienteId: '', clienteNombre: '' }))}>
               <option value="">— Seleccioná destino —</option>
-              <option value="CENTRO">🏪 Centro — Alvear (Roxana)</option>
-              <option value="MONTE CRISTO">🏪 Monte Cristo (Agustín)</option>
-              <option value="carniceria">Carnicería cliente</option>
-              <option value="mayorista">Gastronómico / Mayorista</option>
+              <option value="CENTRO">🏪 Suc. Alvear (franquicia)</option>
+              <option value="MONTE CRISTO">🏪 Suc. Monte Cristo (franquicia)</option>
+              <option value="carniceria">Cliente Carnicería / Minorista</option>
+              <option value="mayorista">Cliente Mayorista / Gastronómico</option>
             </select>
           </div>
           <div className="form-group"><label>Fecha</label>

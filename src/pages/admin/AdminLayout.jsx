@@ -12,15 +12,9 @@ import UserDropdown from '../../components/UserDropdown'
 import CambiarPasswordModal from '../../components/CambiarPasswordModal'
 import BotonAvisos from '../../components/BotonAvisos'
 
-// En el CELULAR, el CEO solo ve lo que usa en la calle: Ejecutivo, Modo TV,
-// los pedidos (para coordinarlos con Iris) y WhatsApp. El resto lo resuelve
-// pidiéndoselo a Iris (no necesita la app completa en el teléfono).
-const NAV_MOVIL_CEO = [
-  { to: '/admin/ejecutivo',      icon: '⚡', label: 'Ejecutivo' },
-  { to: '/admin/ejecutivo?tv=1', icon: '📺', label: 'Modo TV (F.A.B.R.I.)' },
-  { to: '/admin/pedidos',        icon: '📥', label: 'Pedidos Mayoristas' },
-  { to: '/admin/whatsapp',       icon: '💬', label: 'WhatsApp' },
-]
+// Entrada extra solo-CEO para el menú del celular: el Modo TV (F.A.B.R.I.) no
+// es una ruta aparte de navItems, así que se agrega a mano para el CEO.
+const NAV_MOVIL_TV = { to: '/admin/ejecutivo?tv=1', icon: '📺', label: 'Modo TV (F.A.B.R.I.)' }
 
 const navItems = [
   { to: '/admin/dashboard',   icon: '📊', label: 'Dashboard' },
@@ -29,11 +23,11 @@ const navItems = [
   { to: '/admin/ventas', icon: '📋', label: 'Mayorista' },
   { to: '/admin/deposito',    icon: '🏭', label: 'Depósito' },
   { to: '/admin/precios',     icon: '💲', label: 'Precios' },
+  { to: '/admin/presupuestos', icon: '📋', label: 'Presupuestos' },
   { to: '/admin/etiquetas',   icon: '🏷️', label: 'Etiquetas' },
   { to: '/admin/clientes',    icon: '👥', label: 'Clientes' },
   { to: '/admin/pedidos',     icon: '📥', label: 'Pedidos Mayoristas' },
   { to: '/admin/whatsapp', icon: '💬', label: 'WhatsApp' },
-  { to: '/admin/franquicias', icon: '🏪', label: 'Franquicias' },
   { to: '/admin/proveedores', icon: '🏭', label: 'Proveedores' },
   { to: '/admin/cheques',     icon: '📄', label: 'Cheques' },
   { to: '/admin/sueldos',     icon: '💰', label: 'Sueldos' },
@@ -54,10 +48,10 @@ const NAV_GRUPOS = [
     { to: '/admin/whatsapp',  icon: '💬', label: 'WhatsApp' },
   ] },
   { label: 'Comercial', icon: '🏷️', items: [
-    { to: '/admin/precios',     icon: '💲', label: 'Precios' },
-    { to: '/admin/etiquetas',   icon: '🏷️', label: 'Etiquetas' },
-    { to: '/admin/clientes',    icon: '👥', label: 'Clientes' },
-    { to: '/admin/franquicias', icon: '🏪', label: 'Franquicias' },
+    { to: '/admin/precios',      icon: '💲', label: 'Precios' },
+    { to: '/admin/presupuestos', icon: '📋', label: 'Presupuestos' },
+    { to: '/admin/etiquetas',    icon: '🏷️', label: 'Etiquetas' },
+    { to: '/admin/clientes',     icon: '👥', label: 'Clientes' },
   ] },
   { label: 'Finanzas', icon: '💰', items: [
     { to: '/admin/proveedores', icon: '🏭', label: 'Proveedores' },
@@ -86,7 +80,7 @@ function useNotificaciones() {
       const en15Str = fechaHoyARG(en15)
       const haceUnAno = new Date(hoy.getFullYear() - 1, hoy.getMonth(), hoy.getDate())
 
-      const [{ data: cheques }, { data: chequesEmitidos }, { data: clientes }, { data: cierres }, { data: stockData }, { data: cuentasFiscales }, { data: facturasRecientes }, { data: impuestosRecientes }] = await Promise.all([
+      const [{ data: cheques }, { data: chequesEmitidos }, { data: clientes }, { data: cierres }, { data: stockData }, { data: cuentasFiscales }, { data: facturasRecientes }, { data: impuestosRecientes }, { data: productosStock }] = await Promise.all([
         supabase.from('cheques').select('*').neq('origen', 'emitido').gte('fecha_pago', hoyStr).lte('fecha_pago', en15Str),
         // Cheques propios pendientes de imputar que se debitan en ≤7 días (o ya vencieron)
         supabase.from('cheques').select('*').eq('origen', 'emitido').neq('estado', 'imputado').lte('fecha_pago', fechaHoyARG(new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + 7))),
@@ -96,6 +90,8 @@ function useNotificaciones() {
         supabase.from('cuentas_fiscales').select('*').eq('activa', true).then(r => r).catch(() => ({ data: null })),
         supabase.from('facturas').select('cuenta_id, monto_total, fecha').eq('tipo', 'emitida').gte('fecha', fechaHoyARG(haceUnAno)).then(r => r).catch(() => ({ data: null })),
         supabase.from('impuestos_pagados').select('cuenta_id, concepto, periodo_anio, periodo_mes').then(r => r).catch(() => ({ data: null })),
+        // Productos "huérfanos": cerdo/embutido sin stock_origen y sin marca "no descuenta"
+        supabase.from('precios').select('nombre, categoria, stock_origen, stock_no_aplica').in('categoria', ['cerdo_corte', 'cerdo_pieza', 'embutido']).then(r => r).catch(() => ({ data: null })),
       ])
 
       const nuevas = []
@@ -164,6 +160,18 @@ function useNotificaciones() {
         if ((s.bovino_mr || 0) < 100) nuevas.push({ tipo: 'danger', icono: '📦', titulo: `Stock bovino bajo: ${fmtKg(s.bovino_mr || 0)}`, sub: 'Pedí más mercadería', link: '/admin/deposito' })
         if ((s.pollo || 0) < 100) nuevas.push({ tipo: 'warning', icono: '📦', titulo: `Stock pollo bajo: ${fmtKg(s.pollo || 0)}`, sub: 'Pedí más mercadería', link: '/admin/deposito' })
         if ((s.cerdo || 0) < 50) nuevas.push({ tipo: 'warning', icono: '📦', titulo: `Stock cerdo bajo: ${fmtKg(s.cerdo || 0)}`, sub: 'Pedí más mercadería', link: '/admin/deposito' })
+      }
+
+      // ── Productos huérfanos: cerdo/embutido sin stock asignado (se venden pero
+      // no descuentan stock). Recordatorio para enlazarlos en Precios. ──
+      const orfanos = (productosStock || []).filter(p => !p.stock_origen && !p.stock_no_aplica)
+      if (orfanos.length > 0) {
+        nuevas.push({
+          tipo: 'warning', icono: '📦',
+          titulo: `${orfanos.length} producto${orfanos.length === 1 ? '' : 's'} sin stock asignado`,
+          sub: `Se vende${orfanos.length === 1 ? '' : 'n'} pero no descuenta${orfanos.length === 1 ? '' : 'n'} stock — enlazalos en Precios`,
+          link: '/admin/precios',
+        })
       }
 
       setNotifs(nuevas)
@@ -313,9 +321,14 @@ function MenuMobile({ onClose }) {
           </div>
         </div>
 
-        {/* Nav items */}
+        {/* Nav items — TODOS los módulos en el celular (igual que en la compu).
+            El Ejecutivo y el Modo TV son solo para el CEO; el resto lo ven todos
+            los admin. Antes el CEO tenía un menú recortado, ahora ve todo. */}
         <nav style={{ flex: 1, overflowY: 'auto', padding: '10px 12px' }}>
-          {(user?.email === 'fabriciolenardon@gmail.com' ? NAV_MOVIL_CEO : navItems).filter(it => it.to !== '/admin/ejecutivo' || window.__ceoEmail === 'fabriciolenardon@gmail.com').map(item => {
+          {(user?.email === 'fabriciolenardon@gmail.com'
+            ? [...navItems, NAV_MOVIL_TV]
+            : navItems.filter(it => it.to !== '/admin/ejecutivo')
+          ).map(item => {
             const isActive = location.pathname === item.to
             return (
               <NavLink key={item.to} to={item.to} onClick={onClose}
