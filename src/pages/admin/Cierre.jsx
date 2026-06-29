@@ -103,8 +103,23 @@ async function imprimirCierreMensual(semanasMes, totMes, mesLabel, trendMeses = 
     { nombre: 'Gastos', valor: totMes.gastos, color: CHART_COLORS.gastos },
     { nombre: 'Ganancia', valor: totMes.ganancia, color: CHART_COLORS.ganancia },
   ]
+  // Margen del mes (torta): % sobre el total de ventas. Gastos engloba sueldos,
+  // retiros de socios y todos los gastos. Ganancia = ventas − compras − gastos.
+  const gastosTodo = (totMes.gastos || 0) + (totMes.sueldos || 0)
+  const margenSeg = [
+    { nombre: 'Compras', valor: totMes.compras || 0, color: CHART_COLORS.compras },
+    { nombre: 'Gastos (sueldos + socios + otros)', valor: gastosTodo, color: CHART_COLORS.gastos },
+    { nombre: 'Ganancia', valor: totMes.ganancia || 0, color: CHART_COLORS.ganancia },
+  ]
+  const margenPct = totMes.ventas > 0 ? (totMes.ganancia / totMes.ventas) * 100 : 0
+
   const graficos = `
       <div class="titulo" style="font-size:15px;margin-top:22px;border-top:1px solid #ccc;padding-top:14px;">📊 Gráficos del mes</div>
+      <div class="chart-sub">Margen del mes — % sobre el total de ventas (${fmtPrecio(totMes.ventas)})</div>
+      <div style="display:flex;align-items:center;gap:28px;justify-content:center;margin:6px 0 4px;">
+        ${svgDonutStr(margenSeg, `${margenPct.toFixed(1).replace('.', ',')}%`, 'margen ganancia')}
+        ${donutRefsStr(margenSeg)}
+      </div>
       <div class="chart-sub">Semana a semana — Ventas / Compras / Ganancia</div>
       ${svgBarrasStr(gruposSem, serieSem)}
       ${leyendaStr(serieSem)}
@@ -334,6 +349,27 @@ function composicionStr(segmentos) {
   const barras = segmentos.filter(s => s.valor > 0).map(s => `<div style="width:${((s.valor / total) * 100).toFixed(2)}%;background:${s.color};"></div>`).join('')
   const refs = segmentos.map(s => `<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;margin-right:14px;"><span style="width:11px;height:11px;border-radius:2px;background:${s.color};display:inline-block;"></span>${s.nombre}: <b>${fmtPrecio(s.valor)}</b> (${((Math.max(0, s.valor) / total) * 100).toFixed(0)}%)</span>`).join('')
   return `<div style="display:flex;height:26px;border:1px solid #000;border-radius:6px;overflow:hidden;">${barras}</div><div style="margin-top:6px;">${refs}</div>`
+}
+
+// Torta/donut como string SVG. segmentos: [{ nombre, valor, color }].
+// centroTop/centroBot: texto grande/chico del centro (ej. el % de margen).
+function svgDonutStr(segmentos, centroTop, centroBot) {
+  const total = segmentos.reduce((s, x) => s + Math.max(0, x.valor), 0) || 1
+  const size = 200, cx = size / 2, cy = size / 2, r = 70, w = 34, C = 2 * Math.PI * r
+  let acc = 0, arcs = ''
+  segmentos.forEach(s => {
+    const f = Math.max(0, s.valor) / total
+    if (f <= 0) return
+    const rot = -90 + acc * 360
+    arcs += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${w}" stroke-dasharray="${(f * C).toFixed(2)} ${C.toFixed(2)}" transform="rotate(${rot.toFixed(2)} ${cx} ${cy})"/>`
+    acc += f
+  })
+  return `<svg viewBox="0 0 ${size} ${size}" width="190" height="190" style="display:block">${arcs}<text x="${cx}" y="${cy - 1}" text-anchor="middle" font-size="28" font-weight="900" fill="#000">${centroTop}</text><text x="${cx}" y="${cy + 17}" text-anchor="middle" font-size="11" fill="#555">${centroBot}</text></svg>`
+}
+
+function donutRefsStr(segmentos) {
+  const total = segmentos.reduce((s, x) => s + Math.max(0, x.valor), 0) || 1
+  return `<div style="display:flex;flex-direction:column;gap:8px;">${segmentos.map(s => `<div style="font-size:12px;display:flex;align-items:center;gap:7px;"><span style="width:13px;height:13px;border-radius:3px;background:${s.color};display:inline-block;"></span><b>${((Math.max(0, s.valor) / total) * 100).toFixed(1)}%</b> · ${s.nombre} <span style="color:#777;">(${fmtPrecio(s.valor)})</span></div>`).join('')}</div>`
 }
 
 function ConfigMesesOperativos() {
