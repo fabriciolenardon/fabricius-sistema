@@ -47,7 +47,48 @@ function exportarExcel(semanasMes, totMes, mesLabel) {
   URL.revokeObjectURL(url)
 }
 
-function imprimirCierreMensual(semanasMes, totMes, mesLabel) {
+async function imprimirCierreMensual(semanasMes, totMes, mesLabel) {
+  const fechaCorta = d => new Date(d + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })
+  const capSocio = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : 'Otros'
+
+  // Retiros de socios por semana y por socio (tabla gastos, tipo='socio'). Estos
+  // retiros YA están sumados dentro de la columna "Gastos"; esta tabla los abre
+  // para ver cuánto sacó cada socio por semana y en el mes.
+  const desde = [...semanasMes.map(s => s.semana_inicio)].sort()[0]
+  const hasta = [...semanasMes.map(s => s.semana_fin)].sort().slice(-1)[0]
+  const retirosPorSemana = {}   // semana_inicio → { socio: monto }
+  const totalSocio = {}         // socio → total del mes
+  if (desde && hasta) {
+    const { data } = await fetchAllRows(() => supabase.from('gastos')
+      .select('fecha, monto, socio, tipo, solo_balance')
+      .eq('tipo', 'socio').gte('fecha', desde).lte('fecha', hasta))
+    for (const g of (data || [])) {
+      if (g.solo_balance) continue
+      const socio = (g.socio || 'otros').toLowerCase()
+      const wk = semanasMes.find(s => g.fecha >= s.semana_inicio && g.fecha <= s.semana_fin)
+      if (wk) {
+        retirosPorSemana[wk.semana_inicio] = retirosPorSemana[wk.semana_inicio] || {}
+        retirosPorSemana[wk.semana_inicio][socio] = (retirosPorSemana[wk.semana_inicio][socio] || 0) + (Number(g.monto) || 0)
+      }
+      totalSocio[socio] = (totalSocio[socio] || 0) + (Number(g.monto) || 0)
+    }
+  }
+  const socios = Object.keys(totalSocio).sort()
+  const totalRetiros = socios.reduce((a, s) => a + totalSocio[s], 0)
+  const tablaRetiros = socios.length ? `
+      <div class="titulo" style="font-size:14px;margin-top:18px;">💸 Retiros de socios por semana</div>
+      <table>
+        <thead><tr><th>Período</th>${socios.map(s => `<th>${capSocio(s)}</th>`).join('')}<th>Total semana</th></tr></thead>
+        <tbody>
+          ${semanasMes.map(c => {
+            const r = retirosPorSemana[c.semana_inicio] || {}
+            const tot = socios.reduce((a, s) => a + (r[s] || 0), 0)
+            return `<tr><td>${fechaCorta(c.semana_inicio)} → ${fechaCorta(c.semana_fin)}</td>${socios.map(s => `<td class="rojo">${fmtPrecio(r[s] || 0)}</td>`).join('')}<td class="rojo">${fmtPrecio(tot)}</td></tr>`
+          }).join('')}
+        </tbody>
+        <tfoot><tr class="total-row"><td>TOTAL MES</td>${socios.map(s => `<td class="rojo">${fmtPrecio(totalSocio[s])}</td>`).join('')}<td class="rojo">${fmtPrecio(totalRetiros)}</td></tr></tfoot>
+      </table>` : ''
+
   const html = `
     <html><head><title>Cierre Mensual — ${mesLabel}</title>
     <style>
@@ -109,6 +150,7 @@ function imprimirCierreMensual(semanasMes, totMes, mesLabel) {
           </tr>
         </tfoot>
       </table>
+      ${tablaRetiros}
       <div class="socios">
         <div class="socio">
           <div class="socio-nombre">👑 Fabricio Lenardon (85%)</div>
