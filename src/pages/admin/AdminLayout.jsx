@@ -34,6 +34,7 @@ const navItems = [
   { to: '/admin/pedidos',     icon: '📥', label: 'Pedidos Mayoristas' },
   { to: '/admin/whatsapp', icon: '💬', label: 'WhatsApp' },
   { to: '/admin/franquicias', icon: '🏪', label: 'Franquicias' },
+  { to: '/admin/proveedores', icon: '🏭', label: 'Proveedores' },
   { to: '/admin/cheques',     icon: '📄', label: 'Cheques' },
   { to: '/admin/sueldos',     icon: '💰', label: 'Sueldos' },
   { to: '/admin/gastos',      icon: '💸', label: 'Gastos' },
@@ -59,6 +60,7 @@ const NAV_GRUPOS = [
     { to: '/admin/franquicias', icon: '🏪', label: 'Franquicias' },
   ] },
   { label: 'Finanzas', icon: '💰', items: [
+    { to: '/admin/proveedores', icon: '🏭', label: 'Proveedores' },
     { to: '/admin/cheques',     icon: '📄', label: 'Cheques' },
     { to: '/admin/sueldos',     icon: '💰', label: 'Sueldos' },
     { to: '/admin/gastos',      icon: '💸', label: 'Gastos' },

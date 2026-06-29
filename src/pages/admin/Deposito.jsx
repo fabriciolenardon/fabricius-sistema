@@ -298,7 +298,7 @@ export function Deposito() {
   return (
     <div>
       <div className="page-title">DEPÓSITO</div>
-      <div className="page-sub">Stock, entradas, desposte, piezas y proveedores</div>
+      <div className="page-sub">Stock, entradas, desposte y piezas</div>
       {alert && <div className={`alert alert-${alert?.type || 'success'}`}>{alert?.msg || alert}</div>}
       <div style={{ display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap' }}>
         {[
@@ -309,7 +309,6 @@ export function Deposito() {
           { id: 'pollo_cajones', label: '🍗 Pollo Cajones' },
           { id: 'flujo', label: '📥 Flujo Depósito' },
           { id: 'remitos', label: '🧾 Remitos' },
-          { id: 'proveedores', label: '🏭 Proveedores' },
           { id: 'ajuste', label: '🔧 Ajuste Stock' },
         ].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
@@ -325,7 +324,6 @@ export function Deposito() {
 {tab === 'pollo_cajones' && <PolloCajonesTab key={tab} />}
 {tab === 'remitos' && <RemitosTab remitoActual={remitoActual} />}
       {tab === 'flujo' && <FlujoDeposito />}
-      {tab === 'proveedores' && <ProveedoresTab />}
       {tab === 'ajuste' && <AjusteStock />}
     </div>
   )
@@ -4045,7 +4043,7 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
   )
 }
 
-function ProveedoresTab() {
+export function ProveedoresTab() {
   const [subtab, setSubtab] = useState('resumen')
   const [compras, setCompras] = useState([])
   const [pagos, setPagos] = useState([])
