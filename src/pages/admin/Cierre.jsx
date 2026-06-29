@@ -616,8 +616,7 @@ export default function Cierre() {
                 <MetricCard label="💳 Pagado a proveedores" value={fmt(view.pagadoProv.mes || 0)} color="#c084fc"
                   sub="acumulado del mes (sin 1ª semana)" />
                 <MetricCard label="📥 Por pagar al cierre" value={fmt(view.porPagarProv.total)} color="var(--amber)"
-                  editable={editableNow} rawValue={view.porPagarProv.total} onCommit={v => commitLeaf('porPagarProv.total', v)}
-                  sub={`${view.porPagarProv.proveedores.length} proveedores · compras del período`} />
+                  sub="comprado del mes − pagado del mes" />
               </div>
 
               {/* GANANCIA (siempre derivada de los valores de arriba) */}

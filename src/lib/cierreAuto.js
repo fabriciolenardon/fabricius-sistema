@@ -332,16 +332,16 @@ export async function calcularCierreAuto(desde, hasta) {
     .filter(p => p.total > 0)
     .sort((a, b) => b.total - a.total)
 
-  // ====== POR PAGAR PROVEEDORES (lo comprado en el período) ======
-  // A los proveedores se les paga a la semana siguiente, así que lo que se les
-  // debe "al cierre" es lo COMPRADO en este período — no el saldo acumulado del
-  // libro mayor. El saldo histórico (movimientos_proveedores debe−haber) venía
-  // arrastrando saldos iniciales viejos y pagos que no siempre se registran como
-  // 'pago', lo que inflaba el número (ej: $76,7M cuando la deuda real es la de la
-  // semana). Decidido con Fabricio el 29/06/2026. Por eso "Por pagar al cierre" =
-  // "Compras del período", desglosado por proveedor.
-  const proveedoresConDeuda = comprasPorProveedor.map(p => ({ nombre: p.nombre, saldo: p.total }))
-  const totalPorPagar = comprasTotal
+  // ====== POR PAGAR PROVEEDORES (saldo real pendiente) ======
+  // Decisión Fabricio (29/06/2026): lo que se debe a proveedores "al cierre" =
+  // lo COMPRADO en el mes − lo PAGADO en el mes (este último sin la 1ª semana,
+  // ver pagadoMesTotal). Como se paga con ~1 semana de desfasaje, cuando los
+  // pagos están al día esto converge a ~1 semana (la última que falta pagar); si
+  // falta cargar un pago, el número lo refleja (sirve de control). NO se usa el
+  // saldo acumulado del libro mayor (movimientos_proveedores debe−haber), que
+  // arrastraba saldos iniciales y pagos no registrados e inflaba la cifra (daba
+  // $76,7M).
+  const totalPorPagar = comprasMesTotal - pagadoMesTotal
 
   // ====== GANANCIAS ======
   // Devengada: facturado - todos los costos del período (a precio de compra)
@@ -381,7 +381,8 @@ export async function calcularCierreAuto(desde, hasta) {
     },
     porPagarProv: {
       total: totalPorPagar,
-      proveedores: proveedoresConDeuda.slice(0, 10),
+      comprasMes: comprasMesTotal,
+      pagadoMes: pagadoMesTotal,
     },
     // Desgloses POR PERÍODO (no históricos): vendido a cada cliente y comprado
     // a cada proveedor dentro de [desde, hasta].
