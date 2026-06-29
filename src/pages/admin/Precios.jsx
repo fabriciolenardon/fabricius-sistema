@@ -5,6 +5,7 @@ import { fechaHoyARG } from '../../lib/fechas'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 import LimpiezaDuplicados from './LimpiezaDuplicados'
 import ImportarPLUQendra from './ImportarPLUQendra'
+import CombosEditor from './CombosEditor'
 import { abrirVentanaImprimible } from '../../lib/pdfPrintable'
 import { enviarWhatsapp } from '../../lib/whatsapp'
 const CATEGORIAS = {
@@ -514,6 +515,7 @@ export default function Precios() {
         {tabBtn('admin', '✏️ Administrar')}
         {tabBtn('masivo', '🚀 Actualización masiva')}
         {tabBtn('ofertas', `🏷️ Ofertas${ofertasVigentes.length > 0 ? ` (${ofertasVigentes.length})` : ''}`)}
+        {tabBtn('combos', '🍱 Combos')}
         {tabBtn('chat', '🤖 Asistente IA')}
 {tabBtn('plu', '🏷️ PLU / Balanza')}
 {tabBtn('limpieza', '🧹 Limpieza duplicados')}
@@ -1172,6 +1174,7 @@ export default function Precios() {
      {tab === 'plu' && (
   <PLUTab precios={precios} ofertas={ofertas} />
 )}
+      {tab === 'combos' && <CombosEditor precios={precios} />}
       {tab === 'limpieza' && <LimpiezaDuplicados />}
       {tab === 'importar_plu' && <ImportarPLUQendra />}
     </div>
