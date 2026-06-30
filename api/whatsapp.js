@@ -33,6 +33,13 @@ const CATEGORIAS_PUBLICAS = [
 
 const ACUSE_PAGO = '¡Gracias! 🙌 Ya le aviso al equipo para que verifique tu pago. En un ratito te confirman. 🥩'
 
+// Presentación: lo PRIMERO que manda Iris cuando le escribe un número nuevo.
+// Se presenta y deriva mayorista (otro número) vs minorista (este chat).
+const PRESENTACION = `¡Hola! Me llamo Iris, soy asistente de IA 🤖. ¿En qué puedo ayudarte?
+
+🛒 Para pedidos y precios *mayoristas*, escribí al *3861431971*.
+🥩 Para pedidos y consultas *minoristas*, ¡por acá nomás!`
+
 const PROMPT_BASE = `Sos IRIS, la asistente de Carnicerías Fabricius (Río Primero, Córdoba), atendiendo el WhatsApp del negocio. Sos MUJER, cálida, simpática y profesional. Es un chat de WhatsApp: respondé BREVE (1-3 frases), en español argentino, sin tecnicismos, con alguna emoji si pinta 🥩.
 
 REGLAS (modo "auto con barreras"):
@@ -167,6 +174,16 @@ export default async function handler(req, res) {
 
     // Si un humano tomó el control de este chat, Iris no responde.
     if (pausada) return res.status(200).end()
+
+    // PRESENTACIÓN: si es un número NUEVO (nunca escribió antes), lo PRIMERO que
+    // hace Iris es presentarse y derivar mayorista (otro número) vs minorista
+    // (este chat). `contacto` se leyó ANTES del upsert: null = primer mensaje.
+    // El próximo mensaje ya entra al flujo normal de Iris.
+    if (!contacto) {
+      await enviarWhatsApp(phoneId, from, PRESENTACION)
+      await guardarMensaje(from, 'out', 'iris', 'text', PRESENTACION)
+      return res.status(200).end()
+    }
 
     // Sorteo vigente (wa_config.sorteo_contacto). Cuando está cargado: (1) las
     // consultas EXPLÍCITAS del sorteo/rifa/comprar número se derivan acá directo al
