@@ -454,9 +454,8 @@ export default function Sueldos() {
 
   // Guarda (upsert) o borra los conceptos extra de un empleado en un mes:
   // aguinaldo y vacaciones. Monto 0 o vacío → se borra el concepto.
-  async function guardarExtras(mesKey, emp) {
+  async function guardarExtras(mesKey, emp, e) {
     const key = `${mesKey}_${emp.id}`
-    const e = extraEdit[key]
     if (!e) return
     const nombre = `${emp.apellido}, ${emp.nombre}`
     setGuardandoExtra(key)
@@ -755,7 +754,13 @@ export default function Sueldos() {
             const hayExtras = hayAg || hayVac
             const semanasMes = [...new Set(mes.liqs.map(l => l.semana_inicio))].sort((a, b) => b.localeCompare(a))
             const abierto = !!semanasAbiertas[mes.key]
-            const extrasOpen = !!extrasAbiertos[mes.key]
+            // Mes de aguinaldo = Junio (1er SAC) o Diciembre (2do SAC). En esos
+            // meses el aguinaldo se pre-carga (50% del bruto) y el panel de
+            // extras se abre solo para que quede a la vista y solo se confirme.
+            const ymMatch = /^(\d{4})-(\d{2})$/.exec(mes.key)
+            const mesNum = ymMatch ? ymMatch[2] : (mes.inicio ? mes.inicio.slice(5, 7) : '')
+            const esMesAguinaldo = mesNum === '06' || mesNum === '12'
+            const extrasOpen = extrasAbiertos[mes.key] ?? esMesAguinaldo
             return (
               <div key={mes.key} className="card" style={{ marginBottom: 20, borderColor: '#7c3aed' }}>
                 {/* Encabezado del mes */}
@@ -836,6 +841,7 @@ export default function Sueldos() {
                   <div style={{ marginTop: 12, border: '1px solid #7c3aed', borderRadius: 10, padding: 14, background: 'var(--surface2)' }}>
                     <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
                       Aguinaldo = 50% del bruto del mes · Vacaciones (Comercio) = sueldo mensual ÷ 25 × días corridos (14 = 2 semanas, hasta 5 años). Los montos son editables.
+                      {esMesAguinaldo && <span style={{ color: '#f0abfc' }}> El aguinaldo viene pre-cargado — revisá y guardá con 💾.</span>}
                     </div>
                     {empleados.map(emp => {
                       const nombre = `${emp.apellido}, ${emp.nombre}`
@@ -844,16 +850,21 @@ export default function Sueldos() {
                       const key = `${mes.key}_${emp.id}`
                       const agSaved = conceptosMes.find(c => c.empleado_id === emp.id && c.tipo === 'aguinaldo')
                       const vacSaved = conceptosMes.find(c => c.empleado_id === emp.id && c.tipo === 'vacaciones')
+                      const aguinaldoSugerido = Math.round(brutoMes * 0.5)
+                      // En junio/diciembre, si el empleado trabajó y todavía no
+                      // tiene aguinaldo guardado, se pre-carga el 50% del bruto.
+                      const aguinaldoPre = (esMesAguinaldo && !agSaved && brutoMes > 0) ? aguinaldoSugerido : null
                       const ed = extraEdit[key] || {
-                        aguinaldo: agSaved ? String(Number(agSaved.monto)) : '',
+                        aguinaldo: agSaved ? String(Number(agSaved.monto)) : (aguinaldoPre != null ? String(aguinaldoPre) : ''),
                         vacDias: vacSaved?.dias ? String(vacSaved.dias) : '',
                         vacMonto: vacSaved ? String(Number(vacSaved.monto)) : '',
                       }
                       const setEd = patch => setExtraEdit(s => ({ ...s, [key]: { ...ed, ...patch } }))
-                      const aguinaldoSugerido = Math.round(brutoMes * 0.5)
                       const vacDiasNum = parseInt(ed.vacDias) || 14
                       const vacSugerido = Math.round((brutoRef / 25) * vacDiasNum)
-                      const dirty = extraEdit[key] !== undefined
+                      // "dirty" también cuando hay un aguinaldo pre-cargado sin
+                      // guardar, para que el botón 💾 quede activo de una.
+                      const dirty = extraEdit[key] !== undefined || aguinaldoPre != null
                       return (
                         <div key={emp.id} style={{ display: 'grid', gridTemplateColumns: '1.4fr 1.2fr 2fr auto', gap: 10, alignItems: 'center', padding: '8px 0', borderTop: '1px solid var(--border)' }}>
                           <div>
@@ -879,7 +890,7 @@ export default function Sueldos() {
                                 style={{ padding: '0 8px', background: 'transparent', border: '1px solid #7dd3fc', color: '#7dd3fc', borderRadius: 6, cursor: brutoRef > 0 ? 'pointer' : 'not-allowed', fontSize: 11, whiteSpace: 'nowrap', opacity: brutoRef > 0 ? 1 : 0.4 }}>auto</button>
                             </div>
                           </div>
-                          <button onClick={() => guardarExtras(mes.key, emp)} disabled={!dirty || guardandoExtra === key}
+                          <button onClick={() => guardarExtras(mes.key, emp, ed)} disabled={!dirty || guardandoExtra === key}
                             style={{ padding: '7px 12px', background: dirty ? '#7c3aed' : 'var(--surface)', color: dirty ? '#fff' : 'var(--muted)', border: 'none', borderRadius: 8, cursor: dirty ? 'pointer' : 'not-allowed', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>
                             {guardandoExtra === key ? '⏳' : '💾'}
                           </button>
