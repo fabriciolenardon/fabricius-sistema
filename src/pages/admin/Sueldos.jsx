@@ -1,5 +1,5 @@
 // Sueldos.jsx
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { supabase, fetchAllRows } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
 import Paginador, { usePaginacion } from '../../components/Paginador'
@@ -88,6 +88,38 @@ function calcularHorasTurno(fichadas) {
 
 import { fmtPrecio } from '../../lib/formatos'
 function fmt(n) { return fmtPrecio(Number(n) || 0) }
+
+const MESES_ES = ['', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+// Nombre lindo para un mes calendario 'YYYY-MM' (fallback cuando la semana no
+// cae en ningún mes operativo cargado en Cierre → Por Mes).
+function nombreMesCalendario(ym) {
+  const [y, m] = ym.split('-')
+  return `${MESES_ES[parseInt(m)] || ym} ${y}`
+}
+// dd/mm de una fecha 'YYYY-MM-DD' sin desfasar por zona horaria.
+function fmtDdMm(d) {
+  if (!d) return ''
+  return new Date(d + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })
+}
+// Agrega las liquidaciones de un período en un informe por empleado (suma
+// horas, bruto, viáticos, adelantos, boletas y neto). Number() porque las
+// columnas numeric de Supabase vuelven como string.
+function informeEmpleados(liqs) {
+  const map = {}
+  for (const l of liqs) {
+    const k = l.empleado_nombre || '—'
+    if (!map[k]) map[k] = { nombre: k, horas: 0, bruto: 0, viaticos: 0, adelantos: 0, boletas: 0, neto: 0, semanas: 0 }
+    const g = map[k]
+    g.horas += Number(l.horas) || 0
+    g.bruto += Number(l.bruto) || 0
+    g.viaticos += Number(l.viaticos) || 0
+    g.adelantos += Number(l.adelantos) || 0
+    g.boletas += Number(l.boletas) || 0
+    g.neto += Number(l.neto) || 0
+    g.semanas += 1
+  }
+  return Object.values(map).sort((a, b) => a.nombre.localeCompare(b.nombre))
+}
 const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }
 
 export default function Sueldos() {
@@ -108,10 +140,13 @@ export default function Sueldos() {
   const [empleados, setEmpleados] = useState(EMPLEADOS_DEFAULT)
   const [editHora, setEditHora] = useState({})     // valor_hora tipeado en la pestaña Empleados
   const [guardandoEmp, setGuardandoEmp] = useState(null)
+  const [meses, setMeses] = useState([])           // meses operativos (calendario del cierre mensual)
+  const [semanasAbiertas, setSemanasAbiertas] = useState({}) // toggle "ver semanas" por mes en el historial
 
   useEffect(() => {
     fetchLiquidaciones()
     cargarEmpleados()
+    cargarMeses()
     const hoy = new Date()
     const dia = hoy.getDay()
     const lunes = new Date(hoy); lunes.setDate(hoy.getDate() - (dia === 0 ? 6 : dia - 1))
@@ -126,6 +161,14 @@ export default function Sueldos() {
     // Sin .limit() — paginamos en cliente con usePaginacion para mostrar TODAS las semanas
     const { data } = await fetchAllRows(() => supabase.from('liquidaciones_sueldos').select('*').order('semana_inicio', { ascending: false }))
     setLiquidaciones(data || [])
+  }
+
+  async function cargarMeses() {
+    // Meses operativos = mismo calendario que usa el Cierre mensual (rango
+    // fecha_inicio→fecha_cierre por semanas enteras). Sirven para agrupar el
+    // historial de sueldos por mes real de la empresa, no por mes calendario.
+    const { data } = await supabase.from('meses_operativos').select('*').order('fecha_inicio', { ascending: false })
+    setMeses(data || [])
   }
 
   async function cargarEmpleados() {
@@ -341,9 +384,89 @@ export default function Sueldos() {
     w.document.write(html); w.document.close()
   }
 
-  // Lista única de semanas (ordenadas) y paginada — antes era slice(0,10)
-  const semanasAll = [...new Set(liquidaciones.map(l => l.semana_inicio))]
-  const pagSemanas = usePaginacion(semanasAll, 10)
+  // Historial agrupado por MES (mismo calendario que el Cierre mensual) y,
+  // dentro de cada mes, por semana. Cada semana se ubica en el mes operativo
+  // cuyo rango [fecha_inicio, fecha_cierre] la contiene; si no cae en ninguno,
+  // fallback al mes calendario de la semana_inicio.
+  const hoyStr = fechaHoyARG(new Date())
+  const historialPorMes = useMemo(() => {
+    const grupos = {}
+    for (const l of liquidaciones) {
+      const mOp = meses.find(m => l.semana_inicio >= m.fecha_inicio && l.semana_inicio <= m.fecha_cierre)
+      const key = mOp ? (mOp.mes || mOp.fecha_inicio) : l.semana_inicio.substring(0, 7)
+      if (!grupos[key]) {
+        grupos[key] = {
+          key,
+          orden: mOp ? mOp.fecha_inicio : l.semana_inicio.substring(0, 7),
+          etiqueta: mOp ? mOp.etiqueta : nombreMesCalendario(l.semana_inicio.substring(0, 7)),
+          inicio: mOp ? mOp.fecha_inicio : null,
+          cierre: mOp ? mOp.fecha_cierre : null,
+          // Cerrado = el mes ya terminó (su fecha de cierre quedó en el pasado).
+          // Para el fallback calendario, cerrado si el mes es anterior al actual.
+          cerrado: mOp ? mOp.fecha_cierre < hoyStr : l.semana_inicio.substring(0, 7) < hoyStr.substring(0, 7),
+          liqs: [],
+        }
+      }
+      grupos[key].liqs.push(l)
+    }
+    return Object.values(grupos).sort((a, b) => b.orden.localeCompare(a.orden))
+  }, [liquidaciones, meses, hoyStr])
+
+  const pagMeses = usePaginacion(historialPorMes, 6)
+
+  // Imprime el informe mensual: una fila por empleado con horas, bruto,
+  // viáticos, adelantos, boletas y neto acumulados del mes.
+  function imprimirInformeMes(mes) {
+    const informe = informeEmpleados(mes.liqs)
+    if (informe.length === 0) { setAlert({ type: 'error', msg: 'No hay liquidaciones en este mes' }); return }
+    const tot = informe.reduce((s, e) => ({
+      horas: s.horas + e.horas, bruto: s.bruto + e.bruto, viaticos: s.viaticos + e.viaticos,
+      adelantos: s.adelantos + e.adelantos, boletas: s.boletas + e.boletas, neto: s.neto + e.neto,
+    }), { horas: 0, bruto: 0, viaticos: 0, adelantos: 0, boletas: 0, neto: 0 })
+    const periodo = mes.inicio && mes.cierre ? `${fmtDdMm(mes.inicio)} al ${fmtDdMm(mes.cierre)}` : ''
+    const th = t => `<th style="text-align:right;padding:8px 10px;border-bottom:2px solid #111;font-size:11px;text-transform:uppercase;color:#555">${t}</th>`
+    const td = (v, opts = {}) => `<td style="text-align:${opts.align || 'right'};padding:7px 10px;border-bottom:1px solid #ddd;${opts.bold ? 'font-weight:700;' : ''}">${v}</td>`
+    const filas = informe.map(e => `<tr>
+        ${td(e.nombre, { align: 'left', bold: true })}
+        ${td(e.horas + ' h')}
+        ${td(fmt(e.bruto))}
+        ${td(e.viaticos > 0 ? '+' + fmt(e.viaticos) : '—')}
+        ${td(e.adelantos > 0 ? '−' + fmt(e.adelantos) : '—')}
+        ${td(e.boletas > 0 ? '−' + fmt(e.boletas) : '—')}
+        ${td(fmt(e.neto), { bold: true })}
+      </tr>`).join('')
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Informe ${mes.etiqueta}</title>
+      <style>
+        @page { margin: 12mm; }
+        body { font-family: Arial, Helvetica, sans-serif; color:#111; margin:0; padding:20px; }
+        h1 { font-size: 20px; margin:0 0 2px; }
+        .periodo { font-size: 12px; color:#666; margin-bottom: 16px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        tfoot td { border-top: 2px solid #111; font-weight: 800; padding:9px 10px; }
+      </style></head><body onload="window.print()">
+      <h1>Informe mensual de sueldos — ${mes.etiqueta}</h1>
+      <div class="periodo">${periodo ? 'Período ' + periodo + ' · ' : ''}${mes.cerrado ? 'Mes cerrado' : 'Mes en curso'}</div>
+      <table>
+        <thead><tr>
+          <th style="text-align:left;padding:8px 10px;border-bottom:2px solid #111;font-size:11px;text-transform:uppercase;color:#555">Empleado</th>
+          ${th('Horas')}${th('Bruto')}${th('Viáticos')}${th('Adelantos')}${th('Boletas')}${th('Neto')}
+        </tr></thead>
+        <tbody>${filas}</tbody>
+        <tfoot><tr>
+          ${td('TOTAL', { align: 'left' })}
+          ${td(tot.horas + ' h')}
+          ${td(fmt(tot.bruto))}
+          ${td(tot.viaticos > 0 ? '+' + fmt(tot.viaticos) : '—')}
+          ${td(tot.adelantos > 0 ? '−' + fmt(tot.adelantos) : '—')}
+          ${td(tot.boletas > 0 ? '−' + fmt(tot.boletas) : '—')}
+          ${td(fmt(tot.neto))}
+        </tr></tfoot>
+      </table>
+    </body></html>`
+    const w = window.open('', '_blank', 'width=800,height=600')
+    if (!w) { setAlert({ type: 'error', msg: 'Habilitá las ventanas emergentes para poder imprimir' }); return }
+    w.document.write(html); w.document.close()
+  }
 
   return (
     <div>
@@ -542,38 +665,111 @@ export default function Sueldos() {
 
       {tab === 'historial' && (
         <div>
-          {pagSemanas.items.map(semana => {
-            const liqSemana = liquidaciones.filter(l => l.semana_inicio === semana)
-            const totalSemana = liqSemana.reduce((s, l) => s + (l.neto || 0), 0)
+          {pagMeses.items.map(mes => {
+            const informe = informeEmpleados(mes.liqs)
+            const totalMes = informe.reduce((s, e) => s + e.neto, 0)
+            const totHoras = informe.reduce((s, e) => s + e.horas, 0)
+            const totBruto = informe.reduce((s, e) => s + e.bruto, 0)
+            const semanasMes = [...new Set(mes.liqs.map(l => l.semana_inicio))].sort((a, b) => b.localeCompare(a))
+            const abierto = !!semanasAbiertas[mes.key]
             return (
-              <div key={semana} className="card" style={{ marginBottom: 16 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <div className="card-title" style={{ margin: 0 }}>
-                    Semana {new Date(semana + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })} → {new Date((liqSemana[0]?.semana_fin || semana) + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })}
+              <div key={mes.key} className="card" style={{ marginBottom: 20, borderColor: '#7c3aed' }}>
+                {/* Encabezado del mes */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+                  <div>
+                    <div className="card-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+                      📅 {mes.etiqueta}
+                      <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: mes.cerrado ? '#1a2a1a' : '#2a2416', color: mes.cerrado ? '#7dff7d' : '#ffcf5c', border: `1px solid ${mes.cerrado ? '#2d5a2d' : '#5a4a2a'}` }}>
+                        {mes.cerrado ? '✅ Cerrado' : '⏳ En curso'}
+                      </span>
+                    </div>
+                    {mes.inicio && mes.cierre && (
+                      <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{fmtDdMm(mes.inicio)} al {fmtDdMm(mes.cierre)} · {semanasMes.length} semana{semanasMes.length !== 1 ? 's' : ''}</div>
+                    )}
                   </div>
-                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>TOTAL: {fmt(totalSemana)}</div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>Neto del mes</div>
+                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 26, color: 'var(--gold)' }}>{fmt(totalMes)}</div>
+                  </div>
+                </div>
+
+                {/* Informe mensual por empleado */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#a78bfa' }}>
+                    {mes.cerrado ? 'Informe del mes (por empleado)' : 'Acumulado del mes (por empleado)'}
+                  </div>
+                  <button onClick={() => imprimirInformeMes(mes)}
+                    style={{ background: 'transparent', border: '1px solid #7c3aed', color: '#a78bfa', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}>
+                    🖨️ Imprimir informe
+                  </button>
                 </div>
                 <table>
                   <thead><tr><th>Empleado</th><th>Horas</th><th>Bruto</th><th>Viáticos</th><th>Adelantos</th><th>Boletas</th><th>Neto</th></tr></thead>
                   <tbody>
-                    {liqSemana.map(l => (
-                      <tr key={l.id}>
-                        <td><strong>{l.empleado_nombre}</strong></td>
-                        <td>{l.horas > 0 ? l.horas + 'h' : '—'}</td>
-                        <td style={{ color: '#a78bfa' }}>{fmt(l.bruto)}</td>
-                        <td style={{ color: '#22c55e' }}>{l.viaticos > 0 ? '+' + fmt(l.viaticos) : '—'}</td>
-                        <td style={{ color: 'var(--red-light)' }}>{l.adelantos > 0 ? '-' + fmt(l.adelantos) : '—'}</td>
-                        <td style={{ color: 'var(--red-light)' }}>{l.boletas > 0 ? '-' + fmt(l.boletas) : '—'}</td>
-                        <td style={{ color: 'var(--gold)', fontWeight: 700 }}>{fmt(l.neto)}</td>
+                    {informe.map(e => (
+                      <tr key={e.nombre}>
+                        <td><strong>{e.nombre}</strong></td>
+                        <td>{e.horas > 0 ? e.horas + 'h' : '—'}</td>
+                        <td style={{ color: '#a78bfa' }}>{fmt(e.bruto)}</td>
+                        <td style={{ color: '#22c55e' }}>{e.viaticos > 0 ? '+' + fmt(e.viaticos) : '—'}</td>
+                        <td style={{ color: 'var(--red-light)' }}>{e.adelantos > 0 ? '-' + fmt(e.adelantos) : '—'}</td>
+                        <td style={{ color: 'var(--red-light)' }}>{e.boletas > 0 ? '-' + fmt(e.boletas) : '—'}</td>
+                        <td style={{ color: 'var(--gold)', fontWeight: 700 }}>{fmt(e.neto)}</td>
                       </tr>
                     ))}
                   </tbody>
+                  <tfoot>
+                    <tr style={{ background: 'var(--surface2)' }}>
+                      <td><strong>TOTAL</strong></td>
+                      <td><strong>{totHoras > 0 ? totHoras + 'h' : '—'}</strong></td>
+                      <td style={{ color: '#a78bfa', fontWeight: 700 }}>{fmt(totBruto)}</td>
+                      <td colSpan={3}></td>
+                      <td style={{ color: 'var(--gold)', fontWeight: 700, fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(totalMes)}</td>
+                    </tr>
+                  </tfoot>
                 </table>
+
+                {/* Detalle semanal (colapsable) */}
+                <button onClick={() => setSemanasAbiertas(s => ({ ...s, [mes.key]: !abierto }))}
+                  style={{ marginTop: 14, background: 'none', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}>
+                  {abierto ? '▲ Ocultar semanas' : `▼ Ver detalle por semana (${semanasMes.length})`}
+                </button>
+
+                {abierto && semanasMes.map(semana => {
+                  const liqSemana = mes.liqs.filter(l => l.semana_inicio === semana)
+                  const totalSemana = liqSemana.reduce((s, l) => s + (Number(l.neto) || 0), 0)
+                  return (
+                    <div key={semana} style={{ marginTop: 14, border: '1px solid var(--border)', borderRadius: 10, padding: 14 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                        <div style={{ fontWeight: 700, fontSize: 13 }}>
+                          Semana {fmtDdMm(semana)} → {fmtDdMm(liqSemana[0]?.semana_fin || semana)}
+                        </div>
+                        <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: 'var(--gold)' }}>TOTAL: {fmt(totalSemana)}</div>
+                      </div>
+                      <table>
+                        <thead><tr><th>Empleado</th><th>Horas</th><th>Bruto</th><th>Viáticos</th><th>Adelantos</th><th>Boletas</th><th>Neto</th></tr></thead>
+                        <tbody>
+                          {liqSemana.map(l => (
+                            <tr key={l.id}>
+                              <td><strong>{l.empleado_nombre}</strong></td>
+                              <td>{l.horas > 0 ? l.horas + 'h' : '—'}</td>
+                              <td style={{ color: '#a78bfa' }}>{fmt(l.bruto)}</td>
+                              <td style={{ color: '#22c55e' }}>{l.viaticos > 0 ? '+' + fmt(l.viaticos) : '—'}</td>
+                              <td style={{ color: 'var(--red-light)' }}>{l.adelantos > 0 ? '-' + fmt(l.adelantos) : '—'}</td>
+                              <td style={{ color: 'var(--red-light)' }}>{l.boletas > 0 ? '-' + fmt(l.boletas) : '—'}</td>
+                              <td style={{ color: 'var(--gold)', fontWeight: 700 }}>{fmt(l.neto)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )
+                })}
               </div>
             )
           })}
           {liquidaciones.length === 0 && <div className="card"><p style={{ color: 'var(--muted)', textAlign: 'center' }}>Sin liquidaciones registradas</p></div>}
-          <Paginador {...pagSemanas.controles} label="semanas" />
+          <Paginador {...pagMeses.controles} label="meses" />
         </div>
       )}
     </div>
