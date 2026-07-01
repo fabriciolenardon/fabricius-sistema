@@ -62,6 +62,30 @@ export const MODELOS_DESPOSTE = {
   },
 }
 
+// ============================================================
+// MERMA POR PRODUCTO (conversión a cortes)
+// ============================================================
+// % de merma enlazado a cada pieza / media res. Fuente de verdad:
+// config_sistema.merma_conversion (editable desde Depósito). Estos
+// son solo los DEFAULTS de fallback si la config no cargó todavía.
+// Los % son enteros (porcentaje), no fracciones.
+export const MERMA_PIEZA_DEFAULT = {
+  'Pierna': 29,
+  'Cortito': 27,
+  'Costeletal con Lomo': 6,
+  'Costillar Completo': 12,
+  'Cuarto Pistola': 25,
+  'Parrillero': 25,
+  'Paleta': 25,
+}
+// Merma default para cualquier pieza sin % explícito.
+export const MERMA_PIEZA_GENERICA = 25
+
+export const MERMA_MEDIA_RES_DEFAULT = [
+  { id: 'novillito',       label: 'Novillito (Nt)',       merma: 22 },
+  { id: 'vaca_vaquillona', label: 'Vaca/Vaquillona (VQ)', merma: 28 },
+]
+
 // Lista de piezas de cerdo (capón) que se cargan al desposte
 export const PIEZAS_CERDO = [
   { key: 'pierna',     nombre: 'Piernas (x2)',      stock: 'cerdo_pierna' },

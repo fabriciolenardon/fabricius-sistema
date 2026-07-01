@@ -3,7 +3,7 @@ import { supabase, fetchAllRows } from '../../lib/supabase'
 import { fechaHoyARG, fechaRelativaARG, esFechaFutura } from '../../lib/fechas'
 import { lunesDeLaSemana, domingoDeLaSemana } from '../../lib/cierreAuto'
 import { resolverDescuentoStock } from '../../lib/stockHelpers'
-import { bucketDePiezaBovina } from '../../lib/modelosDesposte'
+import { bucketDePiezaBovina, MERMA_PIEZA_DEFAULT, MERMA_PIEZA_GENERICA, MERMA_MEDIA_RES_DEFAULT } from '../../lib/modelosDesposte'
 import { cargarCajasDisponibles, crearCajasIngreso, venderCaja, revertirVentaCaja, CATEGORIA_A_TIPO_CAJA } from '../../lib/cajasStock'
 import { fmtPrecio, fmtKg, parseNumero } from '../../lib/formatos'
 import { imprimirHTML } from '../../lib/imprimir'
@@ -355,6 +355,10 @@ function DesposteTab({ onSaved }) {
   const [tipoAnimalPieza, setTipoAnimalPieza] = useState('novillo')
   const [precioCostoPieza, setPrecioCostoPieza] = useState('')
   const [mermaPieza, setMermaPieza] = useState(25)
+  // Merma por producto (editable). Fuente: config_sistema.merma_conversion.
+  // Se usa para autocompletar el % al elegir una pieza / tipo de media res,
+  // así no se convierte apurado sin ver la merma. Arranca con los defaults.
+  const [mermaConfig, setMermaConfig] = useState({ piezas: MERMA_PIEZA_DEFAULT, media_res: MERMA_MEDIA_RES_DEFAULT })
   const [caponesDisponibles, setCaponesDisponibles] = useState([])
 const [caponSeleccionado, setCaponSeleccionado] = useState(null)
 const [piezasCerdo, setPiezasCerdo] = useState({
@@ -384,13 +388,44 @@ const [piezasIndividuales, setPiezasIndividuales] = useState([])
 // "Historial Medias". Se carga junto con cargarDatos.
 const [mediasStockAll, setMediasStockAll] = useState([])
 const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(null)
-  const MERMAS_KILO = {
-    novillo:  { label: 'Novillo / Novillito', merma: 0.24, color: 'var(--gold)' },
-    ternera:  { label: 'Ternera',             merma: 0.30, color: 'var(--amber)' },
-    bubalino: { label: 'Bubalino',            merma: 0.25, color: 'var(--blue)' },
+  // MERMAS_KILO se arma desde la config editable (media_res). La merma se
+  // guarda como % entero en config y acá se pasa a fracción para conservar
+  // el uso existente (m.merma * 100). Los colores se ciclan de una paleta.
+  const MERMA_COLORS = ['var(--gold)', 'var(--amber)', 'var(--blue)', 'var(--green)', 'var(--red-light)']
+  const MERMAS_KILO = (mermaConfig.media_res || []).reduce((acc, m, i) => {
+    acc[m.id] = { label: m.label, merma: (Number(m.merma) || 0) / 100, color: MERMA_COLORS[i % MERMA_COLORS.length] }
+    return acc
+  }, {})
+
+  useEffect(() => { cargarDatos(); cargarMermaConfig() }, [])
+
+  // Si el tipo de animal seleccionado ya no existe en la config (ej. se
+  // editó/renombró), caemos al primero disponible para no romper el cálculo.
+  useEffect(() => {
+    const ids = Object.keys(MERMAS_KILO)
+    if (ids.length > 0 && !ids.includes(tipoAnimal)) setTipoAnimal(ids[0])
+  }, [mermaConfig])
+
+  async function cargarMermaConfig() {
+    const { data } = await supabase.from('config_sistema').select('valor').eq('clave', 'merma_conversion').maybeSingle()
+    if (data?.valor) {
+      setMermaConfig({
+        piezas: { ...MERMA_PIEZA_DEFAULT, ...(data.valor.piezas || {}) },
+        media_res: (data.valor.media_res && data.valor.media_res.length) ? data.valor.media_res : MERMA_MEDIA_RES_DEFAULT,
+      })
+    }
   }
 
-  useEffect(() => { cargarDatos() }, [])
+  // Persiste la config de merma editada y refresca el estado local.
+  async function guardarMermaConfig(nueva) {
+    setMermaConfig(nueva)
+    const { error } = await supabase.from('config_sistema').upsert({
+      clave: 'merma_conversion',
+      valor: nueva,
+      descripcion: 'Merma por producto al convertir a cortes: % por pieza individual y por tipo de media res. Editable desde Depósito → Desposte.',
+    }, { onConflict: 'clave' })
+    if (error) showAlert('No se pudo guardar la merma: ' + error.message, 'error')
+  }
 
   // Realtime: cuando OTRO usuario (admin desde otra pestaña, desposte
   // desde el tablet, cajero al vender) modifica el stock o las medias,
@@ -962,7 +997,7 @@ async function confirmarDesposteCerdo() {
   const mermaDesposteSugeridaPct = (MODELOS_DESPOSTE[modelo]?.merma_desposte_pct || 0) * 100
   // Alias para no romper referencias previas
   const diferencia = mermaDesposteKg
-  const mermaKilo = MERMAS_KILO[tipoAnimal]
+  const mermaKilo = MERMAS_KILO[tipoAnimal] || Object.values(MERMAS_KILO)[0] || { label: '—', merma: 0, color: 'var(--muted)' }
   const kgNetoKilo = kgBase * (1 - mermaKilo.merma)
   const precioCostoKilo = seleccionada?.precio_kg > 0 ? (seleccionada.precio_kg / (1 - mermaKilo.merma)).toFixed(0) : 0
  const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '7px 10px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, boxSizing: 'border-box' }
@@ -1079,6 +1114,7 @@ async function confirmarDesposteCerdo() {
       )}
 
       {subtab === 'kilo' && (
+        <>
         <div style={{ display: 'grid', gridTemplateColumns: seleccionada ? '1fr 1.2fr' : '1fr', gap: 16 }}>
           <div>
             <div style={{ background: '#1a1a2a', border: '1px solid #2a2a5a', borderRadius: 10, padding: '12px 16px', marginBottom: 16 }}>
@@ -1147,9 +1183,12 @@ async function confirmarDesposteCerdo() {
             </div>
           )}
         </div>
+        <EditorMerma config={mermaConfig} onSave={guardarMermaConfig} />
+        </>
       )}
 
      {subtab === 'pieza_kilo' && (
+  <>
   <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr', gap: 16 }}>
     <div>
       <div style={{ background: '#1a1a2a', border: '1px solid #2a2a5a', borderRadius: 10, padding: '12px 16px', marginBottom: 16 }}>
@@ -1178,6 +1217,9 @@ async function confirmarDesposteCerdo() {
                       setTipoPiezaSeleccionada(pz.tipo_stock || 'bovino_pieza')
                       setKgPiezaConvertir(String(pz.kg))
                       setPrecioCostoPieza(pz.precio_costo_kg ? String(pz.precio_costo_kg) : '')
+                      // Enlazar la merma de la pieza: autocompleta el % desde la
+                      // config para no convertir apurado sin verlo (editable abajo).
+                      setMermaPieza(mermaConfig.piezas?.[pz.tipo_pieza] ?? MERMA_PIEZA_GENERICA)
                     }}
                     style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderRadius: 8, cursor: 'pointer', background: sel ? 'rgba(201,168,76,0.12)' : 'var(--surface2)', border: sel ? '2px solid var(--gold)' : '1px solid var(--border)', marginBottom: 6 }}>
                     <div>
@@ -1214,7 +1256,19 @@ async function confirmarDesposteCerdo() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <input type="number" step="0.5" min="0" max="50" value={mermaPieza} onChange={e => setMermaPieza(parseFloat(e.target.value) || 0)}
             style={{ ...inp, width: 80, borderColor: 'var(--gold)', textAlign: 'center', fontSize: 18, fontWeight: 700 }} />
-          <span style={{ fontSize: 13, color: 'var(--muted)' }}>% — editable según la pieza</span>
+          {(() => {
+            const linked = nombrePieza ? mermaConfig.piezas?.[nombrePieza] : undefined
+            if (linked === undefined) return <span style={{ fontSize: 13, color: 'var(--muted)' }}>% — editable según la pieza</span>
+            const cambiado = Number(mermaPieza) !== Number(linked)
+            return (
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+                🔗 Enlazada a <strong style={{ color: 'var(--text)' }}>{nombrePieza}</strong>: {linked}%
+                {cambiado
+                  ? <> · <button type="button" onClick={() => setMermaPieza(linked)} style={{ background: 'none', border: 'none', color: 'var(--blue)', cursor: 'pointer', padding: 0, fontSize: 12, textDecoration: 'underline' }}>volver a {linked}%</button></>
+                  : ' (editable)'}
+              </span>
+            )
+          })()}
         </div>
       </div>
       {kgPiezaConvertir > 0 && (
@@ -1257,6 +1311,8 @@ async function confirmarDesposteCerdo() {
       </button>
     </div>
   </div>
+  <EditorMerma config={mermaConfig} onSave={guardarMermaConfig} />
+  </>
 )}
 {subtab === 'cerdo' && (
   <div style={{ display: 'grid', gridTemplateColumns: caponSeleccionado ? '1fr 1.5fr' : '1fr', gap: 16 }}>
@@ -5070,6 +5126,91 @@ function PiezasTab() {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+// ============================================================
+// EDITOR DE MERMA POR PRODUCTO
+// ============================================================
+// Panel colapsable para editar el % de merma enlazado a cada pieza
+// y a cada tipo de media res. Se guarda en config_sistema y de ahí
+// se autocompleta al convertir a cortes. Editable por si cambia.
+function EditorMerma({ config, onSave }) {
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState(config)
+  const [ok, setOk] = useState(false)
+  useEffect(() => { setDraft(config) }, [config])
+
+  const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '7px 10px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, boxSizing: 'border-box' }
+
+  const setPieza = (nombre, val) => setDraft(d => ({ ...d, piezas: { ...d.piezas, [nombre]: val } }))
+  const setMedia = (i, field, val) => setDraft(d => ({ ...d, media_res: d.media_res.map((m, j) => j === i ? { ...m, [field]: val } : m) }))
+  const addMedia = () => setDraft(d => ({ ...d, media_res: [...(d.media_res || []), { id: '', label: '', merma: 25 }] }))
+  const delMedia = (i) => setDraft(d => ({ ...d, media_res: d.media_res.filter((_, j) => j !== i) }))
+
+  const clamp = v => Math.max(0, Math.min(50, Number(v) || 0))
+
+  function guardar() {
+    const piezas = {}
+    Object.entries(draft.piezas || {}).forEach(([k, v]) => { piezas[k] = clamp(v) })
+    // media_res: descartar filas sin nombre; generar id único a partir del label.
+    const usados = new Set()
+    const media_res = (draft.media_res || [])
+      .filter(m => (m.label || '').trim())
+      .map((m, i) => {
+        let id = ((m.id || '').trim() || (m.label || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')) || ('m' + i)
+        while (usados.has(id)) id += '_' + i
+        usados.add(id)
+        return { id, label: m.label.trim(), merma: clamp(m.merma) }
+      })
+    onSave({ piezas, media_res })
+    setOk(true); setTimeout(() => setOk(false), 2500)
+  }
+
+  return (
+    <div className="card" style={{ marginTop: 16, borderColor: 'var(--border)' }}>
+      <div onClick={() => setOpen(o => !o)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
+        <div className="card-title" style={{ margin: 0 }}>⚙️ Merma por producto (editable)</div>
+        <span style={{ fontSize: 12, color: 'var(--muted)' }}>{open ? '▲ ocultar' : '▼ editar %'}</span>
+      </div>
+      {!open && (
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
+          El % de merma se enlaza a cada pieza / media res y se autocompleta al convertir. Tocá para ajustarlo.
+        </div>
+      )}
+      {open && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>Piezas</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8, marginBottom: 18 }}>
+            {Object.keys(draft.piezas || {}).map(nombre => (
+              <div key={nombre} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface2)', borderRadius: 8, padding: '6px 10px' }}>
+                <span style={{ flex: 1, fontSize: 12 }}>{nombre}</span>
+                <input type="number" step="0.5" min="0" max="50" value={draft.piezas[nombre]} onChange={e => setPieza(nombre, e.target.value)} style={{ ...inp, width: 64, textAlign: 'center', fontWeight: 700 }} />
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>%</span>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>Media res</div>
+          <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
+            {(draft.media_res || []).map((m, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface2)', borderRadius: 8, padding: '6px 10px' }}>
+                <input value={m.label} onChange={e => setMedia(i, 'label', e.target.value)} placeholder="Ej: Novillito (Nt)" style={{ ...inp, flex: 1 }} />
+                <input type="number" step="0.5" min="0" max="50" value={m.merma} onChange={e => setMedia(i, 'merma', e.target.value)} style={{ ...inp, width: 64, textAlign: 'center', fontWeight: 700 }} />
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>%</span>
+                <button type="button" onClick={() => delMedia(i)} title="Eliminar" style={{ background: 'none', border: 'none', color: 'var(--red-light)', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}>✕</button>
+              </div>
+            ))}
+          </div>
+          <button type="button" className="btn btn-ghost" onClick={addMedia} style={{ fontSize: 12, marginBottom: 12 }}>+ Agregar tipo de media res</button>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 6 }}>
+            <button type="button" className="btn btn-gold" onClick={guardar}>💾 Guardar merma</button>
+            {ok && <span style={{ fontSize: 13, color: 'var(--green)', fontWeight: 700 }}>✅ Guardado</span>}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
