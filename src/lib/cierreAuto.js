@@ -21,6 +21,34 @@
 import { supabase } from './supabase'
 import { fechaHoyARG } from './fechas'
 
+// Fecha en que se imputa un concepto extra de sueldos (aguinaldo/vacaciones).
+// Como no tienen fecha propia, se imputan a la fecha de CIERRE de su mes
+// operativo (meses_operativos.fecha_cierre) → caen en la última semana del mes.
+// Fallback si no hay mes operativo cargado: último día del mes calendario.
+export function fechaImputacionConcepto(mes, mesesOp) {
+  const m = (mesesOp || []).find(x => x.mes === mes)
+  if (m && m.fecha_cierre) return m.fecha_cierre
+  const [y, mm] = mes.split('-').map(Number)
+  const d = new Date(y, mm, 0).getDate()   // día 0 del mes siguiente = último de este
+  return `${mes}-${String(d).padStart(2, '0')}`
+}
+
+// Suma los conceptos extra de sueldos (aguinaldo / vacaciones) que caen en el
+// rango [desde, hasta] según su fecha de imputación. Así el aguinaldo de un mes
+// cae en la ÚLTIMA semana de ese mes y en el mensual, sin duplicarse en las
+// semanas previas.
+// `conceptos`: filas de conceptos_sueldos {mes, tipo, monto}.
+// `mesesOp`:   filas de meses_operativos {mes, fecha_cierre}.
+export function totalesConceptos(conceptos, mesesOp, desde, hasta) {
+  const enRango = (conceptos || []).filter(c => {
+    const f = fechaImputacionConcepto(c.mes, mesesOp)
+    return f >= desde && f <= hasta
+  })
+  const aguinaldos = enRango.filter(c => c.tipo === 'aguinaldo').reduce((s, c) => s + (Number(c.monto) || 0), 0)
+  const vacaciones = enRango.filter(c => c.tipo === 'vacaciones').reduce((s, c) => s + (Number(c.monto) || 0), 0)
+  return { aguinaldos, vacaciones, total: aguinaldos + vacaciones }
+}
+
 // Devuelve el lunes de la semana que contiene `base` (en ARG), formato YYYY-MM-DD.
 // dia 0 = domingo, 1 = lunes, ...
 export function lunesDeLaSemana(base = new Date()) {
@@ -265,25 +293,11 @@ export async function calcularCierreAuto(desde, hasta) {
   const sueldosTotal = sum(sueldos, 'neto')
 
   // ====== AGUINALDO / VACACIONES ======
-  // Los conceptos extra (tabla conceptos_sueldos) no tienen fecha: se imputan a
-  // la fecha de CIERRE de su mes operativo. Así el aguinaldo de junio cae en la
-  // ÚLTIMA semana de junio (la que contiene la fecha de cierre), y aparece tanto
-  // en el cierre de esa semana como en el mensual — pero NO en las semanas
-  // anteriores (para no duplicarlo). Fallback: último día del mes calendario.
-  const mesCierreMap = {}
-  for (const m of (mesesOpR.data || [])) if (m.mes) mesCierreMap[m.mes] = m.fecha_cierre
-  const finDeMesCalendario = ym => {
-    const [y, mm] = ym.split('-').map(Number)
-    const d = new Date(y, mm, 0).getDate()   // día 0 del mes siguiente = último de este
-    return `${ym}-${String(d).padStart(2, '0')}`
-  }
-  const conceptosPeriodo = (conceptosR?.data || []).filter(c => {
-    const fechaImput = mesCierreMap[c.mes] || finDeMesCalendario(c.mes)
-    return fechaImput >= desde && fechaImput <= hasta
-  })
-  const aguinaldosTotal = conceptosPeriodo.filter(c => c.tipo === 'aguinaldo').reduce((s, c) => s + (Number(c.monto) || 0), 0)
-  const vacacionesTotal = conceptosPeriodo.filter(c => c.tipo === 'vacaciones').reduce((s, c) => s + (Number(c.monto) || 0), 0)
-  const conceptosTotal = aguinaldosTotal + vacacionesTotal
+  // Los conceptos extra (aguinaldo/vacaciones) se imputan a la fecha de cierre
+  // de su mes operativo — ver totalesConceptos(). Así caen en la última semana
+  // del mes (y en el mensual) sin duplicarse en las semanas previas.
+  const { aguinaldos: aguinaldosTotal, vacaciones: vacacionesTotal, total: conceptosTotal } =
+    totalesConceptos(conceptosR?.data || [], mesesOpR?.data || [], desde, hasta)
 
   // ====== KG (referencia, no afecta cálculo de ganancia) ======
   const sumarKgPorTipo = tipos => entradas
