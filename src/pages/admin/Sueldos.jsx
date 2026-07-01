@@ -778,7 +778,9 @@ export default function Sueldos() {
             const ymMatch = /^(\d{4})-(\d{2})$/.exec(mes.key)
             const mesNum = ymMatch ? ymMatch[2] : (mes.inicio ? mes.inicio.slice(5, 7) : '')
             const esMesAguinaldo = mesNum === '06' || mesNum === '12'
-            const extrasOpen = extrasAbiertos[mes.key] ?? esMesAguinaldo
+            // El panel de extras se abre solo en meses de aguinaldo (Jun/Dic) o
+            // cuando ya hay conceptos cargados (ej. vacaciones de enero/febrero).
+            const extrasOpen = extrasAbiertos[mes.key] ?? (esMesAguinaldo || conceptosMes.length > 0)
             return (
               <div key={mes.key} className="card" style={{ marginBottom: 20, borderColor: '#7c3aed' }}>
                 {/* Encabezado del mes */}
@@ -852,14 +854,17 @@ export default function Sueldos() {
                 {/* Editor de aguinaldo / vacaciones del mes */}
                 <button onClick={() => setExtrasAbiertos(s => ({ ...s, [mes.key]: !extrasOpen }))}
                   style={{ marginTop: 14, marginRight: 8, background: extrasOpen ? '#7c3aed' : 'none', border: '1px solid #7c3aed', color: extrasOpen ? '#fff' : '#a78bfa', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}>
-                  {extrasOpen ? '▲ Cerrar aguinaldo / vacaciones' : '🎁 Cargar aguinaldo / vacaciones'}
+                  {extrasOpen
+                    ? (esMesAguinaldo ? '▲ Cerrar aguinaldo / vacaciones' : '▲ Cerrar vacaciones')
+                    : (esMesAguinaldo ? '🎁 Cargar aguinaldo / vacaciones' : '🏖️ Cargar vacaciones')}
                 </button>
 
                 {extrasOpen && (
                   <div style={{ marginTop: 12, border: '1px solid #7c3aed', borderRadius: 10, padding: 14, background: 'var(--surface2)' }}>
                     <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
-                      Aguinaldo = 50% del bruto del mes · Vacaciones (Comercio) = sueldo mensual ÷ 25 × días corridos (14 = 2 semanas, hasta 5 años). Los montos son editables.
-                      {esMesAguinaldo && <span style={{ color: '#f0abfc' }}> El aguinaldo viene pre-cargado — revisá y guardá con 💾.</span>}
+                      {esMesAguinaldo
+                        ? <>Aguinaldo = 50% del bruto del mes (se paga en junio y diciembre). Vacaciones (Comercio) = sueldo mensual ÷ 25 × días corridos (14 = 2 semanas, hasta 5 años). Montos editables. <span style={{ color: '#f0abfc' }}>El aguinaldo viene pre-cargado — revisá y guardá con 💾.</span></>
+                        : <>Cargá las vacaciones al empleado que se las tomás este mes. Vacaciones (Comercio) = sueldo mensual ÷ 25 × días corridos (14 = 2 semanas, hasta 5 años). El aguinaldo solo se paga en junio y diciembre.</>}
                     </div>
                     {empleados.map(emp => {
                       const nombre = `${emp.apellido}, ${emp.nombre}`
@@ -889,18 +894,22 @@ export default function Sueldos() {
                             <div style={{ fontWeight: 700, fontSize: 13 }}>{emp.apellido}, {emp.nombre}</div>
                             <div style={{ fontSize: 10, color: 'var(--muted)' }}>bruto mes {fmt(brutoMes)} · ref {fmt(brutoRef)}</div>
                           </div>
-                          {/* Aguinaldo */}
+                          {/* Aguinaldo — solo en junio/diciembre (o si ya hay uno guardado) */}
                           <div>
                             <label style={{ fontSize: 10, color: '#f0abfc', display: 'block', marginBottom: 2 }}>Aguinaldo ($)</label>
-                            <div style={{ display: 'flex', gap: 4 }}>
-                              <input style={{ ...inp, padding: '5px 8px', fontSize: 13 }} type="number" placeholder="0" value={ed.aguinaldo} onChange={e => setEd({ aguinaldo: e.target.value })} />
-                              <button title={`50% de ${fmt(brutoMes)}`} onClick={() => setEd({ aguinaldo: String(aguinaldoSugerido) })} disabled={brutoMes <= 0}
-                                style={{ padding: '0 8px', background: 'transparent', border: '1px solid #f0abfc', color: '#f0abfc', borderRadius: 6, cursor: brutoMes > 0 ? 'pointer' : 'not-allowed', fontSize: 11, whiteSpace: 'nowrap', opacity: brutoMes > 0 ? 1 : 0.4 }}>50%</button>
-                              {agSaved && (
-                                <button title="Eliminar aguinaldo guardado" onClick={() => borrarConcepto(mes.key, emp, 'aguinaldo')} disabled={guardandoExtra === key}
-                                  style={{ padding: '0 8px', background: 'transparent', border: '1px solid var(--red-light)', color: 'var(--red-light)', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>🗑️</button>
-                              )}
-                            </div>
+                            {(esMesAguinaldo || agSaved) ? (
+                              <div style={{ display: 'flex', gap: 4 }}>
+                                <input style={{ ...inp, padding: '5px 8px', fontSize: 13 }} type="number" placeholder="0" value={ed.aguinaldo} onChange={e => setEd({ aguinaldo: e.target.value })} />
+                                <button title={`50% de ${fmt(brutoMes)}`} onClick={() => setEd({ aguinaldo: String(aguinaldoSugerido) })} disabled={brutoMes <= 0}
+                                  style={{ padding: '0 8px', background: 'transparent', border: '1px solid #f0abfc', color: '#f0abfc', borderRadius: 6, cursor: brutoMes > 0 ? 'pointer' : 'not-allowed', fontSize: 11, whiteSpace: 'nowrap', opacity: brutoMes > 0 ? 1 : 0.4 }}>50%</button>
+                                {agSaved && (
+                                  <button title="Eliminar aguinaldo guardado" onClick={() => borrarConcepto(mes.key, emp, 'aguinaldo')} disabled={guardandoExtra === key}
+                                    style={{ padding: '0 8px', background: 'transparent', border: '1px solid var(--red-light)', color: 'var(--red-light)', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>🗑️</button>
+                                )}
+                              </div>
+                            ) : (
+                              <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic', padding: '6px 0' }}>Solo junio / diciembre</div>
+                            )}
                           </div>
                           {/* Vacaciones */}
                           <div>
