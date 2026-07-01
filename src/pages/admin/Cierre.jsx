@@ -161,7 +161,8 @@ function recomputeDerived(c) {
   const cobradoTotal = (c.cobrado.efectivo || 0) + (c.cobrado.debito || 0) +
     (c.cobrado.transferencia || 0) + (c.cobrado.mayorista || 0) + (c.cobrado.cobranzasCta || 0)
   const gastosTotal = (c.gastos.fijos || 0) + (c.gastos.variables || 0) + (c.gastos.socios || 0)
-  const sueldosTotal = c.sueldos.total || 0
+  // Sueldos + aguinaldo + vacaciones: todo es costo del período para la ganancia.
+  const sueldosTotal = (c.sueldos.total || 0) + (c.sueldos.aguinaldos || 0) + (c.sueldos.vacaciones || 0)
   const comprasTotal = c.compras.total || 0
   const pagadoTotal = c.pagadoProv.total || 0
   return {
@@ -668,7 +669,9 @@ export default function Cierre() {
                   <FilaDesglose label="Gastos variables" value={view.gastos.variables} color="var(--red-light)" editable={editableNow} onCommit={v => commitLeaf('gastos.variables', v)} />
                   <FilaDesglose label="Retiros socios" value={view.gastos.socios} color="var(--red-light)" editable={editableNow} onCommit={v => commitLeaf('gastos.socios', v)} />
                   <FilaDesglose label="Sueldos liquidados" value={view.sueldos.total} color="var(--red-light)" editable={editableNow} onCommit={v => commitLeaf('sueldos.total', v)} />
-                  <FilaDesglose label="TOTAL GASTOS + SUELDOS" value={view.gastos.total + view.sueldos.total} color="var(--amber)" />
+                  <FilaDesglose label="Aguinaldos" value={view.sueldos.aguinaldos || 0} color="var(--red-light)" editable={editableNow} onCommit={v => commitLeaf('sueldos.aguinaldos', v)} />
+                  <FilaDesglose label="Vacaciones" value={view.sueldos.vacaciones || 0} color="var(--red-light)" editable={editableNow} onCommit={v => commitLeaf('sueldos.vacaciones', v)} />
+                  <FilaDesglose label="TOTAL GASTOS + SUELDOS" value={view.gastos.total + view.sueldos.total + (view.sueldos.aguinaldos || 0) + (view.sueldos.vacaciones || 0)} color="var(--amber)" />
                 </div>
 
                 {/* KG MOVIDOS */}
