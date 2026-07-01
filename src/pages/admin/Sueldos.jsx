@@ -479,6 +479,24 @@ export default function Sueldos() {
     setTimeout(() => setAlert(null), 3000)
   }
 
+  // Borra un concepto ya guardado (aguinaldo o vacaciones) de un empleado en un
+  // mes, con confirmación. Se usa el 🗑️ que aparece solo si el concepto existe.
+  async function borrarConcepto(mesKey, emp, tipo) {
+    const label = tipo === 'aguinaldo' ? 'aguinaldo' : 'vacaciones'
+    if (!window.confirm(`¿Borrar el ${label} de ${emp.apellido}, ${emp.nombre} de este mes?`)) return
+    const key = `${mesKey}_${emp.id}`
+    setGuardandoExtra(key)
+    const { error } = await supabase.from('conceptos_sueldos')
+      .delete().eq('mes', mesKey).eq('empleado_id', emp.id).eq('tipo', tipo)
+    setGuardandoExtra(null)
+    if (error) { setAlert({ type: 'error', msg: error.message }); return }
+    // Limpiar la edición local para que el input no quede con el valor viejo.
+    setExtraEdit(s => { const n = { ...s }; delete n[key]; return n })
+    setAlert({ type: 'success', msg: `🗑️ ${label.charAt(0).toUpperCase() + label.slice(1)} de ${emp.nombre} eliminado` })
+    cargarConceptos()
+    setTimeout(() => setAlert(null), 3000)
+  }
+
   // Imprime el informe mensual: una fila por empleado con horas, bruto,
   // viáticos, adelantos, boletas, aguinaldo, vacaciones y total del mes.
   function imprimirInformeMes(mes) {
@@ -878,6 +896,10 @@ export default function Sueldos() {
                               <input style={{ ...inp, padding: '5px 8px', fontSize: 13 }} type="number" placeholder="0" value={ed.aguinaldo} onChange={e => setEd({ aguinaldo: e.target.value })} />
                               <button title={`50% de ${fmt(brutoMes)}`} onClick={() => setEd({ aguinaldo: String(aguinaldoSugerido) })} disabled={brutoMes <= 0}
                                 style={{ padding: '0 8px', background: 'transparent', border: '1px solid #f0abfc', color: '#f0abfc', borderRadius: 6, cursor: brutoMes > 0 ? 'pointer' : 'not-allowed', fontSize: 11, whiteSpace: 'nowrap', opacity: brutoMes > 0 ? 1 : 0.4 }}>50%</button>
+                              {agSaved && (
+                                <button title="Eliminar aguinaldo guardado" onClick={() => borrarConcepto(mes.key, emp, 'aguinaldo')} disabled={guardandoExtra === key}
+                                  style={{ padding: '0 8px', background: 'transparent', border: '1px solid var(--red-light)', color: 'var(--red-light)', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>🗑️</button>
+                              )}
                             </div>
                           </div>
                           {/* Vacaciones */}
@@ -888,6 +910,10 @@ export default function Sueldos() {
                               <input style={{ ...inp, padding: '5px 8px', fontSize: 13 }} type="number" placeholder="0" value={ed.vacMonto} onChange={e => setEd({ vacMonto: e.target.value })} />
                               <button title={`${vacDiasNum} días × (${fmt(brutoRef)} ÷ 25)`} onClick={() => setEd({ vacDias: String(vacDiasNum), vacMonto: String(vacSugerido) })} disabled={brutoRef <= 0}
                                 style={{ padding: '0 8px', background: 'transparent', border: '1px solid #7dd3fc', color: '#7dd3fc', borderRadius: 6, cursor: brutoRef > 0 ? 'pointer' : 'not-allowed', fontSize: 11, whiteSpace: 'nowrap', opacity: brutoRef > 0 ? 1 : 0.4 }}>auto</button>
+                              {vacSaved && (
+                                <button title="Eliminar vacaciones guardadas" onClick={() => borrarConcepto(mes.key, emp, 'vacaciones')} disabled={guardandoExtra === key}
+                                  style={{ padding: '0 8px', background: 'transparent', border: '1px solid var(--red-light)', color: 'var(--red-light)', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>🗑️</button>
+                              )}
                             </div>
                           </div>
                           <button onClick={() => guardarExtras(mes.key, emp, ed)} disabled={!dirty || guardandoExtra === key}
