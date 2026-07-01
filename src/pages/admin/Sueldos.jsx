@@ -102,22 +102,33 @@ function fmtDdMm(d) {
   return new Date(d + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })
 }
 // Agrega las liquidaciones de un período en un informe por empleado (suma
-// horas, bruto, viáticos, adelantos, boletas y neto). Number() porque las
-// columnas numeric de Supabase vuelven como string.
-function informeEmpleados(liqs) {
+// horas, bruto, viáticos, adelantos, boletas y neto de sueldo). Los conceptos
+// extra del mes (aguinaldo, vacaciones) se suman aparte y arman el TOTAL a
+// cobrar. Number() porque las columnas numeric de Supabase vuelven como string.
+function informeEmpleados(liqs, conceptos = []) {
   const map = {}
+  const ensure = (nombre) => {
+    if (!map[nombre]) map[nombre] = { nombre, horas: 0, bruto: 0, viaticos: 0, adelantos: 0, boletas: 0, netoSueldo: 0, aguinaldo: 0, vacaciones: 0, neto: 0, semanas: 0 }
+    return map[nombre]
+  }
   for (const l of liqs) {
-    const k = l.empleado_nombre || '—'
-    if (!map[k]) map[k] = { nombre: k, horas: 0, bruto: 0, viaticos: 0, adelantos: 0, boletas: 0, neto: 0, semanas: 0 }
-    const g = map[k]
+    const g = ensure(l.empleado_nombre || '—')
     g.horas += Number(l.horas) || 0
     g.bruto += Number(l.bruto) || 0
     g.viaticos += Number(l.viaticos) || 0
     g.adelantos += Number(l.adelantos) || 0
     g.boletas += Number(l.boletas) || 0
-    g.neto += Number(l.neto) || 0
+    g.netoSueldo += Number(l.neto) || 0
     g.semanas += 1
   }
+  // Un empleado puede tener un concepto sin liquidación esa semana (ej. mes de
+  // vacaciones sin fichar) — ensure() lo crea igual para que aparezca.
+  for (const c of conceptos) {
+    const g = ensure(c.empleado_nombre || '—')
+    if (c.tipo === 'aguinaldo') g.aguinaldo += Number(c.monto) || 0
+    else if (c.tipo === 'vacaciones') g.vacaciones += Number(c.monto) || 0
+  }
+  for (const g of Object.values(map)) g.neto = g.netoSueldo + g.aguinaldo + g.vacaciones
   return Object.values(map).sort((a, b) => a.nombre.localeCompare(b.nombre))
 }
 const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }
@@ -142,11 +153,16 @@ export default function Sueldos() {
   const [guardandoEmp, setGuardandoEmp] = useState(null)
   const [meses, setMeses] = useState([])           // meses operativos (calendario del cierre mensual)
   const [semanasAbiertas, setSemanasAbiertas] = useState({}) // toggle "ver semanas" por mes en el historial
+  const [conceptos, setConceptos] = useState([])   // aguinaldos / vacaciones por mes+empleado
+  const [extrasAbiertos, setExtrasAbiertos] = useState({})   // toggle panel de extras por mes
+  const [extraEdit, setExtraEdit] = useState({})   // edición inline: `${mesKey}_${empId}` → { aguinaldo, vacDias, vacMonto }
+  const [guardandoExtra, setGuardandoExtra] = useState(null)
 
   useEffect(() => {
     fetchLiquidaciones()
     cargarEmpleados()
     cargarMeses()
+    cargarConceptos()
     const hoy = new Date()
     const dia = hoy.getDay()
     const lunes = new Date(hoy); lunes.setDate(hoy.getDate() - (dia === 0 ? 6 : dia - 1))
@@ -169,6 +185,12 @@ export default function Sueldos() {
     // historial de sueldos por mes real de la empresa, no por mes calendario.
     const { data } = await supabase.from('meses_operativos').select('*').order('fecha_inicio', { ascending: false })
     setMeses(data || [])
+  }
+
+  async function cargarConceptos() {
+    // Aguinaldos y vacaciones cargados por mes (tabla conceptos_sueldos).
+    const { data } = await supabase.from('conceptos_sueldos').select('*')
+    setConceptos(data || [])
   }
 
   async function cargarEmpleados() {
@@ -414,15 +436,63 @@ export default function Sueldos() {
 
   const pagMeses = usePaginacion(historialPorMes, 6)
 
+  // "Sueldo mensual" de referencia por empleado = su mejor bruto mensual de todo
+  // el historial. Se usa para sugerir las vacaciones (Comercio: sueldo/25 × días)
+  // sin que el propio mes de vacaciones — con menos horas fichadas — lo achique.
+  const brutoMaxPorEmp = useMemo(() => {
+    const res = {}
+    for (const mes of historialPorMes) {
+      const perEmp = {}
+      for (const l of mes.liqs) {
+        const k = l.empleado_nombre
+        perEmp[k] = (perEmp[k] || 0) + (Number(l.bruto) || 0)
+      }
+      for (const [k, v] of Object.entries(perEmp)) res[k] = Math.max(res[k] || 0, v)
+    }
+    return res
+  }, [historialPorMes])
+
+  // Guarda (upsert) o borra los conceptos extra de un empleado en un mes:
+  // aguinaldo y vacaciones. Monto 0 o vacío → se borra el concepto.
+  async function guardarExtras(mesKey, emp) {
+    const key = `${mesKey}_${emp.id}`
+    const e = extraEdit[key]
+    if (!e) return
+    const nombre = `${emp.apellido}, ${emp.nombre}`
+    setGuardandoExtra(key)
+    const ag = parseFloat(e.aguinaldo) || 0
+    const vm = parseFloat(e.vacMonto) || 0
+    const vd = parseInt(e.vacDias) || null
+    const ops = []
+    ops.push(ag > 0
+      ? supabase.from('conceptos_sueldos').upsert({ mes: mesKey, empleado_id: emp.id, empleado_nombre: nombre, tipo: 'aguinaldo', monto: ag, detalle: '50% del bruto del mes', updated_at: new Date().toISOString() }, { onConflict: 'mes,empleado_id,tipo' })
+      : supabase.from('conceptos_sueldos').delete().eq('mes', mesKey).eq('empleado_id', emp.id).eq('tipo', 'aguinaldo'))
+    ops.push(vm > 0
+      ? supabase.from('conceptos_sueldos').upsert({ mes: mesKey, empleado_id: emp.id, empleado_nombre: nombre, tipo: 'vacaciones', monto: vm, dias: vd, detalle: vd ? `${vd} días corridos · sueldo/25 (Comercio)` : 'Vacaciones', updated_at: new Date().toISOString() }, { onConflict: 'mes,empleado_id,tipo' })
+      : supabase.from('conceptos_sueldos').delete().eq('mes', mesKey).eq('empleado_id', emp.id).eq('tipo', 'vacaciones'))
+    const results = await Promise.all(ops)
+    setGuardandoExtra(null)
+    const err = results.find(r => r.error)
+    if (err) { setAlert({ type: 'error', msg: err.error.message }); return }
+    setExtraEdit(s => { const n = { ...s }; delete n[key]; return n })
+    setAlert({ type: 'success', msg: `✅ Extras de ${emp.nombre} guardados` })
+    cargarConceptos()
+    setTimeout(() => setAlert(null), 3000)
+  }
+
   // Imprime el informe mensual: una fila por empleado con horas, bruto,
-  // viáticos, adelantos, boletas y neto acumulados del mes.
+  // viáticos, adelantos, boletas, aguinaldo, vacaciones y total del mes.
   function imprimirInformeMes(mes) {
-    const informe = informeEmpleados(mes.liqs)
+    const conceptosMes = conceptos.filter(c => c.mes === mes.key)
+    const informe = informeEmpleados(mes.liqs, conceptosMes)
     if (informe.length === 0) { setAlert({ type: 'error', msg: 'No hay liquidaciones en este mes' }); return }
     const tot = informe.reduce((s, e) => ({
       horas: s.horas + e.horas, bruto: s.bruto + e.bruto, viaticos: s.viaticos + e.viaticos,
-      adelantos: s.adelantos + e.adelantos, boletas: s.boletas + e.boletas, neto: s.neto + e.neto,
-    }), { horas: 0, bruto: 0, viaticos: 0, adelantos: 0, boletas: 0, neto: 0 })
+      adelantos: s.adelantos + e.adelantos, boletas: s.boletas + e.boletas,
+      netoSueldo: s.netoSueldo + e.netoSueldo, aguinaldo: s.aguinaldo + e.aguinaldo, vacaciones: s.vacaciones + e.vacaciones, neto: s.neto + e.neto,
+    }), { horas: 0, bruto: 0, viaticos: 0, adelantos: 0, boletas: 0, netoSueldo: 0, aguinaldo: 0, vacaciones: 0, neto: 0 })
+    const hayAg = tot.aguinaldo > 0
+    const hayVac = tot.vacaciones > 0
     const periodo = mes.inicio && mes.cierre ? `${fmtDdMm(mes.inicio)} al ${fmtDdMm(mes.cierre)}` : ''
     const th = t => `<th style="text-align:right;padding:8px 10px;border-bottom:2px solid #111;font-size:11px;text-transform:uppercase;color:#555">${t}</th>`
     const td = (v, opts = {}) => `<td style="text-align:${opts.align || 'right'};padding:7px 10px;border-bottom:1px solid #ddd;${opts.bold ? 'font-weight:700;' : ''}">${v}</td>`
@@ -433,6 +503,9 @@ export default function Sueldos() {
         ${td(e.viaticos > 0 ? '+' + fmt(e.viaticos) : '—')}
         ${td(e.adelantos > 0 ? '−' + fmt(e.adelantos) : '—')}
         ${td(e.boletas > 0 ? '−' + fmt(e.boletas) : '—')}
+        ${td(fmt(e.netoSueldo))}
+        ${hayAg ? td(e.aguinaldo > 0 ? '+' + fmt(e.aguinaldo) : '—') : ''}
+        ${hayVac ? td(e.vacaciones > 0 ? '+' + fmt(e.vacaciones) : '—') : ''}
         ${td(fmt(e.neto), { bold: true })}
       </tr>`).join('')
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Informe ${mes.etiqueta}</title>
@@ -449,7 +522,7 @@ export default function Sueldos() {
       <table>
         <thead><tr>
           <th style="text-align:left;padding:8px 10px;border-bottom:2px solid #111;font-size:11px;text-transform:uppercase;color:#555">Empleado</th>
-          ${th('Horas')}${th('Bruto')}${th('Viáticos')}${th('Adelantos')}${th('Boletas')}${th('Neto')}
+          ${th('Horas')}${th('Bruto')}${th('Viáticos')}${th('Adelantos')}${th('Boletas')}${th('Sueldo')}${hayAg ? th('Aguinaldo') : ''}${hayVac ? th('Vacaciones') : ''}${th('Total')}
         </tr></thead>
         <tbody>${filas}</tbody>
         <tfoot><tr>
@@ -459,11 +532,14 @@ export default function Sueldos() {
           ${td(tot.viaticos > 0 ? '+' + fmt(tot.viaticos) : '—')}
           ${td(tot.adelantos > 0 ? '−' + fmt(tot.adelantos) : '—')}
           ${td(tot.boletas > 0 ? '−' + fmt(tot.boletas) : '—')}
+          ${td(fmt(tot.netoSueldo))}
+          ${hayAg ? td('+' + fmt(tot.aguinaldo)) : ''}
+          ${hayVac ? td('+' + fmt(tot.vacaciones)) : ''}
           ${td(fmt(tot.neto))}
         </tr></tfoot>
       </table>
     </body></html>`
-    const w = window.open('', '_blank', 'width=800,height=600')
+    const w = window.open('', '_blank', 'width=900,height=600')
     if (!w) { setAlert({ type: 'error', msg: 'Habilitá las ventanas emergentes para poder imprimir' }); return }
     w.document.write(html); w.document.close()
   }
@@ -666,12 +742,20 @@ export default function Sueldos() {
       {tab === 'historial' && (
         <div>
           {pagMeses.items.map(mes => {
-            const informe = informeEmpleados(mes.liqs)
+            const conceptosMes = conceptos.filter(c => c.mes === mes.key)
+            const informe = informeEmpleados(mes.liqs, conceptosMes)
             const totalMes = informe.reduce((s, e) => s + e.neto, 0)
             const totHoras = informe.reduce((s, e) => s + e.horas, 0)
             const totBruto = informe.reduce((s, e) => s + e.bruto, 0)
+            const totSueldo = informe.reduce((s, e) => s + e.netoSueldo, 0)
+            const totAguinaldo = informe.reduce((s, e) => s + e.aguinaldo, 0)
+            const totVac = informe.reduce((s, e) => s + e.vacaciones, 0)
+            const hayAg = totAguinaldo > 0
+            const hayVac = totVac > 0
+            const hayExtras = hayAg || hayVac
             const semanasMes = [...new Set(mes.liqs.map(l => l.semana_inicio))].sort((a, b) => b.localeCompare(a))
             const abierto = !!semanasAbiertas[mes.key]
+            const extrasOpen = !!extrasAbiertos[mes.key]
             return (
               <div key={mes.key} className="card" style={{ marginBottom: 20, borderColor: '#7c3aed' }}>
                 {/* Encabezado del mes */}
@@ -688,8 +772,9 @@ export default function Sueldos() {
                     )}
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>Neto del mes</div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>{hayExtras ? 'Total del mes' : 'Neto del mes'}</div>
                     <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 26, color: 'var(--gold)' }}>{fmt(totalMes)}</div>
+                    {hayExtras && <div style={{ fontSize: 10, color: 'var(--muted)' }}>sueldos {fmt(totSueldo)}{hayAg ? ` · aguinaldo +${fmt(totAguinaldo)}` : ''}{hayVac ? ` · vacaciones +${fmt(totVac)}` : ''}</div>}
                   </div>
                 </div>
 
@@ -704,7 +789,13 @@ export default function Sueldos() {
                   </button>
                 </div>
                 <table>
-                  <thead><tr><th>Empleado</th><th>Horas</th><th>Bruto</th><th>Viáticos</th><th>Adelantos</th><th>Boletas</th><th>Neto</th></tr></thead>
+                  <thead><tr>
+                    <th>Empleado</th><th>Horas</th><th>Bruto</th><th>Viáticos</th><th>Adelantos</th><th>Boletas</th>
+                    <th>{hayExtras ? 'Sueldo' : 'Neto'}</th>
+                    {hayAg && <th>Aguinaldo</th>}
+                    {hayVac && <th>Vacaciones</th>}
+                    {hayExtras && <th>Total</th>}
+                  </tr></thead>
                   <tbody>
                     {informe.map(e => (
                       <tr key={e.nombre}>
@@ -714,7 +805,10 @@ export default function Sueldos() {
                         <td style={{ color: '#22c55e' }}>{e.viaticos > 0 ? '+' + fmt(e.viaticos) : '—'}</td>
                         <td style={{ color: 'var(--red-light)' }}>{e.adelantos > 0 ? '-' + fmt(e.adelantos) : '—'}</td>
                         <td style={{ color: 'var(--red-light)' }}>{e.boletas > 0 ? '-' + fmt(e.boletas) : '—'}</td>
-                        <td style={{ color: 'var(--gold)', fontWeight: 700 }}>{fmt(e.neto)}</td>
+                        <td style={{ color: hayExtras ? 'var(--text)' : 'var(--gold)', fontWeight: 700 }}>{fmt(e.netoSueldo)}</td>
+                        {hayAg && <td style={{ color: '#f0abfc' }}>{e.aguinaldo > 0 ? '+' + fmt(e.aguinaldo) : '—'}</td>}
+                        {hayVac && <td style={{ color: '#7dd3fc' }}>{e.vacaciones > 0 ? '+' + fmt(e.vacaciones) : '—'}</td>}
+                        {hayExtras && <td style={{ color: 'var(--gold)', fontWeight: 700 }}>{fmt(e.neto)}</td>}
                       </tr>
                     ))}
                   </tbody>
@@ -724,10 +818,76 @@ export default function Sueldos() {
                       <td><strong>{totHoras > 0 ? totHoras + 'h' : '—'}</strong></td>
                       <td style={{ color: '#a78bfa', fontWeight: 700 }}>{fmt(totBruto)}</td>
                       <td colSpan={3}></td>
-                      <td style={{ color: 'var(--gold)', fontWeight: 700, fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(totalMes)}</td>
+                      <td style={{ color: hayExtras ? 'var(--text)' : 'var(--gold)', fontWeight: 700, fontFamily: hayExtras ? undefined : "'Bebas Neue',cursive", fontSize: hayExtras ? undefined : 18 }}>{fmt(totSueldo)}</td>
+                      {hayAg && <td style={{ color: '#f0abfc', fontWeight: 700 }}>+{fmt(totAguinaldo)}</td>}
+                      {hayVac && <td style={{ color: '#7dd3fc', fontWeight: 700 }}>+{fmt(totVac)}</td>}
+                      {hayExtras && <td style={{ color: 'var(--gold)', fontWeight: 700, fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(totalMes)}</td>}
                     </tr>
                   </tfoot>
                 </table>
+
+                {/* Editor de aguinaldo / vacaciones del mes */}
+                <button onClick={() => setExtrasAbiertos(s => ({ ...s, [mes.key]: !extrasOpen }))}
+                  style={{ marginTop: 14, marginRight: 8, background: extrasOpen ? '#7c3aed' : 'none', border: '1px solid #7c3aed', color: extrasOpen ? '#fff' : '#a78bfa', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}>
+                  {extrasOpen ? '▲ Cerrar aguinaldo / vacaciones' : '🎁 Cargar aguinaldo / vacaciones'}
+                </button>
+
+                {extrasOpen && (
+                  <div style={{ marginTop: 12, border: '1px solid #7c3aed', borderRadius: 10, padding: 14, background: 'var(--surface2)' }}>
+                    <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
+                      Aguinaldo = 50% del bruto del mes · Vacaciones (Comercio) = sueldo mensual ÷ 25 × días corridos (14 = 2 semanas, hasta 5 años). Los montos son editables.
+                    </div>
+                    {empleados.map(emp => {
+                      const nombre = `${emp.apellido}, ${emp.nombre}`
+                      const brutoMes = mes.liqs.filter(l => l.empleado_nombre === nombre).reduce((s, l) => s + (Number(l.bruto) || 0), 0)
+                      const brutoRef = brutoMaxPorEmp[nombre] || brutoMes
+                      const key = `${mes.key}_${emp.id}`
+                      const agSaved = conceptosMes.find(c => c.empleado_id === emp.id && c.tipo === 'aguinaldo')
+                      const vacSaved = conceptosMes.find(c => c.empleado_id === emp.id && c.tipo === 'vacaciones')
+                      const ed = extraEdit[key] || {
+                        aguinaldo: agSaved ? String(Number(agSaved.monto)) : '',
+                        vacDias: vacSaved?.dias ? String(vacSaved.dias) : '',
+                        vacMonto: vacSaved ? String(Number(vacSaved.monto)) : '',
+                      }
+                      const setEd = patch => setExtraEdit(s => ({ ...s, [key]: { ...ed, ...patch } }))
+                      const aguinaldoSugerido = Math.round(brutoMes * 0.5)
+                      const vacDiasNum = parseInt(ed.vacDias) || 14
+                      const vacSugerido = Math.round((brutoRef / 25) * vacDiasNum)
+                      const dirty = extraEdit[key] !== undefined
+                      return (
+                        <div key={emp.id} style={{ display: 'grid', gridTemplateColumns: '1.4fr 1.2fr 2fr auto', gap: 10, alignItems: 'center', padding: '8px 0', borderTop: '1px solid var(--border)' }}>
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 13 }}>{emp.apellido}, {emp.nombre}</div>
+                            <div style={{ fontSize: 10, color: 'var(--muted)' }}>bruto mes {fmt(brutoMes)} · ref {fmt(brutoRef)}</div>
+                          </div>
+                          {/* Aguinaldo */}
+                          <div>
+                            <label style={{ fontSize: 10, color: '#f0abfc', display: 'block', marginBottom: 2 }}>Aguinaldo ($)</label>
+                            <div style={{ display: 'flex', gap: 4 }}>
+                              <input style={{ ...inp, padding: '5px 8px', fontSize: 13 }} type="number" placeholder="0" value={ed.aguinaldo} onChange={e => setEd({ aguinaldo: e.target.value })} />
+                              <button title={`50% de ${fmt(brutoMes)}`} onClick={() => setEd({ aguinaldo: String(aguinaldoSugerido) })} disabled={brutoMes <= 0}
+                                style={{ padding: '0 8px', background: 'transparent', border: '1px solid #f0abfc', color: '#f0abfc', borderRadius: 6, cursor: brutoMes > 0 ? 'pointer' : 'not-allowed', fontSize: 11, whiteSpace: 'nowrap', opacity: brutoMes > 0 ? 1 : 0.4 }}>50%</button>
+                            </div>
+                          </div>
+                          {/* Vacaciones */}
+                          <div>
+                            <label style={{ fontSize: 10, color: '#7dd3fc', display: 'block', marginBottom: 2 }}>Vacaciones — días + monto ($)</label>
+                            <div style={{ display: 'flex', gap: 4 }}>
+                              <input style={{ ...inp, padding: '5px 8px', fontSize: 13, width: 60 }} type="number" placeholder="días" value={ed.vacDias} onChange={e => setEd({ vacDias: e.target.value })} />
+                              <input style={{ ...inp, padding: '5px 8px', fontSize: 13 }} type="number" placeholder="0" value={ed.vacMonto} onChange={e => setEd({ vacMonto: e.target.value })} />
+                              <button title={`${vacDiasNum} días × (${fmt(brutoRef)} ÷ 25)`} onClick={() => setEd({ vacDias: String(vacDiasNum), vacMonto: String(vacSugerido) })} disabled={brutoRef <= 0}
+                                style={{ padding: '0 8px', background: 'transparent', border: '1px solid #7dd3fc', color: '#7dd3fc', borderRadius: 6, cursor: brutoRef > 0 ? 'pointer' : 'not-allowed', fontSize: 11, whiteSpace: 'nowrap', opacity: brutoRef > 0 ? 1 : 0.4 }}>auto</button>
+                            </div>
+                          </div>
+                          <button onClick={() => guardarExtras(mes.key, emp)} disabled={!dirty || guardandoExtra === key}
+                            style={{ padding: '7px 12px', background: dirty ? '#7c3aed' : 'var(--surface)', color: dirty ? '#fff' : 'var(--muted)', border: 'none', borderRadius: 8, cursor: dirty ? 'pointer' : 'not-allowed', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>
+                            {guardandoExtra === key ? '⏳' : '💾'}
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
 
                 {/* Detalle semanal (colapsable) */}
                 <button onClick={() => setSemanasAbiertas(s => ({ ...s, [mes.key]: !abierto }))}
