@@ -142,8 +142,12 @@ export default function Dashboard() {
       `¿Continuar?`
     )
     if (!conf1) return
-    const conf2 = prompt(`Para confirmar, escribí BORRAR en mayúsculas:`)
-    if (conf2 !== 'BORRAR') { alert('Cancelado. Texto de confirmación incorrecto.'); return }
+    // DOBLE TRABA (pedido de Fabricio): frase exacta + código de seguridad, para
+    // que este borrado permanente de historial sea casi imposible de disparar sin querer.
+    const frase = prompt('⚠️ BORRADO DEFINITIVO E IRREVERSIBLE de historial.\n\nPara confirmar, escribí EXACTAMENTE:\nBORRAR HISTORIAL')
+    if (frase !== 'BORRAR HISTORIAL') { alert('Cancelado. La frase no coincide — NO se borró nada.'); return }
+    const codigo = prompt('Ahora ingresá el código de seguridad para confirmar el borrado:')
+    if (codigo !== '240697') { alert('Cancelado. Código incorrecto — NO se borró nada.'); return }
     setLoadingDetalle(true)
     const [delE, delS] = await Promise.all([
       supabase.from('entradas_deposito').delete().in('tipo', cat.tiposEntradas).lt('fecha', fechaCorte),

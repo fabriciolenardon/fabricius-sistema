@@ -12,12 +12,12 @@
 // ============================================================
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
-import { supabase } from '../../lib/supabase'
+import { supabase, fetchAllRows } from '../../lib/supabase'
 import { enviarWhatsapp, fmtArs } from '../../lib/whatsapp'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
 import { fmtKg } from '../../lib/formatos'
-import { fetchAllRows } from '../../lib/fetchAllRows'
 import { useCentroActividad } from '../../lib/useCentroActividad'
+import { totalesConceptos } from '../../lib/cierreAuto'
 import {
   useReportesData, SelectorPeriodo,
   ReporteMargen, ReporteCliente, ReporteCanal, ReporteTemporal,
@@ -189,17 +189,24 @@ function useDashboardData(refreshMs = 120000) {
     const hoy = hoyISO()
     const ayer = fechaHaceDias(1)
     const hace7 = fechaHaceDias(6)
-    const mesIni = inicioMes()
+    // Mes OPERATIVO: las fechas de inicio/cierre que define Fabricio a mano (Cierre →
+    // Por Mes). Si hoy cae dentro de un mes operativo, "este mes" arranca en su
+    // fecha_inicio (no el 01 calendario). Fallback al mes calendario si no hay config.
+    const { data: mesesOpData } = await supabase.from('meses_operativos')
+      .select('mes, etiqueta, fecha_inicio, fecha_cierre').order('fecha_inicio', { ascending: false })
+    const mesOpActual = (mesesOpData || []).find(m => hoy >= m.fecha_inicio && hoy <= m.fecha_cierre) || null
+    const mesIni = mesOpActual ? mesOpActual.fecha_inicio : inicioMes()
+    const mesOpLabel = mesOpActual ? mesOpActual.etiqueta : null
     const mesAntIni = inicioMesAnterior()
     const mesAntMismoDia = mismoDiaMesAnterior() // período comparable: 01→mismo día
     const hoyDt = new Date(hoy + 'T12:00')
     const anioPasadoMesIni = `${hoyDt.getFullYear() - 1}-${String(hoyDt.getMonth() + 1).padStart(2, '0')}-01`
     const anioPasadoHoy    = `${hoyDt.getFullYear() - 1}-${String(hoyDt.getMonth() + 1).padStart(2, '0')}-${String(hoyDt.getDate()).padStart(2, '0')}`
-
     const [ventasHoy, ventasAyer, ventasSemana, ventasMes, ventasMesAnt, ventasAnioPasado,
            salidasMes, cuentas, facturas12m, stock, cheques, clientes,
            gastosMes, sueldosMes, pagosProvMes, movCtacteMes, todasCajas, todosDeudores, promoCfg,
-           comprasMesQ, cierresQ, comprasSemQ, remitosHoyQ] = await Promise.all([
+           comprasMesQ, cierresQ, comprasSemQ, remitosHoyQ, cobranzaQ, arqueosSemQ,
+           cobranzaTotalQ, conceptosQ] = await Promise.all([
       supabase.from('ventas_minoristas').select('total, efectivo, debito, transferencia, items, fecha, hora').eq('origen', 'caja').eq('fecha', hoy),
       // hora incluida: alimenta la curva "hoy vs ayer a esta hora"
       supabase.from('ventas_minoristas').select('total, hora').eq('origen', 'caja').eq('fecha', ayer),
@@ -212,12 +219,12 @@ function useDashboardData(refreshMs = 120000) {
       // Mayorista del mes (con filtro de flujos internos); cliente_nombre
       // alimenta el podio de clientes y la separación mayorista/franquicias.
       // Paginado: un mes supera las 1000 salidas y se truncaba (saldo negativo falso).
-      fetchAllRows(() => supabase.from('salidas_deposito').select('total, cobro, cliente_nombre').gte('fecha', mesIni).lte('fecha', hoy)),
+      fetchAllRows(() => supabase.from('salidas_deposito').select('total, cobro, cliente_nombre, fecha').gte('fecha', mesIni).lte('fecha', hoy)),
       supabase.from('cuentas_fiscales').select('*').eq('activa', true).then(r => r).catch(() => ({ data: null })),
       supabase.from('facturas').select('cuenta_id, monto_total, fecha').eq('tipo', 'emitida').gte('fecha', fechaHaceDias(365)).then(r => r).catch(() => ({ data: null })),
       supabase.from('stock_actual').select('*'),
       supabase.from('cheques').select('*').gte('fecha_pago', hoy).lte('fecha_pago', fechaHaceDias(-15)),
-      supabase.from('clientes').select('nombre, saldo').gt('saldo', 100000).order('saldo', { ascending: false }).limit(5),
+      supabase.from('clientes').select('nombre, saldo').gt('saldo', 0).order('saldo', { ascending: false }).limit(15),
       // solo_balance: facturas a nombre de la SAS que paga un tercero — no son gasto nuestro
       supabase.from('gastos').select('tipo, monto, fecha, solo_balance').gte('fecha', mesIni).lte('fecha', hoy),
       supabase.from('liquidaciones_sueldos').select('neto, semana_fin').gte('semana_inicio', mesIni).lte('semana_fin', hoy),
@@ -236,6 +243,17 @@ function useDashboardData(refreshMs = 120000) {
       supabase.from('compras_proveedores').select('proveedor_nombre, importe').gte('fecha', inicioSemanaARG()).lte('fecha', hoy).not('anulado', 'is', true),
       // Remitos/despachos mayoristas de HOY (para el ticker, sin flujos internos)
       supabase.from('remitos').select('numero, cliente_nombre, total, created_at, cobro').eq('fecha', hoy).eq('eliminado', false).neq('cobro', 'interno'),
+      // Vendido / cobrado / por cobrar del mes (FIFO server-side: los pagos cancelan
+      // primero la deuda vieja, así "por cobrar" es solo de ventas del período)
+      supabase.rpc('ventas_cobranza_periodo', { p_desde: mesIni, p_hasta: hoy }),
+      // Arqueos de la semana (lunes→hoy) — minorista REAL contado: efectivo+débito+transf
+      supabase.from('arqueos_caja').select('total_contado, debito_real, transferencia_real, fecha').gte('fecha', inicioSemanaARG()).lte('fecha', hoy),
+      // Cobranzas mayoristas de TODA la historia (tipo 'pago': los cheques NO cuentan,
+      // se endosan a proveedores). Paginado: el ledger supera las 1000 filas.
+      fetchAllRows(() => supabase.from('movimientos_ctacte').select('tipo, haber')),
+      // Conceptos extra de sueldos (aguinaldo/vacaciones) — se imputan a la fecha
+      // de cierre de su mes operativo (igual criterio que el Cierre).
+      supabase.from('conceptos_sueldos').select('mes, tipo, monto'),
     ])
 
     const totalHoy  = (ventasHoy.data || []).reduce((s, v) => s + (Number(v.total) || 0), 0)
@@ -337,8 +355,10 @@ function useDashboardData(refreshMs = 120000) {
 
     // ── INGRESOS REALES DEL MES (cobranzas, no facturación) ──
     const ingresoCajaMes = totalCajaMes
+    // Los cheques NO cuentan como cobro nuestro: se endosan a proveedores, no se
+    // cobran. Solo cuentan los pagos reales (efectivo/transferencia) → tipo 'pago'.
     const cobranzasCtacte = (movCtacteMes.data || [])
-      .filter(m => m.tipo === 'pago' || m.tipo === 'cheque')
+      .filter(m => m.tipo === 'pago')
       .reduce((s, m) => s + (Number(m.haber) || 0), 0)
     const ingresoExtras = (gastosMes.data || []).filter(g => g.tipo === 'ingreso')
       .reduce((s, g) => s + (Number(g.monto) || 0), 0)
@@ -363,7 +383,9 @@ function useDashboardData(refreshMs = 120000) {
     // GASTOS = gastos operativos + sueldos. Los pagos a proveedores NO van acá:
     // son la cancelación de las compras, sumarían doble.
     const comprasMes = (comprasMesQ.data || []).reduce((s, e) => s + (Number(e.importe) || 0), 0)
-    const gastosOperativosMes = gastosFijos + gastosVariables + gastosSocios + sueldosTotalMes
+    // Aguinaldo/vacaciones del mes (imputados a la fecha de cierre del mes operativo)
+    const conceptosMes = totalesConceptos(conceptosQ?.data || [], mesesOpData || [], mesIni, hoy).total
+    const gastosOperativosMes = gastosFijos + gastosVariables + gastosSocios + sueldosTotalMes + conceptosMes
     const mensualVivo = {
       ventas: facturadoMes,
       compras: comprasMes,
@@ -387,6 +409,53 @@ function useDashboardData(refreshMs = 120000) {
 
     // ── SALDO PENDIENTE TOTAL CLIENTES ──
     const saldoPendienteTotal = (todosDeudores.data || []).reduce((s, c) => s + (Number(c.saldo) || 0), 0)
+
+    // ── MARGEN ESTIMADO DE LA SEMANA EN VIVO (pedido de Fabricio) ──
+    // TODO de la MISMA semana (lunes → hoy): ventas (mayorista emitido + minorista
+    // contado en arqueo) − compras a proveedores − gastos y sueldos.
+    // Es un ESTIMADO: parte de la carne comprada queda en stock para la semana
+    // siguiente (no se vende todo lo comprado), así que no es ganancia cerrada.
+    // NO arrastra deuda vieja: la cuenta corriente acumulada queda fuera a propósito.
+    const inicioSem = inicioSemanaARG()
+    const gastosSemana = (gastosMes.data || [])
+      .filter(g => !g.solo_balance && g.fecha >= inicioSem && (g.tipo === 'fijo' || g.tipo === 'variable' || g.tipo === 'socio'))
+      .reduce((s, g) => s + (Number(g.monto) || 0), 0)
+    const sueldosSemana = (sueldosMes.data || [])
+      .filter(l => l.semana_fin >= inicioSem)
+      .reduce((s, l) => s + (Number(l.neto) || 0), 0)
+    // Aguinaldo/vacaciones que caen en esta semana (por fecha de cierre del mes)
+    const conceptosSemana = totalesConceptos(conceptosQ?.data || [], mesesOpData || [], inicioSem, hoy).total
+    // Minorista REAL de la semana = lo contado en los arqueos (efectivo+débito+transf)
+    const minoristaArqueoSemana = (arqueosSemQ.data || []).reduce((s, a) =>
+      s + (Number(a.total_contado) || 0) + (Number(a.debito_real) || 0) + (Number(a.transferencia_real) || 0), 0)
+    // Mayorista vendido esta semana (remitos/salidas emitidos lunes→hoy, sin flujos internos)
+    const mayoristaVendidoSemana = (salidasMes.data || [])
+      .filter(s => s.cobro !== 'interno' && s.fecha >= inicioSem)
+      .reduce((s, x) => s + (Number(x.total) || 0), 0)
+    const costosSemana = gastosSemana + sueldosSemana + conceptosSemana
+    const ventasSemanaTotal = mayoristaVendidoSemana + minoristaArqueoSemana
+    // LADO IZQUIERDO — margen de la SEMANA (todo de la misma semana, sin deuda vieja)
+    const margenSemana = {
+      mayorista: mayoristaVendidoSemana,
+      minorista: minoristaArqueoSemana,
+      ventas: ventasSemanaTotal,
+      compras: comprasSemanaTotal,
+      gastos: costosSemana,
+      resultado: ventasSemanaTotal - comprasSemanaTotal - costosSemana,
+    }
+    // LADO DERECHO — CUENTA CORRIENTE MAYORISTA en vivo (sin fórmula de margen).
+    // El "vendido total" NO baja cuando te pagan: al cobrar sube COBRADO y baja
+    // TE DEBEN, el total queda igual. Los cheques NO cuentan como cobro (tipo 'pago'
+    // solo: efectivo/transferencia). vendido = te deben (saldo en vivo) + cobrado,
+    // así los tres números siempre cierran entre sí. SOLO LECTURA de cta cte.
+    const cobradoMayoristaTotal = (cobranzaTotalQ.data || [])
+      .filter(m => m.tipo === 'pago')
+      .reduce((s, m) => s + (Number(m.haber) || 0), 0)
+    const ctacteMayorista = {
+      deben: saldoPendienteTotal,
+      cobrado: cobradoMayoristaTotal,
+      vendido: saldoPendienteTotal + cobradoMayoristaTotal,
+    }
 
     // Top productos hoy
     const acc = {}
@@ -425,14 +494,39 @@ function useDashboardData(refreshMs = 120000) {
       { tipo: 'embutido',     label: '🌭 Embutidos',     minimo: 30,  kg: stockMap.embutido || 0 },
     ].filter(s => s.kg < s.minimo)
 
+    // ── ÚLTIMO MES OPERATIVO CERRADO (para el gráfico de margen del mes) ──
+    // Agrupa los cierres semanales por `mes` y toma el más reciente. Gastos del
+    // donut engloba sueldos + retiros socios + gastos; ganancia = el margen.
+    const cierresArr = cierresQ?.data || []
+    let mesCerrado = null
+    if (cierresArr.length) {
+      const ultMes = [...new Set(cierresArr.map(c => c.mes).filter(Boolean))].sort().slice(-1)[0]
+      const ws = cierresArr.filter(c => c.mes === ultMes)
+      const v = ws.reduce((s, c) => s + (Number(c.ventas) || 0), 0)
+      const co = ws.reduce((s, c) => s + (Number(c.compras) || 0), 0)
+      const ga = ws.reduce((s, c) => s + (Number(c.gastos) || 0) + (Number(c.sueldos) || 0), 0)
+      const gan = ws.reduce((s, c) => s + (Number(c.ganancia) || 0), 0)
+      mesCerrado = {
+        mes: ultMes,
+        label: ultMes ? new Date(ultMes + '-15').toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }) : '',
+        ventas: v, compras: co, gastos: ga, ganancia: gan,
+        margenPct: v > 0 ? (gan / v) * 100 : 0,
+      }
+    }
+
     setData({
       totalHoy, cantHoy, ticketProm, totalSemana,
+      mesCerrado,
       totalMes: totalCajaMes,
       mayoristaMes: totalSalidasMes,
       totalMesAnt, variacion,
       topProductosHoy, cuentasConPct, stockCritico,
       ultimaVentaHora,
       mensualVivo,
+      mesOpLabel,
+      cobranzaMes: (cobranzaQ?.data || [])[0] || null,
+      margenSemana,
+      ctacteMayorista,
       curvaHoy, curvaAyer, ultimasVentas,
       mejorDiaMes, canalesMes, topClientesMes,
       comprasSemanaProv, comprasSemanaTotal,
@@ -473,7 +567,7 @@ function useDashboardData(refreshMs = 120000) {
     // INSERT) es clave para la AUTOCORRECCIÓN: si se anula un remito mal cargado
     // o se elimina una compra errónea, el número se corrige EN VIVO (sin esperar
     // el refresh de 2 min). Requiere que estas tablas estén en supabase_realtime.
-    const TABLAS_LIVE = ['ventas_minoristas', 'remitos', 'salidas_deposito', 'entradas_deposito', 'gastos', 'liquidaciones_sueldos', 'config_sistema']
+    const TABLAS_LIVE = ['ventas_minoristas', 'remitos', 'salidas_deposito', 'entradas_deposito', 'gastos', 'liquidaciones_sueldos', 'conceptos_sueldos', 'config_sistema', 'arqueos_caja', 'compras_proveedores', 'movimientos_ctacte', 'clientes', 'meses_operativos']
     let canal = supabase.channel('dashboard-ejecutivo-live')
     TABLAS_LIVE.forEach(t => { canal = canal.on('postgres_changes', { event: '*', schema: 'public', table: t }, debounced) })
     canal.subscribe()
@@ -630,6 +724,178 @@ function ReportePanelData({ tab, periodo, setPeriodo }) {
 }
 
 // ════════════════════════════════════════════════════════════
+// DONUT (torta) — segmentos como arcos. centroTop/Bot = texto del centro.
+// ════════════════════════════════════════════════════════════
+function DonutSVG({ segmentos, centroTop, centroBot, size = 150 }) {
+  const total = segmentos.reduce((s, x) => s + Math.max(0, x.valor), 0) || 1
+  const cx = size / 2, cy = size / 2, r = size * 0.36, w = size * 0.16, C = 2 * Math.PI * r
+  let acc = 0
+  return (
+    <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size}>
+      {segmentos.map((s, i) => {
+        const f = Math.max(0, s.valor) / total
+        const rot = -90 + acc * 360
+        acc += f
+        if (f <= 0) return null
+        return <circle key={i} cx={cx} cy={cy} r={r} fill="none" stroke={s.color} strokeWidth={w}
+          strokeDasharray={`${f * C} ${C}`} transform={`rotate(${rot} ${cx} ${cy})`} />
+      })}
+      <text x={cx} y={cy} textAnchor="middle" fontSize={size * 0.2} fontWeight="900" fill="#fff" style={{ fontFamily: "'Bebas Neue',cursive" }}>{centroTop}</text>
+      <text x={cx} y={cy + 16} textAnchor="middle" fontSize="9" fill={NEON.muted}>{centroBot}</text>
+    </svg>
+  )
+}
+
+// ════════════════════════════════════════════════════════════
+// WIDGET MARGEN DEL MES — torta del último mes operativo cerrado:
+// % Compras / % Gastos (sueldos+socios+otros) / % Ganancia, sobre las ventas.
+// ════════════════════════════════════════════════════════════
+function WidgetMargenMes({ m }) {
+  if (!m) return null
+  const total = m.ventas || 1
+  const seg = [
+    { nombre: 'Compras', valor: m.compras, color: NEON.ambar },
+    { nombre: 'Gastos', valor: m.gastos, color: NEON.rojo },
+    { nombre: 'Ganancia', valor: m.ganancia, color: NEON.verde },
+  ]
+  return (
+    <div className="hud" style={{ ...glass, padding: 18, marginTop: 12 }}>
+      <Etiqueta texto={`MARGEN DEL MES · ${(m.label || '').toUpperCase()}`} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 28, flexWrap: 'wrap', marginTop: 8 }}>
+        <DonutSVG segmentos={seg} centroTop={`${m.margenPct.toFixed(1).replace('.', ',')}%`} centroBot="margen" />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+          {seg.map(s => (
+            <div key={s.nombre} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ width: 14, height: 14, borderRadius: 4, background: s.color, flexShrink: 0 }} />
+              <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: s.color, minWidth: 66 }}>{((Math.max(0, s.valor) / total) * 100).toFixed(1)}%</span>
+              <span style={{ fontSize: 12, color: NEON.muted }}>{s.nombre} · {fmtArs(s.valor)}</span>
+            </div>
+          ))}
+          <div style={{ fontSize: 11, color: NEON.muted, marginTop: 2 }}>
+            Sobre ventas de {fmtArs(m.ventas)} · gastos incluye sueldos y retiros de socios
+          </div>
+        </div>
+
+        {/* Ganancia neta del mes + reparto de socios — llena la derecha */}
+        <div style={{ marginLeft: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, paddingLeft: 20, borderLeft: '1px solid rgba(0,212,255,0.18)', minWidth: 240 }}>
+          <span style={{ fontSize: 10, letterSpacing: 2, color: NEON.muted, fontWeight: 800 }}>GANANCIA NETA DEL MES</span>
+          <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 40, lineHeight: 1, color: m.ganancia >= 0 ? NEON.verde : NEON.rojo }}>{fmtArs(m.ganancia)}</span>
+          <div style={{ display: 'flex', gap: 22, marginTop: 10, justifyContent: 'flex-end' }}>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 11, color: NEON.muted }}>👑 Fabricio · 85%</div>
+              <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: '#ffd17a' }}>{fmtArs(m.ganancia * 0.85)}</div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 11, color: NEON.muted }}>🤝 Ariel · 15%</div>
+              <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: NEON.cian }}>{fmtArs(m.ganancia * 0.15)}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════
+// WIDGET MARGEN DE LA SEMANA — mayorista vendido + minorista arqueo
+// − compras − gastos/sueldos, todo de la misma semana. Margen = ganancia ÷ ventas.
+// ════════════════════════════════════════════════════════════
+function WidgetMargen({ titulo, g, estimado, nota }) {
+  if (!g) return null
+  const minorista = Number(g.minorista) || 0
+  const ventas    = Number(g.ventas) || 0
+  const compras   = Number(g.compras) || 0
+  const gastos    = Number(g.gastos) || 0
+  const ganancia  = Number(g.resultado) || 0
+  const pct = ventas > 0 ? Math.max(-100, Math.min(100, (ganancia / ventas) * 100)) : 0
+  const R = 50, CIRC = 2 * Math.PI * R
+  const dash = (Math.abs(pct) / 100) * CIRC
+  const col = ganancia >= 0 ? NEON.verde : NEON.rojo
+  const filas = [
+    { l: 'MAYORISTA · vendido (semana)',   v: Number(g.mayorista) || 0, c: NEON.cianHi },
+    { l: '+  MINORISTA · arqueo (semana)', v: minorista, c: NEON.cian },
+    { l: '−  COMPRADO ESTA SEMANA',        v: compras,   c: NEON.ambar },
+    { l: '−  GASTOS Y SUELDOS (semana)',   v: gastos,    c: NEON.rojo },
+  ]
+  return (
+    <div className="hud" style={{ ...glass, padding: 16, display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+      <div style={{ position: 'relative', width: 116, height: 116, flexShrink: 0 }}>
+        <svg width="116" height="116" viewBox="0 0 120 120">
+          <circle cx="60" cy="60" r={R} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="12" />
+          <circle cx="60" cy="60" r={R} fill="none" stroke={col} strokeWidth="12" strokeLinecap="round"
+            strokeDasharray={`${dash} ${CIRC}`} transform="rotate(-90 60 60)" />
+        </svg>
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 30, color: col, lineHeight: 1 }}>{pct.toFixed(0)}%</div>
+          <div style={{ fontSize: 9, letterSpacing: 1.5, color: NEON.muted, fontWeight: 800 }}>MARGEN</div>
+        </div>
+      </div>
+      <div style={{ flex: 1, minWidth: 210 }}>
+        <Etiqueta texto={titulo} extra={<PuntoVivo />} />
+        {filas.map(x => (
+          <div key={x.l} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 4 }}>
+            <span style={{ fontSize: 10.5, letterSpacing: 0.8, color: NEON.muted, fontWeight: 800 }}>{x.l}</span>
+            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: x.c }}>{fmtArs(x.v)}</span>
+          </div>
+        ))}
+        <div style={{ borderTop: '1px solid rgba(0,212,255,0.25)', marginTop: 7, paddingTop: 7, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <span style={{ fontSize: 11, letterSpacing: 1, color: NEON.muted, fontWeight: 800 }}>{estimado ? '= GANANCIA ESTIMADA' : '= GANANCIA'}</span>
+          <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 27, color: col }}>{fmtArs(ganancia)}</span>
+        </div>
+        <div style={{ fontSize: 9.5, color: NEON.muted, marginTop: 7, lineHeight: 1.5 }}>{nota}</div>
+      </div>
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════
+// WIDGET CUENTA CORRIENTE MAYORISTA — en vivo, sin fórmula de margen.
+// VENDIDO total (pagado + no pagado) · COBRADO · TE DEBEN. El vendido no baja
+// cuando te pagan: vendido = te deben + cobrado, así los tres números cierran.
+// El gauge muestra el % cobrado del total vendido.
+// ════════════════════════════════════════════════════════════
+function WidgetCtacteMayorista({ titulo, g, nota }) {
+  if (!g) return null
+  const vendido = Number(g.vendido) || 0
+  const cobrado = Number(g.cobrado) || 0
+  const deben   = Number(g.deben) || 0
+  const pct = vendido > 0 ? Math.max(0, Math.min(100, (cobrado / vendido) * 100)) : 0
+  const R = 50, CIRC = 2 * Math.PI * R
+  const dash = (pct / 100) * CIRC
+  const col = NEON.verde
+  const filas = [
+    { l: 'VENDIDO · total (pagado + no pagado)', v: vendido, c: NEON.cianHi },
+    { l: '·  COBRADO de esas cuentas',           v: cobrado, c: NEON.verde },
+    { l: '·  TE DEBEN · saldo en vivo',          v: deben,   c: NEON.ambar },
+  ]
+  return (
+    <div className="hud" style={{ ...glass, padding: 16, display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+      <div style={{ position: 'relative', width: 116, height: 116, flexShrink: 0 }}>
+        <svg width="116" height="116" viewBox="0 0 120 120">
+          <circle cx="60" cy="60" r={R} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="12" />
+          <circle cx="60" cy="60" r={R} fill="none" stroke={col} strokeWidth="12" strokeLinecap="round"
+            strokeDasharray={`${dash} ${CIRC}`} transform="rotate(-90 60 60)" />
+        </svg>
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 30, color: col, lineHeight: 1 }}>{pct.toFixed(0)}%</div>
+          <div style={{ fontSize: 9, letterSpacing: 1.5, color: NEON.muted, fontWeight: 800 }}>COBRADO</div>
+        </div>
+      </div>
+      <div style={{ flex: 1, minWidth: 210 }}>
+        <Etiqueta texto={titulo} extra={<PuntoVivo />} />
+        {filas.map(x => (
+          <div key={x.l} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 6 }}>
+            <span style={{ fontSize: 10.5, letterSpacing: 0.8, color: NEON.muted, fontWeight: 800 }}>{x.l}</span>
+            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: x.c }}>{fmtArs(x.v)}</span>
+          </div>
+        ))}
+        <div style={{ fontSize: 9.5, color: NEON.muted, marginTop: 10, lineHeight: 1.5 }}>{nota}</div>
+      </div>
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════
 // RESUMEN EJECUTIVO (pantalla normal, rediseñada)
 // ════════════════════════════════════════════════════════════
 function ResumenEjecutivo() {
@@ -684,6 +950,12 @@ function ResumenEjecutivo() {
   if (loading) return <p style={{ color: 'var(--muted)' }}>Cargando resumen...</p>
   if (!data) return null
   const pc = data.panelControl
+  // % cobrado LIMPIO del mes (de las ventas del período, criterio FIFO del RPC).
+  // Reemplaza el viejo % que mezclaba cobranza de deuda vieja y daba >100%.
+  const cm = data.cobranzaMes
+  const pcCobradoLimpio = cm && Number(cm.vendido) > 0
+    ? Math.min(100, (Number(cm.cobrado) / Number(cm.vendido)) * 100)
+    : pc.pctCobrado
 
   const flecha = (v) => v == null ? '' : v >= 0 ? '↗' : '↘'
   const signo  = (v) => v == null ? '' : v >= 0 ? '+' : ''
@@ -724,7 +996,7 @@ function ResumenEjecutivo() {
           sub="Remitos a clientes y franquicias" />
         {/* MENSUAL EN VIVO — los 3 parámetros que pidió Fabricio: V − C − G */}
         <div className="hud" style={{ ...glass, padding: 18 }}>
-          <Etiqueta texto={`MENSUAL EN VIVO · 01→${fechaHoyARG().slice(8, 10)}`} extra={<PuntoVivo />} />
+          <Etiqueta texto={data.mesOpLabel ? `MENSUAL EN VIVO · ${data.mesOpLabel}` : `MENSUAL EN VIVO · 01→${fechaHoyARG().slice(8, 10)}`} extra={<PuntoVivo />} />
           {[
             { l: 'VENTAS',  v: data.mensualVivo.ventas,  c: NEON.cianHi },
             { l: 'COMPRAS', v: data.mensualVivo.compras, c: NEON.ambar },
@@ -744,10 +1016,21 @@ function ResumenEjecutivo() {
         </div>
       </div>
 
+      {/* ── Dos paneles: margen de la semana (izq) + margen histórico en vivo (der) ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 12, marginTop: 12 }}>
+        <WidgetMargen titulo="MARGEN DE LA SEMANA · ESTIMADO" g={data.margenSemana} estimado
+          nota="Todo de la misma semana: ventas (mayorista + minorista de arqueo) − compras − gastos/sueldos. Es un ESTIMADO: queda carne en stock para la semana que viene. No arrastra deuda vieja." />
+        <WidgetCtacteMayorista titulo="CUENTA CORRIENTE MAYORISTA · EN VIVO" g={data.ctacteMayorista}
+          nota="Total que les vendiste a cuenta corriente (pagado + no pagado). El vendido NO baja cuando te pagan: sube COBRADO y baja TE DEBEN, el total queda igual. Los cheques no cuentan como cobro (se endosan a proveedores). Solo lectura de la cuenta corriente." />
+      </div>
+
+      {/* ── Margen del último mes cerrado (torta) ── */}
+      <WidgetMargenMes m={data.mesCerrado} />
+
       {/* ── Cinta de métricas secundarias ── */}
       <div style={{ ...glass, marginTop: 12, padding: '14px 18px', display: 'flex', flexWrap: 'wrap', gap: '10px 28px', alignItems: 'center' }}>
         <Mini label="FACTURADO MES TOTAL" valor={fmtArs(pc.facturadoMes)} />
-        <Mini label="% COBRADO" valor={`${pc.pctCobrado.toFixed(0)}%`} color={pc.pctCobrado < 50 ? NEON.rojo : pc.pctCobrado < 75 ? NEON.ambar : NEON.verde} />
+        <Mini label="% COBRADO" valor={`${pcCobradoLimpio.toFixed(0)}%`} color={pcCobradoLimpio < 50 ? NEON.rojo : pcCobradoLimpio < 75 ? NEON.ambar : NEON.verde} />
         <Mini label="PEND. COBRAR" valor={fmtArs(pc.saldoPendienteTotal)} color={pc.saldoPendienteTotal > 500000 ? NEON.ambar : NEON.texto} />
         <Mini label={`VS ${new Date().getFullYear() - 1}`} valor={pc.variacionAnioPasado != null ? `${signo(pc.variacionAnioPasado)}${pc.variacionAnioPasado.toFixed(0)}%` : '—'} color={colorVar(pc.variacionAnioPasado)} />
         <Mini label="% SUELDOS" valor={`${pc.pctSueldosFact.toFixed(1)}%`} color={pc.pctSueldosFact > 60 ? NEON.rojo : pc.pctSueldosFact > 40 ? NEON.ambar : NEON.verde} />
@@ -812,7 +1095,7 @@ function ResumenEjecutivo() {
       {/* ── Cheques + deudores ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 12, marginTop: 12 }}>
         <div style={{ ...glass, padding: 18 }}>
-          <Etiqueta texto="📄 CHEQUES A COBRAR (15 DÍAS)" />
+          <Etiqueta texto="📄 CHEQUES · VENCIMIENTOS (15 DÍAS)" />
           {data.cheques.length === 0 ? (
             <p style={{ color: NEON.muted, fontSize: 13 }}>Sin cheques próximos.</p>
           ) : (
@@ -832,16 +1115,31 @@ function ResumenEjecutivo() {
         </div>
 
         <div style={{ ...glass, padding: 18 }}>
-          <Etiqueta texto="💳 DEUDA ALTA DE CLIENTES" />
+          <Etiqueta texto="💳 TOP 15 DEUDORES · EN VIVO" extra={<PuntoVivo />} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', margin: '4px 0 10px' }}>
+            <span style={{ fontSize: 10, letterSpacing: 1.5, color: NEON.muted, fontWeight: 800 }}>TOTAL EN LA CALLE</span>
+            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 25, color: NEON.rojo }}>{fmtArs(pc.saldoPendienteTotal)}</span>
+          </div>
           {data.clientesDeudores.length === 0 ? (
-            <p style={{ color: NEON.muted, fontSize: 13 }}>Sin clientes con deuda mayor a $100k.</p>
+            <p style={{ color: NEON.muted, fontSize: 13 }}>Nadie con deuda. 🎉</p>
           ) : (
-            data.clientesDeudores.map((c, i) => (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid rgba(255,255,255,0.06)', fontSize: 12 }}>
-                <span style={{ color: NEON.texto }}>{c.nombre}</span>
-                <strong style={{ color: NEON.rojo }}>{fmtArs(c.saldo)}</strong>
-              </div>
-            ))
+            data.clientesDeudores.map((c, i) => {
+              const maxDeuda = Number(data.clientesDeudores[0]?.saldo) || 1
+              const pctBar = Math.max(3, (Number(c.saldo) / maxDeuda) * 100)
+              return (
+                <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontSize: 12, marginBottom: 4 }}>
+                    <span style={{ color: NEON.texto }}>
+                      <span style={{ color: NEON.muted, fontWeight: 800, marginRight: 7 }}>{i + 1}</span>{c.nombre}
+                    </span>
+                    <strong style={{ color: NEON.rojo, flexShrink: 0, marginLeft: 8 }}>{fmtArs(c.saldo)}</strong>
+                  </div>
+                  <div style={{ height: 4, borderRadius: 4, background: 'rgba(255,255,255,0.06)' }}>
+                    <div style={{ height: '100%', width: `${pctBar}%`, borderRadius: 4, background: NEON.rojo, opacity: 0.65 }} />
+                  </div>
+                </div>
+              )
+            })
           )}
         </div>
       </div>

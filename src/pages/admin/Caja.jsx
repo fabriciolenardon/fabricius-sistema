@@ -88,6 +88,10 @@ export default function Caja() {
   const [ultimaVenta, setUltimaVenta] = useState(null)
   const [ventasHoy, setVentasHoy] = useState([])
   const [vistaCaja, setVistaCaja] = useState('vender') // 'vender' | 'historial' | 'arqueo'
+  // Combos armados (bolsones) — botón que agrega todos sus productos al
+  // carrito repartiendo el precio fijo del combo. Se administran en
+  // Precios → Combos (tabla combos_venta). Ver agregarCombo().
+  const [combos, setCombos] = useState([])
 
   const codigoRef = useRef(null)
   const busquedaRef = useRef(null)
@@ -115,6 +119,7 @@ export default function Caja() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'config_sistema' }, debouncedReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cajas_stock' }, debouncedReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'piezas_stock' }, debouncedReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'combos_venta' }, debouncedReload)
       .subscribe()
     return () => {
       clearTimeout(timer)
@@ -124,7 +129,7 @@ export default function Caja() {
 
   async function cargarTodo() {
     const hoy = fechaHoyARG()  // Hora local ARG, NO UTC. Ver lib/fechas.js
-    const [{ data: pre }, { data: cfg }, { data: ventas }, { data: ofs }, { data: cajas }, { data: piezas }, { data: promo }] = await Promise.all([
+    const [{ data: pre }, { data: cfg }, { data: ventas }, { data: ofs }, { data: cajas }, { data: piezas }, { data: promo }, { data: cbs }] = await Promise.all([
       supabase.from('precios').select('*').order('nombre'),
       supabase.from('config_sistema').select('*').eq('clave', 'ean13_formato').maybeSingle(),
       supabase.from('ventas_minoristas').select('*')
@@ -141,6 +146,8 @@ export default function Caja() {
       supabase.from('piezas_stock').select('*').eq('estado', 'disponible')
         .order('fecha_ingreso', { ascending: true }).order('id', { ascending: true }),
       supabase.from('config_sistema').select('*').eq('clave', 'promo_mundial').maybeSingle(),
+      // Combos disponibles para vender (los pausados no se muestran).
+      supabase.from('combos_venta').select('*').eq('disponible', true).order('orden').order('nombre'),
     ])
     setPrecios(pre || [])
     if (cfg?.valor) setConfigEAN(cfg.valor)
@@ -149,6 +156,7 @@ export default function Caja() {
     setCajasDisp(cajas || [])
     setPiezasDisp(piezas || [])
     setPromoMundial(promo?.valor || { activa: false, descuento_pct: 10 })
+    setCombos(cbs || [])
   }
 
   // ---- Resuelve el precio final de un producto según lista activa + ofertas ----
@@ -371,8 +379,78 @@ export default function Caja() {
     showMsg(`✅ ${producto.nombre} — ${kg.toFixed(3)} kg → $${importe.toFixed(2)}`)
   }
 
+  // ---- Agregar un combo armado al carrito ----
+  // Agrega CADA producto del combo como una línea normal del carrito (para
+  // que el stock se descuente igual que una venta común vía cerrarVenta),
+  // pero reparte el precio FIJO del combo entre las líneas en proporción a
+  // su valor minorista normal. Así Σ importe = precio del combo, no la suma
+  // de los precios sueltos. Las líneas quedan marcadas con combo_id/combo_nombre
+  // para excluirlas de Promo Mundial / Blangino (el precio del combo YA es la oferta).
+  function agregarCombo(combo) {
+    const items = Array.isArray(combo?.items) ? combo.items : []
+    if (!items.length) { showMsg('❌ El combo no tiene productos cargados', 'error'); return }
+    // Resolver cada ítem contra el catálogo actual — de ahí salen categoria y
+    // stock_origen reales (NO se adivina el bucket de stock, ver memoria).
+    const resueltos = items.map(it => ({ it, prod: precios.find(p => p.id === it.producto_id) }))
+    const faltan = resueltos.filter(r => !r.prod)
+    if (faltan.length) {
+      const nombres = faltan.map(r => r.it.nombre || '¿?').join(', ')
+      showMsg(`❌ Combo ${combo.nombre}: faltan productos en el catálogo (${nombres}). Revisalo en Precios → Combos.`, 'error', 5000)
+      return
+    }
+    const comboPrecio = Number(combo.precio) || 0
+    // Valor "suelto" de cada línea a precio minorista normal, para repartir.
+    const valores = resueltos.map(({ it, prod }) =>
+      (Number(it.kg) || 0) * Number(prod.precio_minorista || prod.precio_carniceria || 0))
+    const totalNormal = valores.reduce((a, b) => a + b, 0)
+    const comboInst = Date.now() + Math.random()  // instancia única (por si carga 2 combos iguales)
+    let acumulado = 0
+    const lineas = resueltos.map(({ it, prod }, idx) => {
+      const kg = Number(it.kg) || 0
+      // Reparto proporcional; la última línea se lleva el resto para que la
+      // suma dé EXACTO el precio del combo (sin centavos perdidos por redondeo).
+      let share
+      if (idx === resueltos.length - 1) {
+        share = comboPrecio - acumulado
+      } else {
+        share = totalNormal > 0
+          ? Math.round(comboPrecio * (valores[idx] / totalNormal))
+          : Math.round(comboPrecio / resueltos.length)
+        acumulado += share
+      }
+      const precioUnit = kg > 0 ? share / kg : share
+      return {
+        id: Date.now() + Math.random() + idx,
+        producto_id: prod.id,
+        descripcion: prod.nombre,
+        categoria: prod.categoria,
+        stock_origen: prod.stock_origen || null,
+        kg_por_unidad: prod.kg_por_unidad || null,
+        kg,
+        unidad: 'kg',
+        precio: precioUnit,
+        precio_base: precioUnit,
+        tiene_oferta: false,
+        oferta_pct: null,
+        lista: 'minorista',
+        importe: share,
+        // Marca de combo — excluye la línea de Promo/Blangino y la agrupa en el carrito.
+        combo_id: combo.id,
+        combo_nombre: combo.nombre,
+        combo_inst: comboInst,
+      }
+    })
+    setCarrito(c => [...c, ...lineas])
+    showMsg(`✅ Combo ${combo.emoji || ''} ${combo.nombre} — ${fmt(comboPrecio)}`)
+  }
+
   function quitarItem(id) {
     setCarrito(c => c.filter(item => item.id !== id))
+  }
+
+  // Quita TODAS las líneas de una instancia de combo de una sola vez.
+  function quitarCombo(comboInst) {
+    setCarrito(c => c.filter(item => item.combo_inst !== comboInst))
   }
 
   function editarKg(id, nuevoKg) {
@@ -414,6 +492,10 @@ export default function Caja() {
   // parseNumero acepta "1500,50" o "1500.50" — el cajero puede tipear
   // con coma o punto sin preocuparse del formato.
   const total = carrito.reduce((s, i) => s + i.importe, 0)
+  // Los combos ya vienen con su precio de oferta: NO se les aplica Promo
+  // Mundial ni Blangino. La base descontable es el total SIN las líneas de combo.
+  const totalCombos = carrito.reduce((s, i) => s + (i.combo_id ? i.importe : 0), 0)
+  const baseDescuento = total - totalCombos
   const cobrado = parseNumero(pago.efectivo) + parseNumero(pago.debito) + parseNumero(pago.transferencia)
   // ── Promo Mundial ──────────────────────────────────────────
   // El descuento aplica SOLO si el pago es 100% efectivo y/o transferencia.
@@ -425,17 +507,17 @@ export default function Caja() {
   // Empleado de la firma Blangino: 10% en CUALQUIER medio de pago.
   // Pisa la Promo Mundial para no aplicar doble descuento.
   const BLANGINO_PCT = 10
-  const blanginoDescuento = blangino.activo ? Math.round(total * BLANGINO_PCT / 100) : 0
+  const blanginoDescuento = blangino.activo ? Math.round(baseDescuento * BLANGINO_PCT / 100) : 0
   // ── Promo Mundial ──────────────────────────────────────────
   // Aplica SOLO si NO hay Blangino y el pago es 100% efectivo/transferencia.
   const promoDescuento = (!blangino.activo && promoMundial?.activa && !pagaConDebito)
-    ? Math.round(total * promoPct / 100)
+    ? Math.round(baseDescuento * promoPct / 100)
     : 0
   const descuentoAplicado = blanginoDescuento || promoDescuento
   const descuentoPctAplicado = blanginoDescuento > 0 ? BLANGINO_PCT : (promoDescuento > 0 ? promoPct : 0)
   // Montos para los botones rápidos. Blangino aplica a todos los medios;
   // la Promo Mundial solo a efectivo/transferencia (no a débito).
-  const promoFull = promoMundial?.activa ? Math.round(total * promoPct / 100) : 0
+  const promoFull = promoMundial?.activa ? Math.round(baseDescuento * promoPct / 100) : 0
   const fillEfvoTransf = total - (blangino.activo ? blanginoDescuento : promoFull)
   const fillDebito     = total - blanginoDescuento
   const totalACobrar = total - descuentoAplicado
@@ -470,12 +552,15 @@ export default function Caja() {
       showMsg(`❌ Falta cobrar ${fmt(totalACobrar - cobrado)}`, 'error')
       return
     }
-    // Guardia anti-typo: si lo cargado supera al total por un vuelto absurdo
-    // (> $1.000.000), casi seguro es un error de tipeo en el monto (ej. una venta
-    // de $10.279 con $2.000.000.000 de efectivo). Pedimos confirmación para que el
-    // cajero lo revise antes de guardar un número disparatado que ensucia la caja.
-    if (vuelto > 1000000) {
-      if (!confirm(`⚠️ Cargaste ${fmt(cobrado)} para una venta de ${fmt(totalACobrar)}.\nEl vuelto sería ${fmt(vuelto)}.\n\n¿Es correcto? Si te equivocaste, cancelá y corregí el monto.`)) return
+    // TOPE de seguridad: una venta de mostrador de más de $1.000.000 pide el CÓDIGO
+    // de seguridad (240697) para confirmar. Cubre tanto ventas grandes legítimas (se
+    // confirman con el código) como errores de tipeo en el monto (ej. $2.000.000.000
+    // de efectivo en una venta de $13.392): un typo no va a tener el código.
+    const TOPE_CAJA = 1000000
+    const montoMax = Math.max(totalACobrar, cobrado, parseNumero(pago.efectivo), parseNumero(pago.debito), parseNumero(pago.transferencia))
+    if (montoMax > TOPE_CAJA) {
+      const codigo = prompt(`⚠️ Esta venta supera $1.000.000 (${fmt(montoMax)}).\n\nIngresá el código de seguridad para confirmar:`)
+      if (codigo !== '240697') { showMsg('🚫 Código incorrecto — la venta NO se registró.', 'error', 6000); return }
     }
 
     setGuardandoVenta(true)
@@ -520,6 +605,10 @@ export default function Caja() {
         // la pieza de vuelta como 'disponible' en piezas_stock.
         pieza_id: i.pieza_id || null,
         pieza_tipo: i.pieza_tipo || null,
+        // Combo del que salió esta línea (si aplica) — solo trazabilidad;
+        // el descuento de stock y la anulación usan categoria/stock_origen/kg.
+        combo_id: i.combo_id || null,
+        combo_nombre: i.combo_nombre || null,
       })),
       // total = lo efectivamente cobrado (con Promo Mundial ya descontada).
       // La suma de items.importe puede ser mayor: la diferencia queda
@@ -842,6 +931,30 @@ export default function Caja() {
         )}
       </div>
 
+      {/* ============ COMBOS ARMADOS (BOLSONES) ============ */}
+      {combos.length > 0 && (
+        <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 1, marginBottom: 8 }}>
+            🍱 COMBOS — un toque agrega todos sus productos al precio del combo
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {combos.map(combo => (
+              <button key={combo.id} onClick={() => agregarCombo(combo)}
+                style={{
+                  padding: '10px 14px', borderRadius: 10, border: '1px solid var(--gold)',
+                  background: 'linear-gradient(135deg,#1a1408,#0a0a08)', color: 'var(--text)',
+                  cursor: 'pointer', textAlign: 'left', minWidth: 130,
+                }}
+                onMouseOver={e => { e.currentTarget.style.background = 'rgba(201,168,76,0.12)' }}
+                onMouseOut={e => { e.currentTarget.style.background = 'linear-gradient(135deg,#1a1408,#0a0a08)' }}>
+                <div style={{ fontWeight: 800, fontSize: 13 }}>{combo.emoji} {combo.nombre}</div>
+                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: 'var(--gold)', lineHeight: 1.1 }}>{fmt(combo.precio)}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {msg && (
         <div style={{
           position: 'fixed', top: 70, right: 20, zIndex: 1000,
@@ -923,6 +1036,16 @@ export default function Caja() {
                         <td style={{ padding: '8px 4px', fontSize: 13, fontWeight: 600 }}>
                           {item.descripcion}
                           <div style={{ fontSize: 10, color: 'var(--muted)' }}>{CATEGORIAS[item.categoria] || item.categoria}</div>
+                          {item.combo_nombre && (
+                            <div style={{ fontSize: 10, color: 'var(--gold)', fontWeight: 700, marginTop: 2 }}>
+                              🍱 {item.combo_nombre}
+                              <button onClick={() => quitarCombo(item.combo_inst)}
+                                title="Quitar el combo completo"
+                                style={{ background: 'none', border: 'none', color: '#ff6b6b', cursor: 'pointer', fontSize: 10, marginLeft: 6, padding: 0, textDecoration: 'underline' }}>
+                                quitar combo
+                              </button>
+                            </div>
+                          )}
                         </td>
                         <td style={{ textAlign: 'right', padding: '8px 4px' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'flex-end' }}>

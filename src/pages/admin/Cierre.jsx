@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../../lib/supabase'
+import { supabase, fetchAllRows } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
 import { fmtPrecio, fmtKg as fmtKgAR, parseNumero } from '../../lib/formatos'
@@ -47,11 +47,90 @@ function exportarExcel(semanasMes, totMes, mesLabel) {
   URL.revokeObjectURL(url)
 }
 
-function imprimirCierreMensual(semanasMes, totMes, mesLabel) {
+async function imprimirCierreMensual(semanasMes, totMes, mesLabel, trendMeses = []) {
+  const fechaCorta = d => new Date(d + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })
+  const capSocio = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : 'Otros'
+
+  // Retiros de socios por semana y por socio (tabla gastos, tipo='socio'). Estos
+  // retiros YA están sumados dentro de la columna "Gastos"; esta tabla los abre
+  // para ver cuánto sacó cada socio por semana y en el mes.
+  const desde = [...semanasMes.map(s => s.semana_inicio)].sort()[0]
+  const hasta = [...semanasMes.map(s => s.semana_fin)].sort().slice(-1)[0]
+  const retirosPorSemana = {}   // semana_inicio → { socio: monto }
+  const totalSocio = {}         // socio → total del mes
+  if (desde && hasta) {
+    const { data } = await fetchAllRows(() => supabase.from('gastos')
+      .select('fecha, monto, socio, tipo, solo_balance')
+      .eq('tipo', 'socio').gte('fecha', desde).lte('fecha', hasta))
+    for (const g of (data || [])) {
+      if (g.solo_balance) continue
+      const socio = (g.socio || 'otros').toLowerCase()
+      const wk = semanasMes.find(s => g.fecha >= s.semana_inicio && g.fecha <= s.semana_fin)
+      if (wk) {
+        retirosPorSemana[wk.semana_inicio] = retirosPorSemana[wk.semana_inicio] || {}
+        retirosPorSemana[wk.semana_inicio][socio] = (retirosPorSemana[wk.semana_inicio][socio] || 0) + (Number(g.monto) || 0)
+      }
+      totalSocio[socio] = (totalSocio[socio] || 0) + (Number(g.monto) || 0)
+    }
+  }
+  const socios = Object.keys(totalSocio).sort()
+  const totalRetiros = socios.reduce((a, s) => a + totalSocio[s], 0)
+  const tablaRetiros = socios.length ? `
+      <div class="titulo" style="font-size:14px;margin-top:18px;">💸 Retiros de socios por semana</div>
+      <table>
+        <thead><tr><th>Período</th>${socios.map(s => `<th>${capSocio(s)}</th>`).join('')}<th>Total semana</th></tr></thead>
+        <tbody>
+          ${semanasMes.map(c => {
+            const r = retirosPorSemana[c.semana_inicio] || {}
+            const tot = socios.reduce((a, s) => a + (r[s] || 0), 0)
+            return `<tr><td>${fechaCorta(c.semana_inicio)} → ${fechaCorta(c.semana_fin)}</td>${socios.map(s => `<td class="rojo">${fmtPrecio(r[s] || 0)}</td>`).join('')}<td class="rojo">${fmtPrecio(tot)}</td></tr>`
+          }).join('')}
+        </tbody>
+        <tfoot><tr class="total-row"><td>TOTAL MES</td>${socios.map(s => `<td class="rojo">${fmtPrecio(totalSocio[s])}</td>`).join('')}<td class="rojo">${fmtPrecio(totalRetiros)}</td></tr></tfoot>
+      </table>` : ''
+
+  // Totales de ventas minorista / mayorista del mes (de cada snapshot semanal).
+  const totMin = semanasMes.reduce((s, c) => s + (Number(c.ingresos?.ventas_caja) || 0), 0)
+  const totMay = semanasMes.reduce((s, c) => s + (Number(c.ingresos?.ventas_mayorista) || 0), 0)
+
+  // ── Gráficos (van abajo de la distribución por socio) ──
+  const serieSem = [{ nombre: 'Ventas', color: CHART_COLORS.ventas }, { nombre: 'Compras', color: CHART_COLORS.compras }, { nombre: 'Ganancia', color: CHART_COLORS.ganancia }]
+  const gruposSem = semanasMes.map(c => ({ label: fmtFechaCorta(c.semana_inicio), valores: [c.ventas || 0, c.compras || 0, c.ganancia || 0] }))
+  const serieTrend = [{ nombre: 'Ventas', color: CHART_COLORS.ventas }, { nombre: 'Compras', color: CHART_COLORS.compras }]
+  const composicion = [
+    { nombre: 'Compras', valor: totMes.compras, color: CHART_COLORS.compras },
+    { nombre: 'Sueldos', valor: totMes.sueldos, color: CHART_COLORS.sueldos },
+    { nombre: 'Gastos', valor: totMes.gastos, color: CHART_COLORS.gastos },
+    { nombre: 'Ganancia', valor: totMes.ganancia, color: CHART_COLORS.ganancia },
+  ]
+  // Margen del mes (torta): % sobre el total de ventas. Gastos engloba sueldos,
+  // retiros de socios y todos los gastos. Ganancia = ventas − compras − gastos.
+  const gastosTodo = (totMes.gastos || 0) + (totMes.sueldos || 0)
+  const margenSeg = [
+    { nombre: 'Compras', valor: totMes.compras || 0, color: CHART_COLORS.compras },
+    { nombre: 'Gastos (sueldos + socios + otros)', valor: gastosTodo, color: CHART_COLORS.gastos },
+    { nombre: 'Ganancia', valor: totMes.ganancia || 0, color: CHART_COLORS.ganancia },
+  ]
+  const margenPct = totMes.ventas > 0 ? (totMes.ganancia / totMes.ventas) * 100 : 0
+
+  const graficos = `
+      <div class="titulo" style="font-size:15px;margin-top:22px;border-top:1px solid #ccc;padding-top:14px;">📊 Gráficos del mes</div>
+      <div class="chart-sub">Margen del mes — % sobre el total de ventas (${fmtPrecio(totMes.ventas)})</div>
+      <div style="display:flex;align-items:center;gap:28px;justify-content:center;margin:6px 0 4px;">
+        ${svgDonutStr(margenSeg, `${margenPct.toFixed(1).replace('.', ',')}%`, 'margen ganancia')}
+        ${donutRefsStr(margenSeg)}
+      </div>
+      <div class="chart-sub">Semana a semana — Ventas / Compras / Ganancia</div>
+      ${svgBarrasStr(gruposSem, serieSem)}
+      ${leyendaStr(serieSem)}
+      <div class="chart-sub">¿A dónde fue la plata? — sobre ventas de ${fmtPrecio(totMes.ventas)}</div>
+      ${composicionStr(composicion)}
+      ${trendMeses.length > 1 ? `<div class="chart-sub">Histórico mensual — Ventas vs Compras</div>${svgBarrasStr(trendMeses, serieTrend)}${leyendaStr(serieTrend)}` : ''}`
+
   const html = `
     <html><head><title>Cierre Mensual — ${mesLabel}</title>
     <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
+      * { margin: 0; padding: 0; box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       body { font-family: Arial, sans-serif; font-size: 12px; padding: 24px; color: #000; }
       .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 12px; }
       .logo { font-size: 28px; font-weight: 900; letter-spacing: 3px; }
@@ -67,6 +146,7 @@ function imprimirCierreMensual(semanasMes, totMes, mesLabel) {
       .socio { flex: 1; border: 1px solid #000; padding: 12px; text-align: center; }
       .socio-nombre { font-weight: 700; font-size: 13px; }
       .socio-valor { font-size: 22px; font-weight: 900; margin-top: 4px; }
+      .chart-sub { font-size: 12px; font-weight: 700; margin: 12px 0 4px; }
       @media print { body { padding: 10px; } }
     </style></head>
     <body>
@@ -78,13 +158,13 @@ function imprimirCierreMensual(semanasMes, totMes, mesLabel) {
       </div>
       <table>
         <thead><tr>
-          <th>Período</th><th>Ventas</th><th>Vtas.CtaCte</th><th>Compras</th><th>Gastos</th><th>Sueldos</th><th>Ganancia</th><th>Kg Carne</th><th>Kg Pollo</th><th>Kg Cerdo</th>
+          <th>Período</th><th>Vtas. Minorista</th><th>Vtas. Mayorista</th><th>Compras</th><th>Gastos</th><th>Sueldos</th><th>Ganancia</th><th>Kg Carne</th><th>Kg Pollo</th><th>Kg Cerdo</th>
         </tr></thead>
         <tbody>
           ${semanasMes.map(c => `<tr>
             <td>${new Date(c.semana_inicio + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })} → ${new Date(c.semana_fin + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })}</td>
-            <td class="verde">${fmtPrecio(c.ventas)}</td>
-            <td>${fmtPrecio(c.ventas_ctacte || 0)}</td>
+            <td class="verde">${fmtPrecio(c.ingresos?.ventas_caja || 0)}</td>
+            <td class="verde">${fmtPrecio(c.ingresos?.ventas_mayorista || 0)}</td>
             <td class="rojo">${fmtPrecio(c.compras)}</td>
             <td>${fmtPrecio(c.gastos)}</td>
             <td>${fmtPrecio(c.sueldos)}</td>
@@ -97,8 +177,8 @@ function imprimirCierreMensual(semanasMes, totMes, mesLabel) {
         <tfoot>
           <tr class="total-row">
             <td>TOTAL</td>
-            <td class="verde">${fmtPrecio(totMes.ventas)}</td>
-            <td>${fmtPrecio(totMes.ventasCtacte)}</td>
+            <td class="verde">${fmtPrecio(totMin)}</td>
+            <td class="verde">${fmtPrecio(totMay)}</td>
             <td class="rojo">${fmtPrecio(totMes.compras)}</td>
             <td>${fmtPrecio(totMes.gastos)}</td>
             <td>${fmtPrecio(totMes.sueldos)}</td>
@@ -109,6 +189,7 @@ function imprimirCierreMensual(semanasMes, totMes, mesLabel) {
           </tr>
         </tfoot>
       </table>
+      ${tablaRetiros}
       <div class="socios">
         <div class="socio">
           <div class="socio-nombre">👑 Fabricio Lenardon (85%)</div>
@@ -119,6 +200,7 @@ function imprimirCierreMensual(semanasMes, totMes, mesLabel) {
           <div class="socio-valor" style="color:#1a3a7a">${fmtPrecio(totMes.ganancia * 0.15)}</div>
         </div>
       </div>
+      ${graficos}
     </body></html>
   `
   imprimirHTML(html)
@@ -161,7 +243,8 @@ function recomputeDerived(c) {
   const cobradoTotal = (c.cobrado.efectivo || 0) + (c.cobrado.debito || 0) +
     (c.cobrado.transferencia || 0) + (c.cobrado.mayorista || 0) + (c.cobrado.cobranzasCta || 0)
   const gastosTotal = (c.gastos.fijos || 0) + (c.gastos.variables || 0) + (c.gastos.socios || 0)
-  const sueldosTotal = c.sueldos.total || 0
+  // Sueldos + aguinaldo + vacaciones: todo es costo del período para la ganancia.
+  const sueldosTotal = (c.sueldos.total || 0) + (c.sueldos.aguinaldos || 0) + (c.sueldos.vacaciones || 0)
   const comprasTotal = c.compras.total || 0
   const pagadoTotal = c.pagadoProv.total || 0
   return {
@@ -218,6 +301,141 @@ function FilaDesglose({ label, value, color, indent, editable, onCommit, esKg })
 }
 
 // ============================================================
+// CONFIG MESES OPERATIVOS — inicio y cierre de cada mes a mano
+// (como se cierra por semanas enteras, el mes operativo no coincide
+//  con el calendario). El "Mensual en vivo" del Ejecutivo usa estas fechas.
+// ============================================================
+// ============================================================
+// GRÁFICOS DEL PRINT — generan SVG/HTML como string (van en la impresión
+// del cierre mensual, no en la pantalla)
+// ============================================================
+const CHART_COLORS = { ventas: '#22c55e', compras: '#ef4444', ganancia: '#b8860b', sueldos: '#4a7ac0', gastos: '#f59e0b' }
+const fmtFechaCorta = d => d ? new Date(d + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' }) : ''
+
+// Barras agrupadas como string SVG. grupos: [{ label, valores:[...] }]; series: [{ nombre, color }]
+function svgBarrasStr(grupos, series, alto = 170) {
+  if (!grupos.length) return ''
+  const W = 720, H = alto, mTop = 12, mBot = 24, mL = 10, mR = 10
+  const innerH = H - mTop - mBot, innerW = W - mL - mR
+  const todos = grupos.flatMap(g => g.valores)
+  const maxV = Math.max(1, ...todos.map(v => Math.max(0, v)))
+  const minV = Math.min(0, ...todos.map(v => Math.min(0, v)))
+  const rango = (maxV - minV) || 1
+  const yOf = v => mTop + ((maxV - v) / rango) * innerH
+  const y0 = yOf(0)
+  const gW = innerW / grupos.length
+  const nS = series.length, gap = 3
+  const bW = Math.max(2, (gW - gap * (nS + 1)) / nS)
+  let body = ''
+  grupos.forEach((g, gi) => {
+    const gx = mL + gi * gW
+    g.valores.forEach((v, si) => {
+      const yv = yOf(v)
+      const x = gx + gap + si * (bW + gap)
+      body += `<rect x="${x.toFixed(1)}" y="${Math.min(yv, y0).toFixed(1)}" width="${bW.toFixed(1)}" height="${Math.max(1, Math.abs(yv - y0)).toFixed(1)}" rx="2" fill="${series[si].color}"/>`
+    })
+    body += `<text x="${(gx + gW / 2).toFixed(1)}" y="${H - 9}" text-anchor="middle" font-size="11" fill="#555">${g.label}</text>`
+  })
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">
+    <line x1="${mL}" y1="${y0.toFixed(1)}" x2="${W - mR}" y2="${y0.toFixed(1)}" stroke="#bbb" stroke-width="1"/>${body}</svg>`
+}
+
+function leyendaStr(series) {
+  return `<div style="display:flex;gap:18px;justify-content:center;margin-top:4px;font-size:11px;color:#555;">${series.map(s => `<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:11px;height:11px;border-radius:2px;background:${s.color};display:inline-block;"></span>${s.nombre}</span>`).join('')}</div>`
+}
+
+// Barra horizontal de composición (a dónde se fue la plata sobre las ventas).
+function composicionStr(segmentos) {
+  const total = segmentos.reduce((s, x) => s + Math.max(0, x.valor), 0) || 1
+  const barras = segmentos.filter(s => s.valor > 0).map(s => `<div style="width:${((s.valor / total) * 100).toFixed(2)}%;background:${s.color};"></div>`).join('')
+  const refs = segmentos.map(s => `<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;margin-right:14px;"><span style="width:11px;height:11px;border-radius:2px;background:${s.color};display:inline-block;"></span>${s.nombre}: <b>${fmtPrecio(s.valor)}</b> (${((Math.max(0, s.valor) / total) * 100).toFixed(0)}%)</span>`).join('')
+  return `<div style="display:flex;height:26px;border:1px solid #000;border-radius:6px;overflow:hidden;">${barras}</div><div style="margin-top:6px;">${refs}</div>`
+}
+
+// Torta/donut como string SVG. segmentos: [{ nombre, valor, color }].
+// centroTop/centroBot: texto grande/chico del centro (ej. el % de margen).
+function svgDonutStr(segmentos, centroTop, centroBot) {
+  const total = segmentos.reduce((s, x) => s + Math.max(0, x.valor), 0) || 1
+  const size = 200, cx = size / 2, cy = size / 2, r = 70, w = 34, C = 2 * Math.PI * r
+  let acc = 0, arcs = ''
+  segmentos.forEach(s => {
+    const f = Math.max(0, s.valor) / total
+    if (f <= 0) return
+    const rot = -90 + acc * 360
+    arcs += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${w}" stroke-dasharray="${(f * C).toFixed(2)} ${C.toFixed(2)}" transform="rotate(${rot.toFixed(2)} ${cx} ${cy})"/>`
+    acc += f
+  })
+  return `<svg viewBox="0 0 ${size} ${size}" width="190" height="190" style="display:block">${arcs}<text x="${cx}" y="${cy - 1}" text-anchor="middle" font-size="28" font-weight="900" fill="#000">${centroTop}</text><text x="${cx}" y="${cy + 17}" text-anchor="middle" font-size="11" fill="#555">${centroBot}</text></svg>`
+}
+
+function donutRefsStr(segmentos) {
+  const total = segmentos.reduce((s, x) => s + Math.max(0, x.valor), 0) || 1
+  return `<div style="display:flex;flex-direction:column;gap:8px;">${segmentos.map(s => `<div style="font-size:12px;display:flex;align-items:center;gap:7px;"><span style="width:13px;height:13px;border-radius:3px;background:${s.color};display:inline-block;"></span><b>${((Math.max(0, s.valor) / total) * 100).toFixed(1)}%</b> · ${s.nombre} <span style="color:#777;">(${fmtPrecio(s.valor)})</span></div>`).join('')}</div>`
+}
+
+function ConfigMesesOperativos() {
+  const [meses, setMeses] = useState([])
+  const [nuevo, setNuevo] = useState({ etiqueta: '', fecha_inicio: '', fecha_cierre: '' })
+  const [msg, setMsg] = useState(null)
+
+  async function cargar() {
+    const { data } = await supabase.from('meses_operativos').select('*').order('fecha_inicio', { ascending: false })
+    setMeses(data || [])
+  }
+  useEffect(() => { cargar() }, [])
+  function aviso(m) { setMsg(m); setTimeout(() => setMsg(null), 4000) }
+  function setFila(id, campo, val) { setMeses(ms => ms.map(m => m.id === id ? { ...m, [campo]: val } : m)) }
+
+  async function guardarFila(m) {
+    if (!m.fecha_inicio || !m.fecha_cierre) return aviso('⚠️ Cargá inicio y cierre')
+    const { error } = await supabase.from('meses_operativos')
+      .update({ etiqueta: m.etiqueta, fecha_inicio: m.fecha_inicio, fecha_cierre: m.fecha_cierre, mes: String(m.fecha_inicio).substring(0, 7) })
+      .eq('id', m.id)
+    aviso(error ? '❌ ' + error.message : '✅ Guardado'); if (!error) cargar()
+  }
+  async function borrar(id) {
+    if (!window.confirm('¿Borrar este mes operativo?')) return
+    const { error } = await supabase.from('meses_operativos').delete().eq('id', id)
+    aviso(error ? '❌ ' + error.message : '🗑️ Borrado'); if (!error) cargar()
+  }
+  async function agregar() {
+    if (!nuevo.etiqueta || !nuevo.fecha_inicio || !nuevo.fecha_cierre) return aviso('⚠️ Completá nombre, inicio y cierre')
+    const { error } = await supabase.from('meses_operativos').insert({ ...nuevo, mes: String(nuevo.fecha_inicio).substring(0, 7) })
+    if (error) return aviso('❌ ' + error.message)
+    setNuevo({ etiqueta: '', fecha_inicio: '', fecha_cierre: '' }); aviso('✅ Mes agregado'); cargar()
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card-title">📆 Meses operativos — inicio y cierre manual</div>
+      <p style={{ fontSize: 12, color: 'var(--muted)', margin: '-4px 0 14px' }}>
+        Como cerrás por semanas enteras (lun→dom), el mes no coincide con el calendario.
+        Definí desde y hasta qué fecha va cada mes. El <b>Mensual en vivo</b> del Ejecutivo cierra con estas fechas.
+      </p>
+      {msg && <div style={{ marginBottom: 10, fontWeight: 600, color: msg[0] === '✅' || msg[0] === '🗑' ? '#7dff7d' : '#ffb86b' }}>{msg}</div>}
+      {meses.map(m => (
+        <div key={m.id} style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap', marginBottom: 8, borderBottom: '1px solid var(--border)', paddingBottom: 8 }}>
+          <div className="form-group" style={{ flex: '1 1 150px', margin: 0 }}>
+            <label>Mes</label>
+            <input value={m.etiqueta || ''} onChange={e => setFila(m.id, 'etiqueta', e.target.value)} />
+          </div>
+          <div className="form-group" style={{ margin: 0 }}><label>Inicio</label><input type="date" value={m.fecha_inicio || ''} onChange={e => setFila(m.id, 'fecha_inicio', e.target.value)} /></div>
+          <div className="form-group" style={{ margin: 0 }}><label>Cierre</label><input type="date" value={m.fecha_cierre || ''} onChange={e => setFila(m.id, 'fecha_cierre', e.target.value)} /></div>
+          <button className="btn btn-sm" onClick={() => guardarFila(m)}>💾 Guardar</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => borrar(m.id)} title="Borrar">🗑️</button>
+        </div>
+      ))}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap', marginTop: 14, paddingTop: 12, borderTop: '1px dashed var(--border)' }}>
+        <div className="form-group" style={{ flex: '1 1 150px', margin: 0 }}><label>Nuevo mes</label><input placeholder="Ej: Agosto 2026" value={nuevo.etiqueta} onChange={e => setNuevo({ ...nuevo, etiqueta: e.target.value })} /></div>
+        <div className="form-group" style={{ margin: 0 }}><label>Inicio</label><input type="date" value={nuevo.fecha_inicio} onChange={e => setNuevo({ ...nuevo, fecha_inicio: e.target.value })} /></div>
+        <div className="form-group" style={{ margin: 0 }}><label>Cierre</label><input type="date" value={nuevo.fecha_cierre} onChange={e => setNuevo({ ...nuevo, fecha_cierre: e.target.value })} /></div>
+        <button className="btn btn-sm" onClick={agregar}>➕ Agregar mes</button>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================
 // Pantalla principal
 // ============================================================
 
@@ -230,6 +448,10 @@ export default function Cierre() {
 
   const [tab, setTab] = useState('semanal')
   const [cierres, setCierres] = useState([])
+  const [mesesOp, setMesesOp] = useState([])   // meses operativos (inicio/cierre manual)
+  const [remitosHist, setRemitosHist] = useState([]) // para detectar cierres desactualizados
+  const [gastosHist, setGastosHist] = useState([])
+  const [entradasHist, setEntradasHist] = useState([])
   const [loading, setLoading] = useState(false)
   const [calculando, setCalculando] = useState(false)
   const [alert, setAlert] = useState(null)
@@ -275,6 +497,11 @@ export default function Cierre() {
   }
 
   useEffect(() => { fetchCierres() }, [])
+  // Meses operativos: los usa "Mes en curso" para respetar inicio/cierre manual.
+  useEffect(() => {
+    supabase.from('meses_operativos').select('*').order('fecha_inicio', { ascending: false })
+      .then(({ data }) => setMesesOp(data || []))
+  }, [])
   // Recalcular cuando cambia el período
   useEffect(() => {
     if (desde && hasta && desde <= hasta) recalcular()
@@ -288,6 +515,19 @@ export default function Cierre() {
       .order('semana_inicio', { ascending: false })
     setCierres(data || [])
     if (data?.length && !mesSelector) setMesSelector(data[0].mes)
+    // Remitos desde el primer cierre, para detectar semanas cerradas a las que se
+    // les cargaron remitos DESPUÉS (snapshot desactualizado).
+    if (data?.length) {
+      const minIni = data.map(c => c.semana_inicio).filter(Boolean).sort()[0]
+      const [rems, gas, ent] = await Promise.all([
+        fetchAllRows(() => supabase.from('remitos').select('fecha, total, created_at, eliminado, cobro, cliente_nombre').gte('fecha', minIni)),
+        fetchAllRows(() => supabase.from('gastos').select('fecha, monto, created_at, solo_balance, tipo').gte('fecha', minIni)),
+        fetchAllRows(() => supabase.from('entradas_deposito').select('fecha, importe, kg, kg_real, precio_kg, created_at, eliminado, destino').gte('fecha', minIni)),
+      ])
+      setRemitosHist(rems.data || [])
+      setGastosHist(gas.data || [])
+      setEntradasHist(ent.data || [])
+    }
   }
 
   async function recalcular() {
@@ -344,7 +584,9 @@ export default function Cierre() {
 
     let error
     if (ya) {
-      const r = await supabase.from('cierres_semanales').update(fila).eq('id', ya.id)
+      // Bump created_at: marca "recerrado ahora" para que el aviso de desactualizado
+      // se limpie (compara datos cargados DESPUÉS de la fecha del cierre).
+      const r = await supabase.from('cierres_semanales').update({ ...fila, created_at: new Date().toISOString() }).eq('id', ya.id)
       error = r.error
     } else {
       const r = await supabase.from('cierres_semanales').insert(fila)
@@ -380,16 +622,42 @@ export default function Cierre() {
   }
   function setMesActual() {
     const hoy = fechaHoyARG()
-    const primerDiaMes = hoy.substring(0, 7) + '-01'
-    setDesde(primerDiaMes); setHasta(hoy)
+    // Usar el MES OPERATIVO que contiene hoy (inicio/cierre manual), no el del
+    // calendario: así no mezcla los días de fin de mes (29/30) que ya pasan al
+    // mes siguiente. Fallback al calendario si no hay mes operativo definido.
+    const op = mesesOp.find(m => m.fecha_inicio && m.fecha_cierre && m.fecha_inicio <= hoy && hoy <= m.fecha_cierre)
+    if (op) { setDesde(op.fecha_inicio); setHasta(op.fecha_cierre) }
+    else { setDesde(hoy.substring(0, 7) + '-01'); setHasta(hoy) }
   }
 
   // ====== Datos para el tab Por Mes ======
   const meses = [...new Set(cierres.map(c => c.mes))].sort().reverse()
   const semanasMes = cierres.filter(c => c.mes === mesSelector)
-  const totMes = { ventas: 0, compras: 0, gastos: 0, sueldos: 0, ganancia: 0, kgCarne: 0, kgPollo: 0, kgCerdo: 0, ventasCtacte: 0 }
+
+  // Impacto en la ganancia de datos cargados DESPUÉS de cerrar la semana (snapshot
+  // desactualizado): + ventas nuevas (remitos) − gastos nuevos − compras nuevas.
+  // Si hubo cambios, la ganancia guardada quedó vieja → conviene recalcular y reguardar.
+  function impactoPost(c) {
+    if (!c.created_at) return { hay: false, delta: 0 }
+    const ini = c.semana_inicio, fin = c.semana_fin, ts = c.created_at
+    const enRango = (f) => f >= ini && f <= fin
+    const ventasN = remitosHist
+      .filter(r => !r.eliminado && r.cobro !== 'interno' && String(r.cliente_nombre || '').trim().toUpperCase() !== 'MITRE' && enRango(r.fecha) && r.created_at > ts)
+      .reduce((s, r) => s + (Number(r.total) || 0), 0)
+    const gastosN = gastosHist
+      .filter(g => !g.solo_balance && ['fijo', 'variable', 'socio'].includes(g.tipo) && enRango(g.fecha) && g.created_at > ts)
+      .reduce((s, g) => s + (Number(g.monto) || 0), 0)
+    const comprasN = entradasHist
+      .filter(e => !e.eliminado && e.destino !== 'desposte' && e.destino !== 'elaboracion' && enRango(e.fecha) && e.created_at > ts)
+      .reduce((s, e) => s + (Number(e.importe) > 0 ? Number(e.importe) : (Number(e.kg_real || e.kg) || 0) * (Number(e.precio_kg) || 0)), 0)
+    const movido = ventasN + gastosN + comprasN
+    return { hay: movido > 1, delta: ventasN - gastosN - comprasN }
+  }
+  const totMes = { ventas: 0, ventasMin: 0, ventasMay: 0, compras: 0, gastos: 0, sueldos: 0, ganancia: 0, kgCarne: 0, kgPollo: 0, kgCerdo: 0, ventasCtacte: 0 }
   semanasMes.forEach(c => {
     totMes.ventas += c.ventas || 0
+    totMes.ventasMin += Number(c.ingresos?.ventas_caja) || 0
+    totMes.ventasMay += Number(c.ingresos?.ventas_mayorista) || 0
     totMes.compras += c.compras || 0
     totMes.gastos += c.gastos || 0
     totMes.sueldos += c.sueldos || 0
@@ -400,6 +668,17 @@ export default function Cierre() {
     totMes.ventasCtacte += c.ventas_ctacte || 0
   })
   const mesLabel = mesSelector ? new Date(mesSelector + '-15').toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }) : ''
+
+  // Histórico mensual (Ventas vs Compras por mes) — para el gráfico de tendencia.
+  // Usa ventas/compras porque están cargadas en TODOS los cierres (la ganancia
+  // sólo se computa en los recientes). Mes seleccionado resaltado más fuerte.
+  const trendMeses = [...new Set(cierres.map(c => c.mes).filter(Boolean))].sort().map(m => {
+    const ws = cierres.filter(c => c.mes === m)
+    return {
+      label: new Date(m + '-15').toLocaleDateString('es-AR', { month: 'short' }).replace('.', ''),
+      valores: [ws.reduce((s, c) => s + (c.ventas || 0), 0), ws.reduce((s, c) => s + (c.compras || 0), 0)],
+    }
+  })
 
   return (
     <div>
@@ -506,11 +785,12 @@ export default function Cierre() {
                   sub={`${view.porCobrar.clientes.length} clientes con deuda`} />
                 <MetricCard label="🛒 Compras" value={fmt(view.compras.total)} color="var(--red-light)" big
                   editable={editableNow} rawValue={view.compras.total} onCommit={v => commitLeaf('compras.total', v)} />
-                <MetricCard label="💳 Pagado a proveedores" value={fmt(view.pagadoProv.total)} color="#c084fc"
-                  editable={editableNow} rawValue={view.pagadoProv.total} onCommit={v => commitLeaf('pagadoProv.total', v)} />
+                <MetricCard label="📆 Comprado en el mes" value={fmt(view.compras.mes || 0)} color="#f0883e"
+                  sub="acumulado del mes en curso" />
+                <MetricCard label="💳 Pagado a proveedores" value={fmt(view.pagadoProv.mes || 0)} color="#c084fc"
+                  sub="acumulado del mes (sin 1ª semana)" />
                 <MetricCard label="📥 Por pagar al cierre" value={fmt(view.porPagarProv.total)} color="var(--amber)"
-                  editable={editableNow} rawValue={view.porPagarProv.total} onCommit={v => commitLeaf('porPagarProv.total', v)}
-                  sub={`${view.porPagarProv.proveedores.length} proveedores con saldo`} />
+                  sub="saldo real cta. cte. al cierre" />
               </div>
 
               {/* GANANCIA (siempre derivada de los valores de arriba) */}
@@ -563,7 +843,9 @@ export default function Cierre() {
                   <FilaDesglose label="Gastos variables" value={view.gastos.variables} color="var(--red-light)" editable={editableNow} onCommit={v => commitLeaf('gastos.variables', v)} />
                   <FilaDesglose label="Retiros socios" value={view.gastos.socios} color="var(--red-light)" editable={editableNow} onCommit={v => commitLeaf('gastos.socios', v)} />
                   <FilaDesglose label="Sueldos liquidados" value={view.sueldos.total} color="var(--red-light)" editable={editableNow} onCommit={v => commitLeaf('sueldos.total', v)} />
-                  <FilaDesglose label="TOTAL GASTOS + SUELDOS" value={view.gastos.total + view.sueldos.total} color="var(--amber)" />
+                  <FilaDesglose label="Aguinaldos" value={view.sueldos.aguinaldos || 0} color="var(--red-light)" editable={editableNow} onCommit={v => commitLeaf('sueldos.aguinaldos', v)} />
+                  <FilaDesglose label="Vacaciones" value={view.sueldos.vacaciones || 0} color="var(--red-light)" editable={editableNow} onCommit={v => commitLeaf('sueldos.vacaciones', v)} />
+                  <FilaDesglose label="TOTAL GASTOS + SUELDOS" value={view.gastos.total + view.sueldos.total + (view.sueldos.aguinaldos || 0) + (view.sueldos.vacaciones || 0)} color="var(--amber)" />
                 </div>
 
                 {/* KG MOVIDOS */}
@@ -722,6 +1004,7 @@ export default function Cierre() {
       {/* ====================================================== */}
       {tab === 'mensual' && (
         <div>
+          <ConfigMesesOperativos />
           <div className="card">
             <div className="card-title">📅 Cierres por mes</div>
             <div className="form-row">
@@ -738,7 +1021,7 @@ export default function Cierre() {
               <div className="form-group">
                 <label>&nbsp;</label>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn btn-ghost btn-sm" onClick={() => imprimirCierreMensual(semanasMes, totMes, mesLabel)} disabled={!semanasMes.length}>
+                  <button className="btn btn-ghost btn-sm" onClick={() => imprimirCierreMensual(semanasMes, totMes, mesLabel, trendMeses)} disabled={!semanasMes.length}>
                     🖨️ Imprimir
                   </button>
                   <button className="btn btn-ghost btn-sm" onClick={() => exportarExcel(semanasMes, totMes, mesLabel)} disabled={!semanasMes.length}>
@@ -760,6 +1043,8 @@ export default function Cierre() {
               {/* KPIs DEL MES */}
               <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 16 }}>
                 <MetricCard label="Ventas del mes" value={fmt(totMes.ventas)} color="var(--green)" big />
+                <MetricCard label="Vtas. Minorista (caja)" value={fmt(totMes.ventasMin)} color="var(--green)" />
+                <MetricCard label="Vtas. Mayorista" value={fmt(totMes.ventasMay)} color="var(--green)" />
                 <MetricCard label="Compras" value={fmt(totMes.compras)} color="var(--red-light)" />
                 <MetricCard label="Gastos + Sueldos" value={fmt(totMes.gastos + totMes.sueldos)} color="var(--amber)" />
                 <MetricCard label="Ganancia neta" value={fmt(totMes.ganancia)} color={totMes.ganancia >= 0 ? 'var(--gold)' : 'var(--red-light)'} big />
@@ -792,7 +1077,8 @@ export default function Cierre() {
                     <thead>
                       <tr>
                         <th>Período</th>
-                        <th>Ventas</th>
+                        <th>Vtas. Minorista</th>
+                        <th>Vtas. Mayorista</th>
                         <th>Compras</th>
                         <th>Gastos</th>
                         <th>Sueldos</th>
@@ -804,10 +1090,19 @@ export default function Cierre() {
                       </tr>
                     </thead>
                     <tbody>
-                      {semanasMes.map(c => (
+                      {semanasMes.map(c => {
+                        const desact = impactoPost(c)
+                        return (
                         <tr key={c.id}>
-                          <td>{fmtFecha(c.semana_inicio)} → {fmtFecha(c.semana_fin)}</td>
-                          <td style={{ color: 'var(--green)' }}>{fmt(c.ventas)}</td>
+                          <td>{fmtFecha(c.semana_inicio)} → {fmtFecha(c.semana_fin)}
+                            {desact.hay && (
+                              <div title="Se cargaron ventas, gastos o compras con fecha de esta semana DESPUÉS de cerrarla. Recalculá y reguardá el cierre para actualizar la ganancia." style={{ fontSize: 10, color: 'var(--amber)', fontWeight: 700, marginTop: 3 }}>
+                                ⚠️ desactualizado · ganancia real {desact.delta >= 0 ? '+' : '−'}{fmt(desact.delta)} · recalculá
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ color: 'var(--green)' }}>{fmt(c.ingresos?.ventas_caja || 0)}</td>
+                          <td style={{ color: 'var(--green)' }}>{fmt(c.ingresos?.ventas_mayorista || 0)}</td>
                           <td style={{ color: 'var(--red-light)' }}>{fmt(c.compras)}</td>
                           <td style={{ color: 'var(--amber)' }}>{fmt(c.gastos)}</td>
                           <td style={{ color: 'var(--blue)' }}>{fmt(c.sueldos)}</td>
@@ -827,12 +1122,14 @@ export default function Cierre() {
                             })()}
                           </td>
                         </tr>
-                      ))}
+                        )
+                      })}
                     </tbody>
                     <tfoot>
                       <tr className="total-row">
                         <td>TOTAL</td>
-                        <td style={{ color: 'var(--green)' }}>{fmt(totMes.ventas)}</td>
+                        <td style={{ color: 'var(--green)' }}>{fmt(totMes.ventasMin)}</td>
+                        <td style={{ color: 'var(--green)' }}>{fmt(totMes.ventasMay)}</td>
                         <td style={{ color: 'var(--red-light)' }}>{fmt(totMes.compras)}</td>
                         <td style={{ color: 'var(--amber)' }}>{fmt(totMes.gastos)}</td>
                         <td style={{ color: 'var(--blue)' }}>{fmt(totMes.sueldos)}</td>
@@ -872,7 +1169,7 @@ export default function Cierre() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(pagCierres?.itemsActuales || []).filter(Boolean).map(c => (
+                  {(pagCierres?.items || []).filter(Boolean).map(c => (
                     <tr key={c.id}>
                       <td>{fmtFecha(c.semana_inicio)} → {fmtFecha(c.semana_fin)}</td>
                       <td style={{ color: 'var(--green)' }}>{fmt(c.ventas)}</td>
@@ -895,7 +1192,7 @@ export default function Cierre() {
                 </tbody>
               </table>
             </div>
-            <Paginador {...pagCierres} />
+            <Paginador {...pagCierres.controles} label="cierres" />
           </div>
         </div>
       )}

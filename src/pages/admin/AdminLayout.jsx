@@ -11,16 +11,11 @@ import LogoFabricius from '../../components/LogoFabricius'
 import UserDropdown from '../../components/UserDropdown'
 import CambiarPasswordModal from '../../components/CambiarPasswordModal'
 import BotonAvisos from '../../components/BotonAvisos'
+import RecordatorioPagos from '../../components/RecordatorioPagos'
 
-// En el CELULAR, el CEO solo ve lo que usa en la calle: Ejecutivo, Modo TV,
-// los pedidos (para coordinarlos con Iris) y WhatsApp. El resto lo resuelve
-// pidiéndoselo a Iris (no necesita la app completa en el teléfono).
-const NAV_MOVIL_CEO = [
-  { to: '/admin/ejecutivo',      icon: '⚡', label: 'Ejecutivo' },
-  { to: '/admin/ejecutivo?tv=1', icon: '📺', label: 'Modo TV (F.A.B.R.I.)' },
-  { to: '/admin/pedidos',        icon: '📥', label: 'Pedidos Mayoristas' },
-  { to: '/admin/whatsapp',       icon: '💬', label: 'WhatsApp' },
-]
+// Entrada extra solo-CEO para el menú del celular: el Modo TV (F.A.B.R.I.) no
+// es una ruta aparte de navItems, así que se agrega a mano para el CEO.
+const NAV_MOVIL_TV = { to: '/admin/ejecutivo?tv=1', icon: '📺', label: 'Modo TV (F.A.B.R.I.)' }
 
 const navItems = [
   { to: '/admin/dashboard',   icon: '📊', label: 'Dashboard' },
@@ -29,17 +24,49 @@ const navItems = [
   { to: '/admin/ventas', icon: '📋', label: 'Mayorista' },
   { to: '/admin/deposito',    icon: '🏭', label: 'Depósito' },
   { to: '/admin/precios',     icon: '💲', label: 'Precios' },
+  { to: '/admin/presupuestos', icon: '📋', label: 'Presupuestos' },
   { to: '/admin/etiquetas',   icon: '🏷️', label: 'Etiquetas' },
   { to: '/admin/clientes',    icon: '👥', label: 'Clientes' },
   { to: '/admin/pedidos',     icon: '📥', label: 'Pedidos Mayoristas' },
   { to: '/admin/whatsapp', icon: '💬', label: 'WhatsApp' },
-  { to: '/admin/franquicias', icon: '🏪', label: 'Franquicias' },
+  { to: '/admin/proveedores', icon: '🏭', label: 'Proveedores' },
   { to: '/admin/cheques',     icon: '📄', label: 'Cheques' },
   { to: '/admin/sueldos',     icon: '💰', label: 'Sueldos' },
   { to: '/admin/gastos',      icon: '💸', label: 'Gastos' },
   { to: '/admin/facturacion', icon: '📑', label: 'Facturación' },
   { to: '/admin/cierre',      icon: '📋', label: 'Cierre' },
   { to: '/admin/auditoria',   icon: '🔍', label: 'Auditoría' },
+]
+
+// Desktop: los módulos agrupados en 4 menús desplegables (más prolijo que 17
+// botones en una fila con scroll). El badge de cada item "sube" al menú padre.
+const NAV_GRUPOS = [
+  { label: 'Operación', icon: '🛒', items: [
+    { to: '/admin/caja',      icon: '💵', label: 'Caja' },
+    { to: '/admin/ventas',    icon: '📋', label: 'Mayorista' },
+    { to: '/admin/deposito',  icon: '🏭', label: 'Depósito' },
+    { to: '/admin/pedidos',   icon: '📥', label: 'Pedidos Mayoristas' },
+    { to: '/admin/whatsapp',  icon: '💬', label: 'WhatsApp' },
+  ] },
+  { label: 'Comercial', icon: '🏷️', items: [
+    { to: '/admin/precios',      icon: '💲', label: 'Precios' },
+    { to: '/admin/presupuestos', icon: '📋', label: 'Presupuestos' },
+    { to: '/admin/etiquetas',    icon: '🏷️', label: 'Etiquetas' },
+    { to: '/admin/clientes',     icon: '👥', label: 'Clientes' },
+  ] },
+  { label: 'Finanzas', icon: '💰', items: [
+    { to: '/admin/proveedores', icon: '🏭', label: 'Proveedores' },
+    { to: '/admin/cheques',     icon: '📄', label: 'Cheques' },
+    { to: '/admin/sueldos',     icon: '💰', label: 'Sueldos' },
+    { to: '/admin/gastos',      icon: '💸', label: 'Gastos' },
+    { to: '/admin/facturacion', icon: '📑', label: 'Facturación' },
+  ] },
+  { label: 'Dirección', icon: '📈', items: [
+    { to: '/admin/ejecutivo', icon: '⚡', label: 'Ejecutivo', ceoOnly: true },
+    { to: '/admin/dashboard', icon: '📊', label: 'Dashboard' },
+    { to: '/admin/cierre',    icon: '📋', label: 'Cierre' },
+    { to: '/admin/auditoria', icon: '🔍', label: 'Auditoría' },
+  ] },
 ]
 
 function useNotificaciones() {
@@ -54,7 +81,7 @@ function useNotificaciones() {
       const en15Str = fechaHoyARG(en15)
       const haceUnAno = new Date(hoy.getFullYear() - 1, hoy.getMonth(), hoy.getDate())
 
-      const [{ data: cheques }, { data: chequesEmitidos }, { data: clientes }, { data: cierres }, { data: stockData }, { data: cuentasFiscales }, { data: facturasRecientes }, { data: impuestosRecientes }] = await Promise.all([
+      const [{ data: cheques }, { data: chequesEmitidos }, { data: clientes }, { data: cierres }, { data: stockData }, { data: cuentasFiscales }, { data: facturasRecientes }, { data: impuestosRecientes }, { data: productosStock }] = await Promise.all([
         supabase.from('cheques').select('*').neq('origen', 'emitido').gte('fecha_pago', hoyStr).lte('fecha_pago', en15Str),
         // Cheques propios pendientes de imputar que se debitan en ≤7 días (o ya vencieron)
         supabase.from('cheques').select('*').eq('origen', 'emitido').neq('estado', 'imputado').lte('fecha_pago', fechaHoyARG(new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + 7))),
@@ -64,6 +91,8 @@ function useNotificaciones() {
         supabase.from('cuentas_fiscales').select('*').eq('activa', true).then(r => r).catch(() => ({ data: null })),
         supabase.from('facturas').select('cuenta_id, monto_total, fecha').eq('tipo', 'emitida').gte('fecha', fechaHoyARG(haceUnAno)).then(r => r).catch(() => ({ data: null })),
         supabase.from('impuestos_pagados').select('cuenta_id, concepto, periodo_anio, periodo_mes').then(r => r).catch(() => ({ data: null })),
+        // Productos "huérfanos": cerdo/embutido sin stock_origen y sin marca "no descuenta"
+        supabase.from('precios').select('nombre, categoria, stock_origen, stock_no_aplica').in('categoria', ['cerdo_corte', 'cerdo_pieza', 'embutido']).then(r => r).catch(() => ({ data: null })),
       ])
 
       const nuevas = []
@@ -132,6 +161,18 @@ function useNotificaciones() {
         if ((s.bovino_mr || 0) < 100) nuevas.push({ tipo: 'danger', icono: '📦', titulo: `Stock bovino bajo: ${fmtKg(s.bovino_mr || 0)}`, sub: 'Pedí más mercadería', link: '/admin/deposito' })
         if ((s.pollo || 0) < 100) nuevas.push({ tipo: 'warning', icono: '📦', titulo: `Stock pollo bajo: ${fmtKg(s.pollo || 0)}`, sub: 'Pedí más mercadería', link: '/admin/deposito' })
         if ((s.cerdo || 0) < 50) nuevas.push({ tipo: 'warning', icono: '📦', titulo: `Stock cerdo bajo: ${fmtKg(s.cerdo || 0)}`, sub: 'Pedí más mercadería', link: '/admin/deposito' })
+      }
+
+      // ── Productos huérfanos: cerdo/embutido sin stock asignado (se venden pero
+      // no descuentan stock). Recordatorio para enlazarlos en Precios. ──
+      const orfanos = (productosStock || []).filter(p => !p.stock_origen && !p.stock_no_aplica)
+      if (orfanos.length > 0) {
+        nuevas.push({
+          tipo: 'warning', icono: '📦',
+          titulo: `${orfanos.length} producto${orfanos.length === 1 ? '' : 's'} sin stock asignado`,
+          sub: `Se vende${orfanos.length === 1 ? '' : 'n'} pero no descuenta${orfanos.length === 1 ? '' : 'n'} stock — enlazalos en Precios`,
+          link: '/admin/precios',
+        })
       }
 
       setNotifs(nuevas)
@@ -281,9 +322,14 @@ function MenuMobile({ onClose }) {
           </div>
         </div>
 
-        {/* Nav items */}
+        {/* Nav items — TODOS los módulos en el celular (igual que en la compu).
+            El Ejecutivo y el Modo TV son solo para el CEO; el resto lo ven todos
+            los admin. Antes el CEO tenía un menú recortado, ahora ve todo. */}
         <nav style={{ flex: 1, overflowY: 'auto', padding: '10px 12px' }}>
-          {(user?.email === 'fabriciolenardon@gmail.com' ? NAV_MOVIL_CEO : navItems).filter(it => it.to !== '/admin/ejecutivo' || window.__ceoEmail === 'fabriciolenardon@gmail.com').map(item => {
+          {(user?.email === 'fabriciolenardon@gmail.com'
+            ? [...navItems, NAV_MOVIL_TV]
+            : navItems.filter(it => it.to !== '/admin/ejecutivo')
+          ).map(item => {
             const isActive = location.pathname === item.to
             return (
               <NavLink key={item.to} to={item.to} onClick={onClose}
@@ -316,6 +362,92 @@ function MenuMobile({ onClose }) {
       </div>
       {modalPwd && <CambiarPasswordModal onClose={() => setModalPwd(false)} />}
     </>
+  )
+}
+
+// NAV DESKTOP — 4 menús desplegables por categoría. Se abren/cierran con CLICK
+// (el hover daba problemas: al cruzar el huequito hacia el menú se cerraba, y el
+//  click lo volvía a minimizar). Se cierra al clickear afuera o al cambiar de ruta.
+function NavDesktop({ userEmail, badges }) {
+  const location = useLocation()
+  const [openGroup, setOpenGroup] = useState(null)
+  const navRef = useRef(null)
+
+  // Cerrar al clickear fuera de la barra
+  useEffect(() => {
+    function cerrar(e) { if (navRef.current && !navRef.current.contains(e.target)) setOpenGroup(null) }
+    document.addEventListener('mousedown', cerrar)
+    return () => document.removeEventListener('mousedown', cerrar)
+  }, [])
+  // Cerrar al navegar a otra pantalla
+  useEffect(() => { setOpenGroup(null) }, [location.pathname])
+
+  const badgeFor = (to) => {
+    if (to === '/admin/pedidos')  return badges.pedidos
+    if (to === '/admin/whatsapp') return badges.whatsapp
+    if (to === '/admin/deposito') return badges.deposito
+    return 0
+  }
+  const esCeo = userEmail === 'fabriciolenardon@gmail.com'
+  const grupos = NAV_GRUPOS.map(g => ({
+    ...g,
+    items: g.items.filter(it => !it.ceoOnly || esCeo),
+  }))
+
+  return (
+    <nav ref={navRef} style={{ display: 'flex', gap: 4, flex: 1, alignItems: 'center' }}>
+      {grupos.map((g, gi) => {
+        const activo   = g.items.some(it => location.pathname.startsWith(it.to))
+        const abierto  = openGroup === gi
+        const grpBadge = g.items.reduce((s, it) => s + badgeFor(it.to), 0)
+        return (
+          <div key={g.label} style={{ position: 'relative' }}>
+            <button onClick={() => setOpenGroup(abierto ? null : gi)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 7, padding: '8px 14px',
+                borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                fontFamily: "'DM Sans', sans-serif", whiteSpace: 'nowrap',
+                border: '1px solid ' + (activo ? 'rgba(212,175,55,0.45)' : 'transparent'),
+                background: activo ? 'rgba(212,175,55,0.12)' : (abierto ? 'var(--surface2)' : 'transparent'),
+                color: activo ? 'var(--gold)' : 'var(--text2)', transition: 'all 0.15s',
+              }}>
+              <span style={{ fontSize: 15 }}>{g.icon}</span>
+              {g.label}
+              <span style={{ fontSize: 9, opacity: 0.55, transform: abierto ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>▼</span>
+              {grpBadge > 0 && (
+                <span style={{ background: '#ef4444', color: '#fff', borderRadius: '50%', minWidth: 17, height: 17, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px' }}>{grpBadge}</span>
+              )}
+            </button>
+            {abierto && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 6, minWidth: 224, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: '0 12px 32px rgba(0,0,0,0.55)', padding: 6, zIndex: 250 }}>
+                {g.items.map(it => {
+                  const itemBadge = badgeFor(it.to)
+                  const itActivo = location.pathname.startsWith(it.to)
+                  return (
+                    <NavLink key={it.to} to={it.to} onClick={() => setOpenGroup(null)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
+                        borderRadius: 8, fontSize: 13, fontWeight: 600, textDecoration: 'none',
+                        whiteSpace: 'nowrap', transition: 'background 0.12s',
+                        background: itActivo ? 'var(--gold)' : 'transparent',
+                        color: itActivo ? '#000' : 'var(--text2)',
+                      }}
+                      onMouseOver={e => { if (!itActivo) e.currentTarget.style.background = 'var(--surface2)' }}
+                      onMouseOut={e => { if (!itActivo) e.currentTarget.style.background = 'transparent' }}>
+                      <span style={{ fontSize: 16 }}>{it.icon}</span>
+                      <span style={{ flex: 1 }}>{it.label}</span>
+                      {itemBadge > 0 && (
+                        <span style={{ background: '#ef4444', color: '#fff', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{itemBadge}</span>
+                      )}
+                    </NavLink>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </nav>
   )
 }
 
@@ -372,23 +504,10 @@ export default function AdminLayout() {
               <LogoFabricius size="small" />
             </div>
             <div style={{ width: 1, height: 24, background: 'var(--border)' }} />
-            <nav style={{ display: 'flex', gap: 2, flex: 1, overflowX: 'auto' }}>
-              {navItems.filter(it => it.to !== '/admin/ejecutivo' || user?.email === 'fabriciolenardon@gmail.com').map(item => (
-                <NavLink key={item.to} to={item.to}
-                  style={({ isActive }) => ({ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 11px', borderRadius: 8, fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', textDecoration: 'none', transition: 'all 0.2s', border: '1px solid transparent', background: isActive ? 'var(--gold)' : 'transparent', color: isActive ? '#000' : 'var(--muted)', position: 'relative' })}>
-                  <span>{item.icon}</span>{item.label}
-                  {item.to === '/admin/pedidos' && pedidosPendientes > 0 && (
-                    <span style={{ background: 'var(--red-light)', color: '#fff', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{pedidosPendientes}</span>
-                  )}
-                  {item.to === '/admin/whatsapp' && (pedidosWaNuevos + waNoLeidos) > 0 && (
-                    <span style={{ background: 'var(--green)', color: '#000', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{pedidosWaNuevos + waNoLeidos}</span>
-                  )}
-                  {item.to === '/admin/deposito' && flujosPendientes > 0 && (
-                    <span title="Flujos de desposte pendientes" style={{ background: '#ef4444', color: '#fff', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{flujosPendientes}</span>
-                  )}
-                </NavLink>
-              ))}
-            </nav>
+            <NavDesktop
+              userEmail={user?.email}
+              badges={{ pedidos: pedidosPendientes, whatsapp: pedidosWaNuevos + waNoLeidos, deposito: flujosPendientes }}
+            />
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>
               <BotonAvisos />
               <CampanaNotificaciones notifs={notifs} />
@@ -403,6 +522,9 @@ export default function AdminLayout() {
 
       {/* Widget de actividad en vivo (conversaciones + pedidos) con notificaciones */}
       <CentroActividad />
+
+      {/* Recordatorio JUE/VIE/SÁB/DOM para que el CEO cargue los pagos a proveedores */}
+      {user?.email === 'fabriciolenardon@gmail.com' && <RecordatorioPagos />}
 
       {/* CONTENIDO */}
       <main style={{ paddingTop: 56, minHeight: '100vh' }}>

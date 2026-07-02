@@ -5,6 +5,7 @@ import { fechaHoyARG } from '../../lib/fechas'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 import LimpiezaDuplicados from './LimpiezaDuplicados'
 import ImportarPLUQendra from './ImportarPLUQendra'
+import CombosEditor from './CombosEditor'
 import { abrirVentanaImprimible } from '../../lib/pdfPrintable'
 import { enviarWhatsapp } from '../../lib/whatsapp'
 const CATEGORIAS = {
@@ -30,7 +31,17 @@ const CATEGORIAS = {
 const INSUMO_SUBCAT = { descartables: '📦 Descartables', limpieza: '🧽 Limpieza', carniceria: '🔪 Insumos Carnicería' }
 const INSUMO_SUBCAT_ORDEN = { descartables: 0, limpieza: 1, carniceria: 2 }
 const INSUMO_SUBCAT_OPCIONES = [['descartables', '📦 Descartables'], ['limpieza', '🧽 Limpieza'], ['carniceria', '🔪 Insumos Carnicería']]
-const VACIO = { categoria: 'bovino_corte', subcategoria: 'descartables', nombre: '', precio_carniceria: '', precio_mayorista: '', precio_minorista: '', codigo_balanza: '', dias_vencimiento: '3', descripcion_etiqueta: '', pesable: true, kg_por_unidad: '', vende_por_pieza: false }
+const VACIO = { categoria: 'bovino_corte', subcategoria: 'descartables', nombre: '', precio_carniceria: '', precio_mayorista: '', precio_minorista: '', codigo_balanza: '', dias_vencimiento: '3', descripcion_etiqueta: '', pesable: true, kg_por_unidad: '', vende_por_pieza: false, stock_origen: '', stock_no_aplica: false }
+
+// Categorías cuyos productos descuentan de un bucket de stock específico
+// (cerdo por pieza, embutidos de elaboración propia). Sin stock_origen quedan
+// "huérfanos": se venden pero NO descuentan stock. Los bovinos NO van acá: se
+// trackean por categoría/pieza, su stock_origen debe ser NULL.
+const CATEGORIAS_CON_STOCK_ORIGEN = new Set(['cerdo_corte', 'cerdo_pieza', 'embutido'])
+const prettyBucket = b => String(b || '')
+  .replace(/^cerdo_/, '🐷 ')
+  .replace(/^emb_/, '🌭 ')
+  .replace(/_/g, ' ')
 
 // Categorías que se venden por cajón (unidad con peso fijo) y por lo tanto
 // necesitan el campo kg_por_unidad cargado para descontar stock correctamente.
@@ -48,6 +59,7 @@ const inp = { background: 'var(--surface)', border: '1px solid var(--border)', c
 export default function Precios() {
   const [tab, setTab] = useState('ver')
   const [precios, setPrecios] = useState([])
+  const [stockBuckets, setStockBuckets] = useState([])  // tipos de stock_actual (cerdo_*, emb_*) para enlazar
   const [filtro, setFiltro] = useState('bovino_corte')
   const [loading, setLoading] = useState(true)
   const [form, setForm] = useState(VACIO)
@@ -116,8 +128,14 @@ export default function Precios() {
 
   async function cargar() {
     setLoading(true)
-    const { data } = await supabase.from('precios').select('*').order('nombre')
+    const [{ data }, { data: stk }] = await Promise.all([
+      supabase.from('precios').select('*').order('nombre'),
+      supabase.from('stock_actual').select('tipo'),
+    ])
     setPrecios(data || [])
+    // Buckets enlazables: cerdo_* (piezas) y emb_* (embutidos). Excluye el 'cerdo'
+    // genérico (capón entero), que no es a donde van los cortes.
+    setStockBuckets((stk || []).map(s => s.tipo).filter(t => /^cerdo_|^emb_/.test(t)).sort())
     setLoading(false)
   }
 
@@ -181,6 +199,14 @@ export default function Precios() {
       // Cuando el cajero los elige en Caja Rápida (o Mayorista), aparece el
       // selector de piezas_stock para elegir cuál pieza específica vender.
       vende_por_pieza: !!form.vende_por_pieza,
+      // Bucket de stock del que descuenta al venderse. Solo aplica a cerdo/
+      // embutido; el resto (bovino, pollo, etc.) SIEMPRE va NULL para no
+      // reintroducir mapeos malos (bug 09/06: cortes de vaca descontando cerdo).
+      // stock_no_aplica = comprado/reventa: no descuenta y no se marca huérfano.
+      stock_origen: CATEGORIAS_CON_STOCK_ORIGEN.has(form.categoria) && !form.stock_no_aplica
+        ? (form.stock_origen || null)
+        : null,
+      stock_no_aplica: CATEGORIAS_CON_STOCK_ORIGEN.has(form.categoria) ? !!form.stock_no_aplica : false,
     }
 
     // Si está asignando un PLU, verificar si ya está ocupado por OTRO producto
@@ -245,6 +271,8 @@ export default function Precios() {
       pesable: p.pesable !== false,
       kg_por_unidad: p.kg_por_unidad ?? '',
       vende_por_pieza: !!p.vende_por_pieza,
+      stock_origen: p.stock_origen ?? '',
+      stock_no_aplica: !!p.stock_no_aplica,
     })
     setFiltro(p.categoria)
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -487,6 +515,7 @@ export default function Precios() {
         {tabBtn('admin', '✏️ Administrar')}
         {tabBtn('masivo', '🚀 Actualización masiva')}
         {tabBtn('ofertas', `🏷️ Ofertas${ofertasVigentes.length > 0 ? ` (${ofertasVigentes.length})` : ''}`)}
+        {tabBtn('combos', '🍱 Combos')}
         {tabBtn('chat', '🤖 Asistente IA')}
 {tabBtn('plu', '🏷️ PLU / Balanza')}
 {tabBtn('limpieza', '🧹 Limpieza duplicados')}
@@ -587,6 +616,26 @@ export default function Precios() {
 
       {tab === 'admin' && (
         <div>
+          {(() => {
+            const orfanos = precios.filter(p => CATEGORIAS_CON_STOCK_ORIGEN.has(p.categoria) && !p.stock_origen && !p.stock_no_aplica)
+            if (orfanos.length === 0) return null
+            return (
+              <div className="card" style={{ marginBottom: 16, borderColor: 'var(--amber)', background: '#2a1f0a' }}>
+                <div className="card-title" style={{ color: 'var(--amber)' }}>📦 {orfanos.length} producto{orfanos.length === 1 ? '' : 's'} sin stock asignado — enlazalos</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
+                  Estos productos de cerdo/embutido se venden pero NO descuentan stock. Tocá cada uno para asignarle el bucket del que sale (o marcalo "no descuenta" si es comprado para reventa).
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {orfanos.map(p => (
+                    <button key={p.id} onClick={() => editar(p)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--surface2)', border: '1px solid var(--amber)', color: 'var(--text)', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+                      ✏️ {(p.nombre || '').trim()} <span style={{ color: 'var(--muted)', fontSize: 11 }}>({CATEGORIAS[p.categoria] || p.categoria})</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
           <div className="card" style={{ marginBottom: 24 }}>
             <div className="card-title">{editando ? '✏️ Editando producto' : '➕ Agregar producto'}</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -662,6 +711,31 @@ export default function Precios() {
                   <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
                     Al activarlo: cuando se elija este producto en Caja Rápida o Mayorista, aparece un selector con las piezas disponibles del stock (cada una con su kg propio). El cajero elige una pieza específica para vender — no se ingresa kg manualmente.
                     <br />Dejalo desactivado si el producto se vende por kg (Ej: "Pierna por kg" — el cajero pesa lo que el cliente lleva).
+                  </div>
+                </div>
+              )}
+              {CATEGORIAS_CON_STOCK_ORIGEN.has(form.categoria) && (
+                <div style={{ gridColumn: '1/-1', background: '#10231a', border: `1px solid ${(form.stock_origen || form.stock_no_aplica) ? '#2d5a2d' : 'var(--amber)'}`, borderRadius: 8, padding: 12 }}>
+                  <label style={{ fontSize: 12, color: '#7dff7d', display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                    📦 Stock que descuenta (de qué bucket sale al vender)
+                  </label>
+                  <select
+                    value={form.stock_no_aplica ? '__no__' : (form.stock_origen || '')}
+                    onChange={e => {
+                      const v = e.target.value
+                      if (v === '__no__') setForm({ ...form, stock_no_aplica: true, stock_origen: '' })
+                      else setForm({ ...form, stock_no_aplica: false, stock_origen: v })
+                    }}
+                    style={{ ...inp, borderColor: (form.stock_origen || form.stock_no_aplica) ? '#2d5a2d' : 'var(--amber)' }}
+                  >
+                    <option value="">— Sin asignar (huérfano: se vende pero NO descuenta) —</option>
+                    {stockBuckets
+                      .filter(b => form.categoria === 'embutido' ? b.startsWith('emb_') : b.startsWith('cerdo_'))
+                      .map(b => <option key={b} value={b}>{prettyBucket(b)}</option>)}
+                    <option value="__no__">🚫 No descuenta (comprado / reventa)</option>
+                  </select>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                    Al venderse, descuenta de este bucket. Si lo dejás "Sin asignar", el producto se vende pero NO baja stock (queda huérfano y te avisa la alerta). Marcá "No descuenta" solo si es comprado para reventa (no sale de tu producción).
                   </div>
                 </div>
               )}
@@ -1100,6 +1174,7 @@ export default function Precios() {
      {tab === 'plu' && (
   <PLUTab precios={precios} ofertas={ofertas} />
 )}
+      {tab === 'combos' && <CombosEditor precios={precios} />}
       {tab === 'limpieza' && <LimpiezaDuplicados />}
       {tab === 'importar_plu' && <ImportarPLUQendra />}
     </div>

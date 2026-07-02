@@ -1,6 +1,6 @@
 // Sueldos.jsx
-import { useEffect, useState } from 'react'
-import { supabase } from '../../lib/supabase'
+import { useEffect, useMemo, useState } from 'react'
+import { supabase, fetchAllRows } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
@@ -86,8 +86,51 @@ function calcularHorasTurno(fichadas) {
   return Math.round(horas * 2) / 2 // redondear a 0.5
 }
 
-import { fmtPrecio } from '../../lib/formatos'
+import { fmtPrecio, parseNumero } from '../../lib/formatos'
 function fmt(n) { return fmtPrecio(Number(n) || 0) }
+
+const MESES_ES = ['', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+// Nombre lindo para un mes calendario 'YYYY-MM' (fallback cuando la semana no
+// cae en ningún mes operativo cargado en Cierre → Por Mes).
+function nombreMesCalendario(ym) {
+  const [y, m] = ym.split('-')
+  return `${MESES_ES[parseInt(m)] || ym} ${y}`
+}
+// dd/mm de una fecha 'YYYY-MM-DD' sin desfasar por zona horaria.
+function fmtDdMm(d) {
+  if (!d) return ''
+  return new Date(d + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })
+}
+// Agrega las liquidaciones de un período en un informe por empleado (suma
+// horas, bruto, viáticos, adelantos, boletas y neto de sueldo). Los conceptos
+// extra del mes (aguinaldo, vacaciones) se suman aparte y arman el TOTAL a
+// cobrar. Number() porque las columnas numeric de Supabase vuelven como string.
+function informeEmpleados(liqs, conceptos = []) {
+  const map = {}
+  const ensure = (nombre) => {
+    if (!map[nombre]) map[nombre] = { nombre, horas: 0, bruto: 0, viaticos: 0, adelantos: 0, boletas: 0, netoSueldo: 0, aguinaldo: 0, vacaciones: 0, neto: 0, semanas: 0 }
+    return map[nombre]
+  }
+  for (const l of liqs) {
+    const g = ensure(l.empleado_nombre || '—')
+    g.horas += Number(l.horas) || 0
+    g.bruto += Number(l.bruto) || 0
+    g.viaticos += Number(l.viaticos) || 0
+    g.adelantos += Number(l.adelantos) || 0
+    g.boletas += Number(l.boletas) || 0
+    g.netoSueldo += Number(l.neto) || 0
+    g.semanas += 1
+  }
+  // Un empleado puede tener un concepto sin liquidación esa semana (ej. mes de
+  // vacaciones sin fichar) — ensure() lo crea igual para que aparezca.
+  for (const c of conceptos) {
+    const g = ensure(c.empleado_nombre || '—')
+    if (c.tipo === 'aguinaldo') g.aguinaldo += Number(c.monto) || 0
+    else if (c.tipo === 'vacaciones') g.vacaciones += Number(c.monto) || 0
+  }
+  for (const g of Object.values(map)) g.neto = g.netoSueldo + g.aguinaldo + g.vacaciones
+  return Object.values(map).sort((a, b) => a.nombre.localeCompare(b.nombre))
+}
 const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }
 
 export default function Sueldos() {
@@ -108,10 +151,23 @@ export default function Sueldos() {
   const [empleados, setEmpleados] = useState(EMPLEADOS_DEFAULT)
   const [editHora, setEditHora] = useState({})     // valor_hora tipeado en la pestaña Empleados
   const [guardandoEmp, setGuardandoEmp] = useState(null)
+  const [nuevoEmp, setNuevoEmp] = useState({ apellido: '', nombre: '', valor_hora: '', cbu: '' })
+  const [guardandoNuevo, setGuardandoNuevo] = useState(false)
+  const [editLiqId, setEditLiqId] = useState(null)   // id de la liquidación que se está editando en Historial
+  const [liqDraft, setLiqDraft] = useState({ horas: '', bruto: '', viaticos: '', adelantos: '', boletas: '' })
+  const [guardandoLiq, setGuardandoLiq] = useState(false)
+  const [meses, setMeses] = useState([])           // meses operativos (calendario del cierre mensual)
+  const [semanasAbiertas, setSemanasAbiertas] = useState({}) // toggle "ver semanas" por mes en el historial
+  const [conceptos, setConceptos] = useState([])   // aguinaldos / vacaciones por mes+empleado
+  const [extrasAbiertos, setExtrasAbiertos] = useState({})   // toggle panel de extras por mes
+  const [extraEdit, setExtraEdit] = useState({})   // edición inline: `${mesKey}_${empId}` → { aguinaldo, vacDias, vacMonto }
+  const [guardandoExtra, setGuardandoExtra] = useState(null)
 
   useEffect(() => {
     fetchLiquidaciones()
     cargarEmpleados()
+    cargarMeses()
+    cargarConceptos()
     const hoy = new Date()
     const dia = hoy.getDay()
     const lunes = new Date(hoy); lunes.setDate(hoy.getDate() - (dia === 0 ? 6 : dia - 1))
@@ -124,8 +180,22 @@ export default function Sueldos() {
 
   async function fetchLiquidaciones() {
     // Sin .limit() — paginamos en cliente con usePaginacion para mostrar TODAS las semanas
-    const { data } = await supabase.from('liquidaciones_sueldos').select('*').order('semana_inicio', { ascending: false })
+    const { data } = await fetchAllRows(() => supabase.from('liquidaciones_sueldos').select('*').order('semana_inicio', { ascending: false }))
     setLiquidaciones(data || [])
+  }
+
+  async function cargarMeses() {
+    // Meses operativos = mismo calendario que usa el Cierre mensual (rango
+    // fecha_inicio→fecha_cierre por semanas enteras). Sirven para agrupar el
+    // historial de sueldos por mes real de la empresa, no por mes calendario.
+    const { data } = await supabase.from('meses_operativos').select('*').order('fecha_inicio', { ascending: false })
+    setMeses(data || [])
+  }
+
+  async function cargarConceptos() {
+    // Aguinaldos y vacaciones cargados por mes (tabla conceptos_sueldos).
+    const { data } = await supabase.from('conceptos_sueldos').select('*')
+    setConceptos(data || [])
   }
 
   async function cargarEmpleados() {
@@ -147,6 +217,79 @@ export default function Sueldos() {
     setEditHora(h => { const n = { ...h }; delete n[emp.id]; return n })
     setAlert({ type: 'success', msg: `✅ Valor hora de ${emp.nombre} actualizado a ${fmt(v)}` })
     cargarEmpleados()
+    setTimeout(() => setAlert(null), 3500)
+  }
+
+  // Alta de un nuevo empleado (pestaña Empleados). La tabla empleados_sueldos
+  // no tiene default en `id`, así que calculamos el próximo a mano (max+1).
+  async function agregarEmpleado() {
+    const apellido = nuevoEmp.apellido.trim().toUpperCase()
+    const nombre = nuevoEmp.nombre.trim().toUpperCase()
+    const valor = parseFloat(nuevoEmp.valor_hora)
+    if (!apellido || !nombre) { setAlert({ type: 'error', msg: 'Cargá apellido y nombre' }); return }
+    if (!(valor > 0)) { setAlert({ type: 'error', msg: 'Ingresá un valor hora válido' }); return }
+    setGuardandoNuevo(true)
+    const { data: maxRow } = await supabase.from('empleados_sueldos').select('id').order('id', { ascending: false }).limit(1)
+    const nuevoId = (maxRow?.[0]?.id || 0) + 1
+    const { error } = await supabase.from('empleados_sueldos').insert({
+      id: nuevoId, apellido, nombre, valor_hora: valor,
+      modalidad: 'hora', cbu: nuevoEmp.cbu.trim(), activo: true,
+    })
+    setGuardandoNuevo(false)
+    if (error) { setAlert({ type: 'error', msg: error.message }); return }
+    setNuevoEmp({ apellido: '', nombre: '', valor_hora: '', cbu: '' })
+    setAlert({ type: 'success', msg: `✅ ${apellido}, ${nombre} agregado` })
+    cargarEmpleados()
+    setTimeout(() => setAlert(null), 3500)
+  }
+
+  // ── Edición de una liquidación guardada (pestaña Historial) ──
+  // Valor hora usado en esa liquidación: lo deducimos del propio registro
+  // (bruto/horas), así al editar las horas el bruto se recalcula con la tarifa
+  // de ESA semana. Fallback al valor hora actual del empleado.
+  function tarifaLiq(l) {
+    if (Number(l.horas) > 0 && Number(l.bruto) > 0) return Number(l.bruto) / Number(l.horas)
+    const emp = empleados.find(e => `${e.apellido}, ${e.nombre}` === l.empleado_nombre)
+    return emp ? (Number(emp.valor_hora) || 0) : 0
+  }
+  const netoDeDraft = d => Math.max(0,
+    (parseNumero(d.bruto) || 0) + (parseNumero(d.viaticos) || 0) - (parseNumero(d.adelantos) || 0) - (parseNumero(d.boletas) || 0))
+
+  function empezarEditarLiq(l) {
+    setEditLiqId(l.id)
+    setLiqDraft({
+      horas: String(l.horas ?? ''), bruto: String(l.bruto ?? ''),
+      viaticos: String(l.viaticos ?? ''), adelantos: String(l.adelantos ?? ''), boletas: String(l.boletas ?? ''),
+    })
+  }
+  // Al cambiar las horas, recalcula el bruto con la tarifa de esa liquidación
+  // (el bruto igual queda editable a mano si hace falta).
+  function cambiarDraftLiq(l, campo, valor) {
+    setLiqDraft(d => {
+      const next = { ...d, [campo]: valor }
+      if (campo === 'horas') {
+        const r = tarifaLiq(l)
+        if (r > 0) next.bruto = String(Math.round((parseNumero(valor) || 0) * r))
+      }
+      return next
+    })
+  }
+  async function guardarLiq(l) {
+    const upd = {
+      horas: parseNumero(liqDraft.horas) || 0,
+      bruto: parseNumero(liqDraft.bruto) || 0,
+      viaticos: parseNumero(liqDraft.viaticos) || 0,
+      adelantos: parseNumero(liqDraft.adelantos) || 0,
+      boletas: parseNumero(liqDraft.boletas) || 0,
+    }
+    upd.neto = Math.max(0, upd.bruto + upd.viaticos - upd.adelantos - upd.boletas)
+    setGuardandoLiq(true)
+    const { error } = await supabase.from('liquidaciones_sueldos').update(upd).eq('id', l.id)
+    setGuardandoLiq(false)
+    if (error) { setAlert({ type: 'error', msg: error.message }); return }
+    setEditLiqId(null)
+    setAlert({ type: 'success', msg: `✅ Liquidación de ${l.empleado_nombre} actualizada` })
+    fetchLiquidaciones()   // recarga → el TOTAL de la semana se recalcula solo
     setTimeout(() => setAlert(null), 3500)
   }
 
@@ -341,9 +484,160 @@ export default function Sueldos() {
     w.document.write(html); w.document.close()
   }
 
-  // Lista única de semanas (ordenadas) y paginada — antes era slice(0,10)
-  const semanasAll = [...new Set(liquidaciones.map(l => l.semana_inicio))]
-  const pagSemanas = usePaginacion(semanasAll, 10)
+  // Historial agrupado por MES (mismo calendario que el Cierre mensual) y,
+  // dentro de cada mes, por semana. Cada semana se ubica en el mes operativo
+  // cuyo rango [fecha_inicio, fecha_cierre] la contiene; si no cae en ninguno,
+  // fallback al mes calendario de la semana_inicio.
+  const hoyStr = fechaHoyARG(new Date())
+  const historialPorMes = useMemo(() => {
+    const grupos = {}
+    for (const l of liquidaciones) {
+      const mOp = meses.find(m => l.semana_inicio >= m.fecha_inicio && l.semana_inicio <= m.fecha_cierre)
+      const key = mOp ? (mOp.mes || mOp.fecha_inicio) : l.semana_inicio.substring(0, 7)
+      if (!grupos[key]) {
+        grupos[key] = {
+          key,
+          orden: mOp ? mOp.fecha_inicio : l.semana_inicio.substring(0, 7),
+          etiqueta: mOp ? mOp.etiqueta : nombreMesCalendario(l.semana_inicio.substring(0, 7)),
+          inicio: mOp ? mOp.fecha_inicio : null,
+          cierre: mOp ? mOp.fecha_cierre : null,
+          // Cerrado = el mes ya terminó (su fecha de cierre quedó en el pasado).
+          // Para el fallback calendario, cerrado si el mes es anterior al actual.
+          cerrado: mOp ? mOp.fecha_cierre < hoyStr : l.semana_inicio.substring(0, 7) < hoyStr.substring(0, 7),
+          liqs: [],
+        }
+      }
+      grupos[key].liqs.push(l)
+    }
+    return Object.values(grupos).sort((a, b) => b.orden.localeCompare(a.orden))
+  }, [liquidaciones, meses, hoyStr])
+
+  const pagMeses = usePaginacion(historialPorMes, 6)
+
+  // "Sueldo mensual" de referencia por empleado = su mejor bruto mensual de todo
+  // el historial. Se usa para sugerir las vacaciones (Comercio: sueldo/25 × días)
+  // sin que el propio mes de vacaciones — con menos horas fichadas — lo achique.
+  const brutoMaxPorEmp = useMemo(() => {
+    const res = {}
+    for (const mes of historialPorMes) {
+      const perEmp = {}
+      for (const l of mes.liqs) {
+        const k = l.empleado_nombre
+        perEmp[k] = (perEmp[k] || 0) + (Number(l.bruto) || 0)
+      }
+      for (const [k, v] of Object.entries(perEmp)) res[k] = Math.max(res[k] || 0, v)
+    }
+    return res
+  }, [historialPorMes])
+
+  // Guarda (upsert) o borra los conceptos extra de un empleado en un mes:
+  // aguinaldo y vacaciones. Monto 0 o vacío → se borra el concepto.
+  async function guardarExtras(mesKey, emp, e) {
+    const key = `${mesKey}_${emp.id}`
+    if (!e) return
+    const nombre = `${emp.apellido}, ${emp.nombre}`
+    setGuardandoExtra(key)
+    const ag = parseFloat(e.aguinaldo) || 0
+    const vm = parseFloat(e.vacMonto) || 0
+    const vd = parseInt(e.vacDias) || null
+    const ops = []
+    ops.push(ag > 0
+      ? supabase.from('conceptos_sueldos').upsert({ mes: mesKey, empleado_id: emp.id, empleado_nombre: nombre, tipo: 'aguinaldo', monto: ag, detalle: '50% del bruto del mes', updated_at: new Date().toISOString() }, { onConflict: 'mes,empleado_id,tipo' })
+      : supabase.from('conceptos_sueldos').delete().eq('mes', mesKey).eq('empleado_id', emp.id).eq('tipo', 'aguinaldo'))
+    ops.push(vm > 0
+      ? supabase.from('conceptos_sueldos').upsert({ mes: mesKey, empleado_id: emp.id, empleado_nombre: nombre, tipo: 'vacaciones', monto: vm, dias: vd, detalle: vd ? `${vd} días corridos · sueldo/25 (Comercio)` : 'Vacaciones', updated_at: new Date().toISOString() }, { onConflict: 'mes,empleado_id,tipo' })
+      : supabase.from('conceptos_sueldos').delete().eq('mes', mesKey).eq('empleado_id', emp.id).eq('tipo', 'vacaciones'))
+    const results = await Promise.all(ops)
+    setGuardandoExtra(null)
+    const err = results.find(r => r.error)
+    if (err) { setAlert({ type: 'error', msg: err.error.message }); return }
+    setExtraEdit(s => { const n = { ...s }; delete n[key]; return n })
+    setAlert({ type: 'success', msg: `✅ Extras de ${emp.nombre} guardados` })
+    cargarConceptos()
+    setTimeout(() => setAlert(null), 3000)
+  }
+
+  // Borra un concepto ya guardado (aguinaldo o vacaciones) de un empleado en un
+  // mes, con confirmación. Se usa el 🗑️ que aparece solo si el concepto existe.
+  async function borrarConcepto(mesKey, emp, tipo) {
+    const label = tipo === 'aguinaldo' ? 'aguinaldo' : 'vacaciones'
+    if (!window.confirm(`¿Borrar el ${label} de ${emp.apellido}, ${emp.nombre} de este mes?`)) return
+    const key = `${mesKey}_${emp.id}`
+    setGuardandoExtra(key)
+    const { error } = await supabase.from('conceptos_sueldos')
+      .delete().eq('mes', mesKey).eq('empleado_id', emp.id).eq('tipo', tipo)
+    setGuardandoExtra(null)
+    if (error) { setAlert({ type: 'error', msg: error.message }); return }
+    // Limpiar la edición local para que el input no quede con el valor viejo.
+    setExtraEdit(s => { const n = { ...s }; delete n[key]; return n })
+    setAlert({ type: 'success', msg: `🗑️ ${label.charAt(0).toUpperCase() + label.slice(1)} de ${emp.nombre} eliminado` })
+    cargarConceptos()
+    setTimeout(() => setAlert(null), 3000)
+  }
+
+  // Imprime el informe mensual: una fila por empleado con horas, bruto,
+  // viáticos, adelantos, boletas, aguinaldo, vacaciones y total del mes.
+  function imprimirInformeMes(mes) {
+    const conceptosMes = conceptos.filter(c => c.mes === mes.key)
+    const informe = informeEmpleados(mes.liqs, conceptosMes)
+    if (informe.length === 0) { setAlert({ type: 'error', msg: 'No hay liquidaciones en este mes' }); return }
+    const tot = informe.reduce((s, e) => ({
+      horas: s.horas + e.horas, bruto: s.bruto + e.bruto, viaticos: s.viaticos + e.viaticos,
+      adelantos: s.adelantos + e.adelantos, boletas: s.boletas + e.boletas,
+      netoSueldo: s.netoSueldo + e.netoSueldo, aguinaldo: s.aguinaldo + e.aguinaldo, vacaciones: s.vacaciones + e.vacaciones, neto: s.neto + e.neto,
+    }), { horas: 0, bruto: 0, viaticos: 0, adelantos: 0, boletas: 0, netoSueldo: 0, aguinaldo: 0, vacaciones: 0, neto: 0 })
+    const hayAg = tot.aguinaldo > 0
+    const hayVac = tot.vacaciones > 0
+    const periodo = mes.inicio && mes.cierre ? `${fmtDdMm(mes.inicio)} al ${fmtDdMm(mes.cierre)}` : ''
+    const th = t => `<th style="text-align:right;padding:8px 10px;border-bottom:2px solid #111;font-size:11px;text-transform:uppercase;color:#555">${t}</th>`
+    const td = (v, opts = {}) => `<td style="text-align:${opts.align || 'right'};padding:7px 10px;border-bottom:1px solid #ddd;${opts.bold ? 'font-weight:700;' : ''}">${v}</td>`
+    const filas = informe.map(e => `<tr>
+        ${td(e.nombre, { align: 'left', bold: true })}
+        ${td(e.horas + ' h')}
+        ${td(fmt(e.bruto))}
+        ${td(e.viaticos > 0 ? '+' + fmt(e.viaticos) : '—')}
+        ${td(e.adelantos > 0 ? '−' + fmt(e.adelantos) : '—')}
+        ${td(e.boletas > 0 ? '−' + fmt(e.boletas) : '—')}
+        ${td(fmt(e.netoSueldo))}
+        ${hayAg ? td(e.aguinaldo > 0 ? '+' + fmt(e.aguinaldo) : '—') : ''}
+        ${hayVac ? td(e.vacaciones > 0 ? '+' + fmt(e.vacaciones) : '—') : ''}
+        ${td(fmt(e.neto), { bold: true })}
+      </tr>`).join('')
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Informe ${mes.etiqueta}</title>
+      <style>
+        @page { margin: 12mm; }
+        body { font-family: Arial, Helvetica, sans-serif; color:#111; margin:0; padding:20px; }
+        h1 { font-size: 20px; margin:0 0 2px; }
+        .periodo { font-size: 12px; color:#666; margin-bottom: 16px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        tfoot td { border-top: 2px solid #111; font-weight: 800; padding:9px 10px; }
+      </style></head><body onload="window.print()">
+      <h1>Informe mensual de sueldos — ${mes.etiqueta}</h1>
+      <div class="periodo">${periodo ? 'Período ' + periodo + ' · ' : ''}${mes.cerrado ? 'Mes cerrado' : 'Mes en curso'}</div>
+      <table>
+        <thead><tr>
+          <th style="text-align:left;padding:8px 10px;border-bottom:2px solid #111;font-size:11px;text-transform:uppercase;color:#555">Empleado</th>
+          ${th('Horas')}${th('Bruto')}${th('Viáticos')}${th('Adelantos')}${th('Boletas')}${th('Sueldo')}${hayAg ? th('Aguinaldo') : ''}${hayVac ? th('Vacaciones') : ''}${th('Total')}
+        </tr></thead>
+        <tbody>${filas}</tbody>
+        <tfoot><tr>
+          ${td('TOTAL', { align: 'left' })}
+          ${td(tot.horas + ' h')}
+          ${td(fmt(tot.bruto))}
+          ${td(tot.viaticos > 0 ? '+' + fmt(tot.viaticos) : '—')}
+          ${td(tot.adelantos > 0 ? '−' + fmt(tot.adelantos) : '—')}
+          ${td(tot.boletas > 0 ? '−' + fmt(tot.boletas) : '—')}
+          ${td(fmt(tot.netoSueldo))}
+          ${hayAg ? td('+' + fmt(tot.aguinaldo)) : ''}
+          ${hayVac ? td('+' + fmt(tot.vacaciones)) : ''}
+          ${td(fmt(tot.neto))}
+        </tr></tfoot>
+      </table>
+    </body></html>`
+    const w = window.open('', '_blank', 'width=900,height=600')
+    if (!w) { setAlert({ type: 'error', msg: 'Habilitá las ventanas emergentes para poder imprimir' }); return }
+    w.document.write(html); w.document.close()
+  }
 
   return (
     <div>
@@ -537,43 +831,272 @@ export default function Sueldos() {
             </div>
             )
           })}
+
+          {/* Tarjeta de ALTA de empleado */}
+          <div className="card" style={{ border: '1px dashed #7c3aed', background: 'var(--surface)' }}>
+            <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: '#a78bfa', marginBottom: 10 }}>➕ NUEVO EMPLEADO</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <input style={inp} placeholder="Apellido" value={nuevoEmp.apellido}
+                onChange={e => setNuevoEmp(n => ({ ...n, apellido: e.target.value }))} />
+              <input style={inp} placeholder="Nombre" value={nuevoEmp.nombre}
+                onChange={e => setNuevoEmp(n => ({ ...n, nombre: e.target.value }))} />
+              <input type="number" step="100" style={inp} placeholder="Valor hora ($)" value={nuevoEmp.valor_hora}
+                onChange={e => setNuevoEmp(n => ({ ...n, valor_hora: e.target.value }))} />
+              <input style={inp} placeholder="CBU / alias (opcional)" value={nuevoEmp.cbu}
+                onChange={e => setNuevoEmp(n => ({ ...n, cbu: e.target.value }))} />
+              <button onClick={agregarEmpleado} disabled={guardandoNuevo}
+                style={{ padding: '10px 12px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 8, cursor: guardandoNuevo ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 13 }}>
+                {guardandoNuevo ? '⏳ Agregando...' : '➕ Agregar empleado'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
       {tab === 'historial' && (
         <div>
-          {pagSemanas.items.map(semana => {
-            const liqSemana = liquidaciones.filter(l => l.semana_inicio === semana)
-            const totalSemana = liqSemana.reduce((s, l) => s + (l.neto || 0), 0)
+          {pagMeses.items.map(mes => {
+            const conceptosMes = conceptos.filter(c => c.mes === mes.key)
+            const informe = informeEmpleados(mes.liqs, conceptosMes)
+            const totalMes = informe.reduce((s, e) => s + e.neto, 0)
+            const totHoras = informe.reduce((s, e) => s + e.horas, 0)
+            const totBruto = informe.reduce((s, e) => s + e.bruto, 0)
+            const totSueldo = informe.reduce((s, e) => s + e.netoSueldo, 0)
+            const totAguinaldo = informe.reduce((s, e) => s + e.aguinaldo, 0)
+            const totVac = informe.reduce((s, e) => s + e.vacaciones, 0)
+            const hayAg = totAguinaldo > 0
+            const hayVac = totVac > 0
+            const hayExtras = hayAg || hayVac
+            const semanasMes = [...new Set(mes.liqs.map(l => l.semana_inicio))].sort((a, b) => b.localeCompare(a))
+            const abierto = !!semanasAbiertas[mes.key]
+            // Mes de aguinaldo = Junio (1er SAC) o Diciembre (2do SAC). En esos
+            // meses el aguinaldo se pre-carga (50% del bruto) y el panel de
+            // extras se abre solo para que quede a la vista y solo se confirme.
+            const ymMatch = /^(\d{4})-(\d{2})$/.exec(mes.key)
+            const mesNum = ymMatch ? ymMatch[2] : (mes.inicio ? mes.inicio.slice(5, 7) : '')
+            const esMesAguinaldo = mesNum === '06' || mesNum === '12'
+            // El panel de extras se abre solo en meses de aguinaldo (Jun/Dic) o
+            // cuando ya hay conceptos cargados (ej. vacaciones de enero/febrero).
+            const extrasOpen = extrasAbiertos[mes.key] ?? (esMesAguinaldo || conceptosMes.length > 0)
             return (
-              <div key={semana} className="card" style={{ marginBottom: 16 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <div className="card-title" style={{ margin: 0 }}>
-                    Semana {new Date(semana + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })} → {new Date((liqSemana[0]?.semana_fin || semana) + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })}
+              <div key={mes.key} className="card" style={{ marginBottom: 20, borderColor: '#7c3aed' }}>
+                {/* Encabezado del mes */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+                  <div>
+                    <div className="card-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+                      📅 {mes.etiqueta}
+                      <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: mes.cerrado ? '#1a2a1a' : '#2a2416', color: mes.cerrado ? '#7dff7d' : '#ffcf5c', border: `1px solid ${mes.cerrado ? '#2d5a2d' : '#5a4a2a'}` }}>
+                        {mes.cerrado ? '✅ Cerrado' : '⏳ En curso'}
+                      </span>
+                    </div>
+                    {mes.inicio && mes.cierre && (
+                      <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{fmtDdMm(mes.inicio)} al {fmtDdMm(mes.cierre)} · {semanasMes.length} semana{semanasMes.length !== 1 ? 's' : ''}</div>
+                    )}
                   </div>
-                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>TOTAL: {fmt(totalSemana)}</div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>{hayExtras ? 'Total del mes' : 'Neto del mes'}</div>
+                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 26, color: 'var(--gold)' }}>{fmt(totalMes)}</div>
+                    {hayExtras && <div style={{ fontSize: 10, color: 'var(--muted)' }}>sueldos {fmt(totSueldo)}{hayAg ? ` · aguinaldo +${fmt(totAguinaldo)}` : ''}{hayVac ? ` · vacaciones +${fmt(totVac)}` : ''}</div>}
+                  </div>
+                </div>
+
+                {/* Informe mensual por empleado */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#a78bfa' }}>
+                    {mes.cerrado ? 'Informe del mes (por empleado)' : 'Acumulado del mes (por empleado)'}
+                  </div>
+                  <button onClick={() => imprimirInformeMes(mes)}
+                    style={{ background: 'transparent', border: '1px solid #7c3aed', color: '#a78bfa', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}>
+                    🖨️ Imprimir informe
+                  </button>
                 </div>
                 <table>
-                  <thead><tr><th>Empleado</th><th>Horas</th><th>Bruto</th><th>Viáticos</th><th>Adelantos</th><th>Boletas</th><th>Neto</th></tr></thead>
+                  <thead><tr>
+                    <th>Empleado</th><th>Horas</th><th>Bruto</th><th>Viáticos</th><th>Adelantos</th><th>Boletas</th>
+                    <th>{hayExtras ? 'Sueldo' : 'Neto'}</th>
+                    {hayAg && <th>Aguinaldo</th>}
+                    {hayVac && <th>Vacaciones</th>}
+                    {hayExtras && <th>Total</th>}
+                  </tr></thead>
                   <tbody>
-                    {liqSemana.map(l => (
-                      <tr key={l.id}>
-                        <td><strong>{l.empleado_nombre}</strong></td>
-                        <td>{l.horas > 0 ? l.horas + 'h' : '—'}</td>
-                        <td style={{ color: '#a78bfa' }}>{fmt(l.bruto)}</td>
-                        <td style={{ color: '#22c55e' }}>{l.viaticos > 0 ? '+' + fmt(l.viaticos) : '—'}</td>
-                        <td style={{ color: 'var(--red-light)' }}>{l.adelantos > 0 ? '-' + fmt(l.adelantos) : '—'}</td>
-                        <td style={{ color: 'var(--red-light)' }}>{l.boletas > 0 ? '-' + fmt(l.boletas) : '—'}</td>
-                        <td style={{ color: 'var(--gold)', fontWeight: 700 }}>{fmt(l.neto)}</td>
+                    {informe.map(e => (
+                      <tr key={e.nombre}>
+                        <td><strong>{e.nombre}</strong></td>
+                        <td>{e.horas > 0 ? e.horas + 'h' : '—'}</td>
+                        <td style={{ color: '#a78bfa' }}>{fmt(e.bruto)}</td>
+                        <td style={{ color: '#22c55e' }}>{e.viaticos > 0 ? '+' + fmt(e.viaticos) : '—'}</td>
+                        <td style={{ color: 'var(--red-light)' }}>{e.adelantos > 0 ? '-' + fmt(e.adelantos) : '—'}</td>
+                        <td style={{ color: 'var(--red-light)' }}>{e.boletas > 0 ? '-' + fmt(e.boletas) : '—'}</td>
+                        <td style={{ color: hayExtras ? 'var(--text)' : 'var(--gold)', fontWeight: 700 }}>{fmt(e.netoSueldo)}</td>
+                        {hayAg && <td style={{ color: '#f0abfc' }}>{e.aguinaldo > 0 ? '+' + fmt(e.aguinaldo) : '—'}</td>}
+                        {hayVac && <td style={{ color: '#7dd3fc' }}>{e.vacaciones > 0 ? '+' + fmt(e.vacaciones) : '—'}</td>}
+                        {hayExtras && <td style={{ color: 'var(--gold)', fontWeight: 700 }}>{fmt(e.neto)}</td>}
                       </tr>
                     ))}
                   </tbody>
+                  <tfoot>
+                    <tr style={{ background: 'var(--surface2)' }}>
+                      <td><strong>TOTAL</strong></td>
+                      <td><strong>{totHoras > 0 ? totHoras + 'h' : '—'}</strong></td>
+                      <td style={{ color: '#a78bfa', fontWeight: 700 }}>{fmt(totBruto)}</td>
+                      <td colSpan={3}></td>
+                      <td style={{ color: hayExtras ? 'var(--text)' : 'var(--gold)', fontWeight: 700, fontFamily: hayExtras ? undefined : "'Bebas Neue',cursive", fontSize: hayExtras ? undefined : 18 }}>{fmt(totSueldo)}</td>
+                      {hayAg && <td style={{ color: '#f0abfc', fontWeight: 700 }}>+{fmt(totAguinaldo)}</td>}
+                      {hayVac && <td style={{ color: '#7dd3fc', fontWeight: 700 }}>+{fmt(totVac)}</td>}
+                      {hayExtras && <td style={{ color: 'var(--gold)', fontWeight: 700, fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(totalMes)}</td>}
+                    </tr>
+                  </tfoot>
                 </table>
+
+                {/* Editor de aguinaldo / vacaciones del mes */}
+                <button onClick={() => setExtrasAbiertos(s => ({ ...s, [mes.key]: !extrasOpen }))}
+                  style={{ marginTop: 14, marginRight: 8, background: extrasOpen ? '#7c3aed' : 'none', border: '1px solid #7c3aed', color: extrasOpen ? '#fff' : '#a78bfa', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}>
+                  {extrasOpen
+                    ? (esMesAguinaldo ? '▲ Cerrar aguinaldo / vacaciones' : '▲ Cerrar vacaciones')
+                    : (esMesAguinaldo ? '🎁 Cargar aguinaldo / vacaciones' : '🏖️ Cargar vacaciones')}
+                </button>
+
+                {extrasOpen && (
+                  <div style={{ marginTop: 12, border: '1px solid #7c3aed', borderRadius: 10, padding: 14, background: 'var(--surface2)' }}>
+                    <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
+                      {esMesAguinaldo
+                        ? <>Aguinaldo = 50% del bruto del mes (se paga en junio y diciembre). Vacaciones (Comercio) = sueldo mensual ÷ 25 × días corridos (14 = 2 semanas, hasta 5 años). Montos editables. <span style={{ color: '#f0abfc' }}>El aguinaldo viene pre-cargado — revisá y guardá con 💾.</span></>
+                        : <>Cargá las vacaciones al empleado que se las tomás este mes. Vacaciones (Comercio) = sueldo mensual ÷ 25 × días corridos (14 = 2 semanas, hasta 5 años). El aguinaldo solo se paga en junio y diciembre.</>}
+                    </div>
+                    {empleados.map(emp => {
+                      const nombre = `${emp.apellido}, ${emp.nombre}`
+                      const brutoMes = mes.liqs.filter(l => l.empleado_nombre === nombre).reduce((s, l) => s + (Number(l.bruto) || 0), 0)
+                      const brutoRef = brutoMaxPorEmp[nombre] || brutoMes
+                      const key = `${mes.key}_${emp.id}`
+                      const agSaved = conceptosMes.find(c => c.empleado_id === emp.id && c.tipo === 'aguinaldo')
+                      const vacSaved = conceptosMes.find(c => c.empleado_id === emp.id && c.tipo === 'vacaciones')
+                      const aguinaldoSugerido = Math.round(brutoMes * 0.5)
+                      // En junio/diciembre, si el empleado trabajó y todavía no
+                      // tiene aguinaldo guardado, se pre-carga el 50% del bruto.
+                      const aguinaldoPre = (esMesAguinaldo && !agSaved && brutoMes > 0) ? aguinaldoSugerido : null
+                      const ed = extraEdit[key] || {
+                        aguinaldo: agSaved ? String(Number(agSaved.monto)) : (aguinaldoPre != null ? String(aguinaldoPre) : ''),
+                        vacDias: vacSaved?.dias ? String(vacSaved.dias) : '',
+                        vacMonto: vacSaved ? String(Number(vacSaved.monto)) : '',
+                      }
+                      const setEd = patch => setExtraEdit(s => ({ ...s, [key]: { ...ed, ...patch } }))
+                      const vacDiasNum = parseInt(ed.vacDias) || 14
+                      const vacSugerido = Math.round((brutoRef / 25) * vacDiasNum)
+                      // "dirty" también cuando hay un aguinaldo pre-cargado sin
+                      // guardar, para que el botón 💾 quede activo de una.
+                      const dirty = extraEdit[key] !== undefined || aguinaldoPre != null
+                      return (
+                        <div key={emp.id} style={{ display: 'grid', gridTemplateColumns: '1.4fr 1.2fr 2fr auto', gap: 10, alignItems: 'center', padding: '8px 0', borderTop: '1px solid var(--border)' }}>
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 13 }}>{emp.apellido}, {emp.nombre}</div>
+                            <div style={{ fontSize: 10, color: 'var(--muted)' }}>bruto mes {fmt(brutoMes)} · ref {fmt(brutoRef)}</div>
+                          </div>
+                          {/* Aguinaldo — solo en junio/diciembre (o si ya hay uno guardado) */}
+                          <div>
+                            <label style={{ fontSize: 10, color: '#f0abfc', display: 'block', marginBottom: 2 }}>Aguinaldo ($)</label>
+                            {(esMesAguinaldo || agSaved) ? (
+                              <div style={{ display: 'flex', gap: 4 }}>
+                                <input style={{ ...inp, padding: '5px 8px', fontSize: 13 }} type="number" placeholder="0" value={ed.aguinaldo} onChange={e => setEd({ aguinaldo: e.target.value })} />
+                                <button title={`50% de ${fmt(brutoMes)}`} onClick={() => setEd({ aguinaldo: String(aguinaldoSugerido) })} disabled={brutoMes <= 0}
+                                  style={{ padding: '0 8px', background: 'transparent', border: '1px solid #f0abfc', color: '#f0abfc', borderRadius: 6, cursor: brutoMes > 0 ? 'pointer' : 'not-allowed', fontSize: 11, whiteSpace: 'nowrap', opacity: brutoMes > 0 ? 1 : 0.4 }}>50%</button>
+                                {agSaved && (
+                                  <button title="Eliminar aguinaldo guardado" onClick={() => borrarConcepto(mes.key, emp, 'aguinaldo')} disabled={guardandoExtra === key}
+                                    style={{ padding: '0 8px', background: 'transparent', border: '1px solid var(--red-light)', color: 'var(--red-light)', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>🗑️</button>
+                                )}
+                              </div>
+                            ) : (
+                              <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic', padding: '6px 0' }}>Solo junio / diciembre</div>
+                            )}
+                          </div>
+                          {/* Vacaciones */}
+                          <div>
+                            <label style={{ fontSize: 10, color: '#7dd3fc', display: 'block', marginBottom: 2 }}>Vacaciones — días + monto ($)</label>
+                            <div style={{ display: 'flex', gap: 4 }}>
+                              <input style={{ ...inp, padding: '5px 8px', fontSize: 13, width: 60 }} type="number" placeholder="días" value={ed.vacDias} onChange={e => setEd({ vacDias: e.target.value })} />
+                              <input style={{ ...inp, padding: '5px 8px', fontSize: 13 }} type="number" placeholder="0" value={ed.vacMonto} onChange={e => setEd({ vacMonto: e.target.value })} />
+                              <button title={`${vacDiasNum} días × (${fmt(brutoRef)} ÷ 25)`} onClick={() => setEd({ vacDias: String(vacDiasNum), vacMonto: String(vacSugerido) })} disabled={brutoRef <= 0}
+                                style={{ padding: '0 8px', background: 'transparent', border: '1px solid #7dd3fc', color: '#7dd3fc', borderRadius: 6, cursor: brutoRef > 0 ? 'pointer' : 'not-allowed', fontSize: 11, whiteSpace: 'nowrap', opacity: brutoRef > 0 ? 1 : 0.4 }}>auto</button>
+                              {vacSaved && (
+                                <button title="Eliminar vacaciones guardadas" onClick={() => borrarConcepto(mes.key, emp, 'vacaciones')} disabled={guardandoExtra === key}
+                                  style={{ padding: '0 8px', background: 'transparent', border: '1px solid var(--red-light)', color: 'var(--red-light)', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>🗑️</button>
+                              )}
+                            </div>
+                          </div>
+                          <button onClick={() => guardarExtras(mes.key, emp, ed)} disabled={!dirty || guardandoExtra === key}
+                            style={{ padding: '7px 12px', background: dirty ? '#7c3aed' : 'var(--surface)', color: dirty ? '#fff' : 'var(--muted)', border: 'none', borderRadius: 8, cursor: dirty ? 'pointer' : 'not-allowed', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>
+                            {guardandoExtra === key ? '⏳' : '💾'}
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+
+                {/* Detalle semanal (colapsable) */}
+                <button onClick={() => setSemanasAbiertas(s => ({ ...s, [mes.key]: !abierto }))}
+                  style={{ marginTop: 14, background: 'none', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}>
+                  {abierto ? '▲ Ocultar semanas' : `▼ Ver detalle por semana (${semanasMes.length})`}
+                </button>
+
+                {abierto && semanasMes.map(semana => {
+                  const liqSemana = mes.liqs.filter(l => l.semana_inicio === semana)
+                  const totalSemana = liqSemana.reduce((s, l) => s + (Number(l.neto) || 0), 0)
+                  return (
+                    <div key={semana} style={{ marginTop: 14, border: '1px solid var(--border)', borderRadius: 10, padding: 14 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                        <div style={{ fontWeight: 700, fontSize: 13 }}>
+                          Semana {fmtDdMm(semana)} → {fmtDdMm(liqSemana[0]?.semana_fin || semana)}
+                        </div>
+                        <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: 'var(--gold)' }}>TOTAL: {fmt(totalSemana)}</div>
+                      </div>
+                      <table>
+                        <thead><tr><th>Empleado</th><th>Horas</th><th>Bruto</th><th>Viáticos</th><th>Adelantos</th><th>Boletas</th><th>Neto</th><th></th></tr></thead>
+                        <tbody>
+                          {liqSemana.map(l => {
+                            const editando = editLiqId === l.id
+                            if (editando) {
+                              const cell = { ...inp, padding: '4px 6px', fontSize: 13, textAlign: 'right' }
+                              const btn = { padding: '4px 8px', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: 13 }
+                              return (
+                                <tr key={l.id} style={{ background: 'rgba(124,58,237,0.10)' }}>
+                                  <td><strong>{l.empleado_nombre}</strong></td>
+                                  <td><input type="number" step="0.5" style={{ ...cell, width: 64 }} value={liqDraft.horas} onChange={e => cambiarDraftLiq(l, 'horas', e.target.value)} /></td>
+                                  <td><input type="number" step="100" style={{ ...cell, width: 92 }} value={liqDraft.bruto} onChange={e => cambiarDraftLiq(l, 'bruto', e.target.value)} /></td>
+                                  <td><input type="number" step="100" style={{ ...cell, width: 84 }} value={liqDraft.viaticos} onChange={e => cambiarDraftLiq(l, 'viaticos', e.target.value)} /></td>
+                                  <td><input type="number" step="100" style={{ ...cell, width: 84 }} value={liqDraft.adelantos} onChange={e => cambiarDraftLiq(l, 'adelantos', e.target.value)} /></td>
+                                  <td><input type="number" step="100" style={{ ...cell, width: 84 }} value={liqDraft.boletas} onChange={e => cambiarDraftLiq(l, 'boletas', e.target.value)} /></td>
+                                  <td style={{ color: 'var(--gold)', fontWeight: 700 }}>{fmt(netoDeDraft(liqDraft))}</td>
+                                  <td style={{ whiteSpace: 'nowrap' }}>
+                                    <button onClick={() => guardarLiq(l)} disabled={guardandoLiq} style={{ ...btn, background: '#7c3aed', color: '#fff', marginRight: 4 }}>{guardandoLiq ? '⏳' : '💾'}</button>
+                                    <button onClick={() => setEditLiqId(null)} style={{ ...btn, background: 'var(--surface2)', color: 'var(--muted)' }}>✕</button>
+                                  </td>
+                                </tr>
+                              )
+                            }
+                            return (
+                              <tr key={l.id}>
+                                <td><strong>{l.empleado_nombre}</strong></td>
+                                <td>{l.horas > 0 ? l.horas + 'h' : '—'}</td>
+                                <td style={{ color: '#a78bfa' }}>{fmt(l.bruto)}</td>
+                                <td style={{ color: '#22c55e' }}>{l.viaticos > 0 ? '+' + fmt(l.viaticos) : '—'}</td>
+                                <td style={{ color: 'var(--red-light)' }}>{l.adelantos > 0 ? '-' + fmt(l.adelantos) : '—'}</td>
+                                <td style={{ color: 'var(--red-light)' }}>{l.boletas > 0 ? '-' + fmt(l.boletas) : '—'}</td>
+                                <td style={{ color: 'var(--gold)', fontWeight: 700 }}>{fmt(l.neto)}</td>
+                                <td><button onClick={() => empezarEditarLiq(l)} title="Editar liquidación"
+                                  style={{ padding: '4px 8px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>✏️</button></td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )
+                })}
               </div>
             )
           })}
           {liquidaciones.length === 0 && <div className="card"><p style={{ color: 'var(--muted)', textAlign: 'center' }}>Sin liquidaciones registradas</p></div>}
-          <Paginador {...pagSemanas.controles} label="semanas" />
+          <Paginador {...pagMeses.controles} label="meses" />
         </div>
       )}
     </div>

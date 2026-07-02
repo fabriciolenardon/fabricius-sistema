@@ -14,8 +14,7 @@
 //   + todas las fechas con reloj ARG (lib/fechas), nunca UTC
 // ═══════════════════════════════════════════════════════════
 
-import { supabase } from './supabase.js'
-import { fetchAllRows } from './fetchAllRows.js'
+import { supabase, fetchAllRows } from './supabase.js'
 import { fechaHoyARG, fechaRelativaARG } from './fechas.js'
 import { buscarConGoogle } from './gemini.js'
 import { enviarWhatsapp } from './whatsapp.js'

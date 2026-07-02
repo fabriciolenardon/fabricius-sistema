@@ -105,7 +105,7 @@ export default function BuscadorGlobal() {
         { kw: ['etiquetas'],                     ruta: '/admin/etiquetas',   nombre: 'Etiquetas',   icono: '🏷️' },
         { kw: ['clientes'],                      ruta: '/admin/clientes',    nombre: 'Clientes',    icono: '👥' },
         { kw: ['pedidos'],                       ruta: '/admin/pedidos',     nombre: 'Pedidos',     icono: '📥' },
-        { kw: ['franquicia'],                    ruta: '/admin/franquicias', nombre: 'Franquicias', icono: '🏪' },
+        { kw: ['franquicia', 'franquicias'],     ruta: '/admin/clientes',    nombre: 'Clientes (franquicias)', icono: '🏪' },
         { kw: ['cheques'],                       ruta: '/admin/cheques',     nombre: 'Cheques',     icono: '📄' },
         { kw: ['sueldos', 'empleados', 'paga'],  ruta: '/admin/sueldos',     nombre: 'Sueldos',     icono: '💰' },
         { kw: ['gastos'],                        ruta: '/admin/gastos',      nombre: 'Gastos',      icono: '💸' },

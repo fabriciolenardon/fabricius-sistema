@@ -1,12 +1,13 @@
 // ClienteDashboard.jsx - Vistas del portal del cliente mayorista
 import { useEffect, useState } from 'react'
-import { supabase } from '../../lib/supabase'
+import { supabase, fetchAllRows } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
 import { fmtPrecio, fmtKg } from '../../lib/formatos'
 import { imprimirHTML } from '../../lib/imprimir'
 import { getLista } from '../../lib/listasPrecios'
+import { conSaldoCorriente } from '../../lib/ctaCorriente'
 function fmt(n) { return fmtPrecio(Math.abs(Number(n) || 0)) }
 
 // Hook compartido: trae el cliente vinculado al profile actual
@@ -61,16 +62,21 @@ export function ClienteDashboard() {
   async function cargarDatos() {
     if (!cliente) return
     const [{ data: movs }, { data: rems }] = await Promise.all([
-      supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id).order('fecha', { ascending: false }).limit(5),
-      supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false }).limit(3)
+      fetchAllRows(() => supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id)),
+      fetchAllRows(() => supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false }))
     ])
-    setMovimientos(movs || [])
-    setRemitos(rems || [])
+    // Saldo corriente recalculado EN ORDEN DE FECHA (para que la columna cierre
+    // bien con remitos cargados con fecha vieja). Más nuevo primero, hasta 1000.
+    setMovimientos(conSaldoCorriente(movs).slice(0, 1000))
+    setRemitos((rems || []).slice(0, 1000))
   }
 
   const saldo = cliente?.saldo || 0
   const totCompras = movimientos.filter(m => m.debe > 0).reduce((s, m) => s + m.debe, 0)
   const totPagado = movimientos.filter(m => m.haber > 0).reduce((s, m) => s + m.haber, 0)
+  // Paginar para que las listas no sean un scroll infinito (los datos siguen completos)
+  const pagMovs = usePaginacion(movimientos, 10)
+  const pagRems = usePaginacion(remitos, 5)
 
   if (loading) return <div style={{ padding: 40, color: 'var(--muted)', textAlign: 'center' }}>Cargando...</div>
   if (!cliente) return <div style={{ padding: 40, color: 'var(--muted)', textAlign: 'center' }}>Tu perfil de cliente no pudo cargarse. Contactá al administrador.</div>
@@ -101,7 +107,7 @@ export function ClienteDashboard() {
         })()}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 14, marginBottom: 24 }}>
         <div style={{ background: saldo > 0 ? '#3a1a1a' : '#1a3a27', border: `2px solid ${saldo > 0 ? 'var(--red-light)' : 'var(--green)'}`, borderRadius: 12, padding: 20, textAlign: 'center' }}>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8, letterSpacing: 2 }}>SALDO ACTUAL</div>
           <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 40, color: saldo > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(saldo)}</div>
@@ -114,7 +120,7 @@ export function ClienteDashboard() {
       {remitos.length > 0 && (
         <div className="card" style={{ marginBottom: 16, borderColor: 'var(--gold)' }}>
           <div className="card-title">🧾 Últimos remitos recibidos</div>
-          {remitos.map(r => (
+          {pagRems.items.map(r => (
             <div key={r.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                 <div>
@@ -131,6 +137,7 @@ export function ClienteDashboard() {
               ))}
             </div>
           ))}
+          <Paginador {...pagRems.controles} label="remitos" />
         </div>
       )}
 
@@ -139,19 +146,20 @@ export function ClienteDashboard() {
         <table>
           <thead><tr><th>Fecha</th><th>Tipo</th><th>Descripción</th><th>Debe</th><th>Haber</th><th>Saldo</th></tr></thead>
           <tbody>
-            {movimientos.map(m => (
+            {pagMovs.items.map(m => (
               <tr key={m.id}>
                 <td>{m.fecha}</td>
                 <td><span className={`badge ${m.tipo === 'compra' ? 'badge-red' : 'badge-green'}`}>{m.tipo}</span></td>
                 <td>{m.descripcion}</td>
                 <td style={{ color: 'var(--red-light)' }}>{m.debe > 0 ? fmt(m.debe) : '—'}</td>
                 <td style={{ color: 'var(--green)' }}>{m.haber > 0 ? fmt(m.haber) : '—'}</td>
-                <td style={{ fontWeight: 600, color: m.saldo > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(m.saldo)}</td>
+                <td style={{ fontWeight: 600, color: m.saldoCalc > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(m.saldoCalc)}</td>
               </tr>
             ))}
             {movimientos.length === 0 && <tr><td colSpan={6} className="empty">Sin movimientos</td></tr>}
           </tbody>
         </table>
+        <Paginador {...pagMovs.controles} label="movimientos" />
       </div>
     </div>
   )
@@ -166,10 +174,10 @@ export function ClienteCtaCte() {
 
   useEffect(() => {
     if (!cliente) return
-    supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id).order('fecha', { ascending: false }).then(({ data }) => setMovimientos(data || []))
+    fetchAllRows(() => supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id)).then(({ data }) => setMovimientos(conSaldoCorriente(data)))
     const canal = supabase.channel('ctacte-cliente')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'movimientos_ctacte', filter: `cliente_id=eq.${cliente.id}` }, () => {
-        supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id).order('fecha', { ascending: false }).then(({ data }) => setMovimientos(data || []))
+        fetchAllRows(() => supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id)).then(({ data }) => setMovimientos(conSaldoCorriente(data)))
       }).subscribe()
     return () => supabase.removeChannel(canal)
   }, [cliente])
@@ -182,7 +190,7 @@ export function ClienteCtaCte() {
     <div>
       <div className="page-title">MI CUENTA CORRIENTE</div>
       <div className="page-sub">Historial completo de compras y pagos</div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 14, marginBottom: 20 }}>
         <div style={{ background: saldo > 0 ? '#3a1a1a' : '#1a3a27', border: `2px solid ${saldo > 0 ? 'var(--red-light)' : 'var(--green)'}`, borderRadius: 12, padding: 20, textAlign: 'center' }}>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>SALDO ACTUAL</div>
           <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 48, color: saldo > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(saldo)}</div>
@@ -203,7 +211,7 @@ export function ClienteCtaCte() {
                 <td>{m.descripcion}</td>
                 <td style={{ color: 'var(--red-light)' }}>{m.debe > 0 ? fmt(m.debe) : '—'}</td>
                 <td style={{ color: 'var(--green)' }}>{m.haber > 0 ? fmt(m.haber) : '—'}</td>
-                <td style={{ fontWeight: 600, color: m.saldo > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(m.saldo)}</td>
+                <td style={{ fontWeight: 600, color: m.saldoCalc > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(m.saldoCalc)}</td>
               </tr>
             ))}
             {movimientos.length === 0 && <tr><td colSpan={6} className="empty">Sin movimientos registrados</td></tr>}
@@ -225,10 +233,10 @@ export function ClienteRemitos() {
 
   useEffect(() => {
     if (!cliente) return
-    supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false }).then(({ data }) => setRemitos(data || []))
+    fetchAllRows(() => supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false })).then(({ data }) => setRemitos(data || []))
     const canal = supabase.channel('remitos-cliente-lista')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'remitos', filter: `cliente_id=eq.${cliente.id}` }, () => {
-        supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false }).then(({ data }) => setRemitos(data || []))
+        fetchAllRows(() => supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false })).then(({ data }) => setRemitos(data || []))
       }).subscribe()
     return () => supabase.removeChannel(canal)
   }, [cliente])

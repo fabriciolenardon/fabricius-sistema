@@ -159,7 +159,7 @@ const RUTAS_VOZ = [
   { claves: ['sueldos'], ruta: '/admin/sueldos', nombre: 'Sueldos' },
   { claves: ['gastos'], ruta: '/admin/gastos', nombre: 'Gastos' },
   { claves: ['cierre'], ruta: '/admin/cierre', nombre: 'el Cierre' },
-  { claves: ['franquicias'], ruta: '/admin/franquicias', nombre: 'Franquicias' },
+  { claves: ['franquicias', 'franquicia'], ruta: '/admin/clientes', nombre: 'Clientes (franquicias)' },
   { claves: ['mayorista', 'ventas'], ruta: '/admin/ventas', nombre: 'Mayorista' },
   { claves: ['etiquetas'], ruta: '/admin/etiquetas', nombre: 'Etiquetas' },
   { claves: ['facturacion'], ruta: '/admin/facturacion', nombre: 'Facturación' },

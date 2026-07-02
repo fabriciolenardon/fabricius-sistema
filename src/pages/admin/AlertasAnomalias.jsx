@@ -18,6 +18,7 @@
 //     - Sobrante grande en arqueo (>$5.000) — revisar si pagaron de más
 // ============================================================
 import { useEffect, useState, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
 import { fmtKg } from '../../lib/formatos'
@@ -53,9 +54,11 @@ const hoyISO = () => fechaHoyARG()
 const fechaHaceDias = n => fechaRelativaARG(-n)
 
 export default function AlertasAnomalias() {
+  const navigate = useNavigate()
   const [arqueosSemana, setArqueosSemana] = useState([])
   const [ventasHoy, setVentasHoy] = useState([])
   const [stockNegativo, setStockNegativo] = useState([])
+  const [orfanos, setOrfanos] = useState([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => { cargar() }, [])
@@ -67,6 +70,7 @@ export default function AlertasAnomalias() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'ventas_minoristas' }, () => cargar())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'arqueos_caja' }, () => cargar())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_actual' }, () => cargar())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'precios' }, () => cargar())
       .subscribe()
     return () => supabase.removeChannel(canal)
   }, [])
@@ -74,14 +78,19 @@ export default function AlertasAnomalias() {
   async function cargar() {
     setLoading(true)
     const desde = fechaHaceDias(7)
-    const [{ data: arq }, { data: ventas }, { data: stock }] = await Promise.all([
+    const [{ data: arq }, { data: ventas }, { data: stock }, { data: prods }] = await Promise.all([
       supabase.from('arqueos_caja').select('*').gte('fecha', desde),
       supabase.from('ventas_minoristas').select('*').eq('origen', 'caja').eq('fecha', hoyISO()),
       supabase.from('stock_actual').select('*'),
+      // Productos "huérfanos": cerdo/embutido sin stock_origen y sin marcar
+      // "no descuenta" → se venden pero no descuentan stock.
+      supabase.from('precios').select('nombre, categoria, stock_origen, stock_no_aplica')
+        .in('categoria', ['cerdo_corte', 'cerdo_pieza', 'embutido']),
     ])
     setArqueosSemana(arq || [])
     setVentasHoy(ventas || [])
     setStockNegativo((stock || []).filter(s => Number(s.kg_disponible) < 0))
+    setOrfanos((prods || []).filter(p => !p.stock_origen && !p.stock_no_aplica))
     setLoading(false)
   }
 
@@ -117,6 +126,18 @@ export default function AlertasAnomalias() {
         icono: '⚠️',
         titulo: `Stock NEGATIVO en "${nombreStock(s.tipo)}": ${fmtKg(s.kg_disponible)}`,
         detalle: 'Significa que se vendió más mercadería de la que figura como ingresada. Revisar entradas/salidas.',
+      })
+    }
+
+    // 🟡 Productos huérfanos: cerdo/embutido sin stock asignado (se venden pero
+    // no descuentan stock). Hay que enlazarlos a su bucket en Precios.
+    if (orfanos.length > 0) {
+      list.push({
+        nivel: 'media',
+        icono: '📦',
+        titulo: `${orfanos.length} producto${orfanos.length === 1 ? '' : 's'} sin stock asignado`,
+        detalle: `Se vende${orfanos.length === 1 ? '' : 'n'} pero NO descuenta${orfanos.length === 1 ? '' : 'n'} stock: ${orfanos.map(o => (o.nombre || '').trim()).join(', ')}. Andá a Precios → ✏️ Administrar y enlazá cada uno a su bucket de stock (o marcalo "no descuenta" si es comprado para reventa).`,
+        link: '/admin/precios',
       })
     }
 
@@ -157,7 +178,7 @@ export default function AlertasAnomalias() {
     }
 
     return list
-  }, [arqueosSemana, ventasHoy, stockNegativo])
+  }, [arqueosSemana, ventasHoy, stockNegativo, orfanos])
 
   if (loading) {
     return (
@@ -194,12 +215,13 @@ export default function AlertasAnomalias() {
       </div>
 
       {alertas.map((a, i) => (
-        <div key={i} style={{
+        <div key={i} onClick={a.link ? () => navigate(a.link) : undefined} style={{
           padding: '10px 14px', marginBottom: 8,
           background: `${colorNivel[a.nivel]}11`,
           border: `1px solid ${colorNivel[a.nivel]}66`,
           borderLeft: `4px solid ${colorNivel[a.nivel]}`,
           borderRadius: 6,
+          cursor: a.link ? 'pointer' : 'default',
         }}>
           <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
             <div style={{ fontSize: 20, marginTop: 2 }}>{a.icono}</div>

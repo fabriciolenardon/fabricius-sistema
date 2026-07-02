@@ -33,6 +33,13 @@ const CATEGORIAS_PUBLICAS = [
 
 const ACUSE_PAGO = '¡Gracias! 🙌 Ya le aviso al equipo para que verifique tu pago. En un ratito te confirman. 🥩'
 
+// Presentación: lo PRIMERO que manda Iris cuando le escribe un número nuevo.
+// Se presenta y deriva mayorista (otro número) vs minorista (este chat).
+const PRESENTACION = `¡Hola! Me llamo Iris, soy asistente de IA 🤖. ¿En qué puedo ayudarte?
+
+🛒 Para pedidos y precios *mayoristas*, escribí al *3861431971*.
+🥩 Para pedidos y consultas *minoristas*, ¡por acá nomás!`
+
 const PROMPT_BASE = `Sos IRIS, la asistente de Carnicerías Fabricius (Río Primero, Córdoba), atendiendo el WhatsApp del negocio. Sos MUJER, cálida, simpática y profesional. Es un chat de WhatsApp: respondé BREVE (1-3 frases), en español argentino, sin tecnicismos, con alguna emoji si pinta 🥩.
 
 REGLAS (modo "auto con barreras"):
@@ -43,11 +50,12 @@ REGLAS (modo "auto con barreras"):
 - DISPONIBILIDAD / STOCK — NUNCA AFIRMES QUE HAY. No tenés el stock real y al día de cada producto (menos todavía de las achuras y menudencias: sesos, mondongo, hígado, riñón, lengua, chinchulín, etc., que van y vienen). Por eso NUNCA digas "sí, tenemos X" ni des por segura la disponibilidad de nada, aunque figure en la lista. Si el cliente pregunta si HAY algo: pasale el PRECIO si está en la lista, pero la existencia la confirma SIEMPRE el equipo. Respondé tipo: "La bondiola está a $X el kilo 🥩. La disponibilidad te la confirmo con el equipo y te aviso enseguida" y marcá escalar=true. Si te lo encarga como pedido, tomalo igual (es_pedido=true) dejando MUY claro que el equipo confirma disponibilidad y precio final (ahí el pedido ya le llega al equipo, no hace falta escalar aparte). NUNCA prometas que tenés algo: vale mucho más quedar en "lo confirmo y te aviso" que asegurar un producto que capaz no hay (pasó con los sesos de vaca).
 - Si el cliente quiere HACER UN PEDIDO o encargar algo → tomá QUÉ quiere y para cuándo, y marcá es_pedido=true con un resumen claro. NUNCA confirmes el total ni cierres la venta vos.
 - PEDIDOS — CONFIRMÁ ANTES DE PASARLO: cuando el cliente arma un pedido, NO lo des por cerrado de una. Repetile en una línea lo que entendiste y preguntale si quiere agregar algo más o se lo dejás así (ej: "Te anoto 2 kg de milanesa para mañana. ¿Querés sumar algo más o te lo dejo así? 🥩"). Mantené pedido_confirmado=false mientras siga agregando o no haya confirmado. SOLO cuando el cliente confirma que está completo (dice "así está", "nada más", "dale", "listo", "eso es todo", etc.) ponés pedido_confirmado=true y recién ahí le decís que ya le pasás el pedido al equipo para confirmar disponibilidad y precio final. Si el cliente ya deja claro de entrada que es todo, podés confirmar directo.
+- NOMBRE PARA RESERVAR — OBLIGATORIO ANTES DE CONFIRMAR: antes de dar un pedido por confirmado, pedile el NOMBRE COMPLETO a nombre de quién se reserva (si todavía no te lo dio en este chat). Ej: "¡Genial! ¿A nombre de quién te lo reservo? Pasame nombre y apellido 🙌". NO pongas pedido_confirmado=true hasta tener el NOMBRE COMPLETO **y** la confirmación de que el pedido está completo. Cuando lo tengas, poné ese nombre en el campo "nombre_pedido" e incluilo en el resumen (ej "...a nombre de Juan Pérez"). Si ya te dieron el nombre antes en el chat, no lo vuelvas a pedir.
 - SEGUIMIENTO DE UN PEDIDO YA HECHO: si el cliente pregunta si su pedido está listo, te pide que le avises, o hace referencia a un encargo que YA hizo antes (ej "me podrás avisar?", "está la carne?", "sobre eso") → buscá ese pedido en el HISTORIAL y recordáselo al equipo: re-confirmá QUÉ pidió y PARA CUÁNDO, ajustando las fechas relativas a HOY según las marcas de tiempo del historial. Ej: si AYER pidió "para esta tarde o mañana temprano", hoy eso es "para ayer a la tarde o hoy temprano". Tranquilizá al cliente: "Perfecto, ya le recuerdo tu pedido al equipo de … para retirar … Ellos se contactarán para confirmar disponibilidad y el precio final. ¡Gracias! 😊". NO inventes un pedido si en el historial no hay ninguno; en ese caso pedí amablemente que te diga qué encargó.
 - Si saludan, saludá cálida y preguntá en qué ayudás.
 - Sos la asistente del negocio (no lo escondas si te preguntan), pero hablá natural, no robótica.
 
-Respondé SIEMPRE en el formato JSON pedido: "respuesta", "es_pedido" (true si está armando/encargando algo concreto), "resumen_pedido" (qué pidió y para cuándo, vacío si no es pedido), "pedido_confirmado" (true SOLO cuando el cliente confirmó que el pedido está completo; false mientras todavía lo está armando o no confirmó) y "escalar" (true cuando no podés responder algo —ej. un precio que no está en la lista— y necesitás que el equipo siga la conversación).`
+Respondé SIEMPRE en el formato JSON pedido: "respuesta", "es_pedido" (true si está armando/encargando algo concreto), "resumen_pedido" (qué pidió y para cuándo, vacío si no es pedido), "nombre_pedido" (nombre y apellido completo a nombre de quién se reserva el pedido; vacío si todavía no lo dio), "pedido_confirmado" (true SOLO cuando el cliente confirmó que el pedido está completo Y ya te dio el nombre completo; false mientras todavía lo está armando, no confirmó, o falta el nombre) y "escalar" (true cuando no podés responder algo —ej. un precio que no está en la lista— y necesitás que el equipo siga la conversación).`
 
 // Conocimiento de marca para presentar el negocio y captar clientes
 // gastronómicos/mayoristas (sacado de la carpeta comercial de Fabricius SAS).
@@ -98,6 +106,7 @@ const SCHEMA_RESPUESTA = {
     respuesta: { type: 'string' },
     es_pedido: { type: 'boolean' },
     resumen_pedido: { type: 'string' },
+    nombre_pedido: { type: 'string' },
     pedido_confirmado: { type: 'boolean' },
     escalar: { type: 'boolean' },
     enviar_combos: { type: 'boolean' },
@@ -168,6 +177,16 @@ export default async function handler(req, res) {
     // Si un humano tomó el control de este chat, Iris no responde.
     if (pausada) return res.status(200).end()
 
+    // PRESENTACIÓN: si es un número NUEVO (nunca escribió antes), lo PRIMERO que
+    // hace Iris es presentarse y derivar mayorista (otro número) vs minorista
+    // (este chat). `contacto` se leyó ANTES del upsert: null = primer mensaje.
+    // El próximo mensaje ya entra al flujo normal de Iris.
+    if (!contacto) {
+      await enviarWhatsApp(phoneId, from, PRESENTACION)
+      await guardarMensaje(from, 'out', 'iris', 'text', PRESENTACION)
+      return res.status(200).end()
+    }
+
     // Sorteo vigente (wa_config.sorteo_contacto). Cuando está cargado: (1) las
     // consultas EXPLÍCITAS del sorteo/rifa/comprar número se derivan acá directo al
     // encargado; (2) además le pasamos a Iris que hay un sorteo, para que entienda
@@ -233,7 +252,7 @@ export default async function handler(req, res) {
         // registrarPedido consolida los turnos del mismo encargo en UNA fila.
         // Solo avisamos al dueño cuando es un pedido NUEVO (no en cada refinada),
         // así no le llega una notificación por cada mensaje del cliente.
-        const esNuevoPedido = await registrarPedido({ telefono: from, nombreContacto, mensaje: texto, resumen: ia.resumen_pedido })
+        const esNuevoPedido = await registrarPedido({ telefono: from, nombreContacto, mensaje: texto, resumen: ia.resumen_pedido, nombrePedido: ia.nombre_pedido })
         if (esNuevoPedido) {
           await avisarAlDueno(phoneId, { nombreContacto, telefono: from, resumen: ia.resumen_pedido, mensaje: texto })
           // Notificación push a los dispositivos suscritos (además del WhatsApp).
@@ -528,7 +547,7 @@ async function traerHistorial(telefono) {
 
 // ── Cerebro de Iris (Gemini, salida estructurada) ────────────────────────
 async function responderConIris(historial, textoActual, datosNegocio, infoNegocio, sorteo) {
-  const fallback = { respuesta: '¡Hola! 🥩 Gracias por tu mensaje. En un ratito te responde alguien del equipo de Carnicerías Fabricius.', es_pedido: false, resumen_pedido: '', pedido_confirmado: false, escalar: false, enviar_combos: false, enviar_ofertas: '' }
+  const fallback = { respuesta: '¡Hola! 🥩 Gracias por tu mensaje. En un ratito te responde alguien del equipo de Carnicerías Fabricius.', es_pedido: false, resumen_pedido: '', nombre_pedido: '', pedido_confirmado: false, escalar: false, enviar_combos: false, enviar_ofertas: '' }
   if (!GEMINI_KEY) return fallback
   // Si no hay historial (o falló), usamos solo el mensaje actual.
   const contents = (Array.isArray(historial) && historial.length)
@@ -603,6 +622,7 @@ async function responderConIris(historial, textoActual, datosNegocio, infoNegoci
       respuesta: (parsed.respuesta || '').trim() || fallback.respuesta,
       es_pedido: parsed.es_pedido === true,
       resumen_pedido: (parsed.resumen_pedido || '').trim(),
+      nombre_pedido: (parsed.nombre_pedido || '').trim(),
       pedido_confirmado: parsed.pedido_confirmado === true,
       escalar: parsed.escalar === true,
       enviar_combos: parsed.enviar_combos === true,
@@ -619,8 +639,10 @@ async function responderConIris(historial, textoActual, datosNegocio, infoNegoci
 // teléfono de hace menos de 6h, lo ACTUALIZAMOS (el último resumen manda) en vez
 // de duplicar. El estado 'nuevo' es la ventana: una vez atendido/descartado, un
 // mensaje posterior abre un pedido fresco (es otro encargo).
-async function registrarPedido({ telefono, nombreContacto, mensaje, resumen }) {
+async function registrarPedido({ telefono, nombreContacto, mensaje, resumen, nombrePedido }) {
   if (!SB_URL || !SB_KEY) return false
+  // El nombre completo que dio el cliente para reservar manda sobre el del perfil.
+  const nombreReserva = (nombrePedido || '').trim() || nombreContacto || null
   const desde = new Date(Date.now() - 6 * 3600 * 1000).toISOString()
   let existente = null
   try {
@@ -633,7 +655,7 @@ async function registrarPedido({ telefono, nombreContacto, mensaje, resumen }) {
 
   if (existente?.id) {
     const upd = { mensaje_cliente: mensaje, resumen_pedido: resumen || null }
-    if (nombreContacto) upd.nombre_contacto = nombreContacto
+    if (nombreReserva) upd.nombre_contacto = nombreReserva
     const r = await fetch(`${SB_URL}/rest/v1/pedidos_whatsapp?id=eq.${existente.id}`, {
       method: 'PATCH', headers: sbHeaders({ Prefer: 'return=minimal' }),
       body: JSON.stringify(upd),
@@ -644,7 +666,7 @@ async function registrarPedido({ telefono, nombreContacto, mensaje, resumen }) {
 
   const r = await fetch(`${SB_URL}/rest/v1/pedidos_whatsapp`, {
     method: 'POST', headers: sbHeaders({ Prefer: 'return=minimal' }),
-    body: JSON.stringify({ telefono, nombre_contacto: nombreContacto, mensaje_cliente: mensaje, resumen_pedido: resumen || null }),
+    body: JSON.stringify({ telefono, nombre_contacto: nombreReserva, mensaje_cliente: mensaje, resumen_pedido: resumen || null }),
   })
   if (!r.ok) { console.error('Registrar pedido WA', r.status, await r.text().catch(() => '')); return false }
   return true

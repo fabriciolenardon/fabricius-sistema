@@ -1,14 +1,14 @@
 // =============================================
 // CLIENTES & CUENTA CORRIENTE
 // =============================================
-import { useEffect, useState, useMemo } from 'react'
-import { supabase } from '../../lib/supabase'
-import { fetchAllRows } from '../../lib/fetchAllRows'
+import { useEffect, useState, useMemo, Fragment } from 'react'
+import { supabase, fetchAllRows } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
 import { parseNumero, fmtPrecio } from '../../lib/formatos'
 import { imprimirHTML } from '../../lib/imprimir'
-import { recomputarSaldoCliente } from '../../lib/ctaCorriente'
+import { recomputarSaldoCliente, conSaldoCorriente } from '../../lib/ctaCorriente'
 import { getEtiquetaLista } from '../../lib/listasPrecios'
+import { useEsMovil } from '../../lib/useEsMovil'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
 // URL publica de produccion del portal — NO usar window.location.origin para evitar URLs de preview de Vercel
@@ -25,7 +25,7 @@ export function Clientes() {
   const [busquedaCliente, setBusquedaCliente] = useState('')   // filtro lista clientes
   const [filtroSaldo, setFiltroSaldo] = useState('todos')      // todos | con_deuda | al_dia
   const [pago, setPago] = useState({ importe: '', forma: 'efectivo', fecha: fechaHoyARG(), notas: '' })
-  const [form, setForm] = useState({ nombre: '', nombre_fantasia: '', tipo: 'carniceria', telefono: '', localidad: '', domicilio: '', cuit: '', lista_precios: 'carn', notas: '' })
+  const [form, setForm] = useState({ nombre: '', nombre_fantasia: '', tipo: 'carniceria', telefono: '', localidad: '', domicilio: '', cuit: '', lista_precios: 'carn', notas: '', titular: '', es_franquicia: false })
   // Modal de gestion del portal: { tipo: 'habilitar'|'credenciales'|'revocar', cliente, email, credenciales, loading }
   const [modalPortal, setModalPortal] = useState(null)
   // Reporte "Cobranzas por período": aísla las compras/pagos de un rango de fechas
@@ -47,10 +47,11 @@ async function seleccionar(cliente) {
     setSeleccionado(cliente)
     setShowPago(false)
     setShowForm(false)
-    const { data: movs } = await supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id).order('fecha', { ascending: false })
-    setMovimientos(movs || [])
-    // Sin .limit — paginamos en cliente para mostrar todo el historial del cliente
-    const { data: rems } = await supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false })
+    // fetchAllRows: pagina de a 1000 → muestra TODO el historial del cliente aunque
+    // tenga miles de movimientos/remitos (Supabase corta en 1000 sin esto).
+    const { data: movs } = await fetchAllRows(() => supabase.from('movimientos_ctacte').select('*').eq('cliente_id', cliente.id))
+    setMovimientos(conSaldoCorriente(movs))
+    const { data: rems } = await fetchAllRows(() => supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false }))
     setRemitos(rems || [])
   }
   // Reporte de cobranzas por período: suma, por cliente, los remitos (compras) y
@@ -123,8 +124,8 @@ async function eliminarMovimiento(mov) {
   // Recalcular el saldo desde el ledger (antes se ajustaba a mano; el caso del
   // pago hacía `saldo + mov.haber`, que con numeric=string CONCATENA en vez de sumar).
   const nuevoSaldo = await recomputarSaldoCliente(seleccionado.id)
-  const { data: movs } = await supabase.from('movimientos_ctacte').select('*').eq('cliente_id', seleccionado.id).order('fecha', { ascending: false })
-  setMovimientos(movs || [])
+  const { data: movs } = await fetchAllRows(() => supabase.from('movimientos_ctacte').select('*').eq('cliente_id', seleccionado.id))
+  setMovimientos(conSaldoCorriente(movs))
   setSeleccionado(prev => ({ ...prev, saldo: nuevoSaldo }))
   setClientes(prev => prev.map(c => c.id === seleccionado.id ? { ...c, saldo: nuevoSaldo } : c))
 }
@@ -196,7 +197,7 @@ async function eliminarMovimiento(mov) {
 
   function abrirFormNuevo() {
     setEditandoId(null)
-    setForm({ nombre: '', nombre_fantasia: '', tipo: 'carniceria', telefono: '', localidad: '', domicilio: '', cuit: '', lista_precios: 'carn', notas: '' })
+    setForm({ nombre: '', nombre_fantasia: '', tipo: 'carniceria', telefono: '', localidad: '', domicilio: '', cuit: '', lista_precios: 'carn', notas: '', titular: '', es_franquicia: false })
     setShowForm(true)
     setSeleccionado(null)
   }
@@ -212,7 +213,9 @@ async function eliminarMovimiento(mov) {
       domicilio: cliente.domicilio || '',
       cuit: cliente.cuit || '',
       lista_precios: cliente.lista_precios || 'carn',
-      notas: cliente.notas || ''
+      notas: cliente.notas || '',
+      titular: cliente.titular || '',
+      es_franquicia: !!cliente.es_franquicia
     })
     setShowForm(true)
   }
@@ -228,7 +231,7 @@ async function eliminarMovimiento(mov) {
     } else {
       await supabase.from('clientes').insert({ ...form, saldo: 0 })
     }
-    setForm({ nombre: '', nombre_fantasia: '', tipo: 'carniceria', telefono: '', localidad: '', domicilio: '', cuit: '', lista_precios: 'carn', notas: '' })
+    setForm({ nombre: '', nombre_fantasia: '', tipo: 'carniceria', telefono: '', localidad: '', domicilio: '', cuit: '', lista_precios: 'carn', notas: '', titular: '', es_franquicia: false })
     setShowForm(false)
     setEditandoId(null)
     fetchClientes()
@@ -369,6 +372,7 @@ async function eliminarMovimiento(mov) {
   }
 
   const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
+  const esMovil = useEsMovil()
   const totalDeuda = clientes.filter(c => c.saldo > 0).reduce((s, c) => s + c.saldo, 0)
   const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }
 
@@ -415,7 +419,7 @@ async function eliminarMovimiento(mov) {
             const tPendiente = cobData.reduce((s, f) => s + f.pendiente, 0)
             return (
               <>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
                   <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, textAlign: 'center' }}>
                     <div style={{ fontSize: 10, color: 'var(--muted)' }}>COMPRARON EN EL PERÍODO</div>
                     <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 26, color: 'var(--amber)' }}>{fmt(tComprado)}</div>
@@ -488,6 +492,16 @@ async function eliminarMovimiento(mov) {
             <div className="form-group"><label>CUIT</label><input style={inp} value={form.cuit} onChange={e => setForm(f => ({ ...f, cuit: e.target.value }))} placeholder="XX-XXXXXXXX-X" /></div>
           </div>
           <div className="form-row">
+            <div className="form-group"><label>Titular / dueño</label><input style={inp} value={form.titular} onChange={e => setForm(f => ({ ...f, titular: e.target.value }))} placeholder="Nombre del dueño (opcional)" /></div>
+            <div className="form-group">
+              <label>¿Es franquicia nuestra?</label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: 'var(--surface2)', border: `1px solid ${form.es_franquicia ? 'var(--gold)' : 'var(--border)'}`, borderRadius: 8, cursor: 'pointer', fontSize: 14, userSelect: 'none' }}>
+                <input type="checkbox" checked={form.es_franquicia} onChange={e => setForm(f => ({ ...f, es_franquicia: e.target.checked }))} style={{ width: 16, height: 16, accentColor: 'var(--gold)' }} />
+                🏪 Sí, es franquicia Fabricius
+              </label>
+            </div>
+          </div>
+          <div className="form-row">
             <div className="form-group"><label>Teléfono</label><input style={inp} value={form.telefono} onChange={e => setForm(f => ({ ...f, telefono: e.target.value }))} /></div>
             <div className="form-group"><label>Localidad</label><input style={inp} value={form.localidad} onChange={e => setForm(f => ({ ...f, localidad: e.target.value }))} /></div>
           </div>
@@ -514,7 +528,7 @@ async function eliminarMovimiento(mov) {
         <div className="stat"><div className="stat-label">Clientes registrados</div><div className="stat-value" style={{ color: 'var(--gold)' }}>{clientes.length}</div></div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: seleccionado ? '1fr 2fr' : '1fr', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : (seleccionado ? '1fr 2fr' : '1fr'), gap: 16 }}>
         <ListaClientes
           clientes={clientes}
           seleccionado={seleccionado}
@@ -533,7 +547,10 @@ async function eliminarMovimiento(mov) {
             <div className="card" style={{ marginBottom: 16, borderColor: 'var(--gold)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
-                  <div className="card-title" style={{ marginBottom: 4 }}>{seleccionado.nombre}</div>
+                  <div className="card-title" style={{ marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    {seleccionado.nombre}
+                    {seleccionado.es_franquicia && <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.5, background: 'var(--gold)', color: '#000', borderRadius: 5, padding: '2px 8px' }}>🏪 FRANQUICIA</span>}
+                  </div>
                   {seleccionado.nombre_fantasia && <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>"{seleccionado.nombre_fantasia}"</div>}
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
@@ -542,14 +559,15 @@ async function eliminarMovimiento(mov) {
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr 1fr' : '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
                 {[
                   { label: 'CUIT', val: seleccionado.cuit || '—' },
                   { label: 'Teléfono', val: seleccionado.telefono || '—' },
                   { label: 'Localidad', val: seleccionado.localidad || '—' },
                   { label: 'Domicilio', val: seleccionado.domicilio || '—' },
                   { label: 'Lista precios', val: getEtiquetaLista(seleccionado.lista_precios) },
-                  { label: 'Tipo', val: seleccionado.tipo },
+                  { label: 'Tipo', val: `${TIPO_INFO[seleccionado.tipo]?.icon || ''} ${TIPO_INFO[seleccionado.tipo]?.label || seleccionado.tipo}`.trim() },
+                  { label: 'Titular', val: seleccionado.titular || '—' },
                 ].map(d => (
                   <div key={d.label} style={{ background: 'var(--surface2)', borderRadius: 8, padding: '8px 12px' }}>
                     <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 2 }}>{d.label}</div>
@@ -582,7 +600,7 @@ async function eliminarMovimiento(mov) {
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
                 <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, textAlign: 'center' }}>
                   <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>SALDO</div>
                   <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 24, color: seleccionado.saldo > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(seleccionado.saldo)}</div>
@@ -605,7 +623,7 @@ async function eliminarMovimiento(mov) {
                 const saldoDespues = (seleccionado.saldo || 0) - importeParseado
                 return (
                   <div style={{ marginTop: 16, padding: 16, background: 'var(--surface2)', borderRadius: 8 }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : '1fr 1fr', gap: 8, marginBottom: 8 }}>
                       <div className="form-group">
                         <label>Importe ($)</label>
                         <input
@@ -664,6 +682,7 @@ async function eliminarMovimiento(mov) {
               })()}
             </div>
 
+            <MovimientosCliente movimientos={movimientos} fmt={fmt} />
             <RemitosCliente remitos={remitos} imprimirRemito={imprimirRemito} />
             <PagosCliente movimientos={movimientos} onAnular={anularPago} fmt={fmt} />
 {false && (
@@ -824,10 +843,40 @@ async function eliminarMovimiento(mov) {
 // Sub-componente: lista paginada de remitos del cliente seleccionado.
 // Antes mostraba 20 remitos máx; ahora pagina todos.
 function RemitosCliente({ remitos, imprimirRemito }) {
-  const pag = usePaginacion(remitos || [], 20)
+  const [desde, setDesde] = useState('')
+  const [hasta, setHasta] = useState('')
+  const lista = remitos || []
+  const hayFiltro = !!(desde || hasta)
+  // Filtra por rango de fecha de emisión del remito.
+  const filtrados = hayFiltro
+    ? lista.filter(r => (!desde || r.fecha >= desde) && (!hasta || r.fecha <= hasta))
+    : lista
+  // Total a cobrar del rango: SOLO remitos no anulados (un anulado no es una compra).
+  const noAnulados = filtrados.filter(r => !r.eliminado)
+  const totalRango = noAnulados.reduce((s, r) => s + (Number(r.total) || 0), 0)
+  const pag = usePaginacion(filtrados, 20)
+  const inpF = { padding: '7px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 13 }
   return (
     <div className="card" style={{ marginBottom: 16 }}>
-      <div className="card-title">🧾 Remitos ({(remitos || []).length})</div>
+      <div className="card-title">🧾 Remitos ({lista.length})</div>
+      {/* Buscador por fecha + total a cobrar del rango (para no sumar a mano) */}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 14, padding: 12, background: 'var(--surface2)', borderRadius: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <label style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 700 }}>DESDE</label>
+          <input type="date" value={desde} onChange={e => setDesde(e.target.value)} style={inpF} />
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <label style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 700 }}>HASTA</label>
+          <input type="date" value={hasta} onChange={e => setHasta(e.target.value)} style={inpF} />
+        </div>
+        {hayFiltro && <button className="btn btn-ghost btn-sm" onClick={() => { setDesde(''); setHasta('') }}>Limpiar</button>}
+        <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
+          <div style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 700, letterSpacing: 0.5 }}>
+            {hayFiltro ? `TOTAL A COBRAR DEL RANGO · ${noAnulados.length} boleta${noAnulados.length === 1 ? '' : 's'}` : `TOTAL · ${noAnulados.length} boleta${noAnulados.length === 1 ? '' : 's'}`}
+          </div>
+          <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 26, color: 'var(--gold)', lineHeight: 1 }}>${Math.round(totalRango).toLocaleString('es-AR')}</div>
+        </div>
+      </div>
       <table>
         <thead><tr><th>N° Remito</th><th>Fecha</th><th>Total</th><th>Imprimir</th></tr></thead>
         <tbody>
@@ -842,7 +891,7 @@ function RemitosCliente({ remitos, imprimirRemito }) {
               <td>{!r.eliminado && <button onClick={() => imprimirRemito(r)} style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>🖨️</button>}</td>
             </tr>
           ))}
-          {(remitos || []).length === 0 && <tr><td colSpan={4} className="empty">Sin remitos</td></tr>}
+          {filtrados.length === 0 && <tr><td colSpan={4} className="empty">{hayFiltro ? 'Sin remitos en ese rango' : 'Sin remitos'}</td></tr>}
         </tbody>
       </table>
       <Paginador {...pag.controles} label="remitos" />
@@ -856,37 +905,79 @@ function RemitosCliente({ remitos, imprimirRemito }) {
 // Antes: render plano de todos los clientes (>100 filas). Lag y
 // scroll molesto. Ahora: input de búsqueda + toggle "todos/deuda/al día"
 // + paginador (20 por página).
+// Tipos de cliente: orden, ícono y etiqueta para agrupar la lista en secciones.
+const TIPO_INFO = {
+  carniceria: { icon: '🥩', label: 'Carnicerías' },
+  mayorista:  { icon: '📦', label: 'Mayoristas' },
+  minorista:  { icon: '🛒', label: 'Minoristas' },
+  sucursal:   { icon: '🏪', label: 'Sucursales' },
+  otro:       { icon: '•',  label: 'Otros' },
+}
+const TIPO_ORDEN = ['carniceria', 'mayorista', 'minorista', 'sucursal', 'otro']
+const ordenTipo = t => { const i = TIPO_ORDEN.indexOf(t); return i === -1 ? 99 : i }
+
 function ListaClientes({ clientes, seleccionado, onSeleccionar, onEditar, onEliminar, busqueda, setBusqueda, filtroSaldo, setFiltroSaldo, fmt }) {
-  const filtrados = useMemo(() => {
+  // Solapa de tipo: 'todos' muestra las secciones agrupadas; cada otra aísla un tipo.
+  const [filtroTipo, setFiltroTipo] = useState('todos')
+
+  // Base = búsqueda + filtro de saldo (sin tipo). Sirve para contar por tipo.
+  const base = useMemo(() => {
     const q = (busqueda || '').toLowerCase().trim()
     return clientes.filter(c => {
-      // Filtro búsqueda: nombre + nombre_fantasia + localidad
       if (q) {
-        const hay = (
-          (c.nombre || '').toLowerCase() + ' ' +
-          (c.nombre_fantasia || '').toLowerCase() + ' ' +
-          (c.localidad || '').toLowerCase()
-        ).includes(q)
+        const hay = ((c.nombre || '') + ' ' + (c.nombre_fantasia || '') + ' ' + (c.localidad || '') + ' ' + (c.titular || '')).toLowerCase().includes(q)
         if (!hay) return false
       }
-      // Filtro saldo
       if (filtroSaldo === 'con_deuda' && !(Number(c.saldo) > 0)) return false
       if (filtroSaldo === 'al_dia' && Number(c.saldo) > 0) return false
       return true
     })
   }, [clientes, busqueda, filtroSaldo])
 
+  // Conteo por tipo (para las solapas)
+  const conteoTipo = useMemo(() => {
+    const m = {}
+    base.forEach(c => { const t = c.tipo || 'otro'; m[t] = (m[t] || 0) + 1 })
+    return m
+  }, [base])
+
+  // Aplica solapa de tipo + ordena: por tipo, franquicias primero, luego nombre.
+  const filtrados = useMemo(() => {
+    const arr = filtroTipo === 'todos' ? base : base.filter(c => (c.tipo || 'otro') === filtroTipo)
+    return arr.slice().sort((a, b) => {
+      const ta = ordenTipo(a.tipo || 'otro'), tb = ordenTipo(b.tipo || 'otro')
+      if (ta !== tb) return ta - tb
+      const fa = a.es_franquicia ? 0 : 1, fb = b.es_franquicia ? 0 : 1
+      if (fa !== fb) return fa - fb
+      return (a.nombre || '').localeCompare(b.nombre || '')
+    })
+  }, [base, filtroTipo])
+
   const pag = usePaginacion(filtrados, 20)
 
+  // Deuda total por tipo (sobre filtrados) para el encabezado de cada sección.
+  const deudaTipo = useMemo(() => {
+    const m = {}
+    filtrados.forEach(c => { if (Number(c.saldo) > 0) { const t = c.tipo || 'otro'; m[t] = (m[t] || 0) + Number(c.saldo) } })
+    return m
+  }, [filtrados])
+  const countTipoFiltrado = t => filtrados.filter(c => (c.tipo || 'otro') === t).length
+
+  const solapas = [
+    { id: 'todos', icon: '👥', label: 'Todos', n: base.length },
+    ...TIPO_ORDEN.filter(t => conteoTipo[t]).map(t => ({ id: t, icon: TIPO_INFO[t].icon, label: TIPO_INFO[t].label, n: conteoTipo[t] })),
+  ]
+
+  let tipoPrev = null
   return (
     <div className="card">
-      <div className="card-title">Clientes ({filtrados.length}{filtrados.length !== clientes.length ? ` de ${clientes.length}` : ''})</div>
+      <div className="card-title">Clientes ({base.length}{base.length !== clientes.length ? ` de ${clientes.length}` : ''})</div>
 
-      {/* Búsqueda + filtros */}
+      {/* Búsqueda */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
         <input
           type="text"
-          placeholder="🔍 Buscar nombre, fantasía o localidad..."
+          placeholder="🔍 Buscar nombre, fantasía, titular o localidad..."
           value={busqueda}
           onChange={e => setBusqueda(e.target.value)}
           style={{ flex: 1, minWidth: 180, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '6px 10px', fontSize: 12 }}
@@ -897,42 +988,82 @@ function ListaClientes({ clientes, seleccionado, onSeleccionar, onEditar, onElim
         )}
       </div>
 
-      <div style={{ display: 'flex', gap: 4, marginBottom: 10, flexWrap: 'wrap' }}>
+      {/* Solapas por TIPO de cliente */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
+        {solapas.map(s => {
+          const activa = filtroTipo === s.id
+          return (
+            <button key={s.id} onClick={() => setFiltroTipo(s.id)}
+              style={{
+                padding: '5px 10px', borderRadius: 7, cursor: 'pointer', fontSize: 11, fontWeight: 700,
+                display: 'flex', alignItems: 'center', gap: 5,
+                border: `1px solid ${activa ? 'var(--gold)' : 'var(--border)'}`,
+                background: activa ? 'var(--gold)' : 'transparent',
+                color: activa ? '#000' : 'var(--text2)',
+              }}>
+              {s.icon} {s.label}
+              <span style={{ background: activa ? 'rgba(0,0,0,0.15)' : 'var(--surface2)', borderRadius: 10, padding: '0 6px', fontSize: 10, fontWeight: 800 }}>{s.n}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Filtro por saldo */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 12, flexWrap: 'wrap' }}>
         {[
-          { id: 'todos',     label: `Todos` },
+          { id: 'todos',     label: `Todos los saldos` },
           { id: 'con_deuda', label: `💳 Con deuda` },
           { id: 'al_dia',    label: `✅ Al día` },
         ].map(opt => (
           <button key={opt.id} onClick={() => setFiltroSaldo(opt.id)}
             style={{
               padding: '4px 10px', borderRadius: 6,
-              border: `1px solid ${filtroSaldo === opt.id ? 'var(--gold)' : 'var(--border)'}`,
-              background: filtroSaldo === opt.id ? 'var(--gold)' : 'transparent',
-              color: filtroSaldo === opt.id ? '#000' : 'var(--muted)',
+              border: `1px solid ${filtroSaldo === opt.id ? 'var(--text2)' : 'var(--border)'}`,
+              background: filtroSaldo === opt.id ? 'var(--surface2)' : 'transparent',
+              color: filtroSaldo === opt.id ? 'var(--text)' : 'var(--muted)',
               cursor: 'pointer', fontSize: 11, fontWeight: 600,
             }}>{opt.label}</button>
         ))}
       </div>
 
-      {pag.items.map(c => (
-        <div key={c.id}
-          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 8px', borderBottom: '1px solid var(--border)', borderRadius: 6, background: seleccionado?.id === c.id ? 'var(--surface2)' : 'transparent' }}>
-          <div onClick={() => onSeleccionar(c)} style={{ flex: 1, cursor: 'pointer' }}>
-            <div style={{ fontWeight: 600 }}>{c.nombre}</div>
-            <div style={{ fontSize: 11, color: 'var(--muted)' }}>{c.nombre_fantasia ? `"${c.nombre_fantasia}" · ` : ''}{c.localidad} · {c.tipo}</div>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {c.tiene_portal && <span title="Portal habilitado" style={{ fontSize: 13, color: 'var(--green)' }}>📱</span>}
-            <span style={{ color: c.saldo > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 700, fontSize: 13 }}>
-              {c.saldo > 0 ? fmt(c.saldo) + ' debe' : c.saldo < 0 ? fmt(Math.abs(c.saldo)) + ' a favor' : '✅ Al día'}
-            </span>
-            <button onClick={() => onEditar(c)}
-              style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#000' }}>✏️</button>
-            <button onClick={() => onEliminar(c)}
-              style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--red-light)' }}>🗑️</button>
-          </div>
-        </div>
-      ))}
+      {pag.items.map(c => {
+        const t = c.tipo || 'otro'
+        const mostrarHeader = t !== tipoPrev
+        tipoPrev = t
+        const info = TIPO_INFO[t] || TIPO_INFO.otro
+        return (
+          <Fragment key={c.id}>
+            {mostrarHeader && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', margin: '14px 0 6px', paddingBottom: 4, borderBottom: '2px solid var(--border)' }}>
+                <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.8, color: 'var(--gold)' }}>{info.icon} {info.label.toUpperCase()} · {countTipoFiltrado(t)}</span>
+                {deudaTipo[t] > 0 && <span style={{ fontSize: 10.5, color: 'var(--red-light)', fontWeight: 700 }}>{fmt(deudaTipo[t])} en deuda</span>}
+              </div>
+            )}
+            <div
+              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '10px 8px', borderBottom: '1px solid var(--border)', borderRadius: 6, background: seleccionado?.id === c.id ? 'var(--surface2)' : 'transparent' }}>
+              <div onClick={() => onSeleccionar(c)} style={{ flex: 1, cursor: 'pointer', minWidth: 0 }}>
+                <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <span>{c.nombre}</span>
+                  {c.es_franquicia && <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 0.5, background: 'var(--gold)', color: '#000', borderRadius: 4, padding: '1px 6px' }}>🏪 FRANQUICIA</span>}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {[c.nombre_fantasia ? `"${c.nombre_fantasia}"` : '', c.titular ? `👤 ${c.titular}` : '', c.localidad].filter(Boolean).join(' · ') || '—'}
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {c.tiene_portal && <span title="Portal habilitado" style={{ fontSize: 13, color: 'var(--green)' }}>📱</span>}
+                <span style={{ color: c.saldo > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap' }}>
+                  {c.saldo > 0 ? fmt(c.saldo) + ' debe' : c.saldo < 0 ? fmt(Math.abs(c.saldo)) + ' a favor' : '✅ Al día'}
+                </span>
+                <button onClick={() => onEditar(c)}
+                  style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#000' }}>✏️</button>
+                <button onClick={() => onEliminar(c)}
+                  style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--red-light)' }}>🗑️</button>
+              </div>
+            </div>
+          </Fragment>
+        )
+      })}
       {filtrados.length === 0 && (
         <p style={{ color: 'var(--muted)', textAlign: 'center', padding: 20 }}>
           {clientes.length === 0 ? 'Sin clientes registrados' : 'Ningún cliente con esos filtros'}
@@ -950,6 +1081,34 @@ function ListaClientes({ clientes, seleccionado, onSeleccionar, onEditar, onElim
 // para verlos ni anularlos. Solo aparecían sumarizados en "TOTAL PAGADO".
 // Ahora se muestran en una tabla espejo de la de remitos: paginada,
 // con botón 🗑️ Anular que revierte el saldo al cliente.
+// Cuenta corriente completa: debe / haber / saldo corrido (en orden de fecha,
+// igual que el portal del cliente). 10 filas por página.
+function MovimientosCliente({ movimientos, fmt }) {
+  const pag = usePaginacion(movimientos, 10)
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card-title">📒 Cuenta corriente ({movimientos.length} movimientos)</div>
+      <table>
+        <thead><tr><th>Fecha</th><th>Tipo</th><th>Descripción</th><th style={{ textAlign: 'right' }}>Debe</th><th style={{ textAlign: 'right' }}>Haber</th><th style={{ textAlign: 'right' }}>Saldo</th></tr></thead>
+        <tbody>
+          {pag.items.map(m => (
+            <tr key={m.id}>
+              <td>{m.fecha}</td>
+              <td><span className={`badge ${m.tipo === 'compra' ? 'badge-red' : 'badge-green'}`}>{m.tipo}</span></td>
+              <td>{m.descripcion || '—'}</td>
+              <td style={{ textAlign: 'right', color: 'var(--red-light)' }}>{m.debe > 0 ? fmt(m.debe) : '—'}</td>
+              <td style={{ textAlign: 'right', color: 'var(--green)' }}>{m.haber > 0 ? fmt(m.haber) : '—'}</td>
+              <td style={{ textAlign: 'right', fontWeight: 700, color: m.saldoCalc > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(m.saldoCalc)}</td>
+            </tr>
+          ))}
+          {movimientos.length === 0 && <tr><td colSpan={6} className="empty">Sin movimientos</td></tr>}
+        </tbody>
+      </table>
+      <Paginador {...pag.controles} label="movimientos" />
+    </div>
+  )
+}
+
 function PagosCliente({ movimientos, onAnular, fmt }) {
   const pagos = useMemo(() =>
     (movimientos || []).filter(m => m.tipo === 'pago' || m.tipo === 'cheque'),

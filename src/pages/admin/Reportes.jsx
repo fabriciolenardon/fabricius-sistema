@@ -15,10 +15,10 @@
 // Todos los reportes usan fmtPrecio (formato AR uniforme).
 // ============================================================
 import { useState, useEffect, useMemo } from 'react'
-import { supabase } from '../../lib/supabase'
-import { fetchAllRows } from '../../lib/fetchAllRows'
+import { supabase, fetchAllRows } from '../../lib/supabase'
 import { fmtPrecio, fmtKg } from '../../lib/formatos'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
+import { totalesConceptos, fechaImputacionConcepto } from '../../lib/cierreAuto'
 
 const fmt = n => fmtPrecio(Number(n) || 0)
 const fmtK = n => fmtKg(Number(n) || 0)
@@ -63,12 +63,15 @@ export function useReportesData(periodo) {
       // chicas y no se paginan.
       const [entradas, salidas, ventasCaja, pedidos, clientes,
              despostesCosto, cajasCosto, preciosLookup, entradasCosto,
-             gastos, sueldos, pagosProveedores, movimientosCtacte] = await Promise.all([
+             gastos, sueldos, pagosProveedores, movimientosCtacte,
+             conceptosR, mesesOpR] = await Promise.all([
+        // fetchAllRows: pagina de a 1000 → en períodos largos (Año en curso) ningún
+        // total se corta. Las transaccionales superan fácil las 1000 filas.
         fetchAllRows(() => supabase.from('entradas_deposito').select('*').eq('eliminado', false).gte('fecha', desde).lte('fecha', hoy)),
         fetchAllRows(() => supabase.from('salidas_deposito').select('*').gte('fecha', desde).lte('fecha', hoy)),
         fetchAllRows(() => supabase.from('ventas_minoristas').select('*').eq('origen', 'caja').gte('fecha', desde).lte('fecha', hoy)),
         fetchAllRows(() => supabase.from('pedidos').select('*').gte('dia_entrega', desde).lte('dia_entrega', hoy).eq('estado', 'confirmado')),
-        supabase.from('clientes').select('id, nombre, tipo, lista_precios, saldo'),
+        fetchAllRows(() => supabase.from('clientes').select('id, nombre, tipo, lista_precios, saldo')),
         // Cost data (ventana 180d)
         fetchAllRows(() => supabase.from('despostes').select('piezas, fecha').gte('fecha', desdeCosto).lte('fecha', hoy)),
         fetchAllRows(() => supabase.from('cajas_stock').select('producto_id, precio_costo_kg, kg, fecha_ingreso').gte('fecha_ingreso', desdeCosto)),
@@ -79,6 +82,9 @@ export function useReportesData(periodo) {
         fetchAllRows(() => supabase.from('liquidaciones_sueldos').select('*').gte('semana_inicio', desde).lte('semana_fin', hoy)),
         fetchAllRows(() => supabase.from('pagos_proveedores').select('*').gte('fecha', desde).lte('fecha', hoy)),
         fetchAllRows(() => supabase.from('movimientos_ctacte').select('*').gte('fecha', desde).lte('fecha', hoy)),
+        // Aguinaldo/vacaciones (se imputan a la fecha de cierre de su mes operativo)
+        supabase.from('conceptos_sueldos').select('mes, tipo, monto'),
+        supabase.from('meses_operativos').select('mes, fecha_cierre'),
       ])
 
       if (cancelado) return
@@ -120,6 +126,8 @@ export function useReportesData(periodo) {
         // SAS que paga un tercero, ej: luz Alvear) no son gastos nuestros.
         gastos: (gastos.data || []).filter(g => !g.solo_balance),
         sueldos: sueldos.data || [],
+        conceptos: conceptosR.data || [],
+        mesesOp: mesesOpR.data || [],
         pagosProveedores: pagosProveedores.data || [],
         movimientosCtacte: movimientosCtacte.data || [],
         desde, hasta: hoy,
@@ -226,7 +234,7 @@ export function ReporteCajas({ periodo }) {
     async function cargar() {
       setLoading(true)
       const [{ data: cjs }, { data: prods }] = await Promise.all([
-        supabase.from('cajas_stock').select('*'),
+        fetchAllRows(() => supabase.from('cajas_stock').select('*')),
         supabase.from('precios').select('id, nombre, categoria')
           .in('categoria', ['bovino_caja_cb', 'bovino_caja_pt']),
       ])
@@ -1158,10 +1166,12 @@ export function ReporteFlujo({ data }) {
   //   - pagos recibidos de clientes (movimientos_ctacte tipo='pago')
   //   - ingresos extras cargados como gastos.tipo='ingreso'
   const ingresos = useMemo(() => {
-    const caja = data.ventasCaja.reduce((s, v) =>
-      s + (Number(v.efectivo) || 0) + (Number(v.debito) || 0) + (Number(v.transferencia) || 0), 0)
+    // Usa el TOTAL de la venta (no el desglose por medio de pago): es el importe
+    // real vendido y es inmune a un typo en efectivo/débito/transferencia.
+    const caja = data.ventasCaja.reduce((s, v) => s + (Number(v.total) || 0), 0)
+    // Cheques NO cuentan como ingreso: se endosan a proveedores, no se cobran.
     const cobranzasCtacte = data.movimientosCtacte
-      .filter(m => m.tipo === 'pago' || m.tipo === 'cheque')
+      .filter(m => m.tipo === 'pago')
       .reduce((s, m) => s + (Number(m.haber) || 0), 0)
     const extras = data.gastos.filter(g => g.tipo === 'ingreso').reduce((s, g) => s + (Number(g.monto) || 0), 0)
     return { caja, cobranzasCtacte, extras, total: caja + cobranzasCtacte + extras }
@@ -1178,8 +1188,10 @@ export function ReporteFlujo({ data }) {
     const gastosVariables = data.gastos.filter(g => g.tipo === 'variable').reduce((s, g) => s + (Number(g.monto) || 0), 0)
     const retirosSocios   = data.gastos.filter(g => g.tipo === 'socio').reduce((s, g) => s + (Number(g.monto) || 0), 0)
     const sueldos = data.sueldos.reduce((s, l) => s + (Number(l.neto) || 0), 0)
-    return { proveedores, gastosFijos, gastosVariables, retirosSocios, sueldos,
-             total: proveedores + gastosFijos + gastosVariables + retirosSocios + sueldos }
+    // Aguinaldo/vacaciones imputados a la fecha de cierre de su mes operativo
+    const conceptos = totalesConceptos(data.conceptos, data.mesesOp, data.desde, data.hasta).total
+    return { proveedores, gastosFijos, gastosVariables, retirosSocios, sueldos, conceptos,
+             total: proveedores + gastosFijos + gastosVariables + retirosSocios + sueldos + conceptos }
   }, [data])
 
   const saldoNeto = ingresos.total - egresos.total
@@ -1201,14 +1213,17 @@ export function ReporteFlujo({ data }) {
       if (!acc[fecha]) acc[fecha] = { fecha, ingresos: 0, egresos: 0 }
       acc[fecha][key] += Number(monto) || 0
     }
-    data.ventasCaja.forEach(v => sumar(v.fecha, 'ingresos',
-      (Number(v.efectivo) || 0) + (Number(v.debito) || 0) + (Number(v.transferencia) || 0)))
-    data.movimientosCtacte.filter(m => m.tipo === 'pago' || m.tipo === 'cheque')
+    data.ventasCaja.forEach(v => sumar(v.fecha, 'ingresos', Number(v.total) || 0))
+    data.movimientosCtacte.filter(m => m.tipo === 'pago')
       .forEach(m => sumar(m.fecha, 'ingresos', Number(m.haber) || 0))
     data.gastos.filter(g => g.tipo === 'ingreso').forEach(g => sumar(g.fecha, 'ingresos', g.monto))
     data.pagosProveedores.forEach(p => sumar(p.fecha, 'egresos', (Number(p.importe) || 0) + (Number(p.percepcion) || 0)))
     data.gastos.filter(g => g.tipo !== 'ingreso').forEach(g => sumar(g.fecha, 'egresos', g.monto))
     data.sueldos.forEach(l => sumar(l.semana_fin, 'egresos', l.neto))
+    ;(data.conceptos || []).forEach(c => {
+      const f = fechaImputacionConcepto(c.mes, data.mesesOp)
+      if (f >= data.desde && f <= data.hasta) sumar(f, 'egresos', Number(c.monto) || 0)
+    })
     return Object.values(acc).map(d => ({ ...d, saldo: d.ingresos - d.egresos }))
       .sort((a, b) => b.fecha.localeCompare(a.fecha))
   }, [data])
@@ -1268,6 +1283,7 @@ export function ReporteFlujo({ data }) {
               { label: '🧾 Gastos fijos',         monto: egresos.gastosFijos },
               { label: '📦 Gastos variables',     monto: egresos.gastosVariables },
               { label: '👥 Sueldos',              monto: egresos.sueldos },
+              { label: '🎁 Aguinaldo / vacaciones', monto: egresos.conceptos },
               { label: '💼 Retiros socios',       monto: egresos.retirosSocios },
             ].filter(r => r.monto > 0).sort((a, b) => b.monto - a.monto).map(r => {
               const pct = egresos.total > 0 ? (r.monto / egresos.total) * 100 : 0
@@ -1483,10 +1499,8 @@ export function ReporteInteranual() {
       const desdeAnt   = `${anioAnt}-01-01`
       const hastaAnt   = `${anioAnt}-12-31`
 
-      // Cargamos ventas + salidas + pedidos para los 2 años. Paginado: un AÑO
-      // entero de ventas de caja son varios miles de filas; sin paginar Supabase
-      // cortaba en 1000 y cada año quedaba groseramente subdeclarado (ver
-      // lib/fetchAllRows.js).
+      // Cargamos ventas + salidas + pedidos para los 2 años
+      // fetchAllRows: un año de ventas/salidas supera de sobra las 1000 filas.
       const [vc1, vc2, sa1, sa2, pe1, pe2] = await Promise.all([
         fetchAllRows(() => supabase.from('ventas_minoristas').select('total, fecha').eq('origen', 'caja').gte('fecha', desdeEste).lte('fecha', hastaEste)),
         fetchAllRows(() => supabase.from('ventas_minoristas').select('total, fecha').eq('origen', 'caja').gte('fecha', desdeAnt).lte('fecha', hastaAnt)),

@@ -11,9 +11,8 @@
 //   - STOCK que debería quedar al cierre: snapshot guardado del domingo
 //     si existe; si no, el stock_actual en vivo.
 // ============================================================
-import { supabase } from './supabase'
+import { supabase, fetchAllRows } from './supabase'
 import { kgPorUnidadDeProducto } from './stockHelpers'
-import { fetchAllRows } from './fetchAllRows'
 
 const n = v => Number(v) || 0
 const kgDe = e => n(e.kg_real ?? e.kg)
