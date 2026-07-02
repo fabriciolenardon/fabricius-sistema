@@ -11,6 +11,7 @@ import LogoFabricius from '../../components/LogoFabricius'
 import UserDropdown from '../../components/UserDropdown'
 import CambiarPasswordModal from '../../components/CambiarPasswordModal'
 import BotonAvisos from '../../components/BotonAvisos'
+import RecordatorioPagos from '../../components/RecordatorioPagos'
 
 // Entrada extra solo-CEO para el menú del celular: el Modo TV (F.A.B.R.I.) no
 // es una ruta aparte de navItems, así que se agrega a mano para el CEO.
@@ -28,6 +29,7 @@ const navItems = [
   { to: '/admin/clientes',    icon: '👥', label: 'Clientes' },
   { to: '/admin/pedidos',     icon: '📥', label: 'Pedidos Mayoristas' },
   { to: '/admin/whatsapp', icon: '💬', label: 'WhatsApp' },
+  { to: '/admin/proveedores', icon: '🏭', label: 'Proveedores' },
   { to: '/admin/cheques',     icon: '📄', label: 'Cheques' },
   { to: '/admin/sueldos',     icon: '💰', label: 'Sueldos' },
   { to: '/admin/gastos',      icon: '💸', label: 'Gastos' },
@@ -53,6 +55,7 @@ const NAV_GRUPOS = [
     { to: '/admin/clientes',     icon: '👥', label: 'Clientes' },
   ] },
   { label: 'Finanzas', icon: '💰', items: [
+    { to: '/admin/proveedores', icon: '🏭', label: 'Proveedores' },
     { to: '/admin/cheques',     icon: '📄', label: 'Cheques' },
     { to: '/admin/sueldos',     icon: '💰', label: 'Sueldos' },
     { to: '/admin/gastos',      icon: '💸', label: 'Gastos' },
@@ -519,6 +522,9 @@ export default function AdminLayout() {
 
       {/* Widget de actividad en vivo (conversaciones + pedidos) con notificaciones */}
       <CentroActividad />
+
+      {/* Recordatorio JUE/VIE/SÁB/DOM para que el CEO cargue los pagos a proveedores */}
+      {user?.email === 'fabriciolenardon@gmail.com' && <RecordatorioPagos />}
 
       {/* CONTENIDO */}
       <main style={{ paddingTop: 56, minHeight: '100vh' }}>

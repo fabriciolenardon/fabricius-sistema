@@ -512,8 +512,29 @@ function useDashboardData(refreshMs = 120000) {
       { tipo: 'embutido',     label: '🌭 Embutidos',     minimo: 30,  kg: stockMap.embutido || 0 },
     ].filter(s => s.kg < s.minimo)
 
+    // ── ÚLTIMO MES OPERATIVO CERRADO (para el gráfico de margen del mes) ──
+    // Agrupa los cierres semanales por `mes` y toma el más reciente. Gastos del
+    // donut engloba sueldos + retiros socios + gastos; ganancia = el margen.
+    const cierresArr = cierresQ?.data || []
+    let mesCerrado = null
+    if (cierresArr.length) {
+      const ultMes = [...new Set(cierresArr.map(c => c.mes).filter(Boolean))].sort().slice(-1)[0]
+      const ws = cierresArr.filter(c => c.mes === ultMes)
+      const v = ws.reduce((s, c) => s + (Number(c.ventas) || 0), 0)
+      const co = ws.reduce((s, c) => s + (Number(c.compras) || 0), 0)
+      const ga = ws.reduce((s, c) => s + (Number(c.gastos) || 0) + (Number(c.sueldos) || 0), 0)
+      const gan = ws.reduce((s, c) => s + (Number(c.ganancia) || 0), 0)
+      mesCerrado = {
+        mes: ultMes,
+        label: ultMes ? new Date(ultMes + '-15').toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }) : '',
+        ventas: v, compras: co, gastos: ga, ganancia: gan,
+        margenPct: v > 0 ? (gan / v) * 100 : 0,
+      }
+    }
+
     setData({
       totalHoy, cantHoy, ticketProm, totalSemana,
+      mesCerrado,
       totalMes: totalCajaMes,
       mayoristaMes: totalSalidasMes,
       totalMesAnt, variacion,
@@ -717,6 +738,79 @@ function ReportePanelData({ tab, periodo, setPeriodo }) {
         </>
       ) : null}
     </>
+  )
+}
+
+// ════════════════════════════════════════════════════════════
+// DONUT (torta) — segmentos como arcos. centroTop/Bot = texto del centro.
+// ════════════════════════════════════════════════════════════
+function DonutSVG({ segmentos, centroTop, centroBot, size = 150 }) {
+  const total = segmentos.reduce((s, x) => s + Math.max(0, x.valor), 0) || 1
+  const cx = size / 2, cy = size / 2, r = size * 0.36, w = size * 0.16, C = 2 * Math.PI * r
+  let acc = 0
+  return (
+    <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size}>
+      {segmentos.map((s, i) => {
+        const f = Math.max(0, s.valor) / total
+        const rot = -90 + acc * 360
+        acc += f
+        if (f <= 0) return null
+        return <circle key={i} cx={cx} cy={cy} r={r} fill="none" stroke={s.color} strokeWidth={w}
+          strokeDasharray={`${f * C} ${C}`} transform={`rotate(${rot} ${cx} ${cy})`} />
+      })}
+      <text x={cx} y={cy} textAnchor="middle" fontSize={size * 0.2} fontWeight="900" fill="#fff" style={{ fontFamily: "'Bebas Neue',cursive" }}>{centroTop}</text>
+      <text x={cx} y={cy + 16} textAnchor="middle" fontSize="9" fill={NEON.muted}>{centroBot}</text>
+    </svg>
+  )
+}
+
+// ════════════════════════════════════════════════════════════
+// WIDGET MARGEN DEL MES — torta del último mes operativo cerrado:
+// % Compras / % Gastos (sueldos+socios+otros) / % Ganancia, sobre las ventas.
+// ════════════════════════════════════════════════════════════
+function WidgetMargenMes({ m }) {
+  if (!m) return null
+  const total = m.ventas || 1
+  const seg = [
+    { nombre: 'Compras', valor: m.compras, color: NEON.ambar },
+    { nombre: 'Gastos', valor: m.gastos, color: NEON.rojo },
+    { nombre: 'Ganancia', valor: m.ganancia, color: NEON.verde },
+  ]
+  return (
+    <div className="hud" style={{ ...glass, padding: 18, marginTop: 12 }}>
+      <Etiqueta texto={`MARGEN DEL MES · ${(m.label || '').toUpperCase()}`} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 28, flexWrap: 'wrap', marginTop: 8 }}>
+        <DonutSVG segmentos={seg} centroTop={`${m.margenPct.toFixed(1).replace('.', ',')}%`} centroBot="margen" />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+          {seg.map(s => (
+            <div key={s.nombre} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ width: 14, height: 14, borderRadius: 4, background: s.color, flexShrink: 0 }} />
+              <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: s.color, minWidth: 66 }}>{((Math.max(0, s.valor) / total) * 100).toFixed(1)}%</span>
+              <span style={{ fontSize: 12, color: NEON.muted }}>{s.nombre} · {fmtArs(s.valor)}</span>
+            </div>
+          ))}
+          <div style={{ fontSize: 11, color: NEON.muted, marginTop: 2 }}>
+            Sobre ventas de {fmtArs(m.ventas)} · gastos incluye sueldos y retiros de socios
+          </div>
+        </div>
+
+        {/* Ganancia neta del mes + reparto de socios — llena la derecha */}
+        <div style={{ marginLeft: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, paddingLeft: 20, borderLeft: '1px solid rgba(0,212,255,0.18)', minWidth: 240 }}>
+          <span style={{ fontSize: 10, letterSpacing: 2, color: NEON.muted, fontWeight: 800 }}>GANANCIA NETA DEL MES</span>
+          <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 40, lineHeight: 1, color: m.ganancia >= 0 ? NEON.verde : NEON.rojo }}>{fmtArs(m.ganancia)}</span>
+          <div style={{ display: 'flex', gap: 22, marginTop: 10, justifyContent: 'flex-end' }}>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 11, color: NEON.muted }}>👑 Fabricio · 85%</div>
+              <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: '#ffd17a' }}>{fmtArs(m.ganancia * 0.85)}</div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 11, color: NEON.muted }}>🤝 Ariel · 15%</div>
+              <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: NEON.cian }}>{fmtArs(m.ganancia * 0.15)}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -947,6 +1041,9 @@ function ResumenEjecutivo() {
         <WidgetCtacteMayorista titulo="CUENTA CORRIENTE MAYORISTA · EN VIVO" g={data.ctacteMayorista}
           nota="Total que les vendiste a cuenta corriente (pagado + no pagado). El vendido NO baja cuando te pagan: sube COBRADO y baja TE DEBEN, el total queda igual. Los cheques no cuentan como cobro (se endosan a proveedores). Solo lectura de la cuenta corriente." />
       </div>
+
+      {/* ── Margen del último mes cerrado (torta) ── */}
+      <WidgetMargenMes m={data.mesCerrado} />
 
       {/* ── Cinta de métricas secundarias ── */}
       <div style={{ ...glass, marginTop: 12, padding: '14px 18px', display: 'flex', flexWrap: 'wrap', gap: '10px 28px', alignItems: 'center' }}>
