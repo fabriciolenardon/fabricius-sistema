@@ -56,6 +56,11 @@ export function useReportesData(periodo) {
       // Ventana para calcular costos: últimos 180 días (o el período si es mayor)
       const desdeCosto = desde < fechaRelativaARG(-180) ? desde : fechaRelativaARG(-180)
 
+      // Todas las consultas con ventana de fechas van paginadas: un período de
+      // 90d/año supera fácil las 1000 filas (ventas de caja y salidas sobre todo)
+      // y Supabase corta en 1000, subdeclarando los totales en silencio. Ver
+      // lib/fetchAllRows.js (PR #170). clientes/precios son tablas de referencia
+      // chicas y no se paginan.
       const [entradas, salidas, ventasCaja, pedidos, clientes,
              despostesCosto, cajasCosto, preciosLookup, entradasCosto,
              gastos, sueldos, pagosProveedores, movimientosCtacte,

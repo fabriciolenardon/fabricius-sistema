@@ -14,7 +14,7 @@
 //   + todas las fechas con reloj ARG (lib/fechas), nunca UTC
 // ═══════════════════════════════════════════════════════════
 
-import { supabase } from './supabase.js'
+import { supabase, fetchAllRows } from './supabase.js'
 import { fechaHoyARG, fechaRelativaARG } from './fechas.js'
 import { buscarConGoogle } from './gemini.js'
 import { enviarWhatsapp } from './whatsapp.js'
@@ -666,9 +666,10 @@ export async function ejecutarFuncion(nombre, args) {
       case 'consultar_deuda_proveedores': {
         // Saldo real por proveedor = Σ debe − Σ haber de movimientos NO anulados
         // (misma fórmula que la pantalla de Proveedores)
-        const { data, error } = await supabase
+        // Paginado: este ledger crece sin techo y acá se suma entero por proveedor.
+        const { data, error } = await fetchAllRows(() => supabase
           .from('movimientos_proveedores')
-          .select('proveedor_nombre, debe, haber, anulado')
+          .select('proveedor_nombre, debe, haber, anulado'))
         if (error) throw error
         const tot = {}
         ;(data || []).forEach(m => {
@@ -910,14 +911,16 @@ export async function ejecutarFuncion(nombre, args) {
 
       case 'consultar_resumen_mes': {
         const hoy = fechaHoyARG(), mIni = inicioMes()
+        // Paginado: un mes de ventas de caja/salidas supera las 1000 filas y
+        // Supabase corta en 1000 → el resumen mensual subdeclaraba en silencio.
         const [cajaMes, cajaMesAnt, salidasMes, pedidosMes, comprasMes, gastosMes, sueldosMes] = await Promise.all([
-          supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').gte('fecha', mIni).lte('fecha', hoy),
-          supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').gte('fecha', inicioMesAnterior()).lte('fecha', mismoDiaMesAnterior()),
-          supabase.from('salidas_deposito').select('total, cobro').gte('fecha', mIni).lte('fecha', hoy),
-          supabase.from('pedidos').select('total_estimado').eq('estado', 'confirmado').gte('dia_entrega', mIni).lte('dia_entrega', hoy),
-          supabase.from('entradas_deposito').select('importe').gte('fecha', mIni).lte('fecha', hoy).gt('importe', 0).eq('eliminado', false),
-          supabase.from('gastos').select('monto, tipo, solo_balance').gte('fecha', mIni).lte('fecha', hoy),
-          supabase.from('liquidaciones_sueldos').select('neto').gte('semana_inicio', mIni).lte('semana_fin', hoy),
+          fetchAllRows(() => supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').gte('fecha', mIni).lte('fecha', hoy)),
+          fetchAllRows(() => supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').gte('fecha', inicioMesAnterior()).lte('fecha', mismoDiaMesAnterior())),
+          fetchAllRows(() => supabase.from('salidas_deposito').select('total, cobro').gte('fecha', mIni).lte('fecha', hoy)),
+          fetchAllRows(() => supabase.from('pedidos').select('total_estimado').eq('estado', 'confirmado').gte('dia_entrega', mIni).lte('dia_entrega', hoy)),
+          fetchAllRows(() => supabase.from('entradas_deposito').select('importe').gte('fecha', mIni).lte('fecha', hoy).gt('importe', 0).eq('eliminado', false)),
+          fetchAllRows(() => supabase.from('gastos').select('monto, tipo, solo_balance').gte('fecha', mIni).lte('fecha', hoy)),
+          fetchAllRows(() => supabase.from('liquidaciones_sueldos').select('neto').gte('semana_inicio', mIni).lte('semana_fin', hoy)),
         ])
         const totCaja = sumar(cajaMes.data, 'total')
         const totCajaAnt = sumar(cajaMesAnt.data, 'total')
@@ -956,9 +959,12 @@ export async function ejecutarFuncion(nombre, args) {
 
       case 'consultar_gastos': {
         const desde = args?.desde || inicioMes(), hasta = args?.hasta || fechaHoyARG()
-        let query = supabase.from('gastos').select('tipo, monto, categoria, descripcion, solo_balance').gte('fecha', desde).lte('fecha', hasta)
-        if (args?.categoria) query = query.ilike('categoria', `%${args.categoria}%`)
-        const { data, error } = await query
+        // Paginado: el rango lo elige el usuario y puede abarcar meses/un año.
+        const { data, error } = await fetchAllRows(() => {
+          let q = supabase.from('gastos').select('tipo, monto, categoria, descripcion, solo_balance').gte('fecha', desde).lte('fecha', hasta)
+          if (args?.categoria) q = q.ilike('categoria', `%${args.categoria}%`)
+          return q
+        })
         if (error) throw error
         const reales = (data || []).filter(g => !g.solo_balance && g.tipo !== 'ingreso')
         if (reales.length === 0) return { resultado: `Sin gastos registrados entre ${formatearFecha(desde)} y ${formatearFecha(hasta)}.` }
@@ -1004,11 +1010,15 @@ export async function ejecutarFuncion(nombre, args) {
 
       case 'buscar_remitos': {
         if (!args?.desde || !args?.hasta) return { resultado: 'Necesito el rango de fechas (desde y hasta, formato YYYY-MM-DD).' }
-        let query = supabase.from('remitos').select('numero, fecha, cliente_nombre, total, cobro, items')
-          .eq('eliminado', false).gte('fecha', args.desde).lte('fecha', args.hasta)
-          .order('fecha', { ascending: true }).order('numero', { ascending: true })
-        if (args?.cliente) query = query.ilike('cliente_nombre', `%${args.cliente}%`)
-        const { data, error } = await query
+        // Paginado: un rango largo supera las 1000 filas y el TOTAL FACTURADO se
+        // suma en el cliente (Supabase corta en 1000; ver lib/fetchAllRows.js).
+        const { data, error } = await fetchAllRows(() => {
+          let q = supabase.from('remitos').select('numero, fecha, cliente_nombre, total, cobro, items')
+            .eq('eliminado', false).gte('fecha', args.desde).lte('fecha', args.hasta)
+            .order('fecha', { ascending: true }).order('numero', { ascending: true })
+          if (args?.cliente) q = q.ilike('cliente_nombre', `%${args.cliente}%`)
+          return q
+        })
         if (error) throw error
         if (!data || data.length === 0) return { resultado: `No encontré remitos entre ${formatearFecha(args.desde)} y ${formatearFecha(args.hasta)}${args?.cliente ? ` para "${args.cliente}"` : ''}.` }
 
@@ -1059,12 +1069,16 @@ export async function ejecutarFuncion(nombre, args) {
         if (!tokens.length) return { resultado: 'Decime un nombre de producto para buscar.' }
         const matchProd = desc => { const d = sinTilde(desc); return tokens.every(t => d.includes(t)) }
 
-        let qRem = supabase.from('remitos').select('numero, fecha, cliente_nombre, items').eq('eliminado', false).gte('fecha', args.desde).lte('fecha', args.hasta).order('fecha', { ascending: true })
-        if (args?.cliente) qRem = qRem.ilike('cliente_nombre', `%${args.cliente}%`)
-        // Si se filtra por cliente, la caja (mostrador anónimo) no aplica.
+        // Paginado: rango largo → remitos y caja superan las 1000 filas y los kg/$
+        // se acumulan en el cliente (Supabase corta en 1000; ver lib/fetchAllRows.js).
         const [remitosR, cajaR] = await Promise.all([
-          qRem,
-          args?.cliente ? Promise.resolve({ data: [], error: null }) : supabase.from('ventas_minoristas').select('items').eq('origen', 'caja').gte('fecha', args.desde).lte('fecha', args.hasta),
+          fetchAllRows(() => {
+            let q = supabase.from('remitos').select('numero, fecha, cliente_nombre, items').eq('eliminado', false).gte('fecha', args.desde).lte('fecha', args.hasta).order('fecha', { ascending: true })
+            if (args?.cliente) q = q.ilike('cliente_nombre', `%${args.cliente}%`)
+            return q
+          }),
+          // Si se filtra por cliente, la caja (mostrador anónimo) no aplica.
+          args?.cliente ? Promise.resolve({ data: [], error: null }) : fetchAllRows(() => supabase.from('ventas_minoristas').select('items').eq('origen', 'caja').gte('fecha', args.desde).lte('fecha', args.hasta)),
         ])
         if (remitosR.error) throw remitosR.error
         if (cajaR.error) throw cajaR.error
@@ -1110,9 +1124,10 @@ export async function ejecutarFuncion(nombre, args) {
       case 'ranking_productos': {
         if (!args?.desde || !args?.hasta) return { resultado: 'Necesito el rango de fechas (desde y hasta).' }
         const crit = args?.criterio === 'kg' ? 'kg' : 'importe'
+        // Paginado: rango largo supera las 1000 filas (ver lib/fetchAllRows.js).
         const [rem, caja] = await Promise.all([
-          supabase.from('remitos').select('items').eq('eliminado', false).gte('fecha', args.desde).lte('fecha', args.hasta),
-          supabase.from('ventas_minoristas').select('items').eq('origen', 'caja').gte('fecha', args.desde).lte('fecha', args.hasta),
+          fetchAllRows(() => supabase.from('remitos').select('items').eq('eliminado', false).gte('fecha', args.desde).lte('fecha', args.hasta)),
+          fetchAllRows(() => supabase.from('ventas_minoristas').select('items').eq('origen', 'caja').gte('fecha', args.desde).lte('fecha', args.hasta)),
         ])
         if (rem.error) throw rem.error; if (caja.error) throw caja.error
         const acc = {}
@@ -1130,7 +1145,8 @@ export async function ejecutarFuncion(nombre, args) {
 
       case 'ranking_clientes': {
         if (!args?.desde || !args?.hasta) return { resultado: 'Necesito el rango de fechas (desde y hasta).' }
-        const { data, error } = await supabase.from('salidas_deposito').select('cliente_nombre, total, cobro').gte('fecha', args.desde).lte('fecha', args.hasta)
+        // Paginado: un rango largo de salidas supera las 1000 filas (ver lib/fetchAllRows.js).
+        const { data, error } = await fetchAllRows(() => supabase.from('salidas_deposito').select('cliente_nombre, total, cobro').gte('fecha', args.desde).lte('fecha', args.hasta))
         if (error) throw error
         const acc = {}
         ;(data || []).filter(s => s.cobro !== 'interno').forEach(s => {
@@ -1145,7 +1161,8 @@ export async function ejecutarFuncion(nombre, args) {
 
       case 'ranking_proveedores': {
         if (!args?.desde || !args?.hasta) return { resultado: 'Necesito el rango de fechas (desde y hasta).' }
-        const { data, error } = await supabase.from('entradas_deposito').select('proveedor_nombre, importe').eq('eliminado', false).gte('fecha', args.desde).lte('fecha', args.hasta).gt('importe', 0)
+        // Paginado: un rango largo de entradas supera las 1000 filas (ver lib/fetchAllRows.js).
+        const { data, error } = await fetchAllRows(() => supabase.from('entradas_deposito').select('proveedor_nombre, importe').eq('eliminado', false).gte('fecha', args.desde).lte('fecha', args.hasta).gt('importe', 0))
         if (error) throw error
         const acc = {}
         ;(data || []).forEach(e => { const n = (e.proveedor_nombre || 'Sin proveedor').trim(); acc[n] = (acc[n] || 0) + (Number(e.importe) || 0) })
@@ -1157,9 +1174,10 @@ export async function ejecutarFuncion(nombre, args) {
 
       case 'ventas_por_categoria': {
         if (!args?.desde || !args?.hasta) return { resultado: 'Necesito el rango de fechas (desde y hasta).' }
+        // Paginado: rango largo supera las 1000 filas (ver lib/fetchAllRows.js).
         const [rem, caja] = await Promise.all([
-          supabase.from('remitos').select('items').eq('eliminado', false).gte('fecha', args.desde).lte('fecha', args.hasta),
-          supabase.from('ventas_minoristas').select('items').eq('origen', 'caja').gte('fecha', args.desde).lte('fecha', args.hasta),
+          fetchAllRows(() => supabase.from('remitos').select('items').eq('eliminado', false).gte('fecha', args.desde).lte('fecha', args.hasta)),
+          fetchAllRows(() => supabase.from('ventas_minoristas').select('items').eq('origen', 'caja').gte('fecha', args.desde).lte('fecha', args.hasta)),
         ])
         if (rem.error) throw rem.error; if (caja.error) throw caja.error
         const acc = {}
@@ -1177,7 +1195,8 @@ export async function ejecutarFuncion(nombre, args) {
 
       case 'desglose_medios_pago': {
         if (!args?.desde || !args?.hasta) return { resultado: 'Necesito el rango de fechas (desde y hasta).' }
-        const { data, error } = await supabase.from('ventas_minoristas').select('efectivo, debito, transferencia, total').eq('origen', 'caja').gte('fecha', args.desde).lte('fecha', args.hasta)
+        // Paginado: un rango largo de ventas de caja supera las 1000 filas (ver lib/fetchAllRows.js).
+        const { data, error } = await fetchAllRows(() => supabase.from('ventas_minoristas').select('efectivo, debito, transferencia, total').eq('origen', 'caja').gte('fecha', args.desde).lte('fecha', args.hasta))
         if (error) throw error
         const ef = sumar(data, 'efectivo'), de = sumar(data, 'debito'), tr = sumar(data, 'transferencia'), tot = sumar(data, 'total')
         return { resultado: `💳 Medios de pago en caja (${formatearFecha(args.desde)} → ${formatearFecha(args.hasta)}):\n• Efectivo: ${formatearPesos(ef)}\n• Débito: ${formatearPesos(de)}\n• Transferencia: ${formatearPesos(tr)}\n• TOTAL: ${formatearPesos(tot)}` }
@@ -1186,7 +1205,10 @@ export async function ejecutarFuncion(nombre, args) {
       case 'clientes_inactivos': {
         const dias = Number(args?.dias) || 30
         const limite = fechaRelativaARG(-dias)
-        const { data, error } = await supabase.from('salidas_deposito').select('cliente_nombre, fecha, cobro').order('fecha', { ascending: false })
+        // Paginado: barre TODO el historial de salidas (sin filtro de fecha) para
+        // saber la última compra de cada cliente; supera las 1000 filas y sin
+        // paginar omitía clientes (ver lib/fetchAllRows.js).
+        const { data, error } = await fetchAllRows(() => supabase.from('salidas_deposito').select('cliente_nombre, fecha, cobro').order('fecha', { ascending: false }))
         if (error) throw error
         const ultima = {}
         ;(data || []).filter(s => s.cobro !== 'interno').forEach(s => { const n = (s.cliente_nombre || '').trim(); if (n && !ultima[n]) ultima[n] = s.fecha })
@@ -1198,8 +1220,10 @@ export async function ejecutarFuncion(nombre, args) {
 
       case 'historial_cliente': {
         if (!args?.cliente || !args?.desde || !args?.hasta) return { resultado: 'Necesito el cliente y el rango de fechas (desde y hasta).' }
-        const { data, error } = await supabase.from('remitos').select('numero, fecha, cliente_nombre, total, cobro, items')
-          .eq('eliminado', false).ilike('cliente_nombre', `%${args.cliente}%`).gte('fecha', args.desde).lte('fecha', args.hasta).order('fecha', { ascending: true })
+        // Paginado: un cliente grande en un rango largo puede pasar las 1000 filas
+        // y el TOTAL se suma en el cliente (ver lib/fetchAllRows.js).
+        const { data, error } = await fetchAllRows(() => supabase.from('remitos').select('numero, fecha, cliente_nombre, total, cobro, items')
+          .eq('eliminado', false).ilike('cliente_nombre', `%${args.cliente}%`).gte('fecha', args.desde).lte('fecha', args.hasta).order('fecha', { ascending: true }))
         if (error) throw error
         if (!data || !data.length) return { resultado: `No encontré ventas a "${args.cliente}" entre ${formatearFecha(args.desde)} y ${formatearFecha(args.hasta)}.` }
         const bloques = data.map(rm => {
@@ -1259,10 +1283,14 @@ export async function ejecutarFuncion(nombre, args) {
         const termino = (args?.tipo || '').trim().toLowerCase()
         let tipoBd = null
         if (termino) tipoBd = MAP_TIPO[termino] || (Object.entries(MAP_TIPO).find(([k]) => termino.includes(k)) || [])[1] || null
-        let query = supabase.from('entradas_deposito').select('tipo, kg, kg_real, importe, cantidad, fecha')
-          .gte('fecha', args.desde).lte('fecha', args.hasta).eq('eliminado', false)
-        if (tipoBd) query = query.eq('tipo', tipoBd)
-        const { data, error } = await query
+        // Paginado: un rango largo sin filtro de tipo supera las 1000 filas y
+        // unidades/kg/importe se suman en el cliente (ver lib/fetchAllRows.js).
+        const { data, error } = await fetchAllRows(() => {
+          let q = supabase.from('entradas_deposito').select('tipo, kg, kg_real, importe, cantidad, fecha')
+            .gte('fecha', args.desde).lte('fecha', args.hasta).eq('eliminado', false)
+          if (tipoBd) q = q.eq('tipo', tipoBd)
+          return q
+        })
         if (error) throw error
         if (!data || data.length === 0) return { resultado: `No encontré compras${args?.tipo ? ' de ' + args.tipo : ''} entre ${formatearFecha(args.desde)} y ${formatearFecha(args.hasta)}.` }
         const unidades = data.reduce((s, e) => s + (Number(e.cantidad) || 1), 0)
@@ -1339,7 +1367,9 @@ export async function ejecutarFuncion(nombre, args) {
 
       case 'consultar_extracto_proveedor': {
         const sinAcentos2 = (s) => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-        const { data, error } = await supabase.from('movimientos_proveedores').select('*').order('fecha', { ascending: false }).order('id', { ascending: false })
+        // Paginado: el saldo del proveedor suma TODO su ledger; si la tabla pasa
+        // de 1000 filas, sin paginar se omitían movimientos viejos (ver lib/fetchAllRows.js).
+        const { data, error } = await fetchAllRows(() => supabase.from('movimientos_proveedores').select('*').order('fecha', { ascending: false }).order('id', { ascending: false }))
         if (error) throw error
         const buscado = sinAcentos2(args.nombre || '')
         const movs = (data || []).filter(m => sinAcentos2(m.proveedor_nombre || '').includes(buscado))
@@ -1433,9 +1463,10 @@ export async function ejecutarFuncion(nombre, args) {
         // Resumen de ventas de un período: caja minorista + mayorista (remitos
         // sin flujos internos) — misma fórmula que consultar_ventas_dia.
         const resumen = async (p) => {
+          // Paginado: cada período puede abarcar meses/un año (ver lib/fetchAllRows.js).
           const [caja, remitos] = await Promise.all([
-            supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').gte('fecha', p.desde).lte('fecha', p.hasta),
-            supabase.from('remitos').select('total').eq('eliminado', false).neq('cobro', 'interno').gte('fecha', p.desde).lte('fecha', p.hasta),
+            fetchAllRows(() => supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').gte('fecha', p.desde).lte('fecha', p.hasta)),
+            fetchAllRows(() => supabase.from('remitos').select('total').eq('eliminado', false).neq('cobro', 'interno').gte('fecha', p.desde).lte('fecha', p.hasta)),
           ])
           if (caja.error) throw caja.error
           if (remitos.error) throw remitos.error

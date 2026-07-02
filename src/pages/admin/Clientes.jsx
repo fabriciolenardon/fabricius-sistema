@@ -63,6 +63,9 @@ async function seleccionar(cliente) {
     const pagDesde = cobPagDesde || cobDesde
     const pagHasta = cobPagHasta || cobHasta
     setCobLoading(true)
+    // Paginado: el rango lo elige el usuario y puede abarcar meses/un año →
+    // remitos y cobranzas superan las 1000 filas y Supabase corta en 1000,
+    // subdeclarando lo comprado/pagado por cliente (ver lib/fetchAllRows.js).
     const [{ data: rems }, { data: movs }] = await Promise.all([
       fetchAllRows(() => supabase.from('remitos').select('cliente_id, total, fecha, eliminado').gte('fecha', cobDesde).lte('fecha', cobHasta)),
       fetchAllRows(() => supabase.from('movimientos_ctacte').select('cliente_id, haber, fecha').gte('fecha', pagDesde).lte('fecha', pagHasta).gt('haber', 0)),

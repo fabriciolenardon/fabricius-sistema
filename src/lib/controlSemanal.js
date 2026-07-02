@@ -11,7 +11,7 @@
 //   - STOCK que debería quedar al cierre: snapshot guardado del domingo
 //     si existe; si no, el stock_actual en vivo.
 // ============================================================
-import { supabase } from './supabase'
+import { supabase, fetchAllRows } from './supabase'
 import { kgPorUnidadDeProducto } from './stockHelpers'
 
 const n = v => Number(v) || 0
@@ -49,10 +49,14 @@ export const NOMBRE_TIPO = {
 export const nombreTipo = t => NOMBRE_TIPO[t] || t || '—'
 
 export async function calcularControlSemanal(desde, hasta) {
+  // Las 3 consultas con ventana de fechas van paginadas: el control puede correrse
+  // sobre un mes entero (botón "mes" de Cierre.jsx) y un mes de ventas de caja
+  // supera las 1000 filas → sin paginar el "vendido minorista" quedaba corto
+  // (Supabase corta en 1000; ver lib/fetchAllRows.js).
   const [{ data: ent }, { data: sal }, { data: vts }, { data: snap }, { data: stk }] = await Promise.all([
-    supabase.from('entradas_deposito').select('tipo, kg, kg_real, destino').eq('eliminado', false).gte('fecha', desde).lte('fecha', hasta),
-    supabase.from('salidas_deposito').select('tipo, kg, descripcion, cobro, lista, cliente_nombre').gte('fecha', desde).lte('fecha', hasta),
-    supabase.from('ventas_minoristas').select('items').eq('origen', 'caja').gte('fecha', desde).lte('fecha', hasta),
+    fetchAllRows(() => supabase.from('entradas_deposito').select('tipo, kg, kg_real, destino').eq('eliminado', false).gte('fecha', desde).lte('fecha', hasta)),
+    fetchAllRows(() => supabase.from('salidas_deposito').select('tipo, kg, descripcion, cobro, lista, cliente_nombre').gte('fecha', desde).lte('fecha', hasta)),
+    fetchAllRows(() => supabase.from('ventas_minoristas').select('items').eq('origen', 'caja').gte('fecha', desde).lte('fecha', hasta)),
     supabase.from('stock_snapshots').select('stock').eq('fecha', hasta).maybeSingle(),
     supabase.from('stock_actual').select('tipo, kg_disponible'),
   ])
