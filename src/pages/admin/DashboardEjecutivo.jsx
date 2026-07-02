@@ -17,6 +17,7 @@ import { enviarWhatsapp, fmtArs } from '../../lib/whatsapp'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
 import { fmtKg } from '../../lib/formatos'
 import { useCentroActividad } from '../../lib/useCentroActividad'
+import { totalesConceptos } from '../../lib/cierreAuto'
 import {
   useReportesData, SelectorPeriodo,
   ReporteMargen, ReporteCliente, ReporteCanal, ReporteTemporal,
@@ -210,7 +211,7 @@ function useDashboardData(refreshMs = 120000) {
     // Por Mes). Si hoy cae dentro de un mes operativo, "este mes" arranca en su
     // fecha_inicio (no el 01 calendario). Fallback al mes calendario si no hay config.
     const { data: mesesOpData } = await supabase.from('meses_operativos')
-      .select('etiqueta, fecha_inicio, fecha_cierre').order('fecha_inicio', { ascending: false })
+      .select('mes, etiqueta, fecha_inicio, fecha_cierre').order('fecha_inicio', { ascending: false })
     const mesOpActual = (mesesOpData || []).find(m => hoy >= m.fecha_inicio && hoy <= m.fecha_cierre) || null
     const mesIni = mesOpActual ? mesOpActual.fecha_inicio : inicioMes()
     const mesOpLabel = mesOpActual ? mesOpActual.etiqueta : null
@@ -223,7 +224,7 @@ function useDashboardData(refreshMs = 120000) {
            salidasMes, cuentas, facturas12m, stock, cheques, clientes,
            gastosMes, sueldosMes, pagosProvMes, movCtacteMes, todasCajas, todosDeudores, promoCfg,
            comprasMesQ, cierresQ, comprasSemQ, remitosHoyQ, cobranzaQ, arqueosSemQ,
-           cobranzaTotalQ] = await Promise.all([
+           cobranzaTotalQ, conceptosQ] = await Promise.all([
       supabase.from('ventas_minoristas').select('total, efectivo, debito, transferencia, items, fecha, hora').eq('origen', 'caja').eq('fecha', hoy),
       // hora incluida: alimenta la curva "hoy vs ayer a esta hora"
       supabase.from('ventas_minoristas').select('total, hora').eq('origen', 'caja').eq('fecha', ayer),
@@ -268,6 +269,9 @@ function useDashboardData(refreshMs = 120000) {
       // Cobranzas mayoristas de TODA la historia (tipo 'pago': los cheques NO cuentan,
       // se endosan a proveedores). Paginado: el ledger supera las 1000 filas.
       fetchAllRows(() => supabase.from('movimientos_ctacte').select('tipo, haber')),
+      // Conceptos extra de sueldos (aguinaldo/vacaciones) — se imputan a la fecha
+      // de cierre de su mes operativo (igual criterio que el Cierre).
+      supabase.from('conceptos_sueldos').select('mes, tipo, monto'),
     ])
 
     const totalHoy  = (ventasHoy.data || []).reduce((s, v) => s + (Number(v.total) || 0), 0)
@@ -397,7 +401,9 @@ function useDashboardData(refreshMs = 120000) {
     // GASTOS = gastos operativos + sueldos. Los pagos a proveedores NO van acá:
     // son la cancelación de las compras, sumarían doble.
     const comprasMes = (comprasMesQ.data || []).reduce((s, e) => s + (Number(e.importe) || 0), 0)
-    const gastosOperativosMes = gastosFijos + gastosVariables + gastosSocios + sueldosTotalMes
+    // Aguinaldo/vacaciones del mes (imputados a la fecha de cierre del mes operativo)
+    const conceptosMes = totalesConceptos(conceptosQ?.data || [], mesesOpData || [], mesIni, hoy).total
+    const gastosOperativosMes = gastosFijos + gastosVariables + gastosSocios + sueldosTotalMes + conceptosMes
     const mensualVivo = {
       ventas: facturadoMes,
       compras: comprasMes,
@@ -435,6 +441,8 @@ function useDashboardData(refreshMs = 120000) {
     const sueldosSemana = (sueldosMes.data || [])
       .filter(l => l.semana_fin >= inicioSem)
       .reduce((s, l) => s + (Number(l.neto) || 0), 0)
+    // Aguinaldo/vacaciones que caen en esta semana (por fecha de cierre del mes)
+    const conceptosSemana = totalesConceptos(conceptosQ?.data || [], mesesOpData || [], inicioSem, hoy).total
     // Minorista REAL de la semana = lo contado en los arqueos (efectivo+débito+transf)
     const minoristaArqueoSemana = (arqueosSemQ.data || []).reduce((s, a) =>
       s + (Number(a.total_contado) || 0) + (Number(a.debito_real) || 0) + (Number(a.transferencia_real) || 0), 0)
@@ -442,7 +450,7 @@ function useDashboardData(refreshMs = 120000) {
     const mayoristaVendidoSemana = (salidasMes.data || [])
       .filter(s => s.cobro !== 'interno' && s.fecha >= inicioSem)
       .reduce((s, x) => s + (Number(x.total) || 0), 0)
-    const costosSemana = gastosSemana + sueldosSemana
+    const costosSemana = gastosSemana + sueldosSemana + conceptosSemana
     const ventasSemanaTotal = mayoristaVendidoSemana + minoristaArqueoSemana
     // LADO IZQUIERDO — margen de la SEMANA (todo de la misma semana, sin deuda vieja)
     const margenSemana = {
@@ -577,7 +585,7 @@ function useDashboardData(refreshMs = 120000) {
     // INSERT) es clave para la AUTOCORRECCIÓN: si se anula un remito mal cargado
     // o se elimina una compra errónea, el número se corrige EN VIVO (sin esperar
     // el refresh de 2 min). Requiere que estas tablas estén en supabase_realtime.
-    const TABLAS_LIVE = ['ventas_minoristas', 'remitos', 'salidas_deposito', 'entradas_deposito', 'gastos', 'liquidaciones_sueldos', 'config_sistema', 'arqueos_caja', 'compras_proveedores', 'movimientos_ctacte', 'clientes', 'meses_operativos']
+    const TABLAS_LIVE = ['ventas_minoristas', 'remitos', 'salidas_deposito', 'entradas_deposito', 'gastos', 'liquidaciones_sueldos', 'conceptos_sueldos', 'config_sistema', 'arqueos_caja', 'compras_proveedores', 'movimientos_ctacte', 'clientes', 'meses_operativos']
     let canal = supabase.channel('dashboard-ejecutivo-live')
     TABLAS_LIVE.forEach(t => { canal = canal.on('postgres_changes', { event: '*', schema: 'public', table: t }, debounced) })
     canal.subscribe()

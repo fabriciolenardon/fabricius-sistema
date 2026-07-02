@@ -23,6 +23,34 @@
 import { supabase, fetchAllRows } from './supabase'
 import { fechaHoyARG } from './fechas'
 
+// Fecha en que se imputa un concepto extra de sueldos (aguinaldo/vacaciones).
+// Como no tienen fecha propia, se imputan a la fecha de CIERRE de su mes
+// operativo (meses_operativos.fecha_cierre) → caen en la última semana del mes.
+// Fallback si no hay mes operativo cargado: último día del mes calendario.
+export function fechaImputacionConcepto(mes, mesesOp) {
+  const m = (mesesOp || []).find(x => x.mes === mes)
+  if (m && m.fecha_cierre) return m.fecha_cierre
+  const [y, mm] = mes.split('-').map(Number)
+  const d = new Date(y, mm, 0).getDate()   // día 0 del mes siguiente = último de este
+  return `${mes}-${String(d).padStart(2, '0')}`
+}
+
+// Suma los conceptos extra de sueldos (aguinaldo / vacaciones) que caen en el
+// rango [desde, hasta] según su fecha de imputación. Así el aguinaldo de un mes
+// cae en la ÚLTIMA semana de ese mes y en el mensual, sin duplicarse en las
+// semanas previas.
+// `conceptos`: filas de conceptos_sueldos {mes, tipo, monto}.
+// `mesesOp`:   filas de meses_operativos {mes, fecha_cierre}.
+export function totalesConceptos(conceptos, mesesOp, desde, hasta) {
+  const enRango = (conceptos || []).filter(c => {
+    const f = fechaImputacionConcepto(c.mes, mesesOp)
+    return f >= desde && f <= hasta
+  })
+  const aguinaldos = enRango.filter(c => c.tipo === 'aguinaldo').reduce((s, c) => s + (Number(c.monto) || 0), 0)
+  const vacaciones = enRango.filter(c => c.tipo === 'vacaciones').reduce((s, c) => s + (Number(c.monto) || 0), 0)
+  return { aguinaldos, vacaciones, total: aguinaldos + vacaciones }
+}
+
 // Devuelve el lunes de la semana que contiene `base` (en ARG), formato YYYY-MM-DD.
 // dia 0 = domingo, 1 = lunes, ...
 export function lunesDeLaSemana(base = new Date()) {
@@ -93,6 +121,8 @@ export async function calcularCierreAuto(desde, hasta) {
     entradasMesR,
     pagosMesR,
     saldoProvR,
+    conceptosR,
+    mesesOpR,
   ] = await Promise.all([
     // Ventas minoristas (caja) — sólo origen='caja' (cliente cta cte ya cuenta como cobranza)
     supabase
@@ -192,6 +222,18 @@ export async function calcularCierreAuto(desde, hasta) {
       .from('movimientos_proveedores')
       .select('proveedor_id, proveedor_nombre, fecha, debe, haber, anulado')
       .lte('fecha', fechaHoyARG())),
+
+    // Conceptos extra de sueldos (aguinaldo / vacaciones). No tienen fecha:
+    // se imputan a la SEMANA DE CIERRE de su mes operativo (ver más abajo).
+    supabase
+      .from('conceptos_sueldos')
+      .select('mes, tipo, monto'),
+
+    // Meses operativos → para saber en qué fecha cierra cada mes y así ubicar
+    // el aguinaldo/vacaciones en la semana correcta (la última del mes).
+    supabase
+      .from('meses_operativos')
+      .select('mes, fecha_cierre'),
   ])
 
   const ventasCaja = ventasCajaR.data || []
@@ -301,6 +343,13 @@ export async function calcularCierreAuto(desde, hasta) {
   // ====== SUELDOS ======
   const sueldosTotal = sum(sueldos, 'neto')
 
+  // ====== AGUINALDO / VACACIONES ======
+  // Los conceptos extra (aguinaldo/vacaciones) se imputan a la fecha de cierre
+  // de su mes operativo — ver totalesConceptos(). Así caen en la última semana
+  // del mes (y en el mensual) sin duplicarse en las semanas previas.
+  const { aguinaldos: aguinaldosTotal, vacaciones: vacacionesTotal, total: conceptosTotal } =
+    totalesConceptos(conceptosR?.data || [], mesesOpR?.data || [], desde, hasta)
+
   // ====== KG (referencia, no afecta cálculo de ganancia) ======
   const sumarKgPorTipo = tipos => entradas
     .filter(e => tipos.some(t => (e.tipo || '').startsWith(t)))
@@ -366,10 +415,11 @@ export async function calcularCierreAuto(desde, hasta) {
     .reduce((s, v) => s + v, 0)
 
   // ====== GANANCIAS ======
-  // Devengada: facturado - todos los costos del período (a precio de compra)
-  const gananciaDevengada = ventasTotal - comprasTotal - gastosTotal - sueldosTotal
+  // Devengada: facturado - todos los costos del período (a precio de compra).
+  // Aguinaldo/vacaciones se restan como un costo más del período.
+  const gananciaDevengada = ventasTotal - comprasTotal - gastosTotal - sueldosTotal - conceptosTotal
   // Caja real: lo que efectivamente entró menos lo que efectivamente salió
-  const cajaReal = cobradoTotal - pagadoProvTotal - gastosTotal - sueldosTotal
+  const cajaReal = cobradoTotal - pagadoProvTotal - gastosTotal - sueldosTotal - conceptosTotal
 
   return {
     periodo: { desde, hasta },
@@ -419,6 +469,8 @@ export async function calcularCierreAuto(desde, hasta) {
     sueldos: {
       total: sueldosTotal,
       cantLiquidaciones: sueldos.length,
+      aguinaldos: aguinaldosTotal,
+      vacaciones: vacacionesTotal,
     },
     kg: {
       carne: kgCarne,
@@ -443,7 +495,9 @@ export function cierreAutoAFila(cierre, mes) {
     ventas: cierre.ventas.total,
     compras: cierre.compras.total,
     gastos: cierre.gastos.total,
-    sueldos: cierre.sueldos.total,
+    // El aguinaldo/vacaciones del período se guardan dentro de "sueldos" para
+    // que la fila reconcilie (ventas − compras − gastos − sueldos = ganancia).
+    sueldos: cierre.sueldos.total + (cierre.sueldos.aguinaldos || 0) + (cierre.sueldos.vacaciones || 0),
     ganancia: cierre.ganancia.devengada,
     ingresos: {
       ventas_caja: cierre.ventas.caja,
@@ -460,6 +514,9 @@ export function cierreAutoAFila(cierre, mes) {
       gastos_fijos: cierre.gastos.fijos,
       gastos_variables: cierre.gastos.variables,
       gastos_socios: cierre.gastos.socios,
+      sueldos_liquidados: cierre.sueldos.total,
+      aguinaldos: cierre.sueldos.aguinaldos || 0,
+      vacaciones: cierre.sueldos.vacaciones || 0,
       ganancia_devengada: cierre.ganancia.devengada,
       caja_real: cierre.ganancia.cajaReal,
     },
