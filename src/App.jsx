@@ -19,6 +19,7 @@
 // ============================================================
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
+import { rutaRestringida } from './lib/restricciones'
 import { lazy, Suspense } from 'react'
 import LoginPage from './pages/LoginPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
@@ -68,6 +69,14 @@ const DesposteLayout = lazy(() => import('./pages/desposte/DesposteLayout'))
 const DesposteCapones = lazy(() => import('./pages/desposte/DesposteCapones'))
 const DesposteMediaRes = lazy(() => import('./pages/desposte/DesposteMediaRes'))
 const DesposteHistorial = lazy(() => import('./pages/desposte/DesposteHistorial'))
+
+// Bloquea el acceso por URL directa a un módulo vedado para este usuario
+// (lib/restricciones.js). El menú ya lo oculta; esto cubre el link tipeado.
+function SinRestriccion({ ruta, children }) {
+  const { user } = useAuth()
+  if (rutaRestringida(user?.email, ruta)) return <Navigate to="/admin/dashboard" replace />
+  return children
+}
 
 function SoloCEO({ children }) {
   const { user, profile, profileMissing, loading } = useAuth()
@@ -144,12 +153,12 @@ export default function App() {
           <Route path="proveedores" element={<Proveedores />} />
           <Route path="sueldos" element={<Sueldos />} />
           <Route path="gastos" element={<Gastos />} />
-          <Route path="cierre" element={<Cierre />} />
+          <Route path="cierre" element={<SinRestriccion ruta="/admin/cierre"><Cierre /></SinRestriccion>} />
           <Route path="ventas" element={<Ventas />} />
           <Route path="caja" element={<Caja />} />
           <Route path="etiquetas" element={<Etiquetas />} />
           <Route path="facturacion" element={<Facturacion />} />
-          <Route path="auditoria" element={<Auditoria />} />
+          <Route path="auditoria" element={<SinRestriccion ruta="/admin/auditoria"><Auditoria /></SinRestriccion>} />
           <Route path="ejecutivo" element={<SoloCEO><DashboardEjecutivo /></SoloCEO>} />
         </Route>
         <Route path="/franquicia" element={<ProtectedRoute requiredRole="franquicia"><FranquiciaLayout /></ProtectedRoute>}>
