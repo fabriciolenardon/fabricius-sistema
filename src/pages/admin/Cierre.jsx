@@ -386,10 +386,19 @@ function ConfigMesesOperativos() {
   function aviso(m) { setMsg(m); setTimeout(() => setMsg(null), 4000) }
   function setFila(id, campo, val) { setMeses(ms => ms.map(m => m.id === id ? { ...m, [campo]: val } : m)) }
 
+  // 'YYYY-MM' del mes operativo. NO usar el mes de fecha_inicio: como los meses
+  // arrancan/terminan en semanas enteras, el inicio suele caer en el mes calendario
+  // anterior (Septiembre arranca 31/08 → daría '2026-08', duplicado con Agosto).
+  // El punto medio del rango siempre cae en el mes correcto.
+  function mesDeRango(inicio, cierre) {
+    const medio = new Date((new Date(inicio + 'T12:00:00Z').getTime() + new Date(cierre + 'T12:00:00Z').getTime()) / 2)
+    return `${medio.getUTCFullYear()}-${String(medio.getUTCMonth() + 1).padStart(2, '0')}`
+  }
+
   async function guardarFila(m) {
     if (!m.fecha_inicio || !m.fecha_cierre) return aviso('⚠️ Cargá inicio y cierre')
     const { error } = await supabase.from('meses_operativos')
-      .update({ etiqueta: m.etiqueta, fecha_inicio: m.fecha_inicio, fecha_cierre: m.fecha_cierre, mes: String(m.fecha_inicio).substring(0, 7) })
+      .update({ etiqueta: m.etiqueta, fecha_inicio: m.fecha_inicio, fecha_cierre: m.fecha_cierre, mes: mesDeRango(m.fecha_inicio, m.fecha_cierre) })
       .eq('id', m.id)
     aviso(error ? '❌ ' + error.message : '✅ Guardado'); if (!error) cargar()
   }
@@ -400,7 +409,7 @@ function ConfigMesesOperativos() {
   }
   async function agregar() {
     if (!nuevo.etiqueta || !nuevo.fecha_inicio || !nuevo.fecha_cierre) return aviso('⚠️ Completá nombre, inicio y cierre')
-    const { error } = await supabase.from('meses_operativos').insert({ ...nuevo, mes: String(nuevo.fecha_inicio).substring(0, 7) })
+    const { error } = await supabase.from('meses_operativos').insert({ ...nuevo, mes: mesDeRango(nuevo.fecha_inicio, nuevo.fecha_cierre) })
     if (error) return aviso('❌ ' + error.message)
     setNuevo({ etiqueta: '', fecha_inicio: '', fecha_cierre: '' }); aviso('✅ Mes agregado'); cargar()
   }
