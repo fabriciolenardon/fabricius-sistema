@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase'
 import { useFlujoNotificaciones } from '../../lib/useFlujoNotificaciones'
 import { fechaHoyARG } from '../../lib/fechas'
 import { fmtPrecio, fmtKg } from '../../lib/formatos'
+import { rutaRestringida } from '../../lib/restricciones'
 import BuscadorGlobal from '../../components/BuscadorGlobal'
 import CentroActividad from '../../components/CentroActividad'
 import LogoFabricius from '../../components/LogoFabricius'
@@ -328,7 +329,7 @@ function MenuMobile({ onClose }) {
         <nav style={{ flex: 1, overflowY: 'auto', padding: '10px 12px' }}>
           {(user?.email === 'fabriciolenardon@gmail.com'
             ? [...navItems, NAV_MOVIL_TV]
-            : navItems.filter(it => it.to !== '/admin/ejecutivo')
+            : navItems.filter(it => it.to !== '/admin/ejecutivo' && !rutaRestringida(user?.email, it.to))
           ).map(item => {
             const isActive = location.pathname === item.to
             return (
@@ -391,7 +392,7 @@ function NavDesktop({ userEmail, badges }) {
   const esCeo = userEmail === 'fabriciolenardon@gmail.com'
   const grupos = NAV_GRUPOS.map(g => ({
     ...g,
-    items: g.items.filter(it => !it.ceoOnly || esCeo),
+    items: g.items.filter(it => (!it.ceoOnly || esCeo) && !rutaRestringida(userEmail, it.to)),
   }))
 
   return (
