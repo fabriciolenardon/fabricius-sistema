@@ -45,7 +45,7 @@ export default function ClientePrecios() {
   async function cargar() {
     setLoading(true)
     const [{ data: cli }, { data: pr }] = await Promise.all([
-      supabase.from('clientes').select('lista_precios').eq('id', profile.cliente_id).maybeSingle(),
+      supabase.from('clientes').select('nombre, lista_precios').eq('id', profile.cliente_id).maybeSingle(),
       supabase.from('precios').select('*').order('nombre'),
     ])
     setCliente(cli)
@@ -55,9 +55,14 @@ export default function ClientePrecios() {
 
   const L = getLista(cliente?.lista_precios)
   const esCarniceria = L.codigo === 'carn'
-  // Las carnicerías clientas ven además la pestaña de insumos
+  // ALVEAR y MONTE CRISTO son franquicias (mismo criterio de nombre que el
+  // Dashboard Ejecutivo); el resto de la lista carn son carnicerías clientas.
+  // Misma lista de precios, distinta etiqueta de cara al cliente.
+  const esFranquicia = /ALVEAR|MONTE\s*CRISTO/i.test(cliente?.nombre || '')
+  const nombreLista = esFranquicia ? 'Lista para Franquicia' : 'Lista para Carnicerías'
+  // Las carnicerías clientas y franquicias ven además la pestaña de insumos
   const categorias = esCarniceria ? { ...CATEGORIAS, insumos: '🧰 Insumos' } : CATEGORIAS
-  const etiquetaBadge = esCarniceria ? '🔴 Lista para Carnicerías' : L.labelEmoji
+  const etiquetaBadge = esCarniceria ? `🔴 ${nombreLista}` : L.labelEmoji
 
   // Exportar/compartir el PDF de SU lista: carnicerías → PDF Carnicerías;
   // el resto → PDF May/Min. Nunca la lista que no les corresponde.
@@ -98,13 +103,13 @@ export default function ClientePrecios() {
         ))}
       </div>
       <div className="card">
-        <div className="card-title">{filtro === 'insumos' ? '🧰 Insumos para Carnicerías' : categorias[filtro]}</div>
+        <div className="card-title">{filtro === 'insumos' ? `🧰 Insumos para ${esFranquicia ? 'Franquicias' : 'Carnicerías'}` : categorias[filtro]}</div>
         {loading ? <p style={{ color: 'var(--muted)' }}>Cargando precios...</p> : (
           esCarniceria && filtro === 'insumos' ? (
             <table>
               <thead><tr>
                 <th style={{ width: '65%' }}>Insumo</th>
-                <th style={{ color: 'var(--gold)' }}>🧰 Lista para Carnicerías</th>
+                <th style={{ color: 'var(--gold)' }}>🧰 {nombreLista}</th>
               </tr></thead>
               <tbody>
                 {(() => {
@@ -131,7 +136,7 @@ export default function ClientePrecios() {
             <table>
               <thead><tr>
                 <th style={{ width: '70%' }}>Producto</th>
-                <th style={{ color: 'var(--red-light)', textAlign: 'right' }}>🔴 Lista para Carnicerías</th>
+                <th style={{ color: 'var(--red-light)', textAlign: 'right' }}>🔴 {nombreLista}</th>
               </tr></thead>
               <tbody>
                 {productosFiltrados.map(p => (
