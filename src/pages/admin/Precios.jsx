@@ -7,7 +7,6 @@ import LimpiezaDuplicados from './LimpiezaDuplicados'
 import ImportarPLUQendra from './ImportarPLUQendra'
 import CombosEditor from './CombosEditor'
 import { abrirVentanaImprimible } from '../../lib/pdfPrintable'
-import { enviarWhatsapp } from '../../lib/whatsapp'
 import { compartirListaPrecios } from '../../lib/listasPreciosPdf'
 const CATEGORIAS = {
   bovino_mr: '🐄 Media Reses',
@@ -406,33 +405,6 @@ export default function Precios() {
     abrirVentanaImprimible({ titulo: `Catálogo Fabricius ${fechaTxt}`, contenidoHtml: html })
   }
 
-  function enviarCatalogoWhatsapp() {
-    const fechaTxt = new Date().toLocaleDateString('es-AR', { day: 'numeric', month: 'long' })
-    let msg = `🥩 *Carnicerías Fabricius — Lista de precios*\n`
-    msg += `📅 Vigente al ${fechaTxt}\n\n`
-    const precsActivos = preciosConOfertas.filter(p => (p.precio_minorista || p.precio_carniceria || 0) > 0)
-    const porCat = {}
-    precsActivos.forEach(p => {
-      const cat = p.categoria || 'otros'
-      if (!porCat[cat]) porCat[cat] = []
-      porCat[cat].push(p)
-    })
-    Object.entries(porCat).forEach(([catKey, items]) => {
-      msg += `*${CATEGORIAS[catKey] || catKey}*\n`
-      items.sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '')).forEach(p => {
-        const precio = p.precio_minorista || p.precio_carniceria || 0
-        if (precio > 0) {
-          msg += `· ${p.nombre}: ${fmt(precio)}${p.enOferta ? ' 🏷️' : ''}\n`
-        }
-      })
-      msg += `\n`
-    })
-    msg += `_Mensaje generado automáticamente desde el sistema._`
-    const tel = prompt('¿A qué WhatsApp lo querés mandar? (dejá vacío para elegir contacto al abrir Whats)', '')
-    if (tel === null) return
-    enviarWhatsapp(tel, msg)
-  }
-
   // PDFs de listas de precios (archivo real, compartible por WhatsApp).
   // Usa preciosConOfertas: la lista que sale refleja las ofertas vigentes.
   async function pdfLista(tipo) {
@@ -541,10 +513,6 @@ export default function Precios() {
           <button onClick={catalogoPDF}
             style={{ padding: '8px 14px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
             📄 Catálogo PDF (imprimible)
-          </button>
-          <button onClick={enviarCatalogoWhatsapp}
-            style={{ padding: '8px 14px', background: '#25D366', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
-            📱 Enviar precios por WhatsApp
           </button>
           <button onClick={() => pdfLista('mayorista')}
             style={{ padding: '8px 14px', background: '#25D366', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
