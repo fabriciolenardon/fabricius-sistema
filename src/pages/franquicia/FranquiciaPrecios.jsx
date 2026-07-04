@@ -2,9 +2,8 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { compartirListaPrecios } from '../../lib/listasPreciosPdf'
 
-// Mismas categorías que ve el admin en Precios, sin bebidas/insumos/almacén
-// (pedido de Fabricio 04/07/26: las franquicias ven las listas de carne
-// iguales a las nuestras).
+// Mismas categorías de carne que ve el admin en Precios (sin bebidas ni
+// almacén) + Insumos, que la central les vende a las franquicias.
 const CATEGORIAS = {
   bovino_mr: '🐄 Media Reses',
   bovino_corte: '🥩 Bovinos — Cortes',
@@ -19,7 +18,10 @@ const CATEGORIAS = {
   pollo_cajon: '🍗 Pollo x Cajón',
   rebozado: '🧊 Rebozados',
   rebozado_cajon: '🧊 Rebozado Cajón',
+  insumos: '🧰 Insumos',
 }
+const INSUMO_SUBCAT = { descartables: '📦 Descartables', limpieza: '🧽 Limpieza', carniceria: '🔪 Insumos Carnicería' }
+const INSUMO_SUBCAT_ORDEN = { descartables: 0, limpieza: 1, carniceria: 2 }
 
 import { fmtPrecio } from '../../lib/formatos'
 const fmt = n => n != null ? fmtPrecio(Number(n) || 0) : '—'
@@ -77,8 +79,37 @@ export default function FranquiciaPrecios() {
         ))}
       </div>
       <div className="card">
-        <div className="card-title">{CATEGORIAS[filtro]}</div>
+        <div className="card-title">{filtro === 'insumos' ? '🧰 Insumos para Franquicias' : CATEGORIAS[filtro]}</div>
         {loading ? <p style={{ color: 'var(--muted)' }}>Cargando precios...</p> : (
+          filtro === 'insumos' ? (
+            // Insumos: una sola lista (lo que la central les cobra a las franquicias)
+            <table>
+              <thead><tr>
+                <th style={{ width: '65%' }}>Insumo</th>
+                <th style={{ color: 'var(--gold)' }}>🧰 Lista para Franquicia</th>
+              </tr></thead>
+              <tbody>
+                {(() => {
+                  const lista = [...productosFiltrados].sort((a, b) => (INSUMO_SUBCAT_ORDEN[a.subcategoria] ?? 9) - (INSUMO_SUBCAT_ORDEN[b.subcategoria] ?? 9) || a.nombre.localeCompare(b.nombre))
+                  const rows = []
+                  let lastSub = null
+                  lista.forEach(p => {
+                    if (p.subcategoria !== lastSub) {
+                      lastSub = p.subcategoria
+                      rows.push(<tr key={'sub-' + (p.subcategoria || 'x')}><td colSpan={2} style={{ background: 'var(--surface2)', color: 'var(--gold)', fontWeight: 700, fontSize: 12, padding: '6px 10px' }}>{INSUMO_SUBCAT[p.subcategoria] || p.subcategoria}</td></tr>)
+                    }
+                    rows.push(
+                      <tr key={p.id}>
+                        <td style={{ fontWeight: 500 }}>{p.nombre}</td>
+                        <td style={{ color: 'var(--gold)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_carniceria)}</td>
+                      </tr>
+                    )
+                  })
+                  return rows
+                })()}
+              </tbody>
+            </table>
+          ) : (
           <table>
             <thead><tr>
               <th style={{ width: '40%' }}>Producto</th>
@@ -98,6 +129,7 @@ export default function FranquiciaPrecios() {
               {productosFiltrados.length === 0 && <tr><td colSpan={4} className="empty">Sin productos en esta categoría</td></tr>}
             </tbody>
           </table>
+          )
         )}
       </div>
     </div>

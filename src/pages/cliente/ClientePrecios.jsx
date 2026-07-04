@@ -95,7 +95,7 @@ export default function ClientePrecios() {
           <table>
             <thead><tr>
               <th style={{ width: '40%' }}>Producto</th>
-              {esClienteCarniceria && <th style={{ color: 'var(--red-light)' }}>🔴 Tu precio</th>}
+              {esClienteCarniceria && <th style={{ color: 'var(--red-light)' }}>🔴 Lista para Franquicia</th>}
               <th style={{ color: 'var(--amber)' }}>🟡 Mayorista</th>
               <th style={{ color: 'var(--green)' }}>🟢 Minorista</th>
             </tr></thead>
