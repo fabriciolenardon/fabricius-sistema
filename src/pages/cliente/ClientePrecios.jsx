@@ -1,4 +1,11 @@
 // ClientePrecios.jsx - Lista de precios para clientes mayoristas
+// Dos variantes según clientes.lista_precios:
+//  - may/min (clientes comunes): columnas MAYORISTA + MINORISTA y PDF May/Min.
+//    La lista carnicería (reventa) NO se muestra.
+//  - carn (carnicerías clientas, no franquicias): SOLO la Lista para
+//    Carnicerías + Insumos para Carnicerías, y el PDF de Carnicerías.
+//    No ven mayorista/minorista: manejan sus precios de venta de forma
+//    independiente (no somos nosotros quienes se los ponemos).
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
@@ -15,6 +22,8 @@ const CATEGORIAS = {
   pollo_cajon: '🍗 Pollo x Cajón',
   rebozado: '🧊 Rebozados',
 }
+const INSUMO_SUBCAT = { descartables: '📦 Descartables', limpieza: '🧽 Limpieza', carniceria: '🔪 Insumos Carnicería' }
+const INSUMO_SUBCAT_ORDEN = { descartables: 0, limpieza: 1, carniceria: 2 }
 
 import { fmtPrecio } from '../../lib/formatos'
 import { getLista } from '../../lib/listasPrecios'
@@ -45,17 +54,17 @@ export default function ClientePrecios() {
   }
 
   const L = getLista(cliente?.lista_precios)
-  // Los clientes ven las listas MAYORISTA y MINORISTA. La lista carnicería
-  // (reventa) NO se muestra en este portal — salvo la columna "Tu precio"
-  // para los clientes que tienen asignada justamente esa lista.
-  const esClienteCarniceria = L.codigo === 'carn'
+  const esCarniceria = L.codigo === 'carn'
+  // Las carnicerías clientas ven además la pestaña de insumos
+  const categorias = esCarniceria ? { ...CATEGORIAS, insumos: '🧰 Insumos' } : CATEGORIAS
+  const etiquetaBadge = esCarniceria ? '🔴 Lista para Carnicerías' : L.labelEmoji
 
-  // Exportar/compartir el PDF May/Min (la lista carnicerías no está
-  // disponible en el portal de clientes).
-  async function pdfMayMin() {
+  // Exportar/compartir el PDF de SU lista: carnicerías → PDF Carnicerías;
+  // el resto → PDF May/Min. Nunca la lista que no les corresponde.
+  async function pdfLista() {
     try {
       const visibles = precios.filter(p => CATEGORIAS[p.categoria])
-      const res = await compartirListaPrecios({ tipo: 'mayorista', precios: visibles })
+      const res = await compartirListaPrecios({ tipo: esCarniceria ? 'carniceria' : 'mayorista', precios: visibles })
       setMsg(res === 'descargado' ? '✅ PDF descargado — podés arrastrarlo al chat de WhatsApp' : '✅ Lista compartida')
     } catch (e) {
       setMsg('❌ ' + e.message)
@@ -64,7 +73,6 @@ export default function ClientePrecios() {
   }
 
   const productosFiltrados = precios.filter(p => p.categoria === filtro)
-  const cols = 3 + (esClienteCarniceria ? 1 : 0)
 
   return (
     <div>
@@ -73,16 +81,16 @@ export default function ClientePrecios() {
 
       <div style={{ background: 'linear-gradient(135deg,#1a1408,#0a0a08)', border: '1px solid var(--gold)', borderRadius: 12, padding: '12px 18px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
         <div style={{ fontSize: 12, color: 'var(--muted)' }}>Tu lista de precios:</div>
-        <div style={{ background: 'var(--gold)', color: '#000', borderRadius: 6, padding: '4px 12px', fontSize: 12, fontWeight: 700 }}>{L.labelEmoji}</div>
-        <button onClick={pdfMayMin}
+        <div style={{ background: 'var(--gold)', color: '#000', borderRadius: 6, padding: '4px 12px', fontSize: 12, fontWeight: 700 }}>{etiquetaBadge}</div>
+        <button onClick={pdfLista}
           style={{ marginLeft: 'auto', padding: '8px 14px', background: '#25D366', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
-          📄 PDF May/Min → WhatsApp
+          {esCarniceria ? '📄 PDF Lista Carnicerías → WhatsApp' : '📄 PDF May/Min → WhatsApp'}
         </button>
       </div>
       {msg && <div style={{ background: msg.includes('❌') ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${msg.includes('❌') ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 14, color: msg.includes('❌') ? '#ff6b6b' : '#7dff7d', fontWeight: 600, fontSize: 13 }}>{msg}</div>}
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 20 }}>
-        {Object.entries(CATEGORIAS).map(([id, label]) => (
+        {Object.entries(categorias).map(([id, label]) => (
           <button key={id} onClick={() => setFiltro(id)}
             style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid var(--border)', background: filtro === id ? 'var(--gold)' : 'transparent', color: filtro === id ? '#000' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
             {label}
@@ -90,27 +98,70 @@ export default function ClientePrecios() {
         ))}
       </div>
       <div className="card">
-        <div className="card-title">{CATEGORIAS[filtro]}</div>
+        <div className="card-title">{filtro === 'insumos' ? '🧰 Insumos para Carnicerías' : categorias[filtro]}</div>
         {loading ? <p style={{ color: 'var(--muted)' }}>Cargando precios...</p> : (
-          <table>
-            <thead><tr>
-              <th style={{ width: '40%' }}>Producto</th>
-              {esClienteCarniceria && <th style={{ color: 'var(--red-light)' }}>🔴 Lista para Franquicia</th>}
-              <th style={{ color: 'var(--amber)' }}>🟡 Mayorista</th>
-              <th style={{ color: 'var(--green)' }}>🟢 Minorista</th>
-            </tr></thead>
-            <tbody>
-              {productosFiltrados.map(p => (
-                <tr key={p.id}>
-                  <td style={{ fontWeight: 500 }}>{p.nombre}</td>
-                  {esClienteCarniceria && <td style={{ color: 'var(--red-light)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_carniceria)}</td>}
-                  <td style={{ color: 'var(--amber)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_mayorista)}</td>
-                  <td style={{ color: 'var(--green)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_minorista)}</td>
-                </tr>
-              ))}
-              {productosFiltrados.length === 0 && <tr><td colSpan={cols} className="empty">Sin productos en esta categoría</td></tr>}
-            </tbody>
-          </table>
+          esCarniceria && filtro === 'insumos' ? (
+            <table>
+              <thead><tr>
+                <th style={{ width: '65%' }}>Insumo</th>
+                <th style={{ color: 'var(--gold)' }}>🧰 Lista para Carnicerías</th>
+              </tr></thead>
+              <tbody>
+                {(() => {
+                  const lista = [...productosFiltrados].sort((a, b) => (INSUMO_SUBCAT_ORDEN[a.subcategoria] ?? 9) - (INSUMO_SUBCAT_ORDEN[b.subcategoria] ?? 9) || a.nombre.localeCompare(b.nombre))
+                  const rows = []
+                  let lastSub = null
+                  lista.forEach(p => {
+                    if (p.subcategoria !== lastSub) {
+                      lastSub = p.subcategoria
+                      rows.push(<tr key={'sub-' + (p.subcategoria || 'x')}><td colSpan={2} style={{ background: 'var(--surface2)', color: 'var(--gold)', fontWeight: 700, fontSize: 12, padding: '6px 10px' }}>{INSUMO_SUBCAT[p.subcategoria] || p.subcategoria}</td></tr>)
+                    }
+                    rows.push(
+                      <tr key={p.id}>
+                        <td style={{ fontWeight: 500 }}>{p.nombre}</td>
+                        <td style={{ color: 'var(--gold)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_carniceria)}</td>
+                      </tr>
+                    )
+                  })
+                  return rows
+                })()}
+              </tbody>
+            </table>
+          ) : esCarniceria ? (
+            <table>
+              <thead><tr>
+                <th style={{ width: '70%' }}>Producto</th>
+                <th style={{ color: 'var(--red-light)', textAlign: 'right' }}>🔴 Lista para Carnicerías</th>
+              </tr></thead>
+              <tbody>
+                {productosFiltrados.map(p => (
+                  <tr key={p.id}>
+                    <td style={{ fontWeight: 500 }}>{p.nombre}</td>
+                    <td style={{ color: 'var(--red-light)', fontFamily: "'Bebas Neue',cursive", fontSize: 20, textAlign: 'right' }}>{fmt(p.precio_carniceria)}</td>
+                  </tr>
+                ))}
+                {productosFiltrados.length === 0 && <tr><td colSpan={2} className="empty">Sin productos en esta categoría</td></tr>}
+              </tbody>
+            </table>
+          ) : (
+            <table>
+              <thead><tr>
+                <th style={{ width: '40%' }}>Producto</th>
+                <th style={{ color: 'var(--amber)' }}>🟡 Mayorista</th>
+                <th style={{ color: 'var(--green)' }}>🟢 Minorista</th>
+              </tr></thead>
+              <tbody>
+                {productosFiltrados.map(p => (
+                  <tr key={p.id}>
+                    <td style={{ fontWeight: 500 }}>{p.nombre}</td>
+                    <td style={{ color: 'var(--amber)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_mayorista)}</td>
+                    <td style={{ color: 'var(--green)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_minorista)}</td>
+                  </tr>
+                ))}
+                {productosFiltrados.length === 0 && <tr><td colSpan={3} className="empty">Sin productos en esta categoría</td></tr>}
+              </tbody>
+            </table>
+          )
         )}
       </div>
     </div>
