@@ -8,6 +8,7 @@ import ImportarPLUQendra from './ImportarPLUQendra'
 import CombosEditor from './CombosEditor'
 import { abrirVentanaImprimible } from '../../lib/pdfPrintable'
 import { enviarWhatsapp } from '../../lib/whatsapp'
+import { compartirListaPrecios } from '../../lib/listasPreciosPdf'
 const CATEGORIAS = {
   bovino_mr: '🐄 Media Reses',
   bovino_corte: '🥩 Bovino Cortes',
@@ -432,6 +433,18 @@ export default function Precios() {
     enviarWhatsapp(tel, msg)
   }
 
+  // PDFs de listas de precios (archivo real, compartible por WhatsApp).
+  // Usa preciosConOfertas: la lista que sale refleja las ofertas vigentes.
+  async function pdfLista(tipo) {
+    try {
+      const res = await compartirListaPrecios({ tipo, precios: preciosConOfertas })
+      if (res === 'descargado') mostrarMsg('✅ PDF descargado — arrastralo al chat de WhatsApp')
+      if (res === 'compartido') mostrarMsg('✅ Lista compartida')
+    } catch (e) {
+      mostrarMsg('❌ ' + e.message)
+    }
+  }
+
   const ofertasVigentes = ofertas.filter(o => o.activa && o.fecha_inicio <= hoy && o.fecha_fin >= hoy)
   const ofertasVencidas = ofertas.filter(o => !o.activa || o.fecha_fin < hoy)
   const productosFiltrados = precios.filter(p => p.categoria === filtro)
@@ -532,6 +545,14 @@ export default function Precios() {
           <button onClick={enviarCatalogoWhatsapp}
             style={{ padding: '8px 14px', background: '#25D366', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
             📱 Enviar precios por WhatsApp
+          </button>
+          <button onClick={() => pdfLista('mayorista')}
+            style={{ padding: '8px 14px', background: '#25D366', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+            📄 PDF May/Min → WhatsApp
+          </button>
+          <button onClick={() => pdfLista('carniceria')}
+            style={{ padding: '8px 14px', background: '#25D366', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+            📄 PDF Carnicerías → WhatsApp
           </button>
         </div>
       )}
