@@ -61,11 +61,16 @@ export default function ArqueoCaja() {
   // EDICION: cuando setEditandoId !== null, el form esta editando un arqueo
   // existente en lugar de crear uno nuevo. Solo el CEO puede editar.
   const [editandoId, setEditandoId] = useState(null)
+  // Confirmacion inline del guardado. NO usar window.confirm(): iOS lo
+  // suprime silenciosamente en la app instalada (PWA) y el guardado
+  // quedaba bloqueado sin ningun mensaje.
+  const [confirmandoGuardar, setConfirmandoGuardar] = useState(false)
   const { user } = useAuth()
   const esCEO = user?.email === CEO_EMAIL
 
-  // Recargar ventas cuando cambia la fecha seleccionada
-  useEffect(() => { cargar() }, [fechaArqueo])
+  // Recargar ventas cuando cambia la fecha seleccionada (y cerrar la
+  // confirmacion pendiente para no guardar contra datos de otro dia)
+  useEffect(() => { setConfirmandoGuardar(false); cargar() }, [fechaArqueo])
 
   async function cargar() {
     setLoading(true)
@@ -112,6 +117,7 @@ export default function ArqueoCaja() {
       showMsg('❌ Solo el CEO puede editar arqueos', 'error')
       return
     }
+    setConfirmandoGuardar(false)
     setEditandoId(arqueo.id)
     setFechaArqueo(arqueo.fecha)
     setConteo(arqueo.billetes || {})
@@ -135,6 +141,7 @@ export default function ArqueoCaja() {
   }
 
   function cancelarEdicion() {
+    setConfirmandoGuardar(false)
     setEditandoId(null)
     setConteo({})
     setDebitoReal('')
@@ -169,21 +176,16 @@ export default function ArqueoCaja() {
   const debitoDif = debitoRealNum - debitoEsperado
   const transferenciaDif = transferenciaRealNum - transferenciaEsperada
 
-  async function guardarArqueo() {
+  function guardarArqueo() {
     if (totalContado === 0 && efectivoEsperado === 0 && debitoRealNum === 0 && transferenciaRealNum === 0) {
       showMsg('Cargá al menos un valor para arquear', 'error')
       return
     }
-    const difTotal = diferencia + debitoDif + transferenciaDif
-    if (!confirm(
-      `📋 GUARDAR ARQUEO\n\n` +
-      `💵 Efectivo  esperado: ${fmt$(efectivoEsperado)}  |  contado: ${fmt$(totalContado)}  |  dif: ${diferencia >= 0 ? '+' : ''}${fmt$(diferencia)}\n` +
-      `💳 Débito/QR esperado: ${fmt$(debitoEsperado)}  |  real: ${fmt$(debitoRealNum)}  |  dif: ${debitoDif >= 0 ? '+' : ''}${fmt$(debitoDif)}\n` +
-      `🔄 Transfer. esperada: ${fmt$(transferenciaEsperada)}  |  real: ${fmt$(transferenciaRealNum)}  |  dif: ${transferenciaDif >= 0 ? '+' : ''}${fmt$(transferenciaDif)}\n\n` +
-      `DIFERENCIA TOTAL: ${difTotal >= 0 ? '+' : ''}${fmt$(difTotal)}\n\n` +
-      `¿Guardar?`
-    )) return
+    setConfirmandoGuardar(true)
+  }
 
+  async function confirmarGuardarArqueo() {
+    setConfirmandoGuardar(false)
     setGuardando(true)
     // En modo rapido no tenemos desglose por denominacion; guardamos
     // billetes como {} y agregamos nota indicando que fue backfill manual
@@ -533,14 +535,39 @@ export default function ArqueoCaja() {
                 style={{ width: '100%', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '8px 10px', fontSize: 13, resize: 'vertical', fontFamily: 'inherit' }} />
             </div>
 
-            <button onClick={guardarArqueo} disabled={guardando}
-              style={{ marginTop: 12, width: '100%', padding: '12px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: guardando ? 'not-allowed' : 'pointer', fontWeight: 800, fontSize: 14, opacity: guardando ? 0.6 : 1 }}>
-              {guardando
-                ? 'Guardando...'
-                : editandoId
-                  ? `✏️ Guardar cambios del arqueo del ${fechaArqueo}`
-                  : `💾 Guardar arqueo del ${fechaArqueo}`}
-            </button>
+            {!confirmandoGuardar && (
+              <button onClick={guardarArqueo} disabled={guardando}
+                style={{ marginTop: 12, width: '100%', padding: '12px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: guardando ? 'not-allowed' : 'pointer', fontWeight: 800, fontSize: 14, opacity: guardando ? 0.6 : 1 }}>
+                {guardando
+                  ? 'Guardando...'
+                  : editandoId
+                    ? `✏️ Guardar cambios del arqueo del ${fechaArqueo}`
+                    : `💾 Guardar arqueo del ${fechaArqueo}`}
+              </button>
+            )}
+            {confirmandoGuardar && (
+              <div style={{ marginTop: 12, padding: 14, background: 'rgba(255,209,122,0.06)', border: '1px solid var(--gold)', borderRadius: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--gold)', marginBottom: 8 }}>📋 CONFIRMAR ARQUEO DEL {fechaArqueo}</div>
+                <div style={{ fontSize: 12, lineHeight: 1.8 }}>
+                  <div>💵 Efectivo — esperado {fmt$(efectivoEsperado)} · contado <b>{fmt$(totalContado)}</b> · dif {diferencia >= 0 ? '+' : ''}{fmt$(diferencia)}</div>
+                  <div>💳 Débito/QR — esperado {fmt$(debitoEsperado)} · real <b>{fmt$(debitoRealNum)}</b> · dif {debitoDif >= 0 ? '+' : ''}{fmt$(debitoDif)}</div>
+                  <div>🔄 Transfer. — esperada {fmt$(transferenciaEsperada)} · real <b>{fmt$(transferenciaRealNum)}</b> · dif {transferenciaDif >= 0 ? '+' : ''}{fmt$(transferenciaDif)}</div>
+                  <div style={{ marginTop: 6, fontWeight: 800, color: (diferencia + debitoDif + transferenciaDif) === 0 ? '#7dff7d' : '#ffd17a' }}>
+                    DIFERENCIA TOTAL: {(diferencia + debitoDif + transferenciaDif) >= 0 ? '+' : ''}{fmt$(diferencia + debitoDif + transferenciaDif)}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                  <button onClick={confirmarGuardarArqueo} disabled={guardando}
+                    style={{ flex: 1, padding: '12px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: 14 }}>
+                    ✅ Sí, guardar
+                  </button>
+                  <button onClick={() => setConfirmandoGuardar(false)}
+                    style={{ flex: 1, padding: '12px', background: 'transparent', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 8, cursor: 'pointer', fontWeight: 600, fontSize: 14 }}>
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
