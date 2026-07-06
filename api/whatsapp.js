@@ -617,9 +617,17 @@ async function responderConIris(historial, textoActual, datosNegocio, infoNegoci
     }
     if (!raw) return fallback
     let parsed
-    try { parsed = JSON.parse(raw) } catch { return { ...fallback, respuesta: raw } }
+    try { parsed = JSON.parse(raw) } catch {
+      // JSON roto/truncado (típico: el modelo entró en LOOP repitiendo una frase
+      // hasta chocar con maxOutputTokens y el JSON quedó sin cerrar — bug 06/07:
+      // Cristina recibió "(Pendiente de tipo de cliente para precios)" x50).
+      // NUNCA mandarle el crudo al cliente: rescatamos el campo "respuesta" si
+      // se puede; si no, fallback prolijo. En ambos casos escalamos al equipo
+      // porque casi seguro había un pedido en el medio que no se registró.
+      return { ...fallback, respuesta: sanearRespuesta(rescatarRespuesta(raw)) || fallback.respuesta, escalar: true }
+    }
     return {
-      respuesta: (parsed.respuesta || '').trim() || fallback.respuesta,
+      respuesta: sanearRespuesta(parsed.respuesta) || fallback.respuesta,
       es_pedido: parsed.es_pedido === true,
       resumen_pedido: (parsed.resumen_pedido || '').trim(),
       nombre_pedido: (parsed.nombre_pedido || '').trim(),
@@ -629,6 +637,40 @@ async function responderConIris(historial, textoActual, datosNegocio, infoNegoci
       enviar_ofertas: typeof parsed.enviar_ofertas === 'string' ? parsed.enviar_ofertas.toLowerCase().trim() : '',
     }
   } catch (e) { console.error('Gemini WA error', e); return fallback }
+}
+
+// Rescata el campo "respuesta" de un JSON truncado/roto (lo que alcanzó a
+// escribir el modelo antes de cortarse). Devuelve '' si no se puede.
+function rescatarRespuesta(raw) {
+  try {
+    const m = String(raw).match(/"respuesta"\s*:\s*"((?:[^"\\]|\\.)*)"?/)
+    if (!m || !m[1]) return ''
+    // Des-escapamos vía JSON.parse; si el fragmento quedó cortado en medio de
+    // un escape, probamos sin el último caracter.
+    try { return JSON.parse(`"${m[1]}"`) } catch { return JSON.parse(`"${m[1].replace(/\\$/, '')}"`) }
+  } catch { return '' }
+}
+
+// Corta los LOOPS de repetición del modelo antes de mandar al cliente: si una
+// misma frase (larga) aparece repetida, se manda una sola vez; a la 3ª
+// aparición de cualquier frase cortamos ahí (el resto es basura del loop).
+// También pone un techo de largo razonable para un chat de WhatsApp.
+function sanearRespuesta(texto) {
+  let t = String(texto || '').trim()
+  if (!t) return ''
+  const frases = t.split(/(?<=[.!?…])\s+|\n+/)
+  const vistas = new Map()
+  const out = []
+  for (const f of frases) {
+    const clave = f.toLowerCase().replace(/\s+/g, ' ').trim()
+    if (!clave) continue
+    const n = (vistas.get(clave) || 0) + 1
+    vistas.set(clave, n)
+    if (n >= 3) break                       // loop declarado: cortamos acá
+    if (n === 2 && clave.length > 25) continue // frase larga duplicada: fuera
+    out.push(f)
+  }
+  return out.join(' ').slice(0, 1500).trim()
 }
 
 // ── Registro del pedido + aviso al dueño ─────────────────────────────────
