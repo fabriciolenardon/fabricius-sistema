@@ -15,10 +15,25 @@ import { fechaHoyARG, esFechaFutura } from '../../lib/fechas'
 import {
   cargarMovimientos, registrarCompraProv, registrarPagoProv,
   registrarAjusteProv, registrarSaldoInicialProv, eliminarMovimiento,
+  actualizarFormaPagoProv,
 } from '../../lib/ctaProveedores'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
 const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
+
+const FORMAS_PAGO = [
+  { value: 'efectivo', label: 'Efectivo' },
+  { value: 'transferencia', label: 'Transferencia' },
+  { value: 'cheque', label: 'Cheque' },
+  { value: 'echeq', label: 'E-cheq' },
+]
+
+// Pagos viejos sin la columna `forma` cargada: la forma viene incrustada
+// en la descripción ("Pago — efectivo — nota..."). Se rescata de ahí.
+function formaDeDescripcion(desc) {
+  const f = String(desc || '').split(' — ')[1] || ''
+  return FORMAS_PAGO.some(x => x.value === f) ? f : 'efectivo'
+}
 
 export default function CuentaCorrienteProveedor({ proveedor, saldoSugerido = 0, onSaldoChange }) {
   const [movs, setMovs] = useState([])
@@ -133,6 +148,22 @@ export default function CuentaCorrienteProveedor({ proveedor, saldoSugerido = 0,
     if (error) { showMsg('❌ ' + error, 'error'); setGuardando(false); return }
     showMsg('✅ Saldo inicial cargado')
     await despuesDeGuardar()
+  }
+
+  // ✏️ Edición de la forma de pago de un pago ya cargado ("puse efectivo y
+  // era transferencia"). Solo forma + notas — importes y saldo NO se tocan;
+  // un importe mal cargado se corrige eliminando el pago y cargándolo de nuevo.
+  const [editPago, setEditPago] = useState(null) // { id, forma, notas } | null
+
+  async function guardarEdicionPago() {
+    if (!editPago) return
+    setGuardando(true)
+    const { error } = await actualizarFormaPagoProv({ movId: editPago.id, forma: editPago.forma, notas: editPago.notas })
+    setGuardando(false)
+    if (error) { showMsg('❌ ' + error, 'error'); return }
+    setEditPago(null)
+    showMsg('✅ Forma de pago corregida')
+    await cargar()
   }
 
   async function borrarMov(m) {
@@ -315,11 +346,31 @@ export default function CuentaCorrienteProveedor({ proveedor, saldoSugerido = 0,
                         {m.registrado_por && (
                           <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 1 }}>✍️ Registrado por {m.registrado_por}</div>
                         )}
+                        {editPago?.id === m.id && (
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
+                            <select value={editPago.forma} onChange={e => setEditPago(p => ({ ...p, forma: e.target.value }))}
+                              style={{ ...inp, width: 'auto', padding: '4px 8px', fontSize: 12 }}>
+                              {FORMAS_PAGO.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                            </select>
+                            <input value={editPago.notas} onChange={e => setEditPago(p => ({ ...p, notas: e.target.value }))}
+                              placeholder="Notas (cheque nro...)" style={{ ...inp, width: 160, padding: '4px 8px', fontSize: 12 }} />
+                            <button onClick={guardarEdicionPago} disabled={guardando}
+                              style={{ background: 'var(--green)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#000' }}>✓ Guardar</button>
+                            <button onClick={() => setEditPago(null)}
+                              style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 11, color: 'var(--muted)' }}>✗</button>
+                          </div>
+                        )}
                       </td>
                       <td style={{ padding: '6px 4px', textAlign: 'right', textDecoration: tachado, color: Number(m.debe) > 0 ? 'var(--amber)' : 'var(--muted)', fontWeight: Number(m.debe) > 0 ? 700 : 400 }}>{Number(m.debe) > 0 ? fmt(m.debe) : '—'}</td>
                       <td style={{ padding: '6px 4px', textAlign: 'right', textDecoration: tachado, color: Number(m.haber) > 0 ? 'var(--green)' : 'var(--muted)', fontWeight: Number(m.haber) > 0 ? 700 : 400 }}>{Number(m.haber) > 0 ? fmt(m.haber) : '—'}</td>
                       <td style={{ padding: '6px 4px', textAlign: 'right', color: cs, fontWeight: 700 }}>{fmt(m.saldo)}{Number(m.saldo) < 0 ? ' a favor' : ''}</td>
-                      <td style={{ padding: '6px 4px', textAlign: 'center' }}>
+                      <td style={{ padding: '6px 4px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                        {!m.anulado && m.tipo === 'pago' && (
+                          <button
+                            onClick={() => setEditPago(editPago?.id === m.id ? null : { id: m.id, forma: m.forma || formaDeDescripcion(m.descripcion), notas: m.notas || '' })}
+                            title="Corregir forma de pago / notas"
+                            style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, padding: '2px 7px', cursor: 'pointer', fontSize: 11, color: 'var(--gold)', marginRight: 4 }}>✏️</button>
+                        )}
                         {!m.anulado && (
                           <button onClick={() => borrarMov(m)} title="Eliminar movimiento"
                             style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '2px 7px', cursor: 'pointer', fontSize: 11, color: 'var(--red-light)' }}>🗑️</button>

@@ -275,6 +275,19 @@ async function eliminarMovimiento(mov) {
     await seleccionar({ ...seleccionado, saldo: nuevoSaldo })
   }
 
+  // ✏️ Corrige la forma de pago / notas de un pago ya registrado ("puse
+  // efectivo y era transferencia"). En movimientos_ctacte la forma vive
+  // dentro de la descripción (no hay columna aparte), así que se reescribe
+  // ese texto y nada más: importes y saldo NO se tocan.
+  async function editarPago(mov, forma, notas) {
+    const { error } = await supabase.from('movimientos_ctacte')
+      .update({ descripcion: `Pago — ${forma}${notas ? ' — ' + notas : ''}` })
+      .eq('id', mov.id)
+    if (error) { alert('❌ No se pudo corregir el pago: ' + error.message); return false }
+    await seleccionar(seleccionado)
+    return true
+  }
+
   // Anula un pago específico — invierte el efecto en saldo y elimina el movimiento.
   // Bajado desde eliminarMovimiento pero usable directamente desde la nueva
   // tabla de pagos.
@@ -684,7 +697,7 @@ async function eliminarMovimiento(mov) {
 
             <MovimientosCliente movimientos={movimientos} fmt={fmt} />
             <RemitosCliente remitos={remitos} imprimirRemito={imprimirRemito} />
-            <PagosCliente movimientos={movimientos} onAnular={anularPago} fmt={fmt} />
+            <PagosCliente movimientos={movimientos} onAnular={anularPago} onEditar={editarPago} fmt={fmt} />
 {false && (
             <div className="card" style={{ marginBottom: 16 }}>
   <div className="card-title">🧾 Remitos</div>
@@ -1109,11 +1122,39 @@ function MovimientosCliente({ movimientos, fmt }) {
   )
 }
 
-function PagosCliente({ movimientos, onAnular, fmt }) {
+const FORMAS_PAGO_CLI = [
+  { value: 'efectivo', label: 'Efectivo' },
+  { value: 'transferencia', label: 'Transferencia' },
+  { value: 'cheque', label: 'Cheque' },
+  { value: 'echeq', label: 'E-cheq' },
+]
+
+// La forma del pago vive incrustada en la descripción ("Pago — efectivo — nota").
+// Se rescata de ahí para precargar el editor.
+function partesPagoCli(desc) {
+  const p = String(desc || '').split(' — ')
+  const forma = FORMAS_PAGO_CLI.some(x => x.value === p[1]) ? p[1] : 'efectivo'
+  return { forma, notas: p.slice(2).join(' — ') }
+}
+
+function PagosCliente({ movimientos, onAnular, onEditar, fmt }) {
   const pagos = useMemo(() =>
     (movimientos || []).filter(m => m.tipo === 'pago' || m.tipo === 'cheque'),
     [movimientos])
   const pag = usePaginacion(pagos, 20)
+  // ✏️ Edición inline de forma de pago / notas (solo tipo 'pago'; los de
+  // tipo 'cheque' los maneja el módulo de cheques). Importes NO se editan.
+  const [edit, setEdit] = useState(null) // { id, forma, notas } | null
+  const [guardando, setGuardando] = useState(false)
+
+  async function guardarEdit(p) {
+    setGuardando(true)
+    const ok = await onEditar(p, edit.forma, edit.notas)
+    setGuardando(false)
+    if (ok) setEdit(null)
+  }
+
+  const inpMini = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '4px 8px', fontSize: 12, fontFamily: "'DM Sans',sans-serif" }
 
   return (
     <div className="card" style={{ marginBottom: 16 }}>
@@ -1129,9 +1170,32 @@ function PagosCliente({ movimientos, onAnular, fmt }) {
           {pag.items.map(p => (
             <tr key={p.id}>
               <td>{p.fecha}</td>
-              <td>{p.descripcion || '—'}</td>
+              <td>
+                {p.descripcion || '—'}
+                {edit?.id === p.id && (
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
+                    <select value={edit.forma} onChange={e => setEdit(x => ({ ...x, forma: e.target.value }))} style={inpMini}>
+                      {FORMAS_PAGO_CLI.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                    </select>
+                    <input value={edit.notas} onChange={e => setEdit(x => ({ ...x, notas: e.target.value }))}
+                      placeholder="Notas (cheque nro...)" style={{ ...inpMini, width: 160 }} />
+                    <button onClick={() => guardarEdit(p)} disabled={guardando}
+                      style={{ background: 'var(--green)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#000' }}>✓ Guardar</button>
+                    <button onClick={() => setEdit(null)}
+                      style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 11, color: 'var(--muted)' }}>✗</button>
+                  </div>
+                )}
+              </td>
               <td style={{ textAlign: 'right', color: 'var(--green)', fontWeight: 700 }}>{fmt(p.haber)}</td>
-              <td style={{ textAlign: 'center' }}>
+              <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                {p.tipo === 'pago' && (
+                  <button
+                    onClick={() => setEdit(edit?.id === p.id ? null : { id: p.id, ...partesPagoCli(p.descripcion) })}
+                    title="Corregir forma de pago / notas"
+                    style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--gold)', marginRight: 6 }}>
+                    ✏️ Editar
+                  </button>
+                )}
                 <button onClick={() => onAnular(p)}
                   title="Anular este pago (revierte el saldo)"
                   style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--red-light)' }}>
