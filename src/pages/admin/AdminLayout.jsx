@@ -13,6 +13,11 @@ import UserDropdown from '../../components/UserDropdown'
 import CambiarPasswordModal from '../../components/CambiarPasswordModal'
 import BotonAvisos from '../../components/BotonAvisos'
 import RecordatorioPagos from '../../components/RecordatorioPagos'
+import PanelDividido from '../../components/PanelDividido'
+
+// ¿Este AdminLayout corre ADENTRO del panel dividido (iframe)? Si es así, se
+// muestra SOLO el módulo, sin header/menú/widgets (el chrome lo pone el panel).
+const ES_PANEL = typeof window !== 'undefined' && window.self !== window.top
 
 // Entrada extra solo-CEO para el menú del celular: el Modo TV (F.A.B.R.I.) no
 // es una ruta aparte de navItems, así que se agrega a mano para el CEO.
@@ -472,11 +477,35 @@ export default function AdminLayout() {
   const [menuAbierto, setMenuAbierto] = useState(false)
   const [isMobile, setIsMobile] = useState(window.innerWidth < 900)
 
+  // Panel dividido (solo escritorio): módulo secundario a la derecha.
+  const [panelAbierto, setPanelAbierto] = useState(false)
+  const [panelAncho, setPanelAncho] = useState(() => {
+    const n = Number(localStorage.getItem('panel_ancho'))
+    return n >= 25 && n <= 65 ? n : 44
+  })
+
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 900)
     window.addEventListener('resize', check)
     return () => window.removeEventListener('resize', check)
   }, [])
+
+  // Adentro del panel (iframe): solo el contenido del módulo, sin chrome.
+  if (ES_PANEL) {
+    return (
+      <main style={{ minHeight: '100vh' }}>
+        <div style={{ padding: '16px 14px' }} className="fade-in">
+          <Outlet />
+        </div>
+      </main>
+    )
+  }
+
+  // Módulos que se pueden abrir en el panel (mismos filtros que el menú).
+  const itemsPanel = navItems.filter(it =>
+    (it.to !== '/admin/ejecutivo' || user?.email === 'fabriciolenardon@gmail.com')
+    && !rutaRestringida(user?.email, it.to)
+  )
 
   return (
     <div style={{ minHeight: '100vh' }}>
@@ -510,6 +539,18 @@ export default function AdminLayout() {
               badges={{ pedidos: pedidosPendientes, whatsapp: pedidosWaNuevos + waNoLeidos, deposito: flujosPendientes }}
             />
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>
+              <button
+                title={panelAbierto ? 'Cerrar pantalla dividida' : 'Pantalla dividida: trabajá en dos módulos a la vez'}
+                onClick={() => setPanelAbierto(v => !v)}
+                style={{
+                  background: panelAbierto ? 'rgba(212,175,55,0.15)' : 'var(--surface)',
+                  border: '1px solid ' + (panelAbierto ? 'rgba(212,175,55,0.5)' : 'var(--border)'),
+                  borderRadius: 8, padding: '6px 10px', cursor: 'pointer', minHeight: 36,
+                  fontSize: 15, color: panelAbierto ? 'var(--gold)' : 'var(--text2)',
+                  display: 'flex', alignItems: 'center',
+                }}>
+                ⧉
+              </button>
               <BotonAvisos />
               <CampanaNotificaciones notifs={notifs} />
               <UserDropdown />
@@ -527,8 +568,18 @@ export default function AdminLayout() {
       {/* Recordatorio JUE/VIE/SÁB/DOM para que el CEO cargue los pagos a proveedores */}
       {user?.email === 'fabriciolenardon@gmail.com' && <RecordatorioPagos />}
 
+      {/* PANEL DIVIDIDO (solo escritorio) */}
+      {panelAbierto && !isMobile && (
+        <PanelDividido
+          items={itemsPanel}
+          ancho={panelAncho}
+          setAncho={setPanelAncho}
+          onCerrar={() => setPanelAbierto(false)}
+        />
+      )}
+
       {/* CONTENIDO */}
-      <main style={{ paddingTop: 56, minHeight: '100vh' }}>
+      <main style={{ paddingTop: 56, minHeight: '100vh', marginRight: panelAbierto && !isMobile ? `${panelAncho}vw` : 0 }}>
         <div style={{ padding: isMobile ? '16px 12px' : '24px 28px' }} className="fade-in">
           <Outlet />
       <BuscadorGlobal />
