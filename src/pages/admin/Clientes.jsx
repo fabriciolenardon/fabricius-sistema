@@ -653,6 +653,7 @@ async function eliminarMovimiento(mov) {
                         <select style={inp} value={pago.forma} onChange={e => setPago(p => ({ ...p, forma: e.target.value }))}>
                           <option value="efectivo">Efectivo</option>
                           <option value="transferencia">Transferencia</option>
+                          <option value="credito">Crédito</option>
                           <option value="cheque">Cheque</option>
                           <option value="echeq">E-cheq</option>
                         </select>
@@ -1125,6 +1126,7 @@ function MovimientosCliente({ movimientos, fmt }) {
 const FORMAS_PAGO_CLI = [
   { value: 'efectivo', label: 'Efectivo' },
   { value: 'transferencia', label: 'Transferencia' },
+  { value: 'credito', label: 'Crédito' },
   { value: 'cheque', label: 'Cheque' },
   { value: 'echeq', label: 'E-cheq' },
 ]
