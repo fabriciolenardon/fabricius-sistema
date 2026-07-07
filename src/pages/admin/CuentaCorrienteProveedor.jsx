@@ -24,6 +24,7 @@ const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
 const FORMAS_PAGO = [
   { value: 'efectivo', label: 'Efectivo' },
   { value: 'transferencia', label: 'Transferencia' },
+  { value: 'credito', label: 'Crédito' },
   { value: 'cheque', label: 'Cheque' },
   { value: 'echeq', label: 'E-cheq' },
 ]
@@ -267,6 +268,7 @@ export default function CuentaCorrienteProveedor({ proveedor, saldoSugerido = 0,
                 <select value={fPago.forma} onChange={e => setFPago(f => ({ ...f, forma: e.target.value }))} style={inp}>
                   <option value="efectivo">Efectivo</option>
                   <option value="transferencia">Transferencia</option>
+                  <option value="credito">Crédito</option>
                   <option value="cheque">Cheque</option>
                   <option value="echeq">E-cheq</option>
                 </select>
