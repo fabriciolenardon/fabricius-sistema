@@ -168,10 +168,12 @@ export async function calcularCierreAuto(desde, hasta) {
       .gte('fecha', desde)
       .lte('fecha', hasta)),
 
-    // Movimientos cuenta corriente proveedores (extracto ledger)
+    // Movimientos cuenta corriente proveedores (extracto ledger).
+    // entrada_id/anulado: para sumar las compras cargadas a mano por legajo
+    // (sin entrada al depósito) y excluir movimientos anulados.
     fetchAllRows(() => supabase
       .from('movimientos_proveedores')
-      .select('id, fecha, proveedor_id, proveedor_nombre, tipo, debe, haber')
+      .select('id, fecha, proveedor_id, proveedor_nombre, tipo, debe, haber, entrada_id, anulado')
       .gte('fecha', desde)
       .lte('fecha', hasta)),
 
@@ -225,7 +227,7 @@ export async function calcularCierreAuto(desde, hasta) {
     // histórico, así que sin fetchAllRows se cortaría en 1000 filas.
     fetchAllRows(() => supabase
       .from('movimientos_proveedores')
-      .select('proveedor_id, proveedor_nombre, fecha, debe, haber, anulado')
+      .select('proveedor_id, proveedor_nombre, fecha, debe, haber, anulado, tipo, entrada_id')
       .lte('fecha', fechaHoyARG())),
 
     // Conceptos extra de sueldos (aguinaldo / vacaciones). No tienen fecha:
@@ -297,19 +299,30 @@ export async function calcularCierreAuto(desde, hasta) {
     .sort((a, b) => (Number(b.saldo) || 0) - (Number(a.saldo) || 0))
   const totalPorCobrar = clientesConDeuda.reduce((s, c) => s + (Number(c.saldo) || 0), 0)
 
-  // ====== COMPRAS (entradas al depósito) ======
+  // ====== COMPRAS (entradas al depósito + compras por legajo) ======
   // Usar importe si está, si no, kg * precio_kg
-  const comprasTotal = entradas.reduce((s, e) => {
+  const comprasEntradasTotal = entradas.reduce((s, e) => {
     if (Number(e.importe) > 0) return s + Number(e.importe)
     const kg = Number(e.kg_real || e.kg) || 0
     const pkg = Number(e.precio_kg) || 0
     return s + (kg * pkg)
   }, 0)
 
+  // Compras cargadas A MANO desde el legajo del proveedor (cta cte →
+  // "Registrar compra"): viven SOLO en movimientos_proveedores, sin entrada
+  // al depósito. `entrada_id IS NULL` evita contarlas dos veces: las compras
+  // que entran por Depósito crean su movimiento CON entrada_id. Los tipo
+  // 'ajuste'/'saldo_inicial' no son compras y quedan afuera.
+  // Caso real 07/07: compra de LA AVENIDA cargada por legajo con fecha de la
+  // semana anterior no aparecía en el cierre de esa semana.
+  const comprasLegajo = movProv.filter(m => m.tipo === 'compra' && !m.entrada_id && !m.anulado)
+  const comprasLegajoTotal = comprasLegajo.reduce((s, m) => s + (Number(m.debe) || 0), 0)
+  const comprasTotal = comprasEntradasTotal + comprasLegajoTotal
+
   // ====== COMPRAS DEL MES (acumulado mensual) ======
   // Mismo criterio que comprasTotal (importe o kg×precio, excluye internas), pero
   // sobre todo el mes de `hasta`. Alimenta la tarjeta "Comprado en el mes".
-  const comprasMesTotal = (entradasMesR.data || [])
+  const comprasMesEntradas = (entradasMesR.data || [])
     .filter(e => e.destino !== 'desposte' && e.destino !== 'elaboracion')
     .reduce((s, e) => {
       if (Number(e.importe) > 0) return s + Number(e.importe)
@@ -317,6 +330,12 @@ export async function calcularCierreAuto(desde, hasta) {
       const pkg = Number(e.precio_kg) || 0
       return s + (kg * pkg)
     }, 0)
+  // + compras por legajo del mes (mismo criterio que comprasLegajo, sobre el
+  // histórico de movimientos que ya trajimos para "por pagar").
+  const comprasMesLegajo = (saldoProvR.data || [])
+    .filter(m => m.tipo === 'compra' && !m.entrada_id && !m.anulado && m.fecha >= mesDesde && m.fecha <= hasta)
+    .reduce((s, m) => s + (Number(m.debe) || 0), 0)
+  const comprasMesTotal = comprasMesEntradas + comprasMesLegajo
 
   // ====== PAGADO A PROVEEDORES DEL MES (acumulado, sin la 1ª semana) ======
   // Suma los pagos del mes EXCLUYENDO la primera semana (≤ primeraSemFin), porque
@@ -331,7 +350,7 @@ export async function calcularCierreAuto(desde, hasta) {
   // (movimientos_proveedores, tipo='pago' → haber). La tabla vieja
   // `pagos_proveedores` quedó sin uso: si el cierre la leía, daba $0 aunque
   // se hubiera pagado todo. Tomamos los pagos del período desde el ledger.
-  const pagosProvPeriodo = movProv.filter(m => m.tipo === 'pago')
+  const pagosProvPeriodo = movProv.filter(m => m.tipo === 'pago' && !m.anulado)
   const pagadoProvTotal = pagosProvPeriodo.reduce((s, m) => s + (Number(m.haber) || 0), 0)
 
   // ====== POR PAGAR PROVEEDORES (lo comprado en el período) ======
@@ -391,6 +410,13 @@ export async function calcularCierreAuto(desde, hasta) {
     const nombre = e.proveedor_nombre || '(sin proveedor)'
     comprasProvMap.set(nombre, (comprasProvMap.get(nombre) || 0) + imp)
   }
+  // Compras por legajo: también entran al desglose por proveedor.
+  for (const m of comprasLegajo) {
+    const imp = Number(m.debe) || 0
+    if (!imp) continue
+    const nombre = m.proveedor_nombre || '(sin proveedor)'
+    comprasProvMap.set(nombre, (comprasProvMap.get(nombre) || 0) + imp)
+  }
   const comprasPorProveedor = [...comprasProvMap.entries()]
     .map(([nombre, total]) => ({ nombre, total }))
     .filter(p => p.total > 0)
@@ -448,7 +474,7 @@ export async function calcularCierreAuto(desde, hasta) {
     },
     compras: {
       total: comprasTotal,
-      cantEntradas: entradas.length,
+      cantEntradas: entradas.length + comprasLegajo.length,
       mes: comprasMesTotal,
     },
     pagadoProv: {
