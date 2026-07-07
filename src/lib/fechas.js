@@ -25,6 +25,12 @@ export function fechaHoyARG(date = new Date()) {
   }).format(date)
 }
 
+// Devuelve el día de la semana en castellano según el reloj ARG (ej: 'lunes').
+// Para el prompt de Iris: con el día + la fecha calcula bien "esta semana".
+export function diaSemanaARG(date = new Date()) {
+  return new Intl.DateTimeFormat('es-AR', { timeZone: TZ_ARG, weekday: 'long' }).format(date)
+}
+
 // Devuelve HH:MM:SS según el reloj de Argentina (ej: '21:10:57').
 export function horaHoyARG(date = new Date()) {
   return new Intl.DateTimeFormat('en-GB', {
