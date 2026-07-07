@@ -12,6 +12,7 @@ import { getCampoPrecio } from '../../lib/listasPrecios'
 import CuentaCorrienteProveedor from './CuentaCorrienteProveedor'
 import { agregarMovimiento, eliminarMovimiento, registrarCompraDesdeEntrada, revertirCompraDeEntrada } from '../../lib/ctaProveedores'
 import Paginador, { usePaginacion } from '../../components/Paginador'
+import ModalEditarCliente from '../../components/ModalEditarCliente'
 import FlujoDeposito from './FlujoDeposito'
 import AjusteStock from './AjusteStock'
 import CajasTab from './CajasTab'
@@ -2812,6 +2813,8 @@ export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   const [clientes, setClientes] = useState([])
   const [busqueda, setBusqueda] = useState('')
   const [mostrarClientes, setMostrarClientes] = useState(false)
+  // Cliente que se está editando en el modal (✏️ desde el buscador de clientes)
+  const [clienteEditando, setClienteEditando] = useState(null)
   const [mediasDisponibles, setMediasDisponibles] = useState([])
   const [mediaSeleccionada, setMediaSeleccionada] = useState(null)
   const [formManual, setFormManual] = useState({ descripcion: '', importe: '' })
@@ -2976,6 +2979,28 @@ const CATEGORIAS = {
     // Precio según la lista del despacho, aplicando la oferta vigente si la hay
     const precio = precioConOferta(prod, getLista(form.destino, form.clienteId))
     setForm(f => ({ ...f, productoId: id, precio }))
+  }
+
+  // El modal de edición guardó cambios del cliente: refrescar la lista en
+  // memoria y, si es el cliente ya vinculado al remito, re-seleccionarlo para
+  // que tome nombre/domicilio nuevos y recalcule el precio si cambió su lista.
+  function onClienteEditado(actualizado) {
+    setClientes(prev => prev.map(c => c.id === actualizado.id ? actualizado : c))
+    if (form.clienteId === actualizado.id) {
+      // seleccionarCliente busca en `clientes` para recalcular la lista, pero
+      // el setState de arriba todavía no aplicó → le pasamos el actualizado.
+      setForm(f => ({ ...f, clienteNombre: actualizado.nombre, domicilio: actualizado.domicilio || '' }))
+      setBusqueda(actualizado.nombre)
+      if (form.productoId) {
+        const prod = todosPrecios.find(p => p.id === form.productoId)
+        if (prod) {
+          const lista = getCampoPrecio(actualizado.lista_precios) || getLista(form.destino, null)
+          const precio = precioConOferta(prod, lista)
+          setForm(f => ({ ...f, clienteNombre: actualizado.nombre, domicilio: actualizado.domicilio || '', precio }))
+        }
+      }
+    }
+    showAlert?.({ type: 'success', msg: `✅ Cliente "${actualizado.nombre}" actualizado` })
   }
 
   // Normaliza para matchear nombres (minúsculas, sin acentos, espacios colapsados).
@@ -3407,16 +3432,31 @@ for (const item of items) {
               <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, zIndex: 100, maxHeight: 200, overflowY: 'auto' }}>
                 {clientesFiltrados.map(c => (
                   <div key={c.id} onClick={() => seleccionarCliente(c)}
-                    style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between' }}
+                    style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}
                     onMouseOver={e => e.currentTarget.style.background = 'var(--surface2)'}
                     onMouseOut={e => e.currentTarget.style.background = 'transparent'}>
-                    <span style={{ fontWeight: 600 }}>{c.nombre}</span>
+                    <span style={{ fontWeight: 600, flex: 1 }}>{c.nombre}</span>
                     <span style={{ fontSize: 11, color: 'var(--muted)' }}>{c.tipo}</span>
+                    <button
+                      title={`Editar ficha de ${c.nombre}`}
+                      onClick={e => { e.stopPropagation(); setClienteEditando(c); setMostrarClientes(false) }}
+                      style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', fontSize: 12, padding: '3px 7px', flexShrink: 0 }}>
+                      ✏️
+                    </button>
                   </div>
                 ))}
               </div>
             )}
-            {form.clienteId && <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 4 }}>✅ Cliente vinculado</div>}
+            {form.clienteId && (
+              <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+                ✅ Cliente vinculado
+                <button
+                  onClick={() => { const c = clientes.find(x => x.id === form.clienteId); if (c) setClienteEditando(c) }}
+                  style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text2)', cursor: 'pointer', fontSize: 11, padding: '2px 8px' }}>
+                  ✏️ Editar cliente
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -3654,6 +3694,15 @@ for (const item of items) {
 
         <button className="btn btn-gold" onClick={guardar} disabled={guardando} style={{ opacity: guardando ? 0.5 : 1, cursor: guardando ? 'not-allowed' : 'pointer' }}>{guardando ? '⏳ Registrando…' : '📤 Registrar despacho y generar remito'}</button>
       </div>
+
+      {/* Ventana emergente para editar la ficha del cliente sin salir del despacho */}
+      {clienteEditando && (
+        <ModalEditarCliente
+          cliente={clienteEditando}
+          onClose={() => setClienteEditando(null)}
+          onSaved={onClienteEditado}
+        />
+      )}
     </div>
   )
 }
