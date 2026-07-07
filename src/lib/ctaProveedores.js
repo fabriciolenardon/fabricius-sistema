@@ -126,6 +126,18 @@ export function registrarSaldoInicialProv({ proveedorId, proveedorNombre, fecha,
   })
 }
 
+// Corrige la forma de pago (y las notas) de un PAGO ya registrado, sin tocar
+// importes ni saldo — caso típico: se cargó "efectivo" y era transferencia.
+// Regenera la descripción (que lleva la forma incrustada) para que el
+// extracto muestre lo corregido. El filtro tipo='pago' evita pisar compras.
+export async function actualizarFormaPagoProv({ movId, forma, notas }) {
+  const descripcion = `Pago${forma ? ' — ' + forma : ''}${notas ? ' — ' + notas : ''}`
+  const { error } = await supabase.from('movimientos_proveedores')
+    .update({ forma: forma || null, notas: notas || null, descripcion })
+    .eq('id', movId).eq('tipo', 'pago')
+  return { error: error?.message || null }
+}
+
 // Elimina un movimiento y recalcula el saldo del proveedor.
 export async function eliminarMovimiento(movId, proveedorId) {
   const { error } = await supabase.from('movimientos_proveedores').delete().eq('id', movId)
