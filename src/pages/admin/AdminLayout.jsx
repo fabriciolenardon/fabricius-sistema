@@ -3,7 +3,7 @@ import { useAuth } from '../../context/AuthContext'
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useFlujoNotificaciones } from '../../lib/useFlujoNotificaciones'
-import { fechaHoyARG } from '../../lib/fechas'
+import { fechaHoyARG, horaHoyARG, diaSemanaARG } from '../../lib/fechas'
 import { fmtPrecio, fmtKg } from '../../lib/formatos'
 import { rutaRestringida } from '../../lib/restricciones'
 import BuscadorGlobal from '../../components/BuscadorGlobal'
@@ -18,6 +18,27 @@ import PanelDividido from '../../components/PanelDividido'
 // ¿Este AdminLayout corre ADENTRO del panel dividido (iframe)? Si es así, se
 // muestra SOLO el módulo, sin header/menú/widgets (el chrome lo pone el panel).
 const ES_PANEL = typeof window !== 'undefined' && window.self !== window.top
+
+// 🕐 Reloj vivo del header: hora 24 h + día y fecha, SIEMPRE con reloj
+// argentino (lib/fechas) — no confía en la zona horaria de la máquina.
+function RelojHeader() {
+  const [ahora, setAhora] = useState(() => new Date())
+  useEffect(() => {
+    const t = setInterval(() => setAhora(new Date()), 1000)
+    return () => clearInterval(t)
+  }, [])
+  const f = fechaHoyARG(ahora) // YYYY-MM-DD
+  return (
+    <div title="Hora de Argentina" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.15, whiteSpace: 'nowrap', userSelect: 'none' }}>
+      <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--gold)', fontVariantNumeric: 'tabular-nums', letterSpacing: 0.5 }}>
+        {horaHoyARG(ahora).slice(0, 5)}
+      </span>
+      <span style={{ fontSize: 10, color: 'var(--text2)', textTransform: 'capitalize' }}>
+        {diaSemanaARG(ahora).slice(0, 3)} {f.slice(8, 10)}/{f.slice(5, 7)}/{f.slice(0, 4)}
+      </span>
+    </div>
+  )
+}
 
 // Entrada extra solo-CEO para el menú del celular: el Modo TV (F.A.B.R.I.) no
 // es una ruta aparte de navItems, así que se agrega a mano para el CEO.
@@ -524,6 +545,7 @@ export default function AdminLayout() {
             <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
               <LogoFabricius size="small" />
             </div>
+            <RelojHeader />
             <BotonAvisos />
             <CampanaNotificaciones notifs={notifs} />
           </>
@@ -539,6 +561,8 @@ export default function AdminLayout() {
               badges={{ pedidos: pedidosPendientes, whatsapp: pedidosWaNuevos + waNoLeidos, deposito: flujosPendientes }}
             />
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>
+              <RelojHeader />
+              <div style={{ width: 1, height: 24, background: 'var(--border)' }} />
               <button
                 title={panelAbierto ? 'Cerrar pantalla dividida' : 'Pantalla dividida: trabajá en dos módulos a la vez'}
                 onClick={() => setPanelAbierto(v => !v)}
