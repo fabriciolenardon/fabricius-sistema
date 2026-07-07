@@ -19,7 +19,7 @@ import { DEFINICIONES_TOOLS, ejecutarFuncion } from '../lib/asistenteTools'
 import { detectarSkills } from '../lib/irisSkills'
 import { armarBriefing } from '../lib/irisBriefing'
 import { supabase } from '../lib/supabase'
-import { fechaHoyARG } from '../lib/fechas'
+import { fechaHoyARG, diaSemanaARG } from '../lib/fechas'
 
 // ═══════════════════════════════════════════════════════════
 // 🎤 VOZ — reconocimiento (Web Speech API) + lectura en voz alta
@@ -224,6 +224,7 @@ REGLAS DE OPERACIÓN:
 3. REGLA DE KPIs del jefe: el mes en curso SIEMPRE se compara 01→hoy contra 01→mismo día del mes anterior (nunca contra el mes completo); la ganancia semanal sale de los CIERRES (semanas completas), no de números parciales.
 4. Si no entendés algo o falta información, preguntá. Mejor preguntar que cargar mal.
 5. Si te falta el cliente_id para un pago, USÁ buscar_cliente primero — nunca inventes IDs.
+6. FECHAS RELATIVAS — ANCLATE A HOY: cada mensaje del usuario arranca con su fecha entre corchetes (ej "[2026-07-07] ¿cuánto vendimos?"). "Hoy", "ayer", "esta semana" (lunes → hoy), "la semana pasada", "este mes", etc. se calculan SIEMPRE a partir de la FECHA DE HOY que te doy al final de estas instrucciones — NUNCA a partir de fechas de mensajes viejos del historial (la charla puede venir de días o semanas atrás y esas fechas ya no valen). NUNCA copies la marca [fecha] en tus respuestas.
 
 MUNDO EXTERIOR (también podés salir del sistema):
 - buscar_en_internet: para info ACTUAL que no está en el sistema (dólar, precio de la hacienda, noticias, feriados, leyes nuevas, datos de empresas). Usala sin miedo cuando la pregunta lo pida — mencioná de dónde salió.
@@ -335,15 +336,25 @@ function CaraHolograma() {
   )
 }
 
+// ⏳ Vencimiento del hilo: si el último mensaje ENVIADO tiene más de 48 h,
+// la charla arranca de cero. Un hilo guardado de semanas atrás hacía que
+// Gemini se anclara a las fechas del contexto viejo: el 07/07 Iris contestó
+// "esta semana (del 15 al 21 de junio)" porque el historial venía de junio,
+// por más que el prompt le diga la fecha de hoy.
+const HILO_MAX_MS = 48 * 60 * 60 * 1000
+function hiloVigente() {
+  try { return Date.now() - Number(localStorage.getItem('chad_chat_ts') || 0) < HILO_MAX_MS } catch { return false }
+}
+
 export default function AsistenteIA() {
   const navigate = useNavigate()
   const [abierto, setAbierto] = useState(false)
   // 🧵 EL HILO NO SE PIERDE: mensajes e historial persisten en localStorage
-  // (capados a los últimos 40). Cerrás el chat, recargás la página o pausás
-  // a Iris, y la conversación sigue donde quedó.
+  // (capados a los últimos 40 y con vencimiento de 48 h). Cerrás el chat,
+  // recargás la página o pausás a Iris, y la conversación sigue donde quedó.
   const [mensajes, setMensajes] = useState(() => {
     try {
-      const g = JSON.parse(localStorage.getItem('chad_chat_mensajes') || 'null')
+      const g = hiloVigente() ? JSON.parse(localStorage.getItem('chad_chat_mensajes') || 'null') : null
       if (Array.isArray(g) && g.length > 0) return g
     } catch { /* storage corrupto → arranque limpio */ }
     return [
@@ -395,7 +406,7 @@ export default function AsistenteIA() {
   const [cargando, setCargando] = useState(false)
   const [historialGemini, setHistorialGemini] = useState(() => {
     try {
-      const g = JSON.parse(localStorage.getItem('chad_chat_historial') || 'null')
+      const g = hiloVigente() ? JSON.parse(localStorage.getItem('chad_chat_historial') || 'null') : null
       if (Array.isArray(g)) return g
     } catch { /* arranque limpio */ }
     return []
@@ -647,8 +658,12 @@ export default function AsistenteIA() {
 
     try {
       const imagenData = imagen ? { data: imagen.data, mimeType: imagen.mimeType } : null
+      // Cada mensaje viaja a Gemini con su fecha adelante (mismo patrón que
+      // Iris de WhatsApp): en un hilo que persiste días, la fecha de cada
+      // turno viejo queda a la vista y "esta semana" se calcula desde HOY.
+      // En pantalla el mensaje se muestra sin la marca.
       const mensajeNuevo = construirMensajeUsuario(
-        textoUsuario || 'Analizá esta imagen y decime qué es y qué datos puedo extraer.',
+        `[${fechaHoyARG()}] ${textoUsuario || 'Analizá esta imagen y decime qué es y qué datos puedo extraer.'}`,
         imagenData
       )
 
@@ -701,7 +716,7 @@ export default function AsistenteIA() {
           historial: historialActualizado,
           // Contexto vivo: quién está hablando, qué día es y la memoria
           // acumulada — así FABRI reconoce, recuerda y se adapta.
-          systemPrompt: `${SYSTEM_PROMPT}${skillsTxt}\n\nUSUARIO LOGUEADO AHORA: ${usuario?.nombre || 'desconocido'}${usuario?.rol ? ` (rol: ${usuario.rol})` : ''}. FECHA DE HOY: ${fechaHoyARG()}.${memoriaTxt}`,
+          systemPrompt: `${SYSTEM_PROMPT}${skillsTxt}\n\nUSUARIO LOGUEADO AHORA: ${usuario?.nombre || 'desconocido'}${usuario?.rol ? ` (rol: ${usuario.rol})` : ''}. FECHA DE HOY: ${diaSemanaARG()} ${fechaHoyARG()} (todo "hoy/esta semana/este mes" se calcula desde acá).${memoriaTxt}`,
           tools: DEFINICIONES_TOOLS
         })
 
@@ -726,6 +741,10 @@ export default function AsistenteIA() {
       }
 
       setHistorialGemini(historialActualizado)
+      // Marca de actividad del hilo (para el vencimiento de 48 h). Se sella
+      // acá y no en el effect de persistencia: el effect corre en cada mount
+      // y refrescaría la vigencia con solo abrir la app, sin conversar.
+      try { localStorage.setItem('chad_chat_ts', String(Date.now())) } catch { /* ok */ }
     } catch (err) {
       console.error('Error:', err)
       setMensajes(prev => [...prev, {
@@ -763,6 +782,7 @@ export default function AsistenteIA() {
     try {
       localStorage.removeItem('chad_chat_mensajes')
       localStorage.removeItem('chad_chat_historial')
+      localStorage.removeItem('chad_chat_ts')
     } catch { /* sin storage no hay nada que borrar */ }
   }
 
