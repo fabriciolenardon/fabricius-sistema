@@ -4887,17 +4887,48 @@ function ComprasProveedorPaginadas({ compras, fmt, onVerDetalle }) {
 // =============================================
 // COMPRADO POR SEMANA (legajo del proveedor)
 // =============================================
-// Selector de semana (como en Cierre) + tres columnas: media res,
-// piezas bovinas y capones comprados en esa semana, cada una con
-// fecha de ingreso, kilos, precio de carga ($/kg) e importe.
-// Fuente: entradas_deposito del proveedor (ya cargadas por el padre).
+// Selector de semana (como en Cierre) + una columna por RUBRO de producto
+// que el proveedor tenga en su historial de compras: a PRETTO se le compra
+// media res / piezas / capones, a BERTOSSI brosas, a INDACOR pollo, a
+// CUBALA embutidos, a LA AVENIDA almacén… Las columnas se deducen solas
+// de entradas_deposito (sin configurar nada al crear el proveedor) y
+// aparecen/desaparecen según lo que se le compre. Cada ingreso muestra
+// fecha, kilos (o unidades), precio de carga e importe.
 // Se excluyen las entradas internas (destino desposte/elaboración,
 // que son piezas de mercadería YA comprada) y las eliminadas.
-const TIPO_PIEZA_LABEL = {
+const GRUPOS_COMPRA = [
+  // El orden importa: cada entrada cae en el PRIMER grupo que matchea.
+  // 'otros' al final es catch-all para tipos nuevos/desconocidos.
+  { key: 'mr',        titulo: '🐄 Media res',       match: t => t === 'bovino_mr' },
+  { key: 'piezas',    titulo: '🍖 Piezas bovinas',  match: t => t === 'bovino_pieza' || t.startsWith('pieza_'), mostrarTipo: true },
+  { key: 'cortes',    titulo: '🥩 Cortes bovinos',  match: t => t === 'bovino_corte' },
+  { key: 'brosas',    titulo: '🫀 Brosas',          match: t => t === 'bovino_brosa' },
+  { key: 'capones',   titulo: '🐷 Capones',         match: t => t === 'cerdo' },
+  { key: 'cerdocorte', titulo: '🥓 Cortes de cerdo', match: t => t.startsWith('cerdo_'), mostrarTipo: true },
+  { key: 'pollo',     titulo: '🍗 Pollo',           match: t => t === 'pollo' || t === 'pollo_cajon' },
+  { key: 'rebozados', titulo: '🧆 Rebozados',       match: t => t === 'rebozado' || t === 'rebozado_cajon' },
+  { key: 'embutidos', titulo: '🌭 Embutidos',       match: t => t === 'embutido' || t.startsWith('emb_'), mostrarTipo: true },
+  { key: 'cajas',     titulo: '📦 Cajas CB/PT',     match: t => t === 'caja_cb' || t === 'caja_pt', mostrarTipo: true },
+  { key: 'almacen',   titulo: '🛒 Almacén',         match: t => t === 'almacen', unidad: 'u' },
+  { key: 'bebidas',   titulo: '🥤 Bebidas',         match: t => t === 'bebidas', unidad: 'u' },
+  { key: 'otros',     titulo: '📋 Otros',           match: () => true, mostrarTipo: true },
+]
+const grupoDeEntrada = e => GRUPOS_COMPRA.find(g => g.match(String(e.tipo || '')))
+
+// Etiqueta legible del tipo de entrada (para columnas con tipos mezclados:
+// piezas, cortes de cerdo, embutidos…). Fallback: saca el prefijo y capitaliza.
+const TIPO_ENTRADA_LABEL = {
   pieza_costillar: 'Costillar', pieza_cortito: 'Cortito', pieza_pierna: 'Pierna',
   pieza_paleta: 'Paleta', pieza_cuarto_pistola: 'Cuarto pistola',
   pieza_parrillero: 'Parrillero', pieza_costeletal: 'Costeletal',
   bovino_pieza: 'Pieza bovina',
+  cerdo_carre: 'Carré', embutido: 'Embutido', emb_salame_comun: 'Salame común',
+  caja_cb: 'Caja CB', caja_pt: 'Caja PT',
+}
+function labelTipoEntrada(t) {
+  if (TIPO_ENTRADA_LABEL[t]) return TIPO_ENTRADA_LABEL[t]
+  const s = String(t || '').replace(/^(pieza_|cerdo_|emb_)/, '').replace(/_/g, ' ')
+  return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
 function ComprasSemanaLegajo({ entradas, proveedorNombre, fmt }) {
@@ -4919,13 +4950,18 @@ function ComprasSemanaLegajo({ entradas, proveedorNombre, fmt }) {
   }
 
   const nombreUp = (proveedorNombre || '').toUpperCase()
-  const delPeriodo = useMemo(() =>
+  // Historial completo del proveedor (sin internas ni eliminadas) — define
+  // QUÉ columnas tiene este perfil: solo los rubros que alguna vez se le
+  // compraron. Una compra nueva de otro rubro hace aparecer su columna sola.
+  const historicoProv = useMemo(() =>
     (entradas || []).filter(e =>
-      e.fecha >= desde && e.fecha <= hasta &&
       !e.eliminado &&
       e.destino !== 'desposte' && e.destino !== 'elaboracion' &&
       (e.proveedor_nombre || '').toUpperCase().includes(nombreUp)
-    ), [entradas, desde, hasta, nombreUp])
+    ), [entradas, nombreUp])
+  const delPeriodo = useMemo(() =>
+    historicoProv.filter(e => e.fecha >= desde && e.fecha <= hasta),
+    [historicoProv, desde, hasta])
 
   // Kg / precio / importe con el mismo criterio que el Cierre: si la entrada
   // no trae importe, se deriva kg×precio. Number() porque numeric llega string.
@@ -4936,25 +4972,23 @@ function ComprasSemanaLegajo({ entradas, proveedorNombre, fmt }) {
     return { ...e, _kg: kg, _precio: precio, _importe: importe }
   }
 
-  const GRUPOS = [
-    { key: 'mr', titulo: '🐄 Media res', match: t => t === 'bovino_mr' },
-    { key: 'piezas', titulo: '🍖 Piezas bovinas', match: t => t === 'bovino_pieza' || String(t || '').startsWith('pieza_') },
-    { key: 'capones', titulo: '🐷 Capones', match: t => t === 'cerdo' },
-  ]
-  const grupos = GRUPOS.map(g => {
-    const items = delPeriodo.filter(e => g.match(e.tipo)).map(filaDe)
+  // Columnas visibles = rubros con al menos una compra en el historial.
+  const keysVisibles = useMemo(() => {
+    const s = new Set()
+    historicoProv.forEach(e => { const g = grupoDeEntrada(e); if (g) s.add(g.key) })
+    return s
+  }, [historicoProv])
+  const grupos = GRUPOS_COMPRA.filter(g => keysVisibles.has(g.key)).map(g => {
+    const items = delPeriodo.filter(e => grupoDeEntrada(e)?.key === g.key).map(filaDe)
     return {
       ...g, items,
       totKg: items.reduce((s, e) => s + e._kg, 0),
       totImporte: items.reduce((s, e) => s + e._importe, 0),
     }
   })
-  // Otras compras del período (pollo, embutidos, cajas…) — solo aviso, para
-  // que el total de acá no parezca "menor" que el del cierre.
-  const otras = delPeriodo.filter(e => !GRUPOS.some(g => g.match(e.tipo))).map(filaDe)
-  const otrasImporte = otras.reduce((s, e) => s + e._importe, 0)
   const totSemana = grupos.reduce((s, g) => s + g.totImporte, 0)
-  const totKgSemana = grupos.reduce((s, g) => s + g.totKg, 0)
+  // El total de kg del header no mezcla unidades: suma solo los rubros por kg.
+  const totKgSemana = grupos.filter(g => g.unidad !== 'u').reduce((s, g) => s + g.totKg, 0)
 
   const fechaCorta = f => f ? `${f.slice(8, 10)}/${f.slice(5, 7)}` : ''
   const inpFecha = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '6px 10px', fontFamily: "'DM Sans',sans-serif", fontSize: 12 }
@@ -4982,44 +5016,47 @@ function ComprasSemanaLegajo({ entradas, proveedorNombre, fmt }) {
         <button style={btnSem} onClick={setSemanaActual}>Semana actual</button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
-        {grupos.map(g => (
-          <div key={g.key} style={{ background: 'var(--surface2)', borderRadius: 10, padding: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
-              <div style={{ fontSize: 13, fontWeight: 700 }}>{g.titulo}</div>
-              <div style={{ fontSize: 11, color: 'var(--muted)' }}>{g.items.length} ingreso{g.items.length === 1 ? '' : 's'}</div>
-            </div>
-            {g.items.length === 0 ? (
-              <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic', padding: '6px 0' }}>Sin compras esta semana</div>
-            ) : (
-              g.items.map(e => (
-                <div key={e.id} style={{ padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                    <span style={{ fontSize: 12 }}>
-                      📅 {fechaCorta(e.fecha)}
-                      {Number(e.cantidad) > 1 && <span style={{ marginLeft: 6, background: 'var(--surface)', borderRadius: 4, padding: '1px 6px', fontSize: 10, color: 'var(--gold)', fontWeight: 700 }}>×{e.cantidad}</span>}
-                      {g.key === 'piezas' && <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--gold)' }}>{TIPO_PIEZA_LABEL[e.tipo] || e.tipo}</span>}
-                    </span>
-                    <span style={{ fontSize: 13, color: 'var(--amber)', fontWeight: 700, whiteSpace: 'nowrap' }}>{fmt(e._importe)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
-                    <span>{fmtKg(e._kg)} kg × {fmt(e._precio)}/kg</span>
-                    {e.descripcion && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 140 }} title={e.descripcion}>{e.descripcion}</span>}
-                  </div>
+      {grupos.length === 0 ? (
+        <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic', padding: '6px 0' }}>
+          Este proveedor todavía no tiene ingresos registrados en el depósito. Las columnas de productos aparecen solas con la primera compra.
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+          {grupos.map(g => {
+            const u = g.unidad === 'u' ? 'u' : 'kg'
+            return (
+              <div key={g.key} style={{ background: 'var(--surface2)', borderRadius: 10, padding: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>{g.titulo}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>{g.items.length} ingreso{g.items.length === 1 ? '' : 's'}</div>
                 </div>
-              ))
-            )}
-            <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 8, fontSize: 12, fontWeight: 700 }}>
-              <span style={{ color: 'var(--muted)' }}>Total: {fmtKg(g.totKg)} kg</span>
-              <span style={{ color: 'var(--amber)' }}>{fmt(g.totImporte)}</span>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {otras.length > 0 && (
-        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
-          ℹ️ Además hay {otras.length} ingreso{otras.length === 1 ? '' : 's'} de otros productos (pollo, embutidos, cajas…) por {fmt(otrasImporte)} en esta semana — ver el historial de compras abajo.
+                {g.items.length === 0 ? (
+                  <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic', padding: '6px 0' }}>Sin compras esta semana</div>
+                ) : (
+                  g.items.map(e => (
+                    <div key={e.id} style={{ padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                        <span style={{ fontSize: 12 }}>
+                          📅 {fechaCorta(e.fecha)}
+                          {Number(e.cantidad) > 1 && <span style={{ marginLeft: 6, background: 'var(--surface)', borderRadius: 4, padding: '1px 6px', fontSize: 10, color: 'var(--gold)', fontWeight: 700 }}>×{e.cantidad}</span>}
+                          {g.mostrarTipo && <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--gold)' }}>{labelTipoEntrada(e.tipo)}</span>}
+                        </span>
+                        <span style={{ fontSize: 13, color: 'var(--amber)', fontWeight: 700, whiteSpace: 'nowrap' }}>{fmt(e._importe)}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+                        <span>{fmtKg(e._kg)} {u} × {fmt(e._precio)}/{u}</span>
+                        {e.descripcion && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 140 }} title={e.descripcion}>{e.descripcion}</span>}
+                      </div>
+                    </div>
+                  ))
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 8, fontSize: 12, fontWeight: 700 }}>
+                  <span style={{ color: 'var(--muted)' }}>Total: {fmtKg(g.totKg)} {u}</span>
+                  <span style={{ color: 'var(--amber)' }}>{fmt(g.totImporte)}</span>
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
