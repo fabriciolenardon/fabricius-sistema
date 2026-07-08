@@ -4228,6 +4228,9 @@ export function ProveedoresTab() {
   const [nuevoProveedor, setNuevoProveedor] = useState('')
   const [legajoAbierto, setLegajoAbierto] = useState(null)
   const [editandoLegajo, setEditandoLegajo] = useState(false)
+  // Modal "Ver/Editar datos del proveedor" (contacto, CUIT, nombre, etc.) —
+  // reemplaza a la card fija de datos que ocupaba media pantalla del legajo.
+  const [modalDatosProv, setModalDatosProv] = useState(false)
   const [editandoNombreId, setEditandoNombreId] = useState(null)
   const [nombreEditando, setNombreEditando] = useState('')
   const [formLegajo, setFormLegajo] = useState({ contacto: '', telefono: '', cuit: '', direccion: '', producto_principal: '', notas: '' })
@@ -4409,6 +4412,13 @@ export function ProveedoresTab() {
     setLegajoAbierto(prov)
     setFormLegajo({ contacto: prov.contacto || '', telefono: prov.telefono || '', cuit: prov.cuit || '', direccion: prov.direccion || '', producto_principal: prov.producto_principal || '', notas: prov.notas || '' })
     setEditandoLegajo(false)
+    setModalDatosProv(false)
+  }
+
+  function cerrarModalDatos() {
+    setModalDatosProv(false)
+    setEditandoLegajo(false)
+    cancelarEditarNombre()
   }
 
   async function guardarLegajo() {
@@ -4497,7 +4507,7 @@ export function ProveedoresTab() {
   const totalDeuda = proveedoresDB.reduce((s, p) => s + Math.max(0, getResumenProv(p.nombre, p.id).saldo), 0)
 
   if (legajoAbierto) {
-    const { totalCompras, totalEntregado, saldo, comprasProv, pagosProv } = getResumenProv(legajoAbierto.nombre, legajoAbierto.id)
+    const { totalCompras, totalEntregado, saldo, comprasProv } = getResumenProv(legajoAbierto.nombre, legajoAbierto.id)
     return (
       <div>
         <button onClick={() => setLegajoAbierto(null)} className="btn btn-ghost" style={{ marginBottom: 16 }}>← Volver a proveedores</button>
@@ -4505,25 +4515,10 @@ export function ProveedoresTab() {
         <div style={{ background: 'linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%)', border: '1px solid var(--amber)', borderRadius: 16, padding: 24, marginBottom: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div style={{ flex: 1 }}>
-              {editandoNombreId === legajoAbierto.id ? (
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 32 }}>🏭</span>
-                  <input
-                    autoFocus
-                    value={nombreEditando}
-                    onChange={e => setNombreEditando(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') guardarNombreProveedor(legajoAbierto); if (e.key === 'Escape') cancelarEditarNombre() }}
-                    style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 32, color: 'var(--amber)', letterSpacing: 2, background: 'var(--surface)', border: '2px solid var(--gold)', borderRadius: 8, padding: '4px 12px', textTransform: 'uppercase', minWidth: 280 }}
-                  />
-                  <button onClick={() => guardarNombreProveedor(legajoAbierto)} title="Guardar" style={{ background: 'var(--green)', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 14, fontWeight: 700, color: '#fff' }}>✓ Guardar</button>
-                  <button onClick={cancelarEditarNombre} title="Cancelar" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 14, color: 'var(--muted)' }}>✕</button>
-                </div>
-              ) : (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 32, color: 'var(--amber)', letterSpacing: 2 }}>🏭 {legajoAbierto.nombre}</div>
-                  <button onClick={() => iniciarEditarNombre(legajoAbierto)} title="Editar nombre" style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#000' }}>✏️ Editar nombre</button>
-                </div>
-              )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 32, color: 'var(--amber)', letterSpacing: 2 }}>🏭 {legajoAbierto.nombre}</div>
+                <button onClick={() => setModalDatosProv(true)} title="Ver y editar contacto, CUIT, dirección, nombre, etc." style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#000' }}>📋 Ver/Editar datos del proveedor</button>
+              </div>
               <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>Legajo de proveedor</div>
               {legajoAbierto.producto_principal && <div style={{ fontSize: 12, color: 'var(--gold)', marginTop: 4 }}>🥩 {legajoAbierto.producto_principal}</div>}
             </div>
@@ -4542,37 +4537,65 @@ export function ProveedoresTab() {
 
         {/* COMPRADO POR SEMANA — media res / piezas bovinas / capones */}
         <ComprasSemanaLegajo entradas={entradas} proveedorNombre={legajoAbierto.nombre} fmt={fmt} />
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-          <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <div className="card-title" style={{ margin: 0 }}>📋 Datos del proveedor</div>
-              <button onClick={() => setEditandoLegajo(!editandoLegajo)} className="btn btn-ghost btn-sm">{editandoLegajo ? '✕ Cancelar' : '✏️ Editar'}</button>
+
+        {/* MODAL — Ver/Editar datos del proveedor (contacto, CUIT, nombre…).
+            Antes era una card fija; ahora se abre desde el botón del header. */}
+        {modalDatosProv && (
+          <div onClick={cerrarModalDatos} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: 'var(--surface)', border: '1px solid var(--amber)', borderRadius: 16, padding: 24, width: '100%', maxWidth: 520, maxHeight: '85vh', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <div className="card-title" style={{ margin: 0 }}>📋 Datos del proveedor</div>
+                <button onClick={cerrarModalDatos} title="Cerrar" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 14, color: 'var(--muted)' }}>✕</button>
+              </div>
+
+              {/* Nombre (con renombrado en cascada a compras/pagos/entradas/cheques) */}
+              {editandoNombreId === legajoAbierto.id ? (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14 }}>
+                  <span style={{ fontSize: 24 }}>🏭</span>
+                  <input
+                    autoFocus
+                    value={nombreEditando}
+                    onChange={e => setNombreEditando(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') guardarNombreProveedor(legajoAbierto); if (e.key === 'Escape') cancelarEditarNombre() }}
+                    style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 24, color: 'var(--amber)', letterSpacing: 2, background: 'var(--surface2)', border: '2px solid var(--gold)', borderRadius: 8, padding: '4px 12px', textTransform: 'uppercase', flex: 1, minWidth: 180 }}
+                  />
+                  <button onClick={() => guardarNombreProveedor(legajoAbierto)} title="Guardar" style={{ background: 'var(--green)', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#fff' }}>✓ Guardar</button>
+                  <button onClick={cancelarEditarNombre} title="Cancelar" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13, color: 'var(--muted)' }}>✕</button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+                  <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 24, color: 'var(--amber)', letterSpacing: 2 }}>🏭 {legajoAbierto.nombre}</div>
+                  <button onClick={() => iniciarEditarNombre(legajoAbierto)} title="Editar nombre (se actualizan también compras, pagos, entradas y cheques)" style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#000' }}>✏️ Editar nombre</button>
+                </div>
+              )}
+
+              {/* Datos de contacto — vista / edición */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+                <button onClick={() => setEditandoLegajo(!editandoLegajo)} className="btn btn-ghost btn-sm">{editandoLegajo ? '✕ Cancelar' : '✏️ Editar datos'}</button>
+              </div>
+              {editandoLegajo ? (
+                <div>
+                  {[['contacto', '👤 Contacto', 'Nombre del contacto'], ['telefono', '📱 Teléfono', 'Ej: 3574 000000'], ['cuit', '🆔 CUIT', 'XX-XXXXXXXX-X'], ['direccion', '📍 Dirección', 'Dirección del proveedor'], ['producto_principal', '🥩 Producto principal', 'Ej: Bovino Media Res'], ['notas', '📝 Notas', 'Observaciones, condiciones, etc.']].map(([campo, label, placeholder]) => (
+                    <div key={campo} style={{ marginBottom: 10 }}>
+                      <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>{label}</label>
+                      <input value={formLegajo[campo]} onChange={e => setFormLegajo(f => ({ ...f, [campo]: e.target.value }))} placeholder={placeholder} style={inp} />
+                    </div>
+                  ))}
+                  <button className="btn btn-gold" onClick={guardarLegajo} style={{ width: '100%', marginTop: 8 }}>💾 Guardar legajo</button>
+                </div>
+              ) : (
+                <div>
+                  {[['👤 Contacto', legajoAbierto.contacto], ['📱 Teléfono', legajoAbierto.telefono], ['🆔 CUIT', legajoAbierto.cuit], ['📍 Dirección', legajoAbierto.direccion], ['🥩 Producto principal', legajoAbierto.producto_principal], ['📝 Notas', legajoAbierto.notas]].map(([label, valor]) => (
+                    <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                      <span style={{ fontSize: 12, color: 'var(--muted)' }}>{label}</span>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: valor ? 'var(--text)' : 'var(--muted)', fontStyle: valor ? 'normal' : 'italic' }}>{valor || 'Sin datos'}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-            {editandoLegajo ? (
-              <div>
-                {[['contacto', '👤 Contacto', 'Nombre del contacto'], ['telefono', '📱 Teléfono', 'Ej: 3574 000000'], ['cuit', '🆔 CUIT', 'XX-XXXXXXXX-X'], ['direccion', '📍 Dirección', 'Dirección del proveedor'], ['producto_principal', '🥩 Producto principal', 'Ej: Bovino Media Res'], ['notas', '📝 Notas', 'Observaciones, condiciones, etc.']].map(([campo, label, placeholder]) => (
-                  <div key={campo} style={{ marginBottom: 10 }}>
-                    <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>{label}</label>
-                    <input value={formLegajo[campo]} onChange={e => setFormLegajo(f => ({ ...f, [campo]: e.target.value }))} placeholder={placeholder} style={inp} />
-                  </div>
-                ))}
-                <button className="btn btn-gold" onClick={guardarLegajo} style={{ width: '100%', marginTop: 8 }}>💾 Guardar legajo</button>
-              </div>
-            ) : (
-              <div>
-                {[['👤 Contacto', legajoAbierto.contacto], ['📱 Teléfono', legajoAbierto.telefono], ['🆔 CUIT', legajoAbierto.cuit], ['📍 Dirección', legajoAbierto.direccion], ['🥩 Producto principal', legajoAbierto.producto_principal], ['📝 Notas', legajoAbierto.notas]].map(([label, valor]) => (
-                  <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-                    <span style={{ fontSize: 12, color: 'var(--muted)' }}>{label}</span>
-                    <span style={{ fontSize: 13, fontWeight: 500, color: valor ? 'var(--text)' : 'var(--muted)', fontStyle: valor ? 'normal' : 'italic' }}>{valor || 'Sin datos'}</span>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
-          <div className="card">
-            <PagosProveedorPaginados pagos={pagosProv} fmt={fmt} />
-          </div>
-        </div>
+        )}
 
         {/* CUENTA CORRIENTE (nuevo libro mayor DEBE/HABER/SALDO) */}
         <div style={{ marginBottom: 16 }}>
@@ -5000,46 +5023,6 @@ function ComprasSemanaLegajo({ entradas, proveedorNombre, fmt }) {
         </div>
       )}
     </div>
-  )
-}
-
-// =============================================
-// HISTORIAL DE PAGOS DEL PROVEEDOR (paginado)
-// =============================================
-function PagosProveedorPaginados({ pagos, fmt }) {
-  const pag = usePaginacion(pagos || [], 10)
-  const totalEntregado = (pagos || []).reduce((s, p) => s + (Number(p.entrega) || 0), 0)
-  return (
-    <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-        <div className="card-title" style={{ margin: 0 }}>💰 Historial de pagos ({(pagos || []).length})</div>
-        {pagos.length > 0 && (
-          <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-            Total entregado: <strong style={{ color: 'var(--green)' }}>{fmt(totalEntregado)}</strong>
-          </div>
-        )}
-      </div>
-      {pagos.length === 0 ? (
-        <div className="empty">Sin pagos registrados</div>
-      ) : (
-        <>
-          {pag.items.map(p => (
-            <div key={p.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-                <span style={{ fontSize: 12, color: 'var(--muted)' }}>{p.fecha}</span>
-                <span style={{ fontSize: 12, color: p.saldo_adeudado > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 600 }}>Saldo: {fmt(p.saldo_adeudado)}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)' }}>
-                <span>Compra: {fmt(p.importe_compra)}{Number(p.percepcion) > 0 ? ` (+perc. ${fmt(p.percepcion)})` : ''}</span>
-                <span style={{ color: 'var(--green)' }}>Entrega: {fmt(p.entrega)}</span>
-              </div>
-              {p.notas && <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4, fontStyle: 'italic' }}>{p.notas}</div>}
-            </div>
-          ))}
-          <Paginador {...pag.controles} label="pagos" />
-        </>
-      )}
-    </>
   )
 }
 
