@@ -57,6 +57,35 @@ export function kgPorUnidadDeProducto(producto) {
   return kgPorUnidadDeNombre(producto.nombre || producto.descripcion || '')
 }
 
+// Mapea el NOMBRE de un producto de categoría bovino_pieza al bucket de
+// stock específico de esa pieza (pieza_costillar, pieza_pierna, etc.).
+// Mismo criterio que NOMBRE_A_TIPO / PIEZA_A_STOCK en Deposito.jsx — el
+// desposte acredita a estos buckets, así que la venta por kg tiene que
+// debitar del mismo lado (el bucket genérico 'bovino_pieza' ya no recibe
+// créditos y cualquier débito lo deja negativo).
+// Matchea por keyword sobre el nombre normalizado (mayúsculas, sin acentos)
+// porque los nombres en `precios` se editan a mano (ej. "PIERNA BOVINA -
+// MOCHO ( PIEZA )", "PALETA/COGOTE ( PIEZA )").
+// Devuelve null si no reconoce la pieza (ej. "MEDIA RES DESPOSTADA EN
+// PIEZAS", que no corresponde a ningún bucket individual) — el caller
+// decide el fallback.
+export function bucketPiezaBovina(nombre) {
+  if (!nombre) return null
+  const txt = String(nombre)
+    .toUpperCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+  // Las medias res no son una pieza individual — sin bucket específico
+  if (txt.includes('MEDIA RES')) return null
+  if (txt.includes('CUARTO PISTOLA')) return 'pieza_cuarto_pistola'
+  if (txt.includes('COSTELETAL'))     return 'pieza_costeletal'
+  if (txt.includes('COSTILLAR'))      return 'pieza_costillar'   // completo / con vacío / solo
+  if (txt.includes('CORTITO'))        return 'pieza_cortito'
+  if (txt.includes('PIERNA'))         return 'pieza_pierna'
+  if (txt.includes('PALETA') || txt.includes('COGOTE')) return 'pieza_paleta'
+  if (txt.includes('PARRILLERO'))     return 'pieza_parrillero'
+  return null
+}
+
 // Devuelve [tipoStock, kgADescontar] para un item del carrito.
 // item: { tipo, kg, descripcion, stock_origen?, kg_por_unidad? }
 // CATEGORIA_A_STOCK: mapeo categoria_producto → tipo en stock_actual
