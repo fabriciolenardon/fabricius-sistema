@@ -22,6 +22,11 @@ export function mapearStockTipo(cat, stockOrigen) {
   if (stockOrigen) return stockOrigen
   if (cat === 'bovino_mr')        return 'bovino_mr'
   if (cat === 'bovino_corte')     return 'bovino_corte'
+  // bovino_pieza: las ventas nuevas guardan stock_origen específico
+  // (pieza_costillar, pieza_pierna… — resuelto por nombre en Caja) y entran
+  // por el early-return de arriba, revirtiendo contra ese mismo bucket.
+  // Este fallback cubre ventas viejas sin stock_origen, que debitaron el
+  // genérico: se les devuelve al genérico para mantener la simetría.
   if (cat === 'bovino_pieza')     return 'bovino_pieza'
   if (cat === 'bovino_brosa')     return 'bovino_brosa'
   if (cat === 'cerdo')            return 'cerdo'        // capón

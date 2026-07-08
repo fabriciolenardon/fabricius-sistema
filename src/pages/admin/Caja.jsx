@@ -12,7 +12,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { decodificarEANBalanza, esCodigoBalanza } from '../../lib/balanzaEAN'
 import { fechaHoyARG, horaHoyARG, horaNumARG } from '../../lib/fechas'
-import { kgPorUnidadDeProducto } from '../../lib/stockHelpers'
+import { kgPorUnidadDeProducto, bucketPiezaBovina } from '../../lib/stockHelpers'
 import { cargarCajasDisponibles, venderCaja, CATEGORIA_A_TIPO_CAJA } from '../../lib/cajasStock'
 import { fmtPrecio, fmtKg, parseNumero } from '../../lib/formatos'
 import HistorialCaja from './HistorialCaja'
@@ -281,7 +281,11 @@ export default function Caja() {
       // del cut específico (ej. 'cerdo_bondiola') en lugar de la categoría
       // genérica. Permite que productos como "Bondiola de cerdo" toquen
       // stock_actual.cerdo_bondiola en vez del bucket cerdo_pieza general.
-      stock_origen: producto.stock_origen || null,
+      // Para bovino_pieza sin stock_origen configurado, resolver el bucket
+      // por nombre (pieza_costillar, pieza_pierna…): el desposte acredita a
+      // esos buckets y el genérico 'bovino_pieza' quedaría negativo.
+      stock_origen: producto.stock_origen
+        || (producto.categoria === 'bovino_pieza' ? bucketPiezaBovina(producto.nombre) : null),
       // kg por unidad para cajones (pollo_cajon, rebozado_cajon). Si está
       // null, el helper hace fallback al parseo del nombre. Cargado desde
       // /admin/precios al crear el producto.
@@ -424,7 +428,8 @@ export default function Caja() {
         producto_id: prod.id,
         descripcion: prod.nombre,
         categoria: prod.categoria,
-        stock_origen: prod.stock_origen || null,
+        stock_origen: prod.stock_origen
+          || (prod.categoria === 'bovino_pieza' ? bucketPiezaBovina(prod.nombre) : null),
         kg_por_unidad: prod.kg_por_unidad || null,
         kg,
         unidad: 'kg',
@@ -668,6 +673,11 @@ export default function Caja() {
       if (stockOrigen) return stockOrigen
       if (cat === 'bovino_mr')        return 'bovino_mr'
       if (cat === 'bovino_corte')     return 'bovino_corte'
+      // bovino_pieza: los productos de pieza llegan con stock_origen resuelto
+      // por nombre al agregarse al carrito (pieza_costillar, pieza_pierna…),
+      // así que este fallback solo aplica a nombres no reconocidos (medias
+      // res). Se mantiene el genérico para no perder el tracking y quedar
+      // simétrico con la anulación (mapearStockTipo en anularVenta.js).
       if (cat === 'bovino_pieza')     return 'bovino_pieza'
       if (cat === 'bovino_brosa')     return 'bovino_brosa'
       if (cat === 'cerdo')            return 'cerdo'         // capón entero
