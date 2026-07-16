@@ -43,6 +43,9 @@ const NOMBRE_STOCK = {
   bovino_corte: 'Cortes bovinos',
   bovino_pieza: 'Piezas bovinas',
   pollo: 'Pollo',
+  hamb_carne: 'Hamburguesas de carne',
+  hamb_pollo: 'Hamburguesas de pollo',
+  hamb_cerdo: 'Hamburguesas de cerdo',
 }
 const nombreStock = tipo => NOMBRE_STOCK[tipo] || String(tipo || '')
   .replace(/_/g, ' ')
