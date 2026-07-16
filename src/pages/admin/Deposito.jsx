@@ -29,6 +29,29 @@ const NOMBRE_EMBUTIDO = {
   salame_comun: 'Salame Común',
   salame_rockeford: 'Salame Rockeford',
   salame_holanda: 'Salame Holanda',
+  hamburguesa_carne: 'Hamburguesas de Carne',
+  hamburguesa_pollo: 'Hamburguesas de Pollo',
+  hamburguesa_cerdo: 'Hamburguesas de Cerdo',
+}
+
+// Hamburguesas de elaboración propia (mig 85, mismo modelo que embutidos):
+// bucket propio por tipo — la elaboración suma acá y la venta descuenta vía
+// precios.stock_origen. El origen de la carne difiere por tipo:
+//   carne → bovino_corte · pollo → 'pollo' (supremas B) · cerdo → piezas elegidas
+const BUCKET_HAMBURGUESA = {
+  hamburguesa_carne: 'hamb_carne',
+  hamburguesa_pollo: 'hamb_pollo',
+  hamburguesa_cerdo: 'hamb_cerdo',
+}
+const LABEL_BUCKET_HAMB = {
+  hamb_carne: '🐄 Hamburguesas de Carne',
+  hamb_pollo: '🐔 Hamburguesas de Pollo',
+  hamb_cerdo: '🐷 Hamburguesas de Cerdo',
+}
+// Bucket del que sale la materia prima de carne/pollo (cerdo usa las piezas)
+const ORIGEN_HAMBURGUESA = {
+  hamburguesa_carne: { bucket: 'bovino_corte', label: '🥩 Carne bovina (kg) — descuenta de Bovino Cortes' },
+  hamburguesa_pollo: { bucket: 'pollo', label: '🐔 Supremas B (kg) — descuenta del stock de Pollo' },
 }
 
 // Bucket de stock PROPIO de cada embutido elaborado (mig 60, modelo "cerdo
@@ -366,6 +389,12 @@ const [piezasCerdo, setPiezasCerdo] = useState({
 })
 const [tipoElaboracion, setTipoElaboracion] = useState('embutido')
 const [tipoEmbutido, setTipoEmbutido] = useState('chorizo_parrillero')
+// Hamburguesas: tipo elegido, kg de materia prima (carne/pollo — el cerdo usa
+// la grilla de piezas) y kg FINALES de hamburguesas producidas (puede haber
+// merma o incremento por agregados: pan, condimentos, etc.).
+const [tipoHamburguesa, setTipoHamburguesa] = useState('hamburguesa_carne')
+const [kgOrigenHamb, setKgOrigenHamb] = useState('')
+const [kgFinalHamb, setKgFinalHamb] = useState('')
 // Salame multi-variedad: kg NETOS que entran al secado por cada variedad.
 // Una misma tanda puede tener común, holanda y/o rockeford; al secarse se
 // carga el peso final de cada una y va a su bucket (emb_salame_*).
@@ -723,6 +752,67 @@ async function confirmarElaboracionEmbutido() {
     setPiezasEmbutido({ cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '', cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: '' })
     setKgCarneBovinaEmbutido(''); setKgQuesoEmbutido(''); setNotas('')
     setPesoRealEmb({ chorizo_parrillero: '', chorizo_saborizado: '', chorizo_colorado: '', salchicha_parrillera: '', morcilla: '' })
+    await cargarDatos(); onSaved()
+  } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
+  setLoading(false)
+}
+
+// Elaborar hamburguesas (mig 85): descuenta la materia prima según el tipo
+// (carne → bovino_corte, pollo → 'pollo', cerdo → piezas seleccionadas) y
+// suma los kg FINALES producidos al bucket propio (hamb_*). No hay etapa de
+// secado: se confirma con el peso ya elaborado, y la merma (o incremento por
+// agregados) se calcula sola comparando origen vs final.
+async function confirmarElaboracionHamburguesa() {
+  const esCerdo = tipoHamburguesa === 'hamburguesa_cerdo'
+  const piezasUsadas = esCerdo
+    ? Object.entries(piezasEmbutido).filter(([, v]) => parseFloat(v) > 0).map(([tipo, v]) => ({ tipo, kg: parseFloat(v) }))
+    : [{ tipo: ORIGEN_HAMBURGUESA[tipoHamburguesa].bucket, kg: parseNumero(kgOrigenHamb) }]
+  const kgOrigen = piezasUsadas.reduce((s, p) => s + p.kg, 0)
+  if (kgOrigen <= 0) {
+    showAlert(esCerdo ? 'Ingresá al menos una pieza de cerdo' : 'Ingresá los kg de materia prima que se usaron', 'error')
+    return
+  }
+  const kgFinal = parseNumero(kgFinalHamb)
+  if (kgFinal <= 0) { showAlert('Ingresá los kg de hamburguesas elaboradas (peso final)', 'error'); return }
+  setLoading(true)
+  try {
+    const bucket = BUCKET_HAMBURGUESA[tipoHamburguesa]
+    const pctFinal = parseFloat(((kgFinal / kgOrigen - 1) * 100).toFixed(2))
+    await supabase.from('elaboraciones_embutidos').insert({
+      fecha, tipo: 'hamburguesa', tipo_embutido: tipoHamburguesa,
+      piezas_usadas: piezasUsadas,
+      kg_carne_cerdo: esCerdo ? kgOrigen : 0,
+      kg_carne_bovina: tipoHamburguesa === 'hamburguesa_carne' ? kgOrigen : 0,
+      kg_elaborado: kgOrigen, pct_aumento: pctFinal,
+      productos_finales: [{ tipo: tipoHamburguesa, kg: kgFinal }],
+      kg_final: kgFinal, maduracion_completa: true, notas,
+    })
+    // Descontar la materia prima (cada pieza de cerdo, o el bucket de origen)
+    for (const p of piezasUsadas) {
+      const { error } = await actualizarStock(p.tipo, -p.kg)
+      if (error) throw new Error(`No se descontó ${p.tipo}: ${error.message}`)
+    }
+    // Sumar el peso final al stock propio, con verificación
+    await sumarStockVerificado(bucket, kgFinal)
+    // Entrada informativa (importe 0, destino 'elaboracion') para trazabilidad:
+    // aparece en "Entradas registradas", el Dashboard y el Control Semanal.
+    const { error: errEntrada } = await supabase.from('entradas_deposito').insert({
+      fecha,
+      tipo: bucket,
+      proveedor_nombre: 'Elaboración propia',
+      descripcion: `${NOMBRE_EMBUTIDO[tipoHamburguesa]} ${kgFinal.toFixed(1)} kg elaboradas (de ${kgOrigen.toFixed(1)} kg · ${pctFinal >= 0 ? '+' : ''}${pctFinal.toFixed(1)}%)`,
+      kg: kgFinal,
+      kg_real: kgFinal,
+      merma_pct: 0,
+      precio_kg: 0,
+      importe: 0,
+      destino: 'elaboracion',
+      cantidad: 1,
+    })
+    if (errEntrada) console.warn('No se pudo registrar la entrada de la elaboración:', errEntrada.message)
+    showAlert(`✅ ${kgFinal.toFixed(1)} kg de ${NOMBRE_EMBUTIDO[tipoHamburguesa]} al stock (${pctFinal >= 0 ? '+' : ''}${pctFinal.toFixed(1)}% vs ${kgOrigen.toFixed(1)} kg usados)`)
+    setPiezasEmbutido({ cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '', cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: '' })
+    setKgOrigenHamb(''); setKgFinalHamb(''); setNotas('')
     await cargarDatos(); onSaved()
   } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
   setLoading(false)
@@ -1416,7 +1506,7 @@ async function confirmarDesposteCerdo() {
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="card-title">🌭 Tipo de elaboración</div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-          {[{ id: 'embutido', label: '🌭 Embutidos frescos' }, { id: 'salame', label: '🥩 Salames' }].map(t => (
+          {[{ id: 'embutido', label: '🌭 Embutidos frescos' }, { id: 'salame', label: '🥩 Salames' }, { id: 'hamburguesa', label: '🍔 Hamburguesas' }].map(t => (
             <button key={t.id} onClick={() => setTipoElaboracion(t.id)}
               style={{ flex: 1, padding: '10px', borderRadius: 8, border: `2px solid ${tipoElaboracion === t.id ? 'var(--gold)' : 'var(--border)'}`, background: tipoElaboracion === t.id ? 'rgba(201,168,76,0.1)' : 'var(--surface2)', color: tipoElaboracion === t.id ? 'var(--gold)' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
               {t.label}
@@ -1438,6 +1528,22 @@ async function confirmarDesposteCerdo() {
               <input type="number" step="0.5" min="-50" max="30" value={pctAumentoEmbutido} onChange={e => setPctAumentoEmbutido(parseFloat(e.target.value) || 0)}
                 style={{ ...inp, width: 90, borderColor: 'var(--gold)', textAlign: 'center', fontSize: 18, fontWeight: 700 }} />
               <span style={{ fontSize: 12, color: 'var(--muted)' }}>% — <strong style={{ color: '#ff8b8b' }}>negativo = merma</strong> · positivo = agregados (vino, tripas, especias)</span>
+            </div>
+          </div>
+        )}
+        {tipoElaboracion === 'hamburguesa' && (
+          <div>
+            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>Tipo de hamburguesa</label>
+            <select value={tipoHamburguesa} onChange={e => setTipoHamburguesa(e.target.value)} style={{ ...inp, marginBottom: 10 }}>
+              <option value="hamburguesa_carne">🐄 Hamburguesas de Carne</option>
+              <option value="hamburguesa_pollo">🐔 Hamburguesas de Pollo</option>
+              <option value="hamburguesa_cerdo">🐷 Hamburguesas de Cerdo</option>
+            </select>
+            <div style={{ background: '#1a1a2a', border: '1px solid #2a2a5a', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#7db5ff' }}>
+              ℹ️ {tipoHamburguesa === 'hamburguesa_carne' && <>La carne sale del stock de <strong>Bovino Cortes</strong> y el peso final entra como <strong>Hamburguesas de Carne</strong> (stock propio).</>}
+              {tipoHamburguesa === 'hamburguesa_pollo' && <>Las supremas B salen del stock de <strong>Pollo</strong> y el peso final entra como <strong>Hamburguesas de Pollo</strong> (stock propio).</>}
+              {tipoHamburguesa === 'hamburguesa_cerdo' && <>Las piezas de cerdo que selecciones salen de su stock y el peso final entra como <strong>Hamburguesas de Cerdo</strong> (stock propio).</>}
+              {' '}Cargá los <strong>kg elaborados</strong> al final: puede haber merma o incremento por agregados.
             </div>
           </div>
         )}
@@ -1502,10 +1608,33 @@ async function confirmarDesposteCerdo() {
           </span>
         </div>
       </div>
+      {/* Stock de hamburguesas por tipo (mig 85): mismo modelo que embutidos */}
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="card-title">🍔 Stock hamburguesas</div>
+        {Object.entries(LABEL_BUCKET_HAMB).map(([tipo, label]) => (
+          <div key={tipo} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+            <span style={{ fontSize: 12, fontWeight: 600 }}>{label}</span>
+            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: (piezasStock[tipo] || 0) > 0 ? 'var(--green)' : 'var(--muted)' }}>
+              {fmtKg(piezasStock[tipo] || 0, { decimales: 2 })}
+            </span>
+          </div>
+        ))}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0 2px' }}>
+          <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--gold)' }}>TOTAL HAMBURGUESAS</span>
+          <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>
+            {fmtKg(Object.keys(LABEL_BUCKET_HAMB).reduce((s, t) => s + (piezasStock[t] || 0), 0), { decimales: 2 })}
+          </span>
+        </div>
+      </div>
     </div>
     <div className="card">
-      <div className="card-title">🌭 {tipoElaboracion === 'embutido' ? 'Elaborar embutidos' : 'Elaborar salames'}</div>
-      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>Ingresá los kg de cada pieza que vas a usar.</div>
+      <div className="card-title">{tipoElaboracion === 'hamburguesa' ? '🍔 Elaborar hamburguesas' : `🌭 ${tipoElaboracion === 'embutido' ? 'Elaborar embutidos' : 'Elaborar salames'}`}</div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
+        {tipoElaboracion === 'hamburguesa' && tipoHamburguesa !== 'hamburguesa_cerdo'
+          ? 'Ingresá los kg de materia prima usados y el peso final elaborado.'
+          : 'Ingresá los kg de cada pieza que vas a usar.'}
+      </div>
+      {(tipoElaboracion !== 'hamburguesa' || tipoHamburguesa === 'hamburguesa_cerdo') && (
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
         {[
           { id: 'cerdo_pierna', label: '🦵 Piernas' },
@@ -1524,10 +1653,46 @@ async function confirmarDesposteCerdo() {
           </div>
         ))}
       </div>
+      )}
+      {tipoElaboracion !== 'hamburguesa' && (
       <div className="form-group" style={{ marginBottom: 10 }}>
         <label>{tipoElaboracion === 'embutido' ? '🐷 Retazos cerdo (kg) — se descuentan de Cabezas de cerdo' : '🥩 Carne bovina (kg)'}</label>
         <input type="number" step="0.1" placeholder="0" value={kgCarneBovinaEmbutido} onChange={e => setKgCarneBovinaEmbutido(e.target.value)} style={{ ...inp, borderColor: 'var(--gold)' }} />
       </div>
+      )}
+      {tipoElaboracion === 'hamburguesa' && (() => {
+        const esCerdoH = tipoHamburguesa === 'hamburguesa_cerdo'
+        const kgOrigenH = esCerdoH
+          ? Object.values(piezasEmbutido).reduce((s, v) => s + (parseFloat(v) || 0), 0)
+          : parseNumero(kgOrigenHamb)
+        const kgFinalH = parseNumero(kgFinalHamb)
+        const pctH = (kgOrigenH > 0 && kgFinalH > 0) ? ((kgFinalH / kgOrigenH - 1) * 100) : null
+        const origenCfg = ORIGEN_HAMBURGUESA[tipoHamburguesa]
+        return (
+          <>
+            {!esCerdoH && (
+              <div className="form-group" style={{ marginBottom: 10 }}>
+                <label>{origenCfg.label}</label>
+                <input type="number" step="0.1" placeholder="0" value={kgOrigenHamb} onChange={e => setKgOrigenHamb(e.target.value)} style={{ ...inp, borderColor: 'var(--gold)' }} />
+                <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 3 }}>
+                  Disponible: {fmtKg(piezasStock[origenCfg.bucket] || 0, { decimales: 2 })}
+                </div>
+              </div>
+            )}
+            <div className="form-group" style={{ marginBottom: 10 }}>
+              <label>🍔 Kg de hamburguesas elaboradas (peso final)</label>
+              <input type="number" step="0.1" placeholder="0" value={kgFinalHamb} onChange={e => setKgFinalHamb(e.target.value)} style={{ ...inp, borderColor: 'var(--green)' }} />
+            </div>
+            <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, marginBottom: 14 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
+                <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg materia prima</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{kgOrigenH.toFixed(1)} kg</div></div>
+                <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>{pctH === null ? 'Merma / incremento' : `${pctH >= 0 ? '+' : ''}${pctH.toFixed(1)}% ${pctH >= 0 ? 'incremento' : 'merma'}`}</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: (kgFinalH - kgOrigenH) >= 0 ? 'var(--green)' : 'var(--red-light)' }}>{pctH === null ? '—' : `${(kgFinalH - kgOrigenH) >= 0 ? '+' : ''}${(kgFinalH - kgOrigenH).toFixed(1)} kg`}</div></div>
+                <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg finales al stock</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{kgFinalH.toFixed(1)} kg</div></div>
+              </div>
+            </div>
+          </>
+        )
+      })()}
 
       {tipoElaboracion === 'embutido' && (() => {
         const kgCerdoB = Object.values(piezasEmbutido).reduce((s, v) => s + (parseFloat(v) || 0), 0)
@@ -1574,6 +1739,7 @@ async function confirmarDesposteCerdo() {
           <input type="number" step="0.1" placeholder="0" value={kgQuesoEmbutido} onChange={e => setKgQuesoEmbutido(e.target.value)} style={{ ...inp, borderColor: 'var(--amber)' }} />
         </div>
       )}
+      {tipoElaboracion !== 'hamburguesa' && (
       <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, marginBottom: 14 }}>
         {(() => {
           const kgCerdo = Object.values(piezasEmbutido).reduce((s, v) => s + (parseFloat(v) || 0), 0)
@@ -1606,12 +1772,13 @@ async function confirmarDesposteCerdo() {
           )
         })()}
       </div>
+      )}
       <div className="form-row" style={{ marginBottom: 14 }}>
         <div className="form-group"><label>Fecha</label><input type="date" value={fecha} onChange={e => setFecha(e.target.value)} style={inp} /></div>
         <div className="form-group"><label>Notas</label><input placeholder="Observaciones..." value={notas} onChange={e => setNotas(e.target.value)} style={inp} /></div>
       </div>
-      <button className="btn btn-gold" onClick={tipoElaboracion === 'embutido' ? confirmarElaboracionEmbutido : confirmarElaboracionSalame} disabled={loading} style={{ width: '100%' }}>
-        {loading ? '⏳ Procesando...' : tipoElaboracion === 'embutido' ? '🌭 Confirmar elaboración de embutidos' : '🥩 Registrar salame en secado'}
+      <button className="btn btn-gold" onClick={tipoElaboracion === 'embutido' ? confirmarElaboracionEmbutido : tipoElaboracion === 'salame' ? confirmarElaboracionSalame : confirmarElaboracionHamburguesa} disabled={loading} style={{ width: '100%' }}>
+        {loading ? '⏳ Procesando...' : tipoElaboracion === 'embutido' ? '🌭 Confirmar elaboración de embutidos' : tipoElaboracion === 'salame' ? '🥩 Registrar salame en secado' : '🍔 Confirmar elaboración de hamburguesas'}
       </button>
     </div>
   </div>
@@ -1873,11 +2040,12 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, loading }) {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
               <div>
                 <div style={{ fontWeight: 700, fontSize: 13 }}>
-                  {e.tipo === 'salame' ? '🥩 Salame' : '🌭'} {e.tipo === 'embutido' ? e.tipo_embutido?.replace(/_/g, ' ').toUpperCase() : (e.tipo_embutido?.replace(/_/g, ' ').toUpperCase() || '')}
+                  {e.tipo === 'salame' ? '🥩 Salame' : e.tipo === 'hamburguesa' ? '🍔' : '🌭'} {e.tipo === 'hamburguesa' ? (NOMBRE_EMBUTIDO[e.tipo_embutido] || e.tipo_embutido?.replace(/_/g, ' '))?.toUpperCase() : e.tipo === 'embutido' ? e.tipo_embutido?.replace(/_/g, ' ').toUpperCase() : (e.tipo_embutido?.replace(/_/g, ' ').toUpperCase() || '')}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                  {e.fecha}{e.created_at ? ` · ${fmtHora(e.created_at)}` : ''} · {fmtKg(e.kg_carne_cerdo)} cerdo + {fmtKg(e.kg_carne_bovina)} bovino
-                  {Number(e.kg_queso) > 0 ? ` + ${fmtKg(e.kg_queso)} queso` : ''}
+                  {e.fecha}{e.created_at ? ` · ${fmtHora(e.created_at)}` : ''} · {e.tipo === 'hamburguesa'
+                    ? `usó ${(Array.isArray(e.piezas_usadas) ? e.piezas_usadas : []).map(p => `${fmtKg(p.kg)} ${String(p.tipo || '').replace(/_/g, ' ')}`).join(' + ') || fmtKg(e.kg_elaborado)}`
+                    : <>{fmtKg(e.kg_carne_cerdo)} cerdo + {fmtKg(e.kg_carne_bovina)} bovino{Number(e.kg_queso) > 0 ? ` + ${fmtKg(e.kg_queso)} queso` : ''}</>}
                 </div>
                 {Array.isArray(e.productos_finales) && e.productos_finales.length > 0 && (
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
@@ -1897,8 +2065,8 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, loading }) {
                 {e.notas && <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>{e.notas}</div>}
               </div>
               <div style={{ textAlign: 'right' }}>
-                <span style={{ background: e.tipo === 'salame' ? '#2a1a0a' : '#1a2a1a', color: e.tipo === 'salame' ? 'var(--amber)' : 'var(--green)', borderRadius: 6, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>
-                  {e.tipo === 'salame' ? 'SALAME' : 'EMBUTIDO'}
+                <span style={{ background: e.tipo === 'salame' ? '#2a1a0a' : e.tipo === 'hamburguesa' ? '#2a1a1a' : '#1a2a1a', color: e.tipo === 'salame' ? 'var(--amber)' : e.tipo === 'hamburguesa' ? '#ff9b7a' : 'var(--green)', borderRadius: 6, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>
+                  {e.tipo === 'salame' ? 'SALAME' : e.tipo === 'hamburguesa' ? 'HAMBURGUESA' : 'EMBUTIDO'}
                 </span>
                 <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: 'var(--gold)', marginTop: 4 }}>
                   {e.tipo === 'salame'
@@ -2486,6 +2654,11 @@ async function eliminar(entrada) {
     emb_salame_comun: '🥩 Salame',
     emb_salame_holanda: '🥩 Salame',
     emb_salame_rockeford: '🥩 Salame',
+    // Hamburguesas de elaboración propia (mig 85): la entrada informativa
+    // de la elaboración se guarda con el tipo del bucket hamb_*.
+    hamb_carne: '🍔 Hamburguesa',
+    hamb_pollo: '🍔 Hamburguesa',
+    hamb_cerdo: '🍔 Hamburguesa',
     // Piezas bovinas — mismos nombres que la lista de precios (entran por
     // desposte interno de media res o por compra directa a proveedor).
     pieza_pierna: '🥩 Pierna Bovina – Mocho',

@@ -220,6 +220,12 @@ export default function Dashboard() {
     (stock.emb_salame_holanda || 0) +
     (stock.emb_salame_rockeford || 0)
   )
+  // Hamburguesas de elaboración propia (hamb_*, mig 85) — mismo modelo que embutidos
+  const stockHamburguesas = Math.max(0,
+    (stock.hamb_carne || 0) +
+    (stock.hamb_pollo || 0) +
+    (stock.hamb_cerdo || 0)
+  )
   const stockRebozado = Math.max(0, stock.rebozado || 0)
   const stockAlmacen = Math.max(0, stock.almacen || 0)
   const stockBebidas = Math.max(0, stock.bebidas || 0)
@@ -424,6 +430,7 @@ export default function Dashboard() {
             { label: '🍗 Pollo', valor: fmtKg(stockPollo), color: 'var(--blue)', aprox: Math.round(stockPollo / 20) + ' cajones', bajo: stockPollo < 50, stockKg: stockPollo, tiposEntradas: ['pollo'], tiposSalidas: ['pollo'] },
             { label: '🫀 Brosas', valor: fmtKg(stockBrosas), color: 'var(--amber)', aprox: 'al peso', bajo: stockBrosas < 20, stockKg: stockBrosas, tiposEntradas: ['bovino_brosa'], tiposSalidas: ['bovino_brosa'] },
             { label: '🌭 Embutidos', valor: fmtKg(stockEmbutido), color: 'var(--purple)', aprox: 'al peso', bajo: stockEmbutido < 20, stockKg: stockEmbutido, tiposEntradas: ['embutido', 'emb_chorizo_parrillero', 'emb_chorizo_saborizado', 'emb_chorizo_colorado', 'emb_salchicha_parrillera', 'emb_morcilla', 'emb_salame_comun', 'emb_salame_holanda', 'emb_salame_rockeford'], tiposSalidas: ['embutido', 'emb_chorizo_parrillero', 'emb_chorizo_saborizado', 'emb_chorizo_colorado', 'emb_salchicha_parrillera', 'emb_morcilla', 'emb_salame_comun', 'emb_salame_holanda', 'emb_salame_rockeford'] },
+            { label: '🍔 Hamburguesas', valor: fmtKg(stockHamburguesas), color: 'var(--purple)', aprox: 'al peso', bajo: false, stockKg: stockHamburguesas, tiposEntradas: ['hamb_carne', 'hamb_pollo', 'hamb_cerdo'], tiposSalidas: ['hamb_carne', 'hamb_pollo', 'hamb_cerdo'] },
             { label: '🧊 Rebozados/Congelados', valor: fmtKg(stockRebozado), color: 'var(--blue)', aprox: 'al peso', bajo: stockRebozado < 20, stockKg: stockRebozado, tiposEntradas: ['rebozado'], tiposSalidas: ['rebozado'] },
             { label: '🛒 Almacén', valor: Math.round(stockAlmacen) + ' u', color: 'var(--gold)', aprox: cantAlmacen + ' productos cargados', bajo: stockAlmacen < 10, stockKg: stockAlmacen, tiposEntradas: ['almacen'], tiposSalidas: ['almacen'] },
             { label: '🥤 Bebidas', valor: Math.round(stockBebidas) + ' u', color: 'var(--blue)', aprox: cantBebidas + ' productos cargados', bajo: stockBebidas < 10, stockKg: stockBebidas, tiposEntradas: ['bebidas'], tiposSalidas: ['bebidas'] },
