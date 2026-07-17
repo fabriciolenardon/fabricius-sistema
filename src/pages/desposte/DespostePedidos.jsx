@@ -14,6 +14,8 @@ import { useAuth } from '../../context/AuthContext'
 import { parseNumero, fmtKg } from '../../lib/formatos'
 
 const ahora = () => new Date().toISOString()
+// Etiqueta de la unidad de un item: kg / u (unidad) / tiras
+const uLabel = u => u === 'unidad' ? 'u' : u === 'tiras' ? 'tiras' : 'kg'
 
 const inp = {
   background: 'var(--surface2)', border: '2px solid var(--gold)', color: 'var(--text)',
@@ -201,7 +203,7 @@ export default function DespostePedidos() {
               <div style={{ background: '#2a1a08', border: '1px solid #ff9d3a', borderRadius: 10, padding: '10px 14px', marginTop: 12, fontSize: 13 }}>
                 <div style={{ color: '#ff9d3a', fontWeight: 700, marginBottom: 4 }}>⏳ Todavía falta entregar:</div>
                 {pendientesEntrega.map((it, i) => (
-                  <div key={i}>• {it.nombre} — {it.kg_pendiente} {(it.unidad || 'kg') === 'unidad' ? 'u' : 'kg'}</div>
+                  <div key={i}>• {it.nombre} — {it.kg_pendiente} {uLabel(it.unidad)}</div>
                 ))}
               </div>
             )}
@@ -216,7 +218,7 @@ export default function DespostePedidos() {
             {estaAbierto && (
               <div style={{ marginTop: 14 }}>
                 {items.map((it, i) => {
-                  const u = (it.unidad || 'kg') === 'unidad' ? 'u' : 'kg'
+                  const u = uLabel(it.unidad)
                   const prep = !!it.preparado
                   return (
                     <div key={i} style={{
