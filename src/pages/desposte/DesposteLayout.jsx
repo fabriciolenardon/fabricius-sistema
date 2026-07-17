@@ -30,10 +30,12 @@ export default function DesposteLayout() {
         <UserDropdown rolLabel="🔪 Desposte" />
       </header>
 
-      {/* Tabs */}
-      <nav style={{ display: 'flex', gap: 4, padding: 12, background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
-        <NavLinkBig to="/desposte/capones" icono="🐷" label="Desposte Capones" />
-        <NavLinkBig to="/desposte/media-res" icono="🐄" label="Desposte Media Res" />
+      {/* Tabs (flexWrap: en celular angosto pasan a 2 filas en vez de aplastarse) */}
+      <nav style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: 12, background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
+        <NavLinkBig to="/desposte/pedidos" icono="📥" label="Pedidos" />
+        <NavLinkBig to="/desposte/elaborar" icono="🌭" label="Elaborar" />
+        <NavLinkBig to="/desposte/capones" icono="🐷" label="Capones" />
+        <NavLinkBig to="/desposte/media-res" icono="🐄" label="Media Res" />
         <NavLinkBig to="/desposte/historial" icono="📋" label="Historial" />
       </nav>
 
@@ -49,7 +51,7 @@ function NavLinkBig({ to, icono, label }) {
   return (
     <NavLink to={to}
       style={({ isActive }) => ({
-        flex: 1, padding: '16px 12px', borderRadius: 10, border: 'none',
+        flex: 1, minWidth: 130, padding: '16px 12px', borderRadius: 10, border: 'none',
         background: isActive ? 'var(--gold)' : 'var(--surface2)',
         color: isActive ? '#000' : 'var(--text)',
         cursor: 'pointer', fontWeight: 700, fontSize: 16,

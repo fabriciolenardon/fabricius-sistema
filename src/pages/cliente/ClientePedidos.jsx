@@ -11,6 +11,7 @@ const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
 const ESTADO_INFO = {
   pendiente:  { label: '🟡 Pendiente',   color: 'var(--amber)',     bg: '#2a2410' },
   confirmado: { label: '🟢 Confirmado',  color: 'var(--green)',     bg: '#1a3a1a' },
+  listo:      { label: '📦 ¡Listo!',     color: 'var(--gold)',      bg: '#2a2408' },
   incompleto: { label: '🟠 Incompleto',  color: '#ff9d3a',          bg: '#2a1a08' },
   despachado: { label: '🚚 Despachado',  color: 'var(--blue)',      bg: '#1a2030' },
   rechazado:  { label: '🔴 Rechazado',   color: 'var(--red-light)', bg: '#3a1a1a' },

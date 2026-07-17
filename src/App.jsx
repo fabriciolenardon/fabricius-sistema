@@ -70,6 +70,8 @@ const DesposteLayout = lazy(() => import('./pages/desposte/DesposteLayout'))
 const DesposteCapones = lazy(() => import('./pages/desposte/DesposteCapones'))
 const DesposteMediaRes = lazy(() => import('./pages/desposte/DesposteMediaRes'))
 const DesposteHistorial = lazy(() => import('./pages/desposte/DesposteHistorial'))
+const DespostePedidos = lazy(() => import('./pages/desposte/DespostePedidos'))
+const DesposteElaborar = lazy(() => import('./pages/desposte/DesposteElaborar'))
 
 // Bloquea el acceso por URL directa a un módulo vedado para este usuario
 // (lib/restricciones.js). El menú ya lo oculta; esto cubre el link tipeado.
@@ -124,7 +126,7 @@ function RootRedirect() {
   if (profile.rol === 'admin') return <Navigate to="/admin/dashboard" replace />
   if (profile.rol === 'cliente_mayorista') return <Navigate to="/cliente/dashboard" replace />
   if (profile.rol === 'cajero') return <Navigate to="/cajero/caja" replace />
-  if (profile.rol === 'desposte') return <Navigate to="/desposte/capones" replace />
+  if (profile.rol === 'desposte') return <Navigate to="/desposte/pedidos" replace />
   return <Navigate to="/franquicia/dashboard" replace />
 }
 
@@ -181,6 +183,8 @@ export default function App() {
           <Route path="caja" element={<Caja />} />
         </Route>
         <Route path="/desposte" element={<ProtectedRoute requiredRole="desposte"><DesposteLayout /></ProtectedRoute>}>
+          <Route path="pedidos" element={<DespostePedidos />} />
+          <Route path="elaborar" element={<DesposteElaborar />} />
           <Route path="capones" element={<DesposteCapones />} />
           <Route path="media-res" element={<DesposteMediaRes />} />
           <Route path="historial" element={<DesposteHistorial />} />
