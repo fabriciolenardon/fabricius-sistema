@@ -36,6 +36,20 @@ const NO_CARNE = new Set(['almacen', 'bebidas', 'insumos', 'mercaderia', 'mercad
 const esCarne = it => !NO_CARNE.has(String(it?.categoria || it?.tipo || '').toLowerCase())
 const kgCarne = it => esCarne(it) ? kgItem(it) : 0
 
+// Etiqueta del producto para el MIX. La media res entera (bucket bovino_mr)
+// entró en los despachos con rótulos sueltos (NT, VQ, VAQUILLONA, NOVILLITO,
+// sin sufijo, BOVINO_MR…) que son la MISMA media res. La lista de precios tiene
+// solo 2 tipos, así que se consolidan en esos dos: todo va a "NT-VQ PREMIUM"
+// salvo lo que diga OVERO/CHICO → "OVERO CHICO". Las de desposte/piezas
+// (bovino_pieza) NO se tocan: son otro producto.
+const etiquetaMix = it => {
+  const tipo = String(it?.tipo || it?.categoria || '').toLowerCase()
+  const desc = String(it?.descripcion || '(sin descripción)').trim().toUpperCase()
+  const esMediaEntera = tipo === 'bovino_mr' || (desc.startsWith('MEDIA RES') && !/DESPOST|PIEZA/.test(desc))
+  if (esMediaEntera) return /OVERO|CHICO/.test(desc) ? 'MEDIA RES OVERO CHICO' : 'MEDIA RES NT-VQ PREMIUM'
+  return desc
+}
+
 const sumarDias = (fecha, dias) => {
   const d = new Date(fecha + 'T12:00:00')
   d.setDate(d.getDate() + dias)
@@ -409,7 +423,7 @@ function TabFranquicias({ esMovil }) {
           if (acc) { acc.kg += kg; acc.plata += n(r.total); acc.remitos += 1 }
           for (const it of items) {
             if (!esCarne(it)) continue  // insumos / mercadería no entran al mix
-            const d = (it.descripcion || '(sin descripción)').trim().toUpperCase()
+            const d = etiquetaMix(it)   // consolida las variantes de media res
             mix.set(d, (mix.get(d) || 0) + kgCarne(it))
           }
         }
