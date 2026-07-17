@@ -136,16 +136,20 @@ export function Pedidos() {
         precio_unitario: it.precio_unitario,
       }))
     } else {
-      // Si el sector desposte cargó kg reales, el despacho arranca con esos
-      // (lo efectivamente preparado); si no, con lo pedido.
-      itemsBase = (pedido.items || []).map(it => ({
-        producto_id: it.producto_id,
-        nombre: it.nombre,
-        unidad: it.unidad || 'kg',
-        kg_pedido: it.kg,
-        kg_despacho: Number(it.kg_real) > 0 ? Number(it.kg_real) : it.kg,
-        precio_unitario: it.precio_unitario,
-      }))
+      // 'parcial': arranca solo con los productos que el sector marcó LISTOS
+      //   (los demás en 0 → "despachar lo que está listo" en un click).
+      // 'completo': arranca con lo efectivamente preparado (kg_real) o lo pedido.
+      itemsBase = (pedido.items || []).map(it => {
+        const kgReal = Number(it.kg_real) > 0 ? Number(it.kg_real) : it.kg
+        return {
+          producto_id: it.producto_id,
+          nombre: it.nombre,
+          unidad: it.unidad || 'kg',
+          kg_pedido: it.kg,
+          kg_despacho: tipo === 'parcial' ? (it.preparado ? kgReal : 0) : kgReal,
+          precio_unitario: it.precio_unitario,
+        }
+      })
     }
 
     setModalDespacho({ tipo, pedido, items: itemsBase, remitoSeleccionado: '' })
@@ -507,7 +511,7 @@ function DetallePedido({ p, editingItems, editingDia, editingHorario, editingNot
                 const unidad = it.unidad || 'kg'
                 return (
                   <tr key={i}>
-                    <td>{it.nombre}</td>
+                    <td>{it.preparado ? '✅ ' : ''}{it.nombre}</td>
                     <td>
                       {p.estado === 'pendiente' ? (
                         <input type="number" step="0.1" value={it.kg} onChange={e => actualizarItemKg(i, e.target.value)}
@@ -611,8 +615,12 @@ function DetallePedido({ p, editingItems, editingDia, editingHorario, editingNot
             </div>
           )}
           {p.estado === 'incompleto' && (
-            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-              <button onClick={() => abrirModalDespacho(p, 'completar')} style={{ background: 'var(--green)', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#fff', flex: 1 }}>✅ Completar despacho</button>
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>🚚 Entrega por partes: despachá lo que ya está listo. Si en el modal bajás las cantidades, el pedido queda incompleto hasta terminar de entregar todo.</div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button onClick={() => avisarWhatsapp(p)} style={{ background: '#25D366', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#000' }}>💬 Avisar al cliente</button>
+                <button onClick={() => abrirModalDespacho(p, 'completar')} style={{ background: 'var(--green)', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#fff', flex: 1 }}>🚚 Entregar otra parte / completar</button>
+              </div>
             </div>
           )}
         </div>

@@ -45,8 +45,10 @@ export default function DespostePedidos() {
   }, [])
 
   async function cargar() {
+    // 'incompleto' = pedido que se está entregando por partes durante la semana:
+    // el sector lo sigue viendo para preparar lo que falta.
     const { data } = await supabase.from('pedidos').select('*')
-      .in('estado', ['confirmado', 'listo'])
+      .in('estado', ['confirmado', 'listo', 'incompleto'])
       .order('dia_entrega', { ascending: true })
       .order('created_at', { ascending: true })
     setPedidos(data || [])
@@ -64,11 +66,16 @@ export default function DespostePedidos() {
     setKgReales(items => items.map((it, i) => i === idx ? { ...it, kg_real: v } : it))
   }
 
-  // Persiste los kg reales dentro del JSON items (número, o null si no se cargó)
+  // Marca/desmarca un producto como listo para entregar (seguimiento por parte)
+  function togglePreparado(idx) {
+    setKgReales(items => items.map((it, i) => i === idx ? { ...it, preparado: !it.preparado } : it))
+  }
+
+  // Persiste kg reales + flag "preparado" dentro del JSON items
   function itemsConKgReal() {
     return kgReales.map(it => {
       const v = parseNumero(it.kg_real)
-      return { ...it, kg_real: v > 0 ? v : null }
+      return { ...it, kg_real: v > 0 ? v : null, preparado: !!it.preparado }
     })
   }
 
@@ -83,7 +90,8 @@ export default function DespostePedidos() {
 
   async function marcarListo(p) {
     setGuardando(true)
-    const items = itemsConKgReal()
+    // Marcar TODO listo: los productos quedan preparados = true
+    const items = itemsConKgReal().map(it => ({ ...it, preparado: true }))
     const operario = profile?.nombre || 'Sector desposte'
     const chatActualizado = [...(p.mensajes_chat || []), {
       timestamp: ahora(),
@@ -107,7 +115,29 @@ export default function DespostePedidos() {
     cargar()
   }
 
-  const paraPreparar = pedidos.filter(p => p.estado === 'confirmado')
+  // Entrega por partes: guarda el avance y le avisa al admin qué productos ya
+  // están listos para despachar, SIN cerrar el pedido (sigue en curso).
+  async function avisarParteLista(p) {
+    setGuardando(true)
+    const items = itemsConKgReal()
+    const operario = profile?.nombre || 'Sector desposte'
+    const listosTxt = items.filter(it => it.preparado).map(it => it.nombre).join(', ') || '—'
+    const chatActualizado = [...(p.mensajes_chat || []), {
+      timestamp: ahora(),
+      autor: 'admin',
+      texto: `📦 ${operario} avisa que ya hay parte lista para entregar: ${listosTxt}.`,
+    }]
+    const { error } = await supabase.from('pedidos').update({
+      items, preparado_por: operario, preparado_en: ahora(), mensajes_chat: chatActualizado,
+    }).eq('id', p.id)
+    if (error) aviso('❌ Error: ' + error.message, 'error')
+    else { aviso('📣 Aviso enviado al admin con lo que está listo.'); setAbierto(null) }
+    setGuardando(false)
+    cargar()
+  }
+
+  // Tienen trabajo pendiente: recién confirmados + los que se entregan por partes
+  const paraPreparar = pedidos.filter(p => p.estado === 'confirmado' || p.estado === 'incompleto')
   const listos = pedidos.filter(p => p.estado === 'listo')
 
   if (loading) return <p style={{ color: 'var(--muted)', fontSize: 16 }}>Cargando pedidos...</p>
@@ -127,7 +157,7 @@ export default function DespostePedidos() {
 
       <h2 style={{ fontSize: 22, marginBottom: 4 }}>📥 Pedidos para preparar ({paraPreparar.length})</h2>
       <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 0, marginBottom: 16 }}>
-        Cargá los kg reales de cada producto a medida que lo preparás y marcá LISTO al terminar.
+        Cargá los kg reales y tildá cada producto que va quedando listo. Si el pedido se entrega por partes durante la semana, avisá qué está listo y el resto lo seguís acá.
       </p>
 
       {paraPreparar.length === 0 && (
@@ -139,19 +169,26 @@ export default function DespostePedidos() {
       {paraPreparar.map(p => {
         const estaAbierto = abierto === p.id
         const items = estaAbierto ? kgReales : (p.items || [])
-        const cargados = (p.items || []).filter(it => parseNumero(it.kg_real) > 0).length
         const totalItems = (p.items || []).length
-        const todosOk = estaAbierto && kgReales.length > 0 && kgReales.every(it => parseNumero(it.kg_real) > 0)
+        const listosCount = (p.items || []).filter(it => it.preparado).length
+        const enCurso = p.estado === 'incompleto'
+        const pendientesEntrega = p.items_pendientes || []
+        // "Todo listo" = todos los productos tildados como preparados
+        const todosOk = estaAbierto && kgReales.length > 0 && kgReales.every(it => it.preparado)
+        const algoListo = estaAbierto && kgReales.some(it => it.preparado)
         return (
-          <div key={p.id} style={{ background: 'var(--surface)', border: `2px solid ${estaAbierto ? 'var(--gold)' : 'var(--border)'}`, borderRadius: 14, padding: 18, marginBottom: 14 }}>
+          <div key={p.id} style={{ background: 'var(--surface)', border: `2px solid ${estaAbierto ? 'var(--gold)' : enCurso ? '#ff9d3a' : 'var(--border)'}`, borderRadius: 14, padding: 18, marginBottom: 14 }}>
             <div onClick={() => abrir(p)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', cursor: 'pointer' }}>
               <div>
-                <div style={{ fontSize: 19, fontWeight: 800, color: 'var(--gold)' }}>{p.cliente_nombre}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <div style={{ fontSize: 19, fontWeight: 800, color: 'var(--gold)' }}>{p.cliente_nombre}</div>
+                  {enCurso && <span style={{ background: '#2a1a08', color: '#ff9d3a', border: '1px solid #ff9d3a', borderRadius: 6, padding: '2px 10px', fontSize: 11, fontWeight: 800 }}>🚚 ENTREGA EN CURSO</span>}
+                </div>
                 <div style={{ fontSize: 14, marginTop: 2 }}>
                   📅 Para el <strong>{p.dia_entrega || 'sin fecha'}</strong>{p.horario_entrega ? <> · 🕐 {p.horario_entrega}</> : null}
                 </div>
                 <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 2 }}>
-                  {totalItems} producto(s) · {cargados}/{totalItems} con kg cargados
+                  {listosCount}/{totalItems} producto(s) listos
                   {p.origen === 'admin' ? ' · cargado por el admin' : ' · pedido del cliente'}
                 </div>
               </div>
@@ -159,6 +196,15 @@ export default function DespostePedidos() {
                 {estaAbierto ? '▲ Cerrar' : '▼ Preparar'}
               </button>
             </div>
+
+            {enCurso && pendientesEntrega.length > 0 && (
+              <div style={{ background: '#2a1a08', border: '1px solid #ff9d3a', borderRadius: 10, padding: '10px 14px', marginTop: 12, fontSize: 13 }}>
+                <div style={{ color: '#ff9d3a', fontWeight: 700, marginBottom: 4 }}>⏳ Todavía falta entregar:</div>
+                {pendientesEntrega.map((it, i) => (
+                  <div key={i}>• {it.nombre} — {it.kg_pendiente} {(it.unidad || 'kg') === 'unidad' ? 'u' : 'kg'}</div>
+                ))}
+              </div>
+            )}
 
             {(p.notas_admin || p.notas_cliente) && estaAbierto && (
               <div style={{ background: 'var(--surface2)', borderRadius: 10, padding: '10px 14px', marginTop: 12, fontSize: 14 }}>
@@ -171,16 +217,16 @@ export default function DespostePedidos() {
               <div style={{ marginTop: 14 }}>
                 {items.map((it, i) => {
                   const u = (it.unidad || 'kg') === 'unidad' ? 'u' : 'kg'
-                  const ok = parseNumero(it.kg_real) > 0
+                  const prep = !!it.preparado
                   return (
                     <div key={i} style={{
                       display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
                       padding: '12px 14px', borderRadius: 10, marginBottom: 8,
-                      background: ok ? '#14230f' : 'var(--surface2)',
-                      border: `1px solid ${ok ? '#3f6d2f' : 'var(--border)'}`,
+                      background: prep ? '#14230f' : 'var(--surface2)',
+                      border: `1px solid ${prep ? '#3f6d2f' : 'var(--border)'}`,
                     }}>
                       <div style={{ flex: 1, minWidth: 160 }}>
-                        <div style={{ fontSize: 16, fontWeight: 700 }}>{ok ? '✅ ' : ''}{it.nombre}</div>
+                        <div style={{ fontSize: 16, fontWeight: 700 }}>{prep ? '✅ ' : ''}{it.nombre}</div>
                         <div style={{ fontSize: 13, color: 'var(--muted)' }}>Pedido: {it.kg} {u}</div>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -191,6 +237,16 @@ export default function DespostePedidos() {
                           placeholder="0" style={inp} />
                         <span style={{ fontSize: 14, color: 'var(--muted)', fontWeight: 700 }}>{u}</span>
                       </div>
+                      <button onClick={() => togglePreparado(i)}
+                        style={{
+                          padding: '12px 16px', borderRadius: 10, border: 'none', cursor: 'pointer',
+                          fontSize: 14, fontWeight: 800, minWidth: 120,
+                          background: prep ? 'var(--green)' : 'var(--surface)',
+                          color: prep ? '#000' : 'var(--muted)',
+                          borderStyle: 'solid', borderWidth: 1, borderColor: prep ? 'var(--green)' : 'var(--border)',
+                        }}>
+                        {prep ? '✅ Listo' : '⏳ Marcar listo'}
+                      </button>
                     </div>
                   )
                 })}
@@ -200,17 +256,31 @@ export default function DespostePedidos() {
                     style={{ padding: '14px 20px', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 10, cursor: 'pointer', fontSize: 15, fontWeight: 700 }}>
                     💾 Guardar avance
                   </button>
-                  {confirmandoListo ? (
+
+                  {/* Entrega por partes: avisar lo que está listo sin cerrar el pedido.
+                      En pedidos en curso (incompleto) es la ÚNICA acción de cierre del
+                      sector — terminar de entregar lo hace el admin. */}
+                  <button onClick={() => avisarParteLista(p)} disabled={guardando || !algoListo}
+                    style={{
+                      flex: enCurso ? 1 : 'initial', minWidth: enCurso ? 200 : 'initial',
+                      padding: '14px 20px', borderRadius: 10, border: 'none',
+                      background: algoListo ? '#ff9d3a' : 'var(--surface2)', color: algoListo ? '#000' : 'var(--muted)',
+                      cursor: algoListo ? 'pointer' : 'not-allowed', fontSize: 15, fontWeight: 800,
+                    }}>
+                    📣 Avisar parte lista
+                  </button>
+
+                  {!enCurso && (confirmandoListo ? (
                     <div style={{ flex: 1, minWidth: 260, background: 'var(--surface2)', border: '2px solid var(--gold)', borderRadius: 10, padding: 12 }}>
                       <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>
                         {todosOk
-                          ? `¿Marcar el pedido de ${p.cliente_nombre} como LISTO?`
-                          : `⚠️ Hay ítems sin kg real cargado. ¿Marcar LISTO igual?`}
+                          ? `¿Marcar TODO el pedido de ${p.cliente_nombre} como LISTO?`
+                          : `⚠️ Hay productos sin tildar como listos. ¿Marcar TODO listo igual?`}
                       </div>
                       <div style={{ display: 'flex', gap: 8 }}>
                         <button onClick={() => marcarListo(p)} disabled={guardando}
                           style={{ flex: 1, padding: 12, background: 'var(--green)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: 15 }}>
-                          {guardando ? '⏳ Guardando...' : '✅ Sí, está listo'}
+                          {guardando ? '⏳ Guardando...' : '✅ Sí, todo listo'}
                         </button>
                         <button onClick={() => setConfirmandoListo(false)} disabled={guardando}
                           style={{ padding: '12px 16px', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontWeight: 700 }}>
@@ -225,9 +295,9 @@ export default function DespostePedidos() {
                         background: todosOk ? 'var(--green)' : 'var(--gold)', color: '#000',
                         cursor: 'pointer', fontFamily: "'Bebas Neue', cursive", fontSize: 21, letterSpacing: 2,
                       }}>
-                      📦 PEDIDO LISTO
+                      📦 TODO LISTO
                     </button>
-                  )}
+                  ))}
                 </div>
               </div>
             )}
