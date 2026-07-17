@@ -62,6 +62,7 @@ const navItems = [
   { to: '/admin/gastos',      icon: '💸', label: 'Gastos' },
   { to: '/admin/facturacion', icon: '📑', label: 'Facturación' },
   { to: '/admin/cierre',      icon: '📋', label: 'Cierre' },
+  { to: '/admin/productividad', icon: '📶', label: 'Productividad' },
   { to: '/admin/auditoria',   icon: '🔍', label: 'Auditoría' },
 ]
 
@@ -92,6 +93,7 @@ const NAV_GRUPOS = [
     { to: '/admin/ejecutivo', icon: '⚡', label: 'Ejecutivo', ceoOnly: true },
     { to: '/admin/dashboard', icon: '📊', label: 'Dashboard' },
     { to: '/admin/cierre',    icon: '📋', label: 'Cierre' },
+    { to: '/admin/productividad', icon: '📶', label: 'Productividad' },
     { to: '/admin/auditoria', icon: '🔍', label: 'Auditoría' },
   ] },
 ]
