@@ -6,9 +6,11 @@ import Paginador, { usePaginacion } from '../../components/Paginador'
 
 import { fmtPrecio, parseNumero } from '../../lib/formatos'
 import { enviarWhatsapp } from '../../lib/whatsapp'
-import { getCampoPrecio } from '../../lib/listasPrecios'
+import { getCampoPrecio, LISTAS } from '../../lib/listasPrecios'
 const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
 const ahora = () => new Date().toISOString()
+// Etiqueta de la unidad de un item: kg / u (unidad) / tiras
+const uLabel = u => u === 'unidad' ? 'u' : u === 'tiras' ? 'tiras' : 'kg'
 
 const ESTADO_INFO = {
   pendiente:  { label: '🟡 Pendiente',   color: 'var(--amber)' },
@@ -229,7 +231,7 @@ export function Pedidos() {
     const { data: cli } = await supabase.from('clientes').select('telefono, nombre_fantasia, nombre').eq('id', pedido.cliente_id).maybeSingle()
     if (!cli?.telefono) { alert('El cliente no tiene teléfono cargado en su legajo (módulo Clientes).'); return }
     const detalle = (pedido.items || [])
-      .map(it => `• ${it.nombre}: ${Number(it.kg_real) > 0 ? it.kg_real : it.kg} ${(it.unidad || 'kg') === 'unidad' ? 'u' : 'kg'}`)
+      .map(it => `• ${it.nombre}: ${Number(it.kg_real) > 0 ? it.kg_real : it.kg} ${uLabel(it.unidad)}`)
       .join('\n')
     enviarWhatsapp(cli.telefono,
       `¡Hola ${cli.nombre_fantasia || cli.nombre}! 👋\n\n📦 Tu pedido ya está LISTO para retirar/recibir:\n\n${detalle}\n\n📅 Entrega: ${pedido.dia_entrega || 'a coordinar'}${pedido.horario_entrega ? ` · ${pedido.horario_entrega}` : ''}\n\nCarnicería Fabricius 🥩`)
@@ -325,6 +327,7 @@ function ModalNuevoPedido({ cerrar, onCreado, profile }) {
   const [clientes, setClientes] = useState([])
   const [precios, setPrecios] = useState([])
   const [clienteId, setClienteId] = useState('')
+  const [listaSel, setListaSel] = useState('')  // '' = usar la lista del cliente
   const [busqueda, setBusqueda] = useState('')
   const [items, setItems] = useState([])
   const [dia, setDia] = useState('')
@@ -341,7 +344,9 @@ function ModalNuevoPedido({ cerrar, onCreado, profile }) {
   }, [])
 
   const cliente = clientes.find(c => c.id === clienteId)
-  const campoPrecio = getCampoPrecio(cliente?.lista_precios)
+  // Lista efectiva: la elegida a mano, o si no la del cliente (fallback mayorista)
+  const listaEfectiva = listaSel || cliente?.lista_precios || 'may'
+  const campoPrecio = getCampoPrecio(listaEfectiva)
   const resultados = busqueda.trim().length >= 2
     ? precios.filter(p => p.nombre?.toLowerCase().includes(busqueda.trim().toLowerCase())).slice(0, 8)
     : []
@@ -407,7 +412,7 @@ function ModalNuevoPedido({ cerrar, onCreado, profile }) {
         <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>Entra directo a la cola del sector desposte para que lo preparen.</div>
 
         <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>👥 Cliente</label>
-        <select value={clienteId} onChange={e => { setClienteId(e.target.value); setItems([]) }}
+        <select value={clienteId} onChange={e => { setClienteId(e.target.value); setItems([]); setListaSel('') }}
           style={{ ...inputStyle, width: '100%', marginBottom: 12 }}>
           <option value="">— Elegir cliente —</option>
           {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}{c.nombre_fantasia ? ` (${c.nombre_fantasia})` : ''}</option>)}
@@ -415,7 +420,14 @@ function ModalNuevoPedido({ cerrar, onCreado, profile }) {
 
         {clienteId && (
           <>
-            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>🔍 Agregar producto (lista {cliente?.lista_precios || 'carn'})</label>
+            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>🏷️ Lista de precios</label>
+            <select value={listaEfectiva} onChange={e => setListaSel(e.target.value)} style={{ ...inputStyle, width: '100%', marginBottom: 12 }}>
+              {Object.values(LISTAS).map(l => (
+                <option key={l.codigo} value={l.codigo}>{l.labelEmoji}{l.codigo === (cliente?.lista_precios || '') ? ' — la del cliente' : ''}</option>
+              ))}
+            </select>
+
+            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>🔍 Agregar producto (precio {getCampoPrecio(listaEfectiva).replace('precio_', '')})</label>
             <input value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Escribí el nombre del producto..."
               style={{ ...inputStyle, width: '100%' }} />
             {resultados.length > 0 && (
@@ -444,7 +456,8 @@ function ModalNuevoPedido({ cerrar, onCreado, profile }) {
                       <td style={{ textAlign: 'center' }}>
                         <select value={it.unidad} onChange={e => setItem(i, { unidad: e.target.value })} style={{ ...inputStyle, padding: '6px 6px' }}>
                           <option value="kg">kg</option>
-                          <option value="unidad">u</option>
+                          <option value="unidad">unidad</option>
+                          <option value="tiras">tiras</option>
                         </select>
                       </td>
                       <td style={{ textAlign: 'center' }}>
@@ -517,15 +530,15 @@ function DetallePedido({ p, editingItems, editingDia, editingHorario, editingNot
                         <input type="number" step="0.1" value={it.kg} onChange={e => actualizarItemKg(i, e.target.value)}
                           style={{ background: 'var(--surface2)', border: '1px solid var(--gold)', color: 'var(--text)', borderRadius: 4, padding: '2px 6px', fontSize: 12, width: 60, textAlign: 'center' }} />
                       ) : (
-                        <span>{it.kg} {unidad === 'unidad' ? 'u' : 'kg'}</span>
+                        <span>{it.kg} {uLabel(unidad)}</span>
                       )}
                     </td>
                     {hayKgReales && (
                       <td style={{ textAlign: 'center', fontWeight: 700, color: Number(it.kg_real) > 0 ? 'var(--green)' : 'var(--muted)' }}>
-                        {Number(it.kg_real) > 0 ? `${it.kg_real} ${unidad === 'unidad' ? 'u' : 'kg'}` : '—'}
+                        {Number(it.kg_real) > 0 ? `${it.kg_real} ${uLabel(unidad)}` : '—'}
                       </td>
                     )}
-                    <td>{fmt(it.precio_unitario)}/{unidad === 'unidad' ? 'u' : 'kg'}</td>
+                    <td>{fmt(it.precio_unitario)}/{uLabel(unidad)}</td>
                     <td>
                       {p.estado === 'pendiente' && (
                         <button onClick={() => quitarItemEdit(i)} style={{ background: 'none', border: 'none', color: 'var(--red-light)', cursor: 'pointer' }}>🗑️</button>
@@ -542,7 +555,7 @@ function DetallePedido({ p, editingItems, editingDia, editingHorario, editingNot
               <div style={{ fontSize: 11, color: '#ff9d3a', fontWeight: 700, marginBottom: 6 }}>📦 PENDIENTE DE DESPACHO</div>
               {(p.items_pendientes || []).map((it, i) => (
                 <div key={i} style={{ fontSize: 12, padding: '2px 0' }}>
-                  {it.nombre} — {it.kg_pendiente} {(it.unidad || 'kg') === 'unidad' ? 'u' : 'kg'}
+                  {it.nombre} — {it.kg_pendiente} {uLabel(it.unidad)}
                 </div>
               ))}
             </div>
@@ -678,7 +691,7 @@ function ModalDespacho({ m, setModalDespacho, remitosCliente, actualizarKgDespac
           <tbody>
             {m.items.map((it, i) => {
               const pendiente = it.kg_pedido - it.kg_despacho
-              const u = (it.unidad || 'kg') === 'unidad' ? 'u' : 'kg'
+              const u = uLabel(it.unidad)
               return (
                 <tr key={i}>
                   <td style={{ fontWeight: 600 }}>{it.nombre}</td>
