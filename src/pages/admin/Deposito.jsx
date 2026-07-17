@@ -3261,7 +3261,9 @@ async function agregarItem() {
       // de la media) para que el dato quede consistente en remitos y reportes.
       descripcion = nombreCanonicoMediaRes(mediaSeleccionada?.descripcion || mediaSeleccionada?.proveedor_nombre)
     } else if (form.categoria === 'pieza_entera') {
-      descripcion = `${piezaEnteraSeleccionada.tipo_pieza} #${piezaEnteraSeleccionada.id} (${piezaEnteraSeleccionada.proveedor_origen || 's/proveedor'})`
+      // El remito lo ve el CLIENTE: no incluir el proveedor de origen de la
+      // media res. La trazabilidad interna queda por pieza_id (se guarda aparte).
+      descripcion = `${piezaEnteraSeleccionada.tipo_pieza} #${piezaEnteraSeleccionada.id}`
     } else if (esCajaLocal && cajaSeleccionada) {
       descripcion = `Caja ${cajaSeleccionada.tipo_caja} #${cajaSeleccionada.id} — ${Number(cajaSeleccionada.kg).toFixed(1)} kg`
     } else {
