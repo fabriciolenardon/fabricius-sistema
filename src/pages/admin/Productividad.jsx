@@ -369,8 +369,27 @@ function TabFranquicias({ esMovil }) {
   const semanas = []
   for (let i = SEMANAS_FRQ - 1; i >= 0; i--) semanas.push(sumarDias(lunActual, -7 * i))
 
+  // Total general: TODAS las franquicias juntas en las 12 semanas
+  const kgFr = ({ remitos }) => (remitos || []).reduce((s, r) =>
+    s + (Array.isArray(r.items) ? r.items : []).reduce((k, it) => k + kgItem(it), 0), 0)
+  const granTotalKg = datos.reduce((s, d) => s + kgFr(d), 0)
+  const granTotalPlata = datos.reduce((s, d) => s + (d.remitos || []).reduce((k, r) => k + n(r.total), 0), 0)
+  const granTotalRemitos = datos.reduce((s, d) => s + (d.remitos || []).length, 0)
+
   return (
     <div>
+      {datos.length > 1 && (
+        <div className="card" style={{ padding: 16, marginBottom: 16, border: '1px solid var(--gold)' }}>
+          <div style={{ fontSize: 12, color: 'var(--gold)', fontWeight: 700, letterSpacing: 0.5, marginBottom: 8 }}>
+            📊 TOTAL {datos.length} FRANQUICIAS · ÚLTIMAS {SEMANAS_FRQ} SEMANAS
+          </div>
+          <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+            <div><div style={{ fontSize: 11, color: 'var(--muted)' }}>Kg despachados (total)</div><div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 30, color: 'var(--gold)' }}>{fmtNumero(granTotalKg, 0)} kg</div></div>
+            <div><div style={{ fontSize: 11, color: 'var(--muted)' }}>Facturado (total)</div><div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 30 }}>{fmt(granTotalPlata)}</div></div>
+            <div><div style={{ fontSize: 11, color: 'var(--muted)' }}>Remitos (total)</div><div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 30 }}>{granTotalRemitos}</div></div>
+          </div>
+        </div>
+      )}
       {datos.map(({ fr, remitos, pagos }) => {
         const porSemana = new Map(semanas.map(s => [s, { kg: 0, plata: 0, remitos: 0 }]))
         const mix = new Map()
@@ -391,7 +410,9 @@ function TabFranquicias({ esMovil }) {
         const ult4 = serie.slice(-5, -1).reduce((s, x) => s + x.kg, 0)
         const prev4 = serie.slice(-9, -5).reduce((s, x) => s + x.kg, 0)
         const tendencia = prev4 > 0 ? ((ult4 - prev4) / prev4) * 100 : null
-        const topMix = [...mix.entries()].filter(([, kg]) => kg > 0.01).sort((a, b) => b[1] - a[1]).slice(0, 8)
+        const mixOrdenado = [...mix.entries()].filter(([, kg]) => kg > 0.01).sort((a, b) => b[1] - a[1])
+        const mixTotalCount = mixOrdenado.length
+        const topMix = mixOrdenado.slice(0, 8)
         const maxMix = Math.max(...topMix.map(([, kg]) => kg), 1)
         const totKg = serie.reduce((s, x) => s + x.kg, 0)
         const totPlata = serie.reduce((s, x) => s + x.plata, 0)
@@ -441,7 +462,9 @@ function TabFranquicias({ esMovil }) {
 
             <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : '1fr 1fr', gap: 16 }}>
               <div>
-                <div style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 700, marginBottom: 6 }}>MIX DE PRODUCTOS (kg, {SEMANAS_FRQ} sem)</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 700, marginBottom: 6 }}>
+                  MIX DE PRODUCTOS (kg, {SEMANAS_FRQ} sem){mixTotalCount > 8 ? ` — top 8 de ${mixTotalCount}` : ''}
+                </div>
                 {topMix.length === 0 && <div style={{ fontSize: 12, color: 'var(--muted)' }}>Sin despachos con kg en el período.</div>}
                 {topMix.map(([desc, kg]) => (
                   <div key={desc} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
@@ -450,6 +473,12 @@ function TabFranquicias({ esMovil }) {
                     <div style={{ width: 62, fontSize: 11, textAlign: 'right', color: 'var(--text2)' }}>{fmtNumero(kg, 0)} kg</div>
                   </div>
                 ))}
+                {topMix.length > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 8, paddingTop: 8, borderTop: '2px solid var(--gold)' }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--gold)' }}>TOTAL (todos los productos)</div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--gold)' }}>{fmtNumero(totKg, 0)} kg</div>
+                  </div>
+                )}
               </div>
               <div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 700, marginBottom: 6 }}>ÚLTIMOS PAGOS RECIBIDOS</div>
