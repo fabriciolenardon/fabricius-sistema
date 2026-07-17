@@ -281,6 +281,9 @@ function nombreCanonicoMediaRes(txtLibre) {
   const d = String(txtLibre || '').toUpperCase()
   return /OVERO|CHICO/.test(d) ? 'MEDIA RES OVERO CHICO' : 'MEDIA RES NT-VQ PREMIUM'
 }
+// Los 2 únicos tipos de media res (coinciden con la lista de precios). El
+// ingreso al depósito los elige de acá — no más texto libre.
+const MEDIA_RES_TIPOS = ['MEDIA RES NT-VQ PREMIUM', 'MEDIA RES OVERO CHICO']
 
 const CATEGORIA_A_STOCK = {
   bovino_mr: 'bovino_mr',
@@ -2406,9 +2409,17 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
         : '⛔ Cargá el importe (precio total) — no se puede ingresar al depósito sin precio.' })
       return
     }
+    // Media res: exigir el tipo (Premium NT-VQ u Overo Chico) — no texto libre.
+    if (form.tipo === 'bovino_mr' && !MEDIA_RES_TIPOS.includes(form.descripcion)) {
+      showAlert({ type: 'error', msg: 'Elegí el tipo de media res (Premium NT-VQ u Overo Chico).' })
+      return
+    }
     // Si se seleccionó un producto pollo/rebozado/embutido, usar su nombre en la descripción.
     const productoSelec = productosFiltradosTipo.find(p => p.id === form.polloProductoId)
-    const descripcionBase = prodEmbutido?.nombre?.trim() || productoSelec?.nombre || form.descripcion || form.tipo
+    // Para media res, el nombre siempre es canónico (uno de los 2 de la lista).
+    const descripcionBase = form.tipo === 'bovino_mr'
+      ? nombreCanonicoMediaRes(form.descripcion)
+      : (prodEmbutido?.nombre?.trim() || productoSelec?.nombre || form.descripcion || form.tipo)
     const descripcionFinal = esEnUnidades && cantidad > 1
       ? `${descripcionBase} ×${cantidad}`
       : descripcionBase
@@ -2720,8 +2731,15 @@ async function eliminar(entrada) {
               {proveedores.map(p => <option key={p}>{p}</option>)}
             </select>
           </div>
-          <div className="form-group"><label>Descripción</label>
-            <input placeholder="Ej: Novillito Premium..." value={form.descripcion} onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))} />
+          <div className="form-group"><label>{form.tipo === 'bovino_mr' ? 'Tipo de media res' : 'Descripción'}</label>
+            {form.tipo === 'bovino_mr' ? (
+              <select value={MEDIA_RES_TIPOS.includes(form.descripcion) ? form.descripcion : ''} onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))}>
+                <option value="">— Elegí el tipo —</option>
+                {MEDIA_RES_TIPOS.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            ) : (
+              <input placeholder="Ej: Novillito Premium..." value={form.descripcion} onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))} />
+            )}
           </div>
         </div>
         {/* Selector de producto específico para Pollo/Rebozado por cajones —
