@@ -272,6 +272,16 @@ const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
 // SalidaForm (al despachar, descuenta stock) como RemitosTab (al anular un
 // remito, devuelve el mismo stock). Si quedara local en SalidaForm, el revert
 // de la anulación no podría calcular qué stock devolver.
+// La media res entera tiene SOLO 2 tipos en la lista de precios. Antes el
+// despacho copiaba el texto libre de la media (NT, VQ, VAQUILLONA, NOVILLITO,
+// vacío, BOVINO_MR…) y eso fragmentaba el dato en los reportes. Ahora el remito
+// SIEMPRE sale con uno de los 2 nombres canónicos: todo va a "NT-VQ PREMIUM"
+// salvo lo que diga OVERO/CHICO → "OVERO CHICO" (criterio definido por Fabricio).
+function nombreCanonicoMediaRes(txtLibre) {
+  const d = String(txtLibre || '').toUpperCase()
+  return /OVERO|CHICO/.test(d) ? 'MEDIA RES OVERO CHICO' : 'MEDIA RES NT-VQ PREMIUM'
+}
+
 const CATEGORIA_A_STOCK = {
   bovino_mr: 'bovino_mr',
   bovino_corte: 'bovino_corte',
@@ -3229,7 +3239,9 @@ async function agregarItem() {
     const prod = todosPrecios.find(p => p.id === form.productoId)
     let descripcion
     if (form.categoria === 'bovino_mr') {
-      descripcion = mediaSeleccionada ? `Media Res — ${mediaSeleccionada.descripcion || mediaSeleccionada.proveedor_nombre}` : 'Media Res'
+      // Siempre uno de los 2 nombres de la lista de precios (no el texto libre
+      // de la media) para que el dato quede consistente en remitos y reportes.
+      descripcion = nombreCanonicoMediaRes(mediaSeleccionada?.descripcion || mediaSeleccionada?.proveedor_nombre)
     } else if (form.categoria === 'pieza_entera') {
       descripcion = `${piezaEnteraSeleccionada.tipo_pieza} #${piezaEnteraSeleccionada.id} (${piezaEnteraSeleccionada.proveedor_origen || 's/proveedor'})`
     } else if (esCajaLocal && cajaSeleccionada) {
