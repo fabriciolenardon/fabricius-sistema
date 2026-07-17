@@ -4,13 +4,16 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
-import { fmtPrecio } from '../../lib/formatos'
+import { fmtPrecio, parseNumero } from '../../lib/formatos'
+import { enviarWhatsapp } from '../../lib/whatsapp'
+import { getCampoPrecio } from '../../lib/listasPrecios'
 const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
 const ahora = () => new Date().toISOString()
 
 const ESTADO_INFO = {
   pendiente:  { label: '🟡 Pendiente',   color: 'var(--amber)' },
   confirmado: { label: '🟢 Confirmado',  color: 'var(--green)' },
+  listo:      { label: '📦 Listo',       color: 'var(--gold)' },
   incompleto: { label: '🟠 Incompleto',  color: '#ff9d3a' },
   despachado: { label: '🚚 Despachado',  color: 'var(--blue)' },
   rechazado:  { label: '🔴 Rechazado',   color: 'var(--red-light)' },
@@ -29,6 +32,7 @@ export function Pedidos() {
   const [editingNotaAdmin, setEditingNotaAdmin] = useState('')
   const [modalDespacho, setModalDespacho] = useState(null)
   const [remitosCliente, setRemitosCliente] = useState([])
+  const [modalNuevo, setModalNuevo] = useState(false)
 
   useEffect(() => {
     cargar()
@@ -132,12 +136,14 @@ export function Pedidos() {
         precio_unitario: it.precio_unitario,
       }))
     } else {
+      // Si el sector desposte cargó kg reales, el despacho arranca con esos
+      // (lo efectivamente preparado); si no, con lo pedido.
       itemsBase = (pedido.items || []).map(it => ({
         producto_id: it.producto_id,
         nombre: it.nombre,
         unidad: it.unidad || 'kg',
         kg_pedido: it.kg,
-        kg_despacho: it.kg,
+        kg_despacho: Number(it.kg_real) > 0 ? Number(it.kg_real) : it.kg,
         precio_unitario: it.precio_unitario,
       }))
     }
@@ -213,6 +219,18 @@ export function Pedidos() {
     cargar()
   }
 
+  // Avisar al cliente por WhatsApp que su pedido está listo (abre wa.me con
+  // el mensaje precargado — el envío final lo hace el admin desde su WhatsApp).
+  async function avisarWhatsapp(pedido) {
+    const { data: cli } = await supabase.from('clientes').select('telefono, nombre_fantasia, nombre').eq('id', pedido.cliente_id).maybeSingle()
+    if (!cli?.telefono) { alert('El cliente no tiene teléfono cargado en su legajo (módulo Clientes).'); return }
+    const detalle = (pedido.items || [])
+      .map(it => `• ${it.nombre}: ${Number(it.kg_real) > 0 ? it.kg_real : it.kg} ${(it.unidad || 'kg') === 'unidad' ? 'u' : 'kg'}`)
+      .join('\n')
+    enviarWhatsapp(cli.telefono,
+      `¡Hola ${cli.nombre_fantasia || cli.nombre}! 👋\n\n📦 Tu pedido ya está LISTO para retirar/recibir:\n\n${detalle}\n\n📅 Entrega: ${pedido.dia_entrega || 'a coordinar'}${pedido.horario_entrega ? ` · ${pedido.horario_entrega}` : ''}\n\nCarnicería Fabricius 🥩`)
+  }
+
   const pedidosFiltrados = pedidos.filter(p => filtro === 'todos' || p.estado === filtro)
   // Paginación del listado filtrado — vuelve a página 1 cuando cambia el filtro
   // gracias al useEffect interno de usePaginacion que ajusta si pagina > totalPaginas.
@@ -220,6 +238,7 @@ export function Pedidos() {
   const cantPorEstado = {
     pendiente: pedidos.filter(p => p.estado === 'pendiente').length,
     confirmado: pedidos.filter(p => p.estado === 'confirmado').length,
+    listo: pedidos.filter(p => p.estado === 'listo').length,
     incompleto: pedidos.filter(p => p.estado === 'incompleto').length,
     despachado: pedidos.filter(p => p.estado === 'despachado').length,
     rechazado: pedidos.filter(p => p.estado === 'rechazado').length,
@@ -228,11 +247,18 @@ export function Pedidos() {
 
   return (
     <div>
-      <div className="page-title">📥 PEDIDOS ONLINE</div>
-      <div className="page-sub">Pedidos recibidos desde los portales de clientes mayoristas</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
+        <div>
+          <div className="page-title">📥 PEDIDOS</div>
+          <div className="page-sub">Pedidos de los portales de clientes + pedidos internos para el sector desposte</div>
+        </div>
+        <button onClick={() => setModalNuevo(true)} className="btn btn-gold" style={{ whiteSpace: 'nowrap' }}>
+          ➕ Nuevo pedido
+        </button>
+      </div>
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-        {['pendiente', 'confirmado', 'incompleto', 'despachado', 'rechazado', 'cancelado', 'todos'].map(e => {
+        {['pendiente', 'confirmado', 'listo', 'incompleto', 'despachado', 'rechazado', 'cancelado', 'todos'].map(e => {
           const info = ESTADO_INFO[e] || { label: 'Todos', color: 'var(--gold)' }
           const count = e === 'todos' ? pedidos.length : (cantPorEstado[e] || 0)
           return (
@@ -273,7 +299,7 @@ export function Pedidos() {
                   </button>
                 </div>
 
-                {abierto && <DetallePedido p={p} editingItems={editingItems} editingDia={editingDia} editingHorario={editingHorario} editingNotaAdmin={editingNotaAdmin} setEditingDia={setEditingDia} setEditingHorario={setEditingHorario} setEditingNotaAdmin={setEditingNotaAdmin} actualizarItemKg={actualizarItemKg} quitarItemEdit={quitarItemEdit} confirmarPedido={confirmarPedido} rechazarPedido={rechazarPedido} abrirModalDespacho={abrirModalDespacho} />}
+                {abierto && <DetallePedido p={p} editingItems={editingItems} editingDia={editingDia} editingHorario={editingHorario} editingNotaAdmin={editingNotaAdmin} setEditingDia={setEditingDia} setEditingHorario={setEditingHorario} setEditingNotaAdmin={setEditingNotaAdmin} actualizarItemKg={actualizarItemKg} quitarItemEdit={quitarItemEdit} confirmarPedido={confirmarPedido} rechazarPedido={rechazarPedido} abrirModalDespacho={abrirModalDespacho} avisarWhatsapp={avisarWhatsapp} />}
               </div>
             )
           })}
@@ -283,19 +309,199 @@ export function Pedidos() {
       {pedidosFiltrados.length > 0 && <Paginador {...pag.controles} label="pedidos" />}
 
       {modalDespacho && <ModalDespacho m={modalDespacho} setModalDespacho={setModalDespacho} remitosCliente={remitosCliente} actualizarKgDespacho={actualizarKgDespacho} confirmarDespacho={confirmarDespacho} />}
+      {modalNuevo && <ModalNuevoPedido cerrar={() => setModalNuevo(false)} onCreado={() => { setModalNuevo(false); setFiltro('confirmado'); cargar() }} profile={profile} />}
     </div>
   )
 }
 
-function DetallePedido({ p, editingItems, editingDia, editingHorario, editingNotaAdmin, setEditingDia, setEditingHorario, setEditingNotaAdmin, actualizarItemKg, quitarItemEdit, confirmarPedido, rechazarPedido, abrirModalDespacho }) {
+// Alta de pedido desde el admin: nace 'confirmado' (origen 'admin') y entra
+// directo a la cola del panel del sector desposte, que carga los kg reales
+// y lo marca LISTO.
+function ModalNuevoPedido({ cerrar, onCreado, profile }) {
+  const [clientes, setClientes] = useState([])
+  const [precios, setPrecios] = useState([])
+  const [clienteId, setClienteId] = useState('')
+  const [busqueda, setBusqueda] = useState('')
+  const [items, setItems] = useState([])
+  const [dia, setDia] = useState('')
+  const [horario, setHorario] = useState('')
+  const [nota, setNota] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    Promise.all([
+      supabase.from('clientes').select('id, nombre, nombre_fantasia, lista_precios').order('nombre'),
+      supabase.from('precios').select('*').order('nombre'),
+    ]).then(([c, p]) => { setClientes(c.data || []); setPrecios(p.data || []) })
+  }, [])
+
+  const cliente = clientes.find(c => c.id === clienteId)
+  const campoPrecio = getCampoPrecio(cliente?.lista_precios)
+  const resultados = busqueda.trim().length >= 2
+    ? precios.filter(p => p.nombre?.toLowerCase().includes(busqueda.trim().toLowerCase())).slice(0, 8)
+    : []
+
+  function agregarProducto(prod) {
+    setItems(its => [...its, {
+      producto_id: prod.id,
+      nombre: prod.nombre,
+      categoria: prod.categoria,
+      kg: 1,
+      unidad: 'kg',
+      precio_unitario: Number(prod[campoPrecio]) || 0,
+      subtotal: Number(prod[campoPrecio]) || 0,
+    }])
+    setBusqueda('')
+  }
+
+  function setItem(idx, cambios) {
+    setItems(its => its.map((it, i) => {
+      if (i !== idx) return it
+      const nuevo = { ...it, ...cambios }
+      nuevo.subtotal = (parseNumero(nuevo.kg)) * (parseNumero(nuevo.precio_unitario))
+      return nuevo
+    }))
+  }
+
+  const total = items.reduce((s, it) => s + (it.subtotal || 0), 0)
+  const inputStyle = { background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '7px 10px', fontSize: 13, boxSizing: 'border-box' }
+
+  async function crear() {
+    if (!clienteId) { setError('Elegí el cliente'); return }
+    if (items.length === 0) { setError('Agregá al menos un producto'); return }
+    if (items.some(it => !(parseNumero(it.kg) > 0))) { setError('Todos los productos necesitan cantidad mayor a 0'); return }
+    setGuardando(true); setError(null)
+    const quien = profile?.nombre || 'Admin'
+    const { error: e } = await supabase.from('pedidos').insert({
+      cliente_id: clienteId,
+      cliente_nombre: cliente?.nombre || '',
+      estado: 'confirmado',
+      origen: 'admin',
+      dia_entrega: dia || null,
+      horario_entrega: horario || null,
+      items: items.map(it => ({ ...it, kg: parseNumero(it.kg), precio_unitario: parseNumero(it.precio_unitario) })),
+      total_estimado: total,
+      notas_admin: nota.trim() || null,
+      confirmado_por: quien,
+      confirmado_en: ahora(),
+      mensajes_chat: [{ timestamp: ahora(), autor: 'admin', texto: `📋 Pedido cargado por ${quien} para preparar en el sector desposte.` }],
+    })
+    setGuardando(false)
+    if (e) {
+      // Columna 'origen' inexistente = migración 86 sin aplicar
+      setError(e.message.includes('origen') ? 'Falta aplicar la migración 86 en Supabase (columna "origen").' : e.message)
+      return
+    }
+    onCreado()
+  }
+
+  return (
+    <div onClick={cerrar} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: 'var(--surface)', border: '1px solid var(--gold)', borderRadius: 16, padding: 24, maxWidth: 640, width: '100%', maxHeight: '90vh', overflow: 'auto' }}>
+        <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 24, color: 'var(--gold)', letterSpacing: 1, marginBottom: 4 }}>➕ Nuevo pedido</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>Entra directo a la cola del sector desposte para que lo preparen.</div>
+
+        <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>👥 Cliente</label>
+        <select value={clienteId} onChange={e => { setClienteId(e.target.value); setItems([]) }}
+          style={{ ...inputStyle, width: '100%', marginBottom: 12 }}>
+          <option value="">— Elegir cliente —</option>
+          {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}{c.nombre_fantasia ? ` (${c.nombre_fantasia})` : ''}</option>)}
+        </select>
+
+        {clienteId && (
+          <>
+            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>🔍 Agregar producto (lista {cliente?.lista_precios || 'carn'})</label>
+            <input value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Escribí el nombre del producto..."
+              style={{ ...inputStyle, width: '100%' }} />
+            {resultados.length > 0 && (
+              <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, marginTop: 4, overflow: 'hidden' }}>
+                {resultados.map(p => (
+                  <button key={p.id} onClick={() => agregarProducto(p)}
+                    style={{ display: 'flex', justifyContent: 'space-between', width: '100%', padding: '8px 12px', background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', color: 'var(--text)', cursor: 'pointer', fontSize: 13 }}>
+                    <span>{p.nombre}</span>
+                    <span style={{ color: 'var(--gold)' }}>{fmt(p[campoPrecio])}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {items.length > 0 && (
+              <table style={{ width: '100%', fontSize: 12, marginTop: 12 }}>
+                <thead><tr><th style={{ textAlign: 'left' }}>Producto</th><th>Cant.</th><th>Unidad</th><th>Precio</th><th>Subtotal</th><th></th></tr></thead>
+                <tbody>
+                  {items.map((it, i) => (
+                    <tr key={i}>
+                      <td style={{ fontWeight: 600 }}>{it.nombre}</td>
+                      <td style={{ textAlign: 'center' }}>
+                        <input type="number" step="0.1" min="0" value={it.kg} onChange={e => setItem(i, { kg: e.target.value })}
+                          style={{ ...inputStyle, width: 64, textAlign: 'center' }} />
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        <select value={it.unidad} onChange={e => setItem(i, { unidad: e.target.value })} style={{ ...inputStyle, padding: '6px 6px' }}>
+                          <option value="kg">kg</option>
+                          <option value="unidad">u</option>
+                        </select>
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        <input type="number" step="1" min="0" value={it.precio_unitario} onChange={e => setItem(i, { precio_unitario: e.target.value })}
+                          style={{ ...inputStyle, width: 80, textAlign: 'right' }} />
+                      </td>
+                      <td style={{ textAlign: 'right', color: 'var(--gold)', fontWeight: 600 }}>{fmt(it.subtotal)}</td>
+                      <td>
+                        <button onClick={() => setItems(its => its.filter((_, j) => j !== i))}
+                          style={{ background: 'none', border: 'none', color: 'var(--red-light)', cursor: 'pointer' }}>🗑️</button>
+                      </td>
+                    </tr>
+                  ))}
+                  <tr style={{ borderTop: '2px solid var(--gold)' }}>
+                    <td colSpan={4} style={{ textAlign: 'right', fontWeight: 700 }}>TOTAL ESTIMADO</td>
+                    <td style={{ textAlign: 'right', color: 'var(--gold)', fontFamily: "'Bebas Neue',cursive", fontSize: 17 }}>{fmt(total)}</td>
+                    <td></td>
+                  </tr>
+                </tbody>
+              </table>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 12 }}>
+              <div>
+                <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>📅 Día de entrega</label>
+                <input type="date" value={dia} onChange={e => setDia(e.target.value)} style={{ ...inputStyle, width: '100%' }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>🕐 Horario</label>
+                <input type="text" value={horario} onChange={e => setHorario(e.target.value)} placeholder="mañana / tarde / 10:30" style={{ ...inputStyle, width: '100%' }} />
+              </div>
+            </div>
+            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', margin: '10px 0 4px' }}>📝 Nota para el sector desposte (opcional)</label>
+            <textarea value={nota} onChange={e => setNota(e.target.value)} rows={2} style={{ ...inputStyle, width: '100%', fontFamily: 'inherit' }} />
+          </>
+        )}
+
+        {error && <div style={{ marginTop: 10, fontSize: 12, color: 'var(--red-light)', fontWeight: 700 }}>⚠️ {error}</div>}
+
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
+          <button onClick={cerrar} className="btn btn-ghost">Cancelar</button>
+          <button onClick={crear} disabled={guardando} className="btn btn-gold">
+            {guardando ? '⏳ Creando...' : '✅ Crear y mandar a preparar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DetallePedido({ p, editingItems, editingDia, editingHorario, editingNotaAdmin, setEditingDia, setEditingHorario, setEditingNotaAdmin, actualizarItemKg, quitarItemEdit, confirmarPedido, rechazarPedido, abrirModalDespacho, avisarWhatsapp }) {
   const itemsRender = p.estado === 'pendiente' ? (editingItems || []) : (p.items || [])
+  // kg reales cargados por el sector desposte (portal): se muestran apenas existan
+  const hayKgReales = (p.items || []).some(it => Number(it.kg_real) > 0)
   return (
     <div style={{ marginTop: 14, borderTop: '1px solid var(--border)', paddingTop: 14 }}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>📦 Productos {p.estado === 'pendiente' && '(editable)'}</div>
           <table style={{ width: '100%', fontSize: 12 }}>
-            <thead><tr><th>Producto</th><th>Cant.</th><th>Precio</th><th></th></tr></thead>
+            <thead><tr><th>Producto</th><th>Cant.</th>{hayKgReales && <th>Real</th>}<th>Precio</th><th></th></tr></thead>
             <tbody>
               {itemsRender.map((it, i) => {
                 const unidad = it.unidad || 'kg'
@@ -310,6 +516,11 @@ function DetallePedido({ p, editingItems, editingDia, editingHorario, editingNot
                         <span>{it.kg} {unidad === 'unidad' ? 'u' : 'kg'}</span>
                       )}
                     </td>
+                    {hayKgReales && (
+                      <td style={{ textAlign: 'center', fontWeight: 700, color: Number(it.kg_real) > 0 ? 'var(--green)' : 'var(--muted)' }}>
+                        {Number(it.kg_real) > 0 ? `${it.kg_real} ${unidad === 'unidad' ? 'u' : 'kg'}` : '—'}
+                      </td>
+                    )}
                     <td>{fmt(it.precio_unitario)}/{unidad === 'unidad' ? 'u' : 'kg'}</td>
                     <td>
                       {p.estado === 'pendiente' && (
@@ -379,9 +590,24 @@ function DetallePedido({ p, editingItems, editingDia, editingHorario, editingNot
             </div>
           )}
           {p.estado === 'confirmado' && (
-            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-              <button onClick={() => abrirModalDespacho(p, 'completo')} style={{ background: 'var(--blue)', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#fff', flex: 1 }}>🚚 Despachar completo</button>
-              <button onClick={() => abrirModalDespacho(p, 'parcial')} style={{ background: '#ff9d3a', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#000' }}>⚠️ Despacho parcial</button>
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>🔪 En preparación: el sector desposte lo ve en su panel y lo marca LISTO al terminarlo.</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => abrirModalDespacho(p, 'completo')} style={{ background: 'var(--blue)', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#fff', flex: 1 }}>🚚 Despachar completo</button>
+                <button onClick={() => abrirModalDespacho(p, 'parcial')} style={{ background: '#ff9d3a', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#000' }}>⚠️ Despacho parcial</button>
+              </div>
+            </div>
+          )}
+          {p.estado === 'listo' && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ background: '#14230f', border: '1px solid #3f6d2f', borderRadius: 8, padding: '8px 12px', fontSize: 12, marginBottom: 8 }}>
+                📦 <strong>Preparado y listo</strong>{p.preparado_por ? <> por <strong>{p.preparado_por}</strong></> : null}{p.preparado_en ? <> el {new Date(p.preparado_en).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })}</> : null}.
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button onClick={() => avisarWhatsapp(p)} style={{ background: '#25D366', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#000' }}>💬 Avisar al cliente</button>
+                <button onClick={() => abrirModalDespacho(p, 'completo')} style={{ background: 'var(--blue)', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#fff', flex: 1 }}>🚚 Despachar completo</button>
+                <button onClick={() => abrirModalDespacho(p, 'parcial')} style={{ background: '#ff9d3a', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#000' }}>⚠️ Despacho parcial</button>
+              </div>
             </div>
           )}
           {p.estado === 'incompleto' && (
