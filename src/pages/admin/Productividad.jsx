@@ -29,6 +29,13 @@ const kgItem = it => {
 }
 const kgVenta = v => (Array.isArray(v.items) ? v.items : []).reduce((s, it) => s + kgItem(it), 0)
 
+// Solo CARNE (y derivados: embutidos, hamburguesas, pollo, achuras…). Deja
+// afuera insumos / almacén / bebidas / mercadería reventa. Lo que no tiene
+// categoría se cuenta como carne (los despachos a franquicia son de carne).
+const NO_CARNE = new Set(['almacen', 'bebidas', 'insumos', 'mercaderia', 'mercaderias', 'limpieza', 'varios'])
+const esCarne = it => !NO_CARNE.has(String(it?.categoria || it?.tipo || '').toLowerCase())
+const kgCarne = it => esCarne(it) ? kgItem(it) : 0
+
 const sumarDias = (fecha, dias) => {
   const d = new Date(fecha + 'T12:00:00')
   d.setDate(d.getDate() + dias)
@@ -369,9 +376,9 @@ function TabFranquicias({ esMovil }) {
   const semanas = []
   for (let i = SEMANAS_FRQ - 1; i >= 0; i--) semanas.push(sumarDias(lunActual, -7 * i))
 
-  // Total general: TODAS las franquicias juntas en las 12 semanas
+  // Total general: TODAS las franquicias juntas en las 12 semanas (solo carne)
   const kgFr = ({ remitos }) => (remitos || []).reduce((s, r) =>
-    s + (Array.isArray(r.items) ? r.items : []).reduce((k, it) => k + kgItem(it), 0), 0)
+    s + (Array.isArray(r.items) ? r.items : []).reduce((k, it) => k + kgCarne(it), 0), 0)
   const granTotalKg = datos.reduce((s, d) => s + kgFr(d), 0)
   const granTotalPlata = datos.reduce((s, d) => s + (d.remitos || []).reduce((k, r) => k + n(r.total), 0), 0)
   const granTotalRemitos = datos.reduce((s, d) => s + (d.remitos || []).length, 0)
@@ -381,13 +388,14 @@ function TabFranquicias({ esMovil }) {
       {datos.length > 1 && (
         <div className="card" style={{ padding: 16, marginBottom: 16, border: '1px solid var(--gold)' }}>
           <div style={{ fontSize: 12, color: 'var(--gold)', fontWeight: 700, letterSpacing: 0.5, marginBottom: 8 }}>
-            📊 TOTAL {datos.length} FRANQUICIAS · ÚLTIMAS {SEMANAS_FRQ} SEMANAS
+            🥩 TOTAL CARNE · {datos.length} FRANQUICIAS · ÚLTIMAS {SEMANAS_FRQ} SEMANAS
           </div>
           <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-            <div><div style={{ fontSize: 11, color: 'var(--muted)' }}>Kg despachados (total)</div><div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 30, color: 'var(--gold)' }}>{fmtNumero(granTotalKg, 0)} kg</div></div>
-            <div><div style={{ fontSize: 11, color: 'var(--muted)' }}>Facturado (total)</div><div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 30 }}>{fmt(granTotalPlata)}</div></div>
+            <div><div style={{ fontSize: 11, color: 'var(--muted)' }}>Kg de CARNE despachados</div><div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 30, color: 'var(--gold)' }}>{fmtNumero(granTotalKg, 0)} kg</div></div>
+            <div><div style={{ fontSize: 11, color: 'var(--muted)' }}>Facturado total (todo)</div><div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 30 }}>{fmt(granTotalPlata)}</div></div>
             <div><div style={{ fontSize: 11, color: 'var(--muted)' }}>Remitos (total)</div><div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 30 }}>{granTotalRemitos}</div></div>
           </div>
+          <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 6 }}>Los kg suman solo carne y derivados (embutidos, hamburguesas, pollo). Insumos y mercadería no cuentan.</div>
         </div>
       )}
       {datos.map(({ fr, remitos, pagos }) => {
@@ -397,11 +405,12 @@ function TabFranquicias({ esMovil }) {
           const sem = lunesDe(r.fecha)
           const acc = porSemana.get(sem)
           const items = Array.isArray(r.items) ? r.items : []
-          const kg = items.reduce((s, it) => s + kgItem(it), 0)
+          const kg = items.reduce((s, it) => s + kgCarne(it), 0)  // solo carne
           if (acc) { acc.kg += kg; acc.plata += n(r.total); acc.remitos += 1 }
           for (const it of items) {
+            if (!esCarne(it)) continue  // insumos / mercadería no entran al mix
             const d = (it.descripcion || '(sin descripción)').trim().toUpperCase()
-            mix.set(d, (mix.get(d) || 0) + kgItem(it))
+            mix.set(d, (mix.get(d) || 0) + kgCarne(it))
           }
         }
         const serie = semanas.map(s => ({ semana: s, ...porSemana.get(s) }))
@@ -432,7 +441,7 @@ function TabFranquicias({ esMovil }) {
             </div>
 
             <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginBottom: 14 }}>
-              <div><div style={{ fontSize: 11, color: 'var(--muted)' }}>Kg despachados ({SEMANAS_FRQ} sem)</div><div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 24 }}>{fmtNumero(totKg, 0)} kg</div></div>
+              <div><div style={{ fontSize: 11, color: 'var(--muted)' }}>Kg de carne ({SEMANAS_FRQ} sem)</div><div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 24, color: 'var(--gold)' }}>{fmtNumero(totKg, 0)} kg</div></div>
               <div><div style={{ fontSize: 11, color: 'var(--muted)' }}>Facturado</div><div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 24 }}>{fmt(totPlata)}</div></div>
               <div><div style={{ fontSize: 11, color: 'var(--muted)' }}>Remitos</div><div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 24 }}>{remitos.length}</div></div>
               <div>
@@ -442,7 +451,7 @@ function TabFranquicias({ esMovil }) {
             </div>
 
             <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 700, marginBottom: 6 }}>KG DESPACHADOS POR SEMANA</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 700, marginBottom: 6 }}>KG DE CARNE POR SEMANA</div>
               <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 90 }}>
                 {serie.map(x => (
                   <div key={x.semana} title={`Semana del ${ddmm(x.semana)}: ${fmtNumero(x.kg, 0)} kg · ${x.remitos} remitos`}
@@ -463,7 +472,7 @@ function TabFranquicias({ esMovil }) {
             <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : '1fr 1fr', gap: 16 }}>
               <div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 700, marginBottom: 6 }}>
-                  MIX DE PRODUCTOS (kg, {SEMANAS_FRQ} sem){mixTotalCount > 8 ? ` — top 8 de ${mixTotalCount}` : ''}
+                  MIX DE CARNE (kg, {SEMANAS_FRQ} sem){mixTotalCount > 8 ? ` — top 8 de ${mixTotalCount}` : ''}
                 </div>
                 {topMix.length === 0 && <div style={{ fontSize: 12, color: 'var(--muted)' }}>Sin despachos con kg en el período.</div>}
                 {topMix.map(([desc, kg]) => (
@@ -475,7 +484,7 @@ function TabFranquicias({ esMovil }) {
                 ))}
                 {topMix.length > 0 && (
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 8, paddingTop: 8, borderTop: '2px solid var(--gold)' }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--gold)' }}>TOTAL (todos los productos)</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--gold)' }}>TOTAL CARNE (todos los cortes)</div>
                     <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--gold)' }}>{fmtNumero(totKg, 0)} kg</div>
                   </div>
                 )}
