@@ -365,15 +365,9 @@ function ModalNuevoPedido({ cerrar, onCreado, profile }) {
   }
 
   function setItem(idx, cambios) {
-    setItems(its => its.map((it, i) => {
-      if (i !== idx) return it
-      const nuevo = { ...it, ...cambios }
-      nuevo.subtotal = (parseNumero(nuevo.kg)) * (parseNumero(nuevo.precio_unitario))
-      return nuevo
-    }))
+    setItems(its => its.map((it, i) => (i === idx ? { ...it, ...cambios } : it)))
   }
 
-  const total = items.reduce((s, it) => s + (it.subtotal || 0), 0)
   const inputStyle = { background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '7px 10px', fontSize: 13, boxSizing: 'border-box' }
 
   async function crear() {
@@ -389,8 +383,10 @@ function ModalNuevoPedido({ cerrar, onCreado, profile }) {
       origen: 'admin',
       dia_entrega: dia || null,
       horario_entrega: horario || null,
-      items: items.map(it => ({ ...it, kg: parseNumero(it.kg), precio_unitario: parseNumero(it.precio_unitario) })),
-      total_estimado: total,
+      items: items.map(({ subtotal, ...it }) => ({ ...it, kg: parseNumero(it.kg), precio_unitario: parseNumero(it.precio_unitario) })),
+      // Sin total estimado: con tiras/unidades sin peso real no es un número viable.
+      // El total real se define al pesar y remitir.
+      total_estimado: null,
       notas_admin: nota.trim() || null,
       confirmado_por: quien,
       confirmado_en: ahora(),
@@ -444,7 +440,7 @@ function ModalNuevoPedido({ cerrar, onCreado, profile }) {
 
             {items.length > 0 && (
               <table style={{ width: '100%', fontSize: 12, marginTop: 12 }}>
-                <thead><tr><th style={{ textAlign: 'left' }}>Producto</th><th>Cant.</th><th>Unidad</th><th>Precio</th><th>Subtotal</th><th></th></tr></thead>
+                <thead><tr><th style={{ textAlign: 'left' }}>Producto</th><th>Cant.</th><th>Unidad</th><th>Precio x kg/u</th><th></th></tr></thead>
                 <tbody>
                   {items.map((it, i) => (
                     <tr key={i}>
@@ -462,22 +458,21 @@ function ModalNuevoPedido({ cerrar, onCreado, profile }) {
                       </td>
                       <td style={{ textAlign: 'center' }}>
                         <input type="number" step="1" min="0" value={it.precio_unitario} onChange={e => setItem(i, { precio_unitario: e.target.value })}
-                          style={{ ...inputStyle, width: 80, textAlign: 'right' }} />
+                          style={{ ...inputStyle, width: 90, textAlign: 'right' }} />
                       </td>
-                      <td style={{ textAlign: 'right', color: 'var(--gold)', fontWeight: 600 }}>{fmt(it.subtotal)}</td>
                       <td>
                         <button onClick={() => setItems(its => its.filter((_, j) => j !== i))}
                           style={{ background: 'none', border: 'none', color: 'var(--red-light)', cursor: 'pointer' }}>🗑️</button>
                       </td>
                     </tr>
                   ))}
-                  <tr style={{ borderTop: '2px solid var(--gold)' }}>
-                    <td colSpan={4} style={{ textAlign: 'right', fontWeight: 700 }}>TOTAL ESTIMADO</td>
-                    <td style={{ textAlign: 'right', color: 'var(--gold)', fontFamily: "'Bebas Neue',cursive", fontSize: 17 }}>{fmt(total)}</td>
-                    <td></td>
-                  </tr>
                 </tbody>
               </table>
+            )}
+            {items.length > 0 && (
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>
+                El precio queda registrado por si hay un precio especial; el total real se define al pesar y remitir.
+              </div>
             )}
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 12 }}>
