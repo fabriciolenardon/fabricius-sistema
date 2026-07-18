@@ -78,6 +78,95 @@ export function useFlujoNotificaciones({ enabled = true } = {}) {
   return { pendientes, ultimo }
 }
 
+// ============================================================
+// usePedidosListosNotif — aviso cuando el sector desposte deja un pedido LISTO
+// ============================================================
+// Suscribe Realtime a `pedidos` y, cuando aparece un pedido en estado 'listo'
+// que no habíamos visto, dispara beep + notificación del navegador. Devuelve el
+// contador de pedidos listos (para el badge del menú).
+// Se recuenta con un SELECT en cada cambio (no depende de payload.old, que según
+// la REPLICA IDENTITY de la tabla puede no traer el estado anterior) y se lleva
+// un set de ids ya avisados para no repetir ni molestar al abrir la app.
+export function usePedidosListosNotif({ enabled = true } = {}) {
+  const [listos, setListos] = useState(0)
+  const [ultimo, setUltimo] = useState(null)
+  const audioCtxRef = useRef(null)
+  const notificadosRef = useRef(new Set())
+  const primeraCarga = useRef(true)
+  const permisoPedido = useRef(false)
+
+  useEffect(() => {
+    if (!enabled) return
+    if (typeof Notification === 'undefined') return
+    if (permisoPedido.current) return
+    permisoPedido.current = true
+    if (Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {})
+    }
+  }, [enabled])
+
+  useEffect(() => {
+    if (!enabled) return
+    let cancelado = false
+    async function recargar() {
+      const { data } = await supabase.from('pedidos')
+        .select('id, cliente_nombre, preparado_por').eq('estado', 'listo')
+      if (cancelado) return
+      const filas = data || []
+      setListos(filas.length)
+      const idsActuales = new Set(filas.map(f => f.id))
+      if (primeraCarga.current) {
+        // Al abrir la app no avisamos de los que ya estaban listos.
+        filas.forEach(f => notificadosRef.current.add(f.id))
+        primeraCarga.current = false
+      } else {
+        for (const f of filas) {
+          if (!notificadosRef.current.has(f.id)) {
+            notificadosRef.current.add(f.id)
+            setUltimo(f)
+            dispararBeep(audioCtxRef)
+            dispararNotifPedidoListo(f)
+          }
+        }
+      }
+      // Si un pedido dejó de estar listo (se despachó), lo sacamos del set para
+      // poder volver a avisar si en el futuro vuelve a listo.
+      for (const id of [...notificadosRef.current]) {
+        if (!idsActuales.has(id)) notificadosRef.current.delete(id)
+      }
+    }
+    recargar()
+    const canal = supabase.channel('pedidos-listos-push')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => recargar())
+      .subscribe()
+    return () => { cancelado = true; supabase.removeChannel(canal) }
+  }, [enabled])
+
+  return { listos, ultimo }
+}
+
+function dispararNotifPedidoListo(pedido) {
+  try {
+    if (typeof Notification === 'undefined') return
+    if (Notification.permission !== 'granted') return
+    const cliente = pedido.cliente_nombre || 'Cliente'
+    const quien = pedido.preparado_por ? ` · por ${pedido.preparado_por}` : ''
+    const n = new Notification('📦 Pedido LISTO en depósito', {
+      body: `${cliente}${quien}\nListo para despachar y avisar al cliente`,
+      tag: `pedido-listo-${pedido.id}`,
+      icon: '/favicon.ico',
+      requireInteraction: false,
+    })
+    n.onclick = () => {
+      window.focus()
+      if (window.location.pathname !== '/admin/pedidos') window.location.href = '/admin/pedidos'
+      n.close()
+    }
+  } catch (e) {
+    // Algunos browsers requieren HTTPS o permisos específicos
+  }
+}
+
 // Genera un beep corto sin necesidad de archivos de audio
 function dispararBeep(ref) {
   try {

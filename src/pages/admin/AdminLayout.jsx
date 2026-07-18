@@ -2,7 +2,7 @@ import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
-import { useFlujoNotificaciones } from '../../lib/useFlujoNotificaciones'
+import { useFlujoNotificaciones, usePedidosListosNotif } from '../../lib/useFlujoNotificaciones'
 import { fechaHoyARG, horaHoyARG, diaSemanaARG } from '../../lib/fechas'
 import { fmtPrecio, fmtKg } from '../../lib/formatos'
 import { rutaRestringida } from '../../lib/restricciones'
@@ -368,8 +368,8 @@ function MenuMobile({ onClose }) {
                 {item.to === '/admin/deposito' && (window.__flujosPendientes > 0) && (
                   <span style={{ background: '#ef4444', color: '#fff', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{window.__flujosPendientes}</span>
                 )}
-                {item.to === '/admin/pedidos' && (window.__pedidosPendientes > 0) && (
-                  <span style={{ background: '#ef4444', color: '#fff', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{window.__pedidosPendientes}</span>
+                {item.to === '/admin/pedidos' && (((window.__pedidosPendientes || 0) + (window.__pedidosListos || 0)) > 0) && (
+                  <span style={{ background: '#ef4444', color: '#fff', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{(window.__pedidosPendientes || 0) + (window.__pedidosListos || 0)}</span>
                 )}
                 {item.to === '/admin/whatsapp' && (((window.__pedidosWaNuevos || 0) + (window.__waNoLeidos || 0)) > 0) && (
                   <span style={{ background: 'var(--green)', color: '#000', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{(window.__pedidosWaNuevos || 0) + (window.__waNoLeidos || 0)}</span>
@@ -487,10 +487,12 @@ export default function AdminLayout() {
   const pedidosWaNuevos = usePedidosWaNuevos()
   const waNoLeidos = useWaNoLeidos()
   const { pendientes: flujosPendientes } = useFlujoNotificaciones()
+  const { listos: pedidosListos } = usePedidosListosNotif()
   // Exponer en window para que el sidebar mobile pueda mostrar los badges
   // (el sidebar mobile es un componente separado que no recibe estos valores como props)
   useEffect(() => { window.__flujosPendientes = flujosPendientes }, [flujosPendientes])
   useEffect(() => { window.__pedidosPendientes = pedidosPendientes }, [pedidosPendientes])
+  useEffect(() => { window.__pedidosListos = pedidosListos }, [pedidosListos])
   useEffect(() => { window.__pedidosWaNuevos = pedidosWaNuevos }, [pedidosWaNuevos])
   useEffect(() => { window.__waNoLeidos = waNoLeidos }, [waNoLeidos])
   // Exponer el email del usuario actual para que el menú mobile pueda
@@ -560,7 +562,7 @@ export default function AdminLayout() {
             <div style={{ width: 1, height: 24, background: 'var(--border)' }} />
             <NavDesktop
               userEmail={user?.email}
-              badges={{ pedidos: pedidosPendientes, whatsapp: pedidosWaNuevos + waNoLeidos, deposito: flujosPendientes }}
+              badges={{ pedidos: pedidosPendientes + pedidosListos, whatsapp: pedidosWaNuevos + waNoLeidos, deposito: flujosPendientes }}
             />
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>
               <RelojHeader />
