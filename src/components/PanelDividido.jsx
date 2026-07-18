@@ -14,15 +14,12 @@ import { useState, useEffect, useRef } from 'react'
 const ANCHO_MIN = 25   // % de la pantalla
 const ANCHO_MAX = 65
 
-export default function PanelDividido({ items, ancho, setAncho, onCerrar }) {
-  const [ruta, setRuta] = useState(() => {
-    const r = localStorage.getItem('panel_ruta')
-    // Solo rutas del admin que sigan existiendo en el menú (por si cambió)
-    return items.some(it => it.to === r) ? r : (items[0]?.to || '/admin/dashboard')
-  })
+export default function PanelDividido({ items, ancho, setAncho, onCerrar, ruta, onRutaChange, nonce = 0 }) {
+  // La ruta la controla AdminLayout (para poder abrir el panel en un módulo
+  // puntual desde afuera, ej. "Remitar"). Persistencia de panel_ruta vive allá.
+  const setRuta = onRutaChange
   const [arrastrando, setArrastrando] = useState(false)
 
-  useEffect(() => { localStorage.setItem('panel_ruta', ruta) }, [ruta])
   useEffect(() => { localStorage.setItem('panel_ancho', String(ancho)) }, [ancho])
 
   // Arrastre del divisor. Mientras se arrastra, el iframe no captura el mouse
@@ -90,7 +87,7 @@ export default function PanelDividido({ items, ancho, setAncho, onCerrar }) {
         {/* El módulo en sí. key={ruta} fuerza un iframe fresco al cambiar de
             módulo (navegación limpia, sin historial raro adentro). */}
         <iframe
-          key={ruta}
+          key={`${ruta}-${nonce}`}
           src={ruta}
           title="Panel dividido"
           style={{ flex: 1, width: '100%', border: 'none', pointerEvents: arrastrando ? 'none' : 'auto', background: '#0a0a08' }}
