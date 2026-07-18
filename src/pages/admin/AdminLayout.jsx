@@ -504,6 +504,27 @@ export default function AdminLayout() {
 
   // Panel dividido (solo escritorio): módulo secundario a la derecha.
   const [panelAbierto, setPanelAbierto] = useState(false)
+  const [panelRuta, setPanelRuta] = useState(() => {
+    try { const r = localStorage.getItem('panel_ruta'); return navItems.some(it => it.to === r) ? r : '/admin/dashboard' }
+    catch { return '/admin/dashboard' }
+  })
+  const [panelNonce, setPanelNonce] = useState(0)
+  useEffect(() => { try { localStorage.setItem('panel_ruta', panelRuta) } catch {} }, [panelRuta])
+  // Permite abrir la pantalla dividida en un módulo puntual desde cualquier
+  // pantalla (ej. botón "Remitar" en Pedidos → abre Mayorista con el remito precargado).
+  // El nonce fuerza a recargar el iframe aunque ya esté ese módulo abierto (para
+  // que vuelva a leer el prefill del pedido).
+  useEffect(() => {
+    window.__abrirPanelEn = (ruta) => {
+      // En celular no hay pantalla dividida: navegamos a la ruta (el prefill lo
+      // toma esa pantalla al montar).
+      if (window.innerWidth < 900) { if (ruta) window.location.href = ruta; return }
+      if (ruta) setPanelRuta(ruta)
+      setPanelNonce(n => n + 1)
+      setPanelAbierto(true)
+    }
+    return () => { try { delete window.__abrirPanelEn } catch {} }
+  }, [])
   const [panelAncho, setPanelAncho] = useState(() => {
     const n = Number(localStorage.getItem('panel_ancho'))
     return n >= 25 && n <= 65 ? n : 44
@@ -600,6 +621,9 @@ export default function AdminLayout() {
       {panelAbierto && !isMobile && (
         <PanelDividido
           items={itemsPanel}
+          ruta={panelRuta}
+          onRutaChange={setPanelRuta}
+          nonce={panelNonce}
           ancho={panelAncho}
           setAncho={setPanelAncho}
           onCerrar={() => setPanelAbierto(false)}

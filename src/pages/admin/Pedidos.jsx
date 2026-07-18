@@ -237,6 +237,34 @@ export function Pedidos() {
       `¡Hola ${cli.nombre_fantasia || cli.nombre}! 👋\n\n📦 Tu pedido ya está LISTO para retirar/recibir:\n\n${detalle}\n\n📅 Entrega: ${pedido.dia_entrega || 'a coordinar'}${pedido.horario_entrega ? ` · ${pedido.horario_entrega}` : ''}\n\nCarnicería Fabricius 🥩`)
   }
 
+  // Remitar: abre el módulo Mayorista en pantalla dividida con un remito
+  // PRE-CARGADO (cliente + productos + kg reales que mandó depósito). NO emite:
+  // el admin revisa/edita y emite con su click. Lo real siempre va en kg.
+  async function remitarPedido(pedido) {
+    const { data: cli } = await supabase.from('clientes').select('id, nombre, domicilio').eq('id', pedido.cliente_id).maybeSingle()
+    const items = (pedido.items || []).map(it => ({
+      producto_id: it.producto_id || null,
+      nombre: it.nombre,
+      // Lo que manda depósito (columna Real) es SIEMPRE kg; si falta, cae a lo pedido.
+      kg: Number(it.kg_real) > 0 ? Number(it.kg_real) : (Number(it.kg) || 0),
+      precio_unitario: Number(it.precio_unitario) || 0,
+      categoria: it.categoria || null,
+    }))
+    const payload = {
+      cliente_id: pedido.cliente_id || null,
+      cliente_nombre: cli?.nombre || pedido.cliente_nombre || '',
+      domicilio: cli?.domicilio || '',
+      pedido_id: pedido.id,
+      items,
+    }
+    try { localStorage.setItem('remito_prefill', JSON.stringify(payload)) } catch {}
+    if (typeof window.__abrirPanelEn === 'function') {
+      window.__abrirPanelEn('/admin/ventas')  // pantalla dividida
+    } else {
+      window.location.href = '/admin/ventas'  // fallback (mobile / sin panel)
+    }
+  }
+
   const pedidosFiltrados = pedidos.filter(p => filtro === 'todos' || p.estado === filtro)
   // Paginación del listado filtrado — vuelve a página 1 cuando cambia el filtro
   // gracias al useEffect interno de usePaginacion que ajusta si pagina > totalPaginas.
@@ -305,7 +333,7 @@ export function Pedidos() {
                   </button>
                 </div>
 
-                {abierto && <DetallePedido p={p} editingItems={editingItems} editingDia={editingDia} editingHorario={editingHorario} editingNotaAdmin={editingNotaAdmin} setEditingDia={setEditingDia} setEditingHorario={setEditingHorario} setEditingNotaAdmin={setEditingNotaAdmin} actualizarItemKg={actualizarItemKg} quitarItemEdit={quitarItemEdit} confirmarPedido={confirmarPedido} rechazarPedido={rechazarPedido} abrirModalDespacho={abrirModalDespacho} avisarWhatsapp={avisarWhatsapp} />}
+                {abierto && <DetallePedido p={p} editingItems={editingItems} editingDia={editingDia} editingHorario={editingHorario} editingNotaAdmin={editingNotaAdmin} setEditingDia={setEditingDia} setEditingHorario={setEditingHorario} setEditingNotaAdmin={setEditingNotaAdmin} actualizarItemKg={actualizarItemKg} quitarItemEdit={quitarItemEdit} confirmarPedido={confirmarPedido} rechazarPedido={rechazarPedido} abrirModalDespacho={abrirModalDespacho} avisarWhatsapp={avisarWhatsapp} remitarPedido={remitarPedido} />}
               </div>
             )
           })}
@@ -503,7 +531,7 @@ function ModalNuevoPedido({ cerrar, onCreado, profile }) {
   )
 }
 
-function DetallePedido({ p, editingItems, editingDia, editingHorario, editingNotaAdmin, setEditingDia, setEditingHorario, setEditingNotaAdmin, actualizarItemKg, quitarItemEdit, confirmarPedido, rechazarPedido, abrirModalDespacho, avisarWhatsapp }) {
+function DetallePedido({ p, editingItems, editingDia, editingHorario, editingNotaAdmin, setEditingDia, setEditingHorario, setEditingNotaAdmin, actualizarItemKg, quitarItemEdit, confirmarPedido, rechazarPedido, abrirModalDespacho, avisarWhatsapp, remitarPedido }) {
   const itemsRender = p.estado === 'pendiente' ? (editingItems || []) : (p.items || [])
   // kg reales cargados por el sector desposte (portal): se muestran apenas existan
   const hayKgReales = (p.items || []).some(it => Number(it.kg_real) > 0)
@@ -513,7 +541,7 @@ function DetallePedido({ p, editingItems, editingDia, editingHorario, editingNot
         <div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>📦 Productos {p.estado === 'pendiente' && '(editable)'}</div>
           <table style={{ width: '100%', fontSize: 12 }}>
-            <thead><tr><th>Producto</th><th>Cant.</th>{hayKgReales && <th>Real</th>}<th>Precio</th><th></th></tr></thead>
+            <thead><tr><th>Producto</th><th>Cant.</th>{hayKgReales && <th>Real (kg)</th>}<th>Precio</th><th></th></tr></thead>
             <tbody>
               {itemsRender.map((it, i) => {
                 const unidad = it.unidad || 'kg'
@@ -530,7 +558,7 @@ function DetallePedido({ p, editingItems, editingDia, editingHorario, editingNot
                     </td>
                     {hayKgReales && (
                       <td style={{ textAlign: 'center', fontWeight: 700, color: Number(it.kg_real) > 0 ? 'var(--green)' : 'var(--muted)' }}>
-                        {Number(it.kg_real) > 0 ? `${it.kg_real} ${uLabel(unidad)}` : '—'}
+                        {Number(it.kg_real) > 0 ? `${it.kg_real} kg` : '—'}
                       </td>
                     )}
                     <td>{fmt(it.precio_unitario)}/{uLabel(unidad)}</td>
@@ -616,10 +644,12 @@ function DetallePedido({ p, editingItems, editingDia, editingHorario, editingNot
                 📦 <strong>Preparado y listo</strong>{p.preparado_por ? <> por <strong>{p.preparado_por}</strong></> : null}{p.preparado_en ? <> el {new Date(p.preparado_en).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })}</> : null}.
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button onClick={() => remitarPedido(p)} style={{ background: 'var(--gold)', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 800, color: '#000' }}>🧾 Remitar</button>
                 <button onClick={() => avisarWhatsapp(p)} style={{ background: '#25D366', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#000' }}>💬 Avisar al cliente</button>
                 <button onClick={() => abrirModalDespacho(p, 'completo')} style={{ background: 'var(--blue)', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#fff', flex: 1 }}>🚚 Despachar completo</button>
                 <button onClick={() => abrirModalDespacho(p, 'parcial')} style={{ background: '#ff9d3a', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#000' }}>⚠️ Despacho parcial</button>
               </div>
+              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 6 }}>🧾 Remitar abre el remito ya cargado (cliente + productos + kg reales) en pantalla dividida — vos revisás y emitís.</div>
             </div>
           )}
           {p.estado === 'incompleto' && (

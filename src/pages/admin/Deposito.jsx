@@ -3060,6 +3060,46 @@ export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   recargarStockMap()
   }, [])
 
+  // ── PRE-CARGA desde un pedido (botón "Remitar" de Pedidos) ──
+  // El pedido escribe en localStorage 'remito_prefill' y abre este módulo en
+  // pantalla dividida. Acá lo leemos (una vez, cuando ya hay precios cargados
+  // para enriquecer categoría/stock_origen), llenamos cliente + items y lo
+  // borramos. NO emite: el admin revisa y aprieta "Registrar despacho".
+  const prefillRef = useRef(false)
+  useEffect(() => {
+    if (prefillRef.current) return
+    if (!todosPrecios.length) return
+    let raw = null
+    try { raw = localStorage.getItem('remito_prefill') } catch {}
+    if (!raw) return
+    prefillRef.current = true
+    try { localStorage.removeItem('remito_prefill') } catch {}
+    let pf = null
+    try { pf = JSON.parse(raw) } catch { return }
+    if (!pf) return
+    setForm(f => ({ ...f, destino: 'mayorista', clienteId: pf.cliente_id || '', clienteNombre: pf.cliente_nombre || '', domicilio: pf.domicilio || '', cobro: 'cta_cte' }))
+    setBusqueda(pf.cliente_nombre || '')
+    const nuevos = (pf.items || []).map(it => {
+      const prod = it.producto_id ? todosPrecios.find(p => p.id === it.producto_id) : null
+      const kg = Number(it.kg) || 0        // depósito manda SIEMPRE en kg
+      const precio = Number(it.precio_unitario) || 0
+      const base = {
+        descripcion: it.nombre || prod?.nombre || '',
+        kg, precio, importe: kg * precio,
+        tipo: prod?.categoria || it.categoria || 'manual',
+        unidad: 'kg',
+        stock_origen: prod?.stock_origen || null,
+        kg_por_unidad: prod?.kg_por_unidad || null,
+        media_res_id: null, pieza_id: null, pieza_tipo: null, caja_id: null, caja_tipo: null,
+      }
+      // Sin match de producto no sabemos qué bucket descontar → item manual
+      // (no toca stock) para no crear un bucket inexistente.
+      return prod ? base : { ...base, manual: true }
+    })
+    setItems(nuevos)
+    if (typeof showAlert === 'function') showAlert('🧾 Remito precargado desde el pedido. Revisá kilos/productos y emitilo.')
+  }, [todosPrecios])
+
   // Categorías que se venden por UNIDAD (no por kg). Para estas el form
   // muestra "Cantidad" en vez de "Kg", el step es entero, y el carrito
   // muestra "X u" en vez de "X kg". Las cajas CB/PT además validan stock.
