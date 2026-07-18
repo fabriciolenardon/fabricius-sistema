@@ -168,12 +168,15 @@ export function Pedidos() {
     const m = modalDespacho
     if (!m) return
     const pedido = m.pedido
-    const pendientes = m.items
+    // "Despacho completo" = pedido entregado, SIEMPRE queda despachado aunque los
+    // kg no coincidan con lo pedido (el pedido es relativo: "2 tiras" no es un kg
+    // exacto). El cálculo de pendientes solo aplica a parcial/completar, y en kg.
+    const pendientes = m.tipo === 'completo' ? [] : m.items
       .filter(it => (it.kg_pedido - it.kg_despacho) > 0.001)
       .map(it => ({
         producto_id: it.producto_id,
         nombre: it.nombre,
-        unidad: it.unidad || 'kg',
+        unidad: 'kg',
         kg_pendiente: it.kg_pedido - it.kg_despacho,
         precio_unitario: it.precio_unitario,
         subtotal_pendiente: (it.kg_pedido - it.kg_despacho) * it.precio_unitario,
@@ -710,63 +713,73 @@ function ModalDespacho({ m, setModalDespacho, remitosCliente, actualizarKgDespac
           Cliente: <strong>{m.pedido.cliente_nombre}</strong> · Pedido para el {m.pedido.dia_entrega}
         </div>
 
-        <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>📦 Items a despachar (podés ajustar las cantidades si es parcial)</div>
-        <table style={{ width: '100%', fontSize: 12, marginBottom: 16 }}>
-          <thead><tr><th style={{ textAlign: 'left' }}>Producto</th><th>Pedido</th><th>Despachado</th><th>Pendiente</th><th>Subtotal</th></tr></thead>
-          <tbody>
-            {m.items.map((it, i) => {
-              const pendiente = it.kg_pedido - it.kg_despacho
-              const u = uLabel(it.unidad)
-              return (
-                <tr key={i}>
-                  <td style={{ fontWeight: 600 }}>{it.nombre}</td>
-                  <td style={{ textAlign: 'center' }}>{it.kg_pedido} {u}</td>
-                  <td style={{ textAlign: 'center' }}>
-                    <input type="number" step="0.1" min="0" max={it.kg_pedido} value={it.kg_despacho}
-                      onChange={e => actualizarKgDespacho(i, e.target.value)}
-                      style={{ background: 'var(--surface2)', border: '1px solid var(--gold)', color: 'var(--text)', borderRadius: 4, padding: '4px 8px', fontSize: 13, width: 70, textAlign: 'center' }} /> {u}
-                  </td>
-                  <td style={{ textAlign: 'center', color: pendiente > 0.001 ? '#ff9d3a' : 'var(--muted)', fontWeight: pendiente > 0.001 ? 700 : 400 }}>
-                    {pendiente > 0.001 ? `${pendiente.toFixed(1)} ${u}` : '—'}
-                  </td>
-                  <td style={{ textAlign: 'right', color: 'var(--gold)', fontWeight: 600 }}>
-                    {fmt(it.kg_despacho * it.precio_unitario)}
-                  </td>
-                </tr>
-              )
-            })}
-            <tr style={{ borderTop: '2px solid var(--gold)' }}>
-              <td colSpan={4} style={{ textAlign: 'right', fontWeight: 700 }}>TOTAL DESPACHO</td>
-              <td style={{ textAlign: 'right', color: 'var(--gold)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>
-                {fmt(m.items.reduce((s, it) => s + (it.kg_despacho * it.precio_unitario), 0))}
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        {(() => {
+          const esParcial = m.tipo !== 'completo'  // completo no tiene pendiente
+          const remitoSel = remitosCliente.find(r => r.id === m.remitoSeleccionado)
+          return (
+            <>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>
+                📦 Lo despachado se pesa en <strong>kg</strong> (aunque el pedido diga tiras/u). {esParcial ? 'Ajustá los kg de cada producto.' : 'El total real es el del remito que enlaces.'}
+              </div>
+              <table style={{ width: '100%', fontSize: 12, marginBottom: 16 }}>
+                <thead><tr><th style={{ textAlign: 'left' }}>Producto</th><th>Pedido</th><th>Despachado (kg)</th>{esParcial && <th>Pendiente (kg)</th>}</tr></thead>
+                <tbody>
+                  {m.items.map((it, i) => {
+                    const pendiente = it.kg_pedido - it.kg_despacho
+                    return (
+                      <tr key={i}>
+                        <td style={{ fontWeight: 600 }}>{it.nombre}</td>
+                        <td style={{ textAlign: 'center', color: 'var(--muted)' }}>{it.kg_pedido} {uLabel(it.unidad)}</td>
+                        <td style={{ textAlign: 'center' }}>
+                          <input type="number" step="0.01" min="0" value={it.kg_despacho}
+                            onChange={e => actualizarKgDespacho(i, e.target.value)}
+                            style={{ background: 'var(--surface2)', border: '1px solid var(--gold)', color: 'var(--text)', borderRadius: 4, padding: '4px 8px', fontSize: 13, width: 70, textAlign: 'center' }} /> kg
+                        </td>
+                        {esParcial && (
+                          <td style={{ textAlign: 'center', color: pendiente > 0.001 ? '#ff9d3a' : 'var(--muted)', fontWeight: pendiente > 0.001 ? 700 : 400 }}>
+                            {pendiente > 0.001 ? `${pendiente.toFixed(2)} kg` : '—'}
+                          </td>
+                        )}
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
 
-        <div style={{ background: 'var(--surface2)', borderRadius: 10, padding: 14, marginBottom: 16 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--gold)', marginBottom: 8 }}>🧾 Enlazar remito emitido</div>
-          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>Seleccioná el remito que corresponde a este despacho (últimos 30 del cliente)</div>
-          <select value={m.remitoSeleccionado} onChange={e => setModalDespacho(prev => ({ ...prev, remitoSeleccionado: e.target.value }))}
-            style={{ background: 'var(--surface)', border: '1px solid var(--gold)', color: 'var(--text)', borderRadius: 6, padding: '8px 12px', fontSize: 13, width: '100%' }}>
-            <option value="">— Sin remito (lo enlazás después) —</option>
-            {remitosCliente.map(r => (
-              <option key={r.id} value={r.id}>
-                N° {String(r.numero).padStart(5,'0')} — {r.fecha} — {fmt(r.total)}
-              </option>
-            ))}
-          </select>
-          {remitosCliente.length === 0 && (
-            <div style={{ marginTop: 8, fontSize: 11, color: 'var(--amber)' }}>⚠️ Este cliente no tiene remitos emitidos aún. Podés enlazarlo después.</div>
-          )}
-        </div>
+              <div style={{ background: 'var(--surface2)', borderRadius: 10, padding: 14, marginBottom: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--gold)', marginBottom: 8 }}>🧾 Enlazar remito emitido</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>Seleccioná el remito que corresponde a este despacho (últimos 30 del cliente). El total real sale del remito.</div>
+                <select value={m.remitoSeleccionado} onChange={e => setModalDespacho(prev => ({ ...prev, remitoSeleccionado: e.target.value }))}
+                  style={{ background: 'var(--surface)', border: '1px solid var(--gold)', color: 'var(--text)', borderRadius: 6, padding: '8px 12px', fontSize: 13, width: '100%' }}>
+                  <option value="">— Sin remito (lo enlazás después) —</option>
+                  {remitosCliente.map(r => (
+                    <option key={r.id} value={r.id}>
+                      N° {String(r.numero).padStart(5,'0')} — {r.fecha} — {fmt(r.total)}
+                    </option>
+                  ))}
+                </select>
+                {remitoSel && (
+                  <div style={{ marginTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#14230f', border: '1px solid #3f6d2f', borderRadius: 8, padding: '8px 12px' }}>
+                    <span style={{ fontSize: 12 }}>Remito N° {String(remitoSel.numero).padStart(5,'0')} · total real</span>
+                    <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{fmt(remitoSel.total)}</span>
+                  </div>
+                )}
+                {remitosCliente.length === 0 && (
+                  <div style={{ marginTop: 8, fontSize: 11, color: 'var(--amber)' }}>⚠️ Este cliente no tiene remitos emitidos aún. Podés enlazarlo después.</div>
+                )}
+              </div>
 
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-          <button onClick={() => setModalDespacho(null)} className="btn btn-ghost">Cancelar</button>
-          <button onClick={confirmarDespacho} className="btn btn-gold">
-            {m.items.some(it => (it.kg_pedido - it.kg_despacho) > 0.001) ? '⚠️ Confirmar despacho parcial' : '🚚 Confirmar despacho completo'}
-          </button>
-        </div>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <button onClick={() => setModalDespacho(null)} className="btn btn-ghost">Cancelar</button>
+                <button onClick={confirmarDespacho} className="btn btn-gold">
+                  {m.tipo === 'completo' && '🚚 Confirmar despacho completo'}
+                  {m.tipo === 'parcial' && '⚠️ Confirmar despacho parcial'}
+                  {m.tipo === 'completar' && '✅ Completar despacho'}
+                </button>
+              </div>
+            </>
+          )
+        })()}
       </div>
     </div>
   )
