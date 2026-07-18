@@ -32,6 +32,8 @@ export default function DespostePedidos() {
   const [guardando, setGuardando] = useState(false)
   const [confirmandoListo, setConfirmandoListo] = useState(false)
   const [msg, setMsg] = useState(null)
+  const [precios, setPrecios] = useState([])       // catálogo para añadir productos
+  const [busqueda, setBusqueda] = useState('')     // búsqueda del "añadir producto"
 
   function aviso(texto, tipo = 'success') {
     setMsg({ texto, tipo })
@@ -40,6 +42,9 @@ export default function DespostePedidos() {
 
   useEffect(() => {
     cargar()
+    // El desposte puede leer precios (RLS mig 30) — para añadir un producto al pedido.
+    supabase.from('precios').select('id, nombre, categoria, precio_mayorista').order('nombre')
+      .then(({ data }) => setPrecios(data || []))
     const canal = supabase.channel('pedidos-desposte')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => cargar())
       .subscribe()
@@ -61,6 +66,7 @@ export default function DespostePedidos() {
     if (abierto === p.id) { setAbierto(null); return }
     setAbierto(p.id)
     setConfirmandoListo(false)
+    setBusqueda('')
     setKgReales((p.items || []).map(it => ({ ...it })))
   }
 
@@ -71,6 +77,28 @@ export default function DespostePedidos() {
   // Marca/desmarca un producto como listo para entregar (seguimiento por parte)
   function togglePreparado(idx) {
     setKgReales(items => items.map((it, i) => i === idx ? { ...it, preparado: !it.preparado } : it))
+  }
+
+  // Añadir un producto que faltaba / que sumó el cliente. El desposte NO fija
+  // precios: se guarda el mayorista como referencia (unidad kg) y el admin lo
+  // ajusta al remitar. El item queda marcado como agregado en depósito.
+  function agregarProducto(prod) {
+    setKgReales(items => [...items, {
+      producto_id: prod.id,
+      nombre: prod.nombre,
+      categoria: prod.categoria,
+      kg: 0,                 // no fue "pedido": lo agrega depósito
+      unidad: 'kg',
+      precio_unitario: Number(prod.precio_mayorista) || 0,
+      kg_real: '',
+      preparado: false,
+      agregado_desposte: true,
+    }])
+    setBusqueda('')
+  }
+
+  function quitarItem(idx) {
+    setKgReales(items => items.filter((_, i) => i !== idx))
   }
 
   // Persiste kg reales + flag "preparado" dentro del JSON items
@@ -228,8 +256,13 @@ export default function DespostePedidos() {
                       border: `1px solid ${prep ? '#3f6d2f' : 'var(--border)'}`,
                     }}>
                       <div style={{ flex: 1, minWidth: 160 }}>
-                        <div style={{ fontSize: 16, fontWeight: 700 }}>{prep ? '✅ ' : ''}{it.nombre}</div>
-                        <div style={{ fontSize: 13, color: 'var(--muted)' }}>Pedido: {it.kg} {u}</div>
+                        <div style={{ fontSize: 16, fontWeight: 700 }}>
+                          {prep ? '✅ ' : ''}{it.nombre}
+                          {it.agregado_desposte && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 800, background: 'var(--gold)', color: '#000', borderRadius: 5, padding: '1px 7px' }}>➕ AGREGADO</span>}
+                        </div>
+                        <div style={{ fontSize: 13, color: 'var(--muted)' }}>
+                          {it.agregado_desposte ? 'Agregado en depósito' : `Pedido: ${it.kg} ${u}`}
+                        </div>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         {/* Lo real SIEMPRE se pesa y se carga en KG (aunque el pedido diga tiras/u) */}
@@ -250,9 +283,33 @@ export default function DespostePedidos() {
                         }}>
                         {prep ? '✅ Listo' : '⏳ Marcar listo'}
                       </button>
+                      {it.agregado_desposte && (
+                        <button onClick={() => quitarItem(i)} title="Quitar producto agregado"
+                          style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', color: '#ff8b8b', borderRadius: 10, padding: '12px 14px', cursor: 'pointer', fontSize: 14, fontWeight: 700 }}>🗑️</button>
+                      )}
                     </div>
                   )
                 })}
+
+                {/* Añadir un producto que el cliente sumó o que faltaba */}
+                <div style={{ marginTop: 8, marginBottom: 4 }}>
+                  <input value={busqueda} onChange={e => setBusqueda(e.target.value)}
+                    placeholder="➕ Añadir un producto al pedido (escribí el nombre)…"
+                    style={{ width: '100%', boxSizing: 'border-box', background: 'var(--surface2)', border: '1px dashed var(--gold)', color: 'var(--text)', borderRadius: 10, padding: '12px 14px', fontSize: 15 }} />
+                  {busqueda.trim().length >= 2 && (
+                    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, marginTop: 4, overflow: 'hidden' }}>
+                      {precios.filter(pr => pr.nombre?.toLowerCase().includes(busqueda.trim().toLowerCase())).slice(0, 8).map(pr => (
+                        <button key={pr.id} onClick={() => agregarProducto(pr)}
+                          style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', background: 'transparent', border: 'none', borderBottom: '1px solid var(--border)', color: 'var(--text)', cursor: 'pointer', fontSize: 15 }}>
+                          {pr.nombre}
+                        </button>
+                      ))}
+                      {precios.filter(pr => pr.nombre?.toLowerCase().includes(busqueda.trim().toLowerCase())).length === 0 && (
+                        <div style={{ padding: '10px 14px', color: 'var(--muted)', fontSize: 13 }}>Sin resultados.</div>
+                      )}
+                    </div>
+                  )}
+                </div>
 
                 <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
                   <button onClick={() => guardarAvance(p)} disabled={guardando}
