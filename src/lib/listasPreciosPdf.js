@@ -39,22 +39,47 @@ const TITULOS_PDF = {
   rebozado:       'REBOZADOS Y CONGELADOS',
   rebozado_cajon: 'REBOZADOS — CAJAS',
 }
-// Categorías que nunca van a la lista compartible (no son carne)
+// Categorías que nunca van a la lista compartible (no son carne).
+// La lista 'franquicia' SÍ incluye insumos: la central se los vende a las
+// franquicias (mismo precio carnicería que ven en su portal).
 const EXCLUIDAS_PDF = new Set(['almacen', 'bebidas', 'insumos'])
+const EXCLUIDAS_PDF_FRANQUICIA = new Set(['almacen', 'bebidas'])
+// Subgrupos de insumos (mismo criterio que Precios.jsx / el PDF original)
+const INSUMO_SUBSECCIONES = [
+  ['descartables', 'INSUMOS — DESCARTABLES'],
+  ['limpieza',     'INSUMOS — LIMPIEZA'],
+  ['carniceria',   'INSUMOS — CARNICERIA'],
+]
 // Orden default si no llega el catálogo dinámico (compat)
 const ORDEN_DEFAULT = ['bovino_mr', 'bovino_pieza', 'bovino_corte', 'bovino_brosa', 'bovino_caja_pt', 'cerdo_corte', 'cerdo_pieza', 'embutido', 'pollo', 'pollo_cajon', 'rebozado', 'rebozado_cajon']
 
 // Arma las secciones a partir del catálogo de categorías (Precios → 🗂️
 // Categorías): respeta su orden y suma las personalizadas. El título sale
 // del override histórico o del label (sin emojis, en mayúsculas).
-function seccionesDe(categorias) {
-  const base = (categorias && categorias.length)
-    ? categorias.filter(c => c.activa !== false && !EXCLUIDAS_PDF.has(c.clave)).map(c => ({ cat: c.clave, label: c.label }))
+function seccionesDe(categorias, tipo) {
+  const excluidas = tipo === 'franquicia' ? EXCLUIDAS_PDF_FRANQUICIA : EXCLUIDAS_PDF
+  // En la lista de franquicias los insumos van SIEMPRE, aunque la categoría
+  // esté oculta en el admin (ocultar es para clientes, no para franquicias).
+  const visible = c => c.activa !== false || (tipo === 'franquicia' && c.clave === 'insumos')
+  let base = (categorias && categorias.length)
+    ? categorias.filter(c => visible(c) && !excluidas.has(c.clave)).map(c => ({ cat: c.clave, label: c.label }))
     : ORDEN_DEFAULT.map(clave => ({ cat: clave, label: clave }))
-  return base.map(s => ({
-    cat: s.cat,
-    titulo: TITULOS_PDF[s.cat] || safe(s.label).toUpperCase() || s.cat.replace(/^cat_/, '').replace(/_/g, ' ').toUpperCase(),
-  }))
+  if (tipo === 'franquicia' && !base.some(s => s.cat === 'insumos')) base = [...base, { cat: 'insumos', label: 'Insumos' }]
+  const secciones = []
+  for (const s of base) {
+    if (s.cat === 'insumos') {
+      // Insumos se parten en sus subgrupos (descartables / limpieza / carnicería)
+      for (const [sub, titulo] of INSUMO_SUBSECCIONES) {
+        secciones.push({ cat: 'insumos', titulo, filtro: p => (p.subcategoria || 'descartables') === sub })
+      }
+      continue
+    }
+    secciones.push({
+      cat: s.cat,
+      titulo: TITULOS_PDF[s.cat] || safe(s.label).toUpperCase() || s.cat.replace(/^cat_/, '').replace(/_/g, ' ').toUpperCase(),
+    })
+  }
+  return secciones
 }
 
 const money = v => '$ ' + (Number(v) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -91,7 +116,9 @@ export async function generarListaPreciosPdf({ tipo, precios, categorias }) {
     page.drawText('CARNICERIAS FABRICIUS', { x: ML, y, size: 20, font: bold, color: gold })
     y -= 15
     const fechaTxt = new Date().toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
-    const titulo = esMayMin ? 'LISTA DE PRECIOS — MAYORISTA Y MINORISTA' : 'LISTA DE PRECIOS — CARNICERIAS'
+    const titulo = esMayMin ? 'LISTA DE PRECIOS — MAYORISTA Y MINORISTA'
+      : tipo === 'franquicia' ? 'LISTA DE PRECIOS — FRANQUICIAS'
+      : 'LISTA DE PRECIOS — CARNICERIAS'
     page.drawText(titulo, { x: ML, y, size: 10, font: bold, color: dark })
     const fTxt = `Vigente al ${fechaTxt}`
     const fw = font.widthOfTextAtSize(fTxt, 9)
@@ -112,8 +139,9 @@ export async function generarListaPreciosPdf({ tipo, precios, categorias }) {
   const porCat = {}
   precios.forEach(p => { (porCat[p.categoria] = porCat[p.categoria] || []).push(p) })
 
-  seccionesDe(categorias).forEach(sec => {
+  seccionesDe(categorias, tipo).forEach(sec => {
     const items = (porCat[sec.cat] || [])
+      .filter(p => !sec.filtro || sec.filtro(p))
       .filter(p => esMayMin
         ? (Number(p.precio_minorista) > 0 || Number(p.precio_mayorista) > 0)
         : Number(p.precio_carniceria) > 0)
@@ -169,7 +197,9 @@ export async function compartirListaPrecios({ tipo, precios, categorias }) {
   const fecha = new Date().toLocaleDateString('es-AR').replace(/\//g, '-')
   const nombre = tipo === 'mayorista'
     ? `Lista Fabricius Mayorista-Minorista ${fecha}.pdf`
-    : `Lista Fabricius Carnicerias ${fecha}.pdf`
+    : tipo === 'franquicia'
+      ? `Lista Fabricius Franquicias ${fecha}.pdf`
+      : `Lista Fabricius Carnicerias ${fecha}.pdf`
   const file = new File([bytes], nombre, { type: 'application/pdf' })
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     try {
