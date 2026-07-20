@@ -1436,12 +1436,16 @@ function PLUTab({ precios, ofertas = [], onRecargar, categoriasOrden = [] }) {
       const precio2 = pct > 0 ? Math.round(precio1 * (1 - pct / 100) / 10) * 10 : precio1
       return `1;"CARNICERIA";${p.codigoNum};"${nombreParaQendra(p.nombre)}";${p.codigoNum};${precio1};${precio2}`
     }).join('\n')
-    descargar(header + rows, `PLU_Qendra_${fechaHoyARG()}.csv`)
+    // SIN BOM: el asistente viejo de Qendra se atraganta con la marca UTF-8
+    // al inicio del archivo. El contenido es ASCII puro (nombreParaQendra
+    // ya filtr\u00F3 acentos), as\u00ED que no se pierde nada.
+    descargar(header + rows, `PLU_Qendra_${fechaHoyARG()}.csv`, { conBom: false })
   }
 
-  function descargar(contenido, nombre) {
-    // BOM para que Excel/Qendra abran con acentos correctamente
-    const bom = '\uFEFF'
+  function descargar(contenido, nombre, { conBom = true } = {}) {
+    // BOM para que Excel abra con acentos correctamente (el CSV de Qendra
+    // va SIN BOM \u2014 ver exportarQendra)
+    const bom = conBom ? '\uFEFF' : ''
     // Saltos de l\u00EDnea de WINDOWS (CRLF): el asistente de importaci\u00F3n de
     // Qendra no reconoce los LF de Unix y lee todo el archivo como un solo
     // registro ("0 registros a importar, 1 con errores" \u2014 caso 20/07).
