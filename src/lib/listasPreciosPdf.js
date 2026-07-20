@@ -23,22 +23,39 @@ function cargarPdfLib() {
   })
 }
 
-// Secciones y orden de cada lista. Sin emojis: Helvetica (WinAnsi) no
-// puede codificarlos y pdf-lib tira error al dibujar el texto.
-const SECCIONES = [
-  { cat: 'bovino_mr',      titulo: 'BOVINO — MEDIAS RESES' },
-  { cat: 'bovino_pieza',   titulo: 'BOVINO — PIEZAS' },
-  { cat: 'bovino_corte',   titulo: 'BOVINO — CORTES' },
-  { cat: 'bovino_brosa',   titulo: 'BROSAS / ACHURAS' },
-  { cat: 'bovino_caja_pt', titulo: 'CAJAS BOVINAS — ENVASADOS PT' },
-  { cat: 'cerdo_corte',    titulo: 'CERDO — CORTES' },
-  { cat: 'cerdo_pieza',    titulo: 'CERDO — PIEZAS' },
-  { cat: 'embutido',       titulo: 'EMBUTIDOS' },
-  { cat: 'pollo',          titulo: 'POLLO' },
-  { cat: 'pollo_cajon',    titulo: 'POLLO — CAJONES' },
-  { cat: 'rebozado',       titulo: 'REBOZADOS Y CONGELADOS' },
-  { cat: 'rebozado_cajon', titulo: 'REBOZADOS — CAJAS' },
-]
+// Títulos "lindos" para las categorías históricas. Sin emojis: Helvetica
+// (WinAnsi) no puede codificarlos y pdf-lib tira error al dibujar el texto.
+const TITULOS_PDF = {
+  bovino_mr:      'BOVINO — MEDIAS RESES',
+  bovino_pieza:   'BOVINO — PIEZAS',
+  bovino_corte:   'BOVINO — CORTES',
+  bovino_brosa:   'BROSAS / ACHURAS',
+  bovino_caja_pt: 'CAJAS BOVINAS — ENVASADOS PT',
+  cerdo_corte:    'CERDO — CORTES',
+  cerdo_pieza:    'CERDO — PIEZAS',
+  embutido:       'EMBUTIDOS',
+  pollo:          'POLLO',
+  pollo_cajon:    'POLLO — CAJONES',
+  rebozado:       'REBOZADOS Y CONGELADOS',
+  rebozado_cajon: 'REBOZADOS — CAJAS',
+}
+// Categorías que nunca van a la lista compartible (no son carne)
+const EXCLUIDAS_PDF = new Set(['almacen', 'bebidas', 'insumos'])
+// Orden default si no llega el catálogo dinámico (compat)
+const ORDEN_DEFAULT = ['bovino_mr', 'bovino_pieza', 'bovino_corte', 'bovino_brosa', 'bovino_caja_pt', 'cerdo_corte', 'cerdo_pieza', 'embutido', 'pollo', 'pollo_cajon', 'rebozado', 'rebozado_cajon']
+
+// Arma las secciones a partir del catálogo de categorías (Precios → 🗂️
+// Categorías): respeta su orden y suma las personalizadas. El título sale
+// del override histórico o del label (sin emojis, en mayúsculas).
+function seccionesDe(categorias) {
+  const base = (categorias && categorias.length)
+    ? categorias.filter(c => c.activa !== false && !EXCLUIDAS_PDF.has(c.clave)).map(c => ({ cat: c.clave, label: c.label }))
+    : ORDEN_DEFAULT.map(clave => ({ cat: clave, label: clave }))
+  return base.map(s => ({
+    cat: s.cat,
+    titulo: TITULOS_PDF[s.cat] || safe(s.label).toUpperCase() || s.cat.replace(/^cat_/, '').replace(/_/g, ' ').toUpperCase(),
+  }))
+}
 
 const money = v => '$ ' + (Number(v) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -46,7 +63,7 @@ const money = v => '$ ' + (Number(v) || 0).toLocaleString('es-AR', { minimumFrac
 // comillas raras) rompe drawText. Se filtra defensivamente.
 const safe = s => String(s ?? '').replace(/[^\x20-\xFF]/g, '').trim()
 
-export async function generarListaPreciosPdf({ tipo, precios }) {
+export async function generarListaPreciosPdf({ tipo, precios, categorias }) {
   const PDFLib = await cargarPdfLib()
   const { PDFDocument, StandardFonts, rgb } = PDFLib
   const doc = await PDFDocument.create()
@@ -95,7 +112,7 @@ export async function generarListaPreciosPdf({ tipo, precios }) {
   const porCat = {}
   precios.forEach(p => { (porCat[p.categoria] = porCat[p.categoria] || []).push(p) })
 
-  SECCIONES.forEach(sec => {
+  seccionesDe(categorias).forEach(sec => {
     const items = (porCat[sec.cat] || [])
       .filter(p => esMayMin
         ? (Number(p.precio_minorista) > 0 || Number(p.precio_mayorista) > 0)
@@ -147,8 +164,8 @@ export async function generarListaPreciosPdf({ tipo, precios }) {
 
 // Comparte el PDF por el share nativo (celular → WhatsApp directo) o lo
 // descarga (compu → arrastrarlo al chat de WhatsApp Web).
-export async function compartirListaPrecios({ tipo, precios }) {
-  const bytes = await generarListaPreciosPdf({ tipo, precios })
+export async function compartirListaPrecios({ tipo, precios, categorias }) {
+  const bytes = await generarListaPreciosPdf({ tipo, precios, categorias })
   const fecha = new Date().toLocaleDateString('es-AR').replace(/\//g, '-')
   const nombre = tipo === 'mayorista'
     ? `Lista Fabricius Mayorista-Minorista ${fecha}.pdf`

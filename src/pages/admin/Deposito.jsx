@@ -17,6 +17,7 @@ import FlujoDeposito from './FlujoDeposito'
 import AjusteStock from './AjusteStock'
 import CajasTab from './CajasTab'
 import PolloCajonesTab from './PolloCajonesTab'
+import { cargarCategoriasPrecios, labelsDeCategorias } from '../../lib/categoriasPrecios'
 
 // Nombre legible de cada tipo de embutido/salame (para descripciones de
 // historial y entradas registradas). El <select> usa estas mismas claves.
@@ -3028,6 +3029,10 @@ export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   // disponibilidad de cajas CB/PT al cajero y validar que no sobre-venda.
   const [stockMap, setStockMap] = useState({})
   const [ofertas, setOfertas] = useState([])   // ofertas vigentes para aplicar al precio del despacho
+  // Labels del catálogo de categorías (Precios → 🗂️ Categorías): así una
+  // categoría personalizada (cat_pescados) muestra su nombre y no la clave.
+  const [labelsCatalogo, setLabelsCatalogo] = useState({})
+  useEffect(() => { cargarCategoriasPrecios().then(l => setLabelsCatalogo(labelsDeCategorias(l))) }, [])
   async function recargarPiezasDispVenta() {
     const { data } = await supabase.from('piezas_stock').select('*').eq('estado', 'disponible').order('fecha_ingreso', { ascending: true }).order('id', { ascending: true })
     setPiezasDispVenta(data || [])
@@ -3116,6 +3121,9 @@ export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   const esCaja = form.categoria === 'bovino_caja_cb' || form.categoria === 'bovino_caja_pt'
 
 const CATEGORIAS = {
+    // Catálogo dinámico primero (aporta labels de categorías personalizadas);
+    // los nombres propios del remito pisan a los del catálogo.
+    ...labelsCatalogo,
     bovino_mr: '🐄 Media Reses',
     pieza_entera: '🍖 Pieza Entera (Piezas Bovinas)',
     bovino_corte: '🥩 Bovinos — Cortes',
@@ -4005,7 +4013,10 @@ export function RemitosTab({ remitoActual }) {
 
   // Paginación del historial de remitos (ya filtrado)
   const pagRemitos = usePaginacion(remitosFiltrados, 20)
+ // Labels del catálogo dinámico + nombres propios del historial (que pisan).
+ const [labelsCatalogo, setLabelsCatalogo] = useState({})
  const CATEGORIAS = {
+    ...labelsCatalogo,
     bovino_mr: '🐄 Media Reses', bovino_corte: '🥩 Bovinos — Cortes',
     bovino_brosa: '🫀 Brosas', bovino_pieza: '🍖 Piezas',
     bovino_caja_cb: '📦 Cajas CB', bovino_caja_pt: '📦 Cajas PT',
@@ -4017,6 +4028,7 @@ export function RemitosTab({ remitoActual }) {
   useEffect(() => {
     cargarRemitos()
     supabase.from('precios').select('*').order('nombre').then(({ data }) => setTodosPrecios(data || []))
+    cargarCategoriasPrecios().then(l => setLabelsCatalogo(labelsDeCategorias(l)))
   }, [])
 
   useEffect(() => { if (remitoActual) setSeleccionado(remitoActual) }, [remitoActual])
