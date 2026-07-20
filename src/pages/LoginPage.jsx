@@ -7,6 +7,8 @@ import { supabase } from '../lib/supabase'
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  // Ojito 👁: alterna ver/ocultar la contraseña (útil en la PC de la caja)
+  const [verPassword, setVerPassword] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   // 'login' | 'forgot' | 'forgot_sent' — controla qué form se muestra.
@@ -73,7 +75,15 @@ export default function LoginPage() {
               </div>
               <div className="form-group">
                 <label>Contraseña</label>
-                <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" required />
+                <div style={{ position: 'relative' }}>
+                  <input type={verPassword ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)}
+                    placeholder="••••••••" required style={{ paddingRight: 44, width: '100%', boxSizing: 'border-box' }} />
+                  <button type="button" onClick={() => setVerPassword(v => !v)}
+                    title={verPassword ? 'Ocultar contraseña' : 'Ver contraseña'}
+                    style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 17, padding: '4px 6px', lineHeight: 1 }}>
+                    {verPassword ? '🙈' : '👁️'}
+                  </button>
+                </div>
               </div>
 
               {error && <div className="alert alert-error">{error}</div>}
