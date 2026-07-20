@@ -1445,7 +1445,10 @@ function PLUTab({ precios, ofertas = [], onRecargar, categoriasOrden = [] }) {
     // Saltos de l\u00EDnea de WINDOWS (CRLF): el asistente de importaci\u00F3n de
     // Qendra no reconoce los LF de Unix y lee todo el archivo como un solo
     // registro ("0 registros a importar, 1 con errores" \u2014 caso 20/07).
-    const win = contenido.replace(/\r?\n/g, '\r\n')
+    // + salto de línea FINAL: sin él, el asistente no cierra el último
+    // registro y el último producto del CSV rebota con errores absurdos
+    // (sección vacía) — le pasó al PLU 131, última línea del archivo.
+    const win = contenido.replace(/\r?\n/g, '\r\n').replace(/\r\n$/, '') + '\r\n'
     const blob = new Blob([bom + win], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
