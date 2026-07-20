@@ -108,6 +108,7 @@ export async function generarListaPreciosPdf({ tipo, precios, categorias }) {
   const gold = rgb(0.72, 0.55, 0.12)
   const lineC = rgb(0.85, 0.85, 0.88)
   const zebra = rgb(0.965, 0.96, 0.945)
+  const green = rgb(0.16, 0.5, 0.18)
 
   let page, y
   const headerPagina = () => {
@@ -165,21 +166,39 @@ export async function generarListaPreciosPdf({ tipo, precios, categorias }) {
     items.forEach((p, i) => {
       saltoSiHaceFalta(13)
       if (i % 2 === 1) page.drawRectangle({ x: ML - 3, y: y - 3.5, width: COLR - ML + 6, height: 13, color: zebra })
+      // Producto en oferta vigente: el precio que sale en la lista es el de
+      // la oferta, así que se marca "OFERTA" al lado del nombre y el precio
+      // va en verde — si no, el precio promocional se lee como precio real
+      // (pasó con la falda especial el 20/07).
+      const tagW = p.enOferta ? bold.widthOfTextAtSize('OFERTA', 7.5) + 6 : 0
       // El nombre no debe pisar la columna de precios: se recorta si hace falta
-      const maxW = (esMayMin ? COL_MIN - 78 : COL_MAY - 90) - ML
+      const maxW = (esMayMin ? COL_MIN - 78 : COL_MAY - 90) - ML - tagW
       let nombre = safe(p.nombre).toUpperCase()
       while (nombre.length > 4 && font.widthOfTextAtSize(nombre, 9.5) > maxW) nombre = nombre.slice(0, -1)
       page.drawText(nombre, { x: ML, y, size: 9.5, font, color: dark })
+      if (p.enOferta) {
+        const nw = font.widthOfTextAtSize(nombre, 9.5)
+        page.drawText('OFERTA', { x: ML + nw + 6, y: y + 0.5, size: 7.5, font: bold, color: green })
+      }
+      const precioColor = p.enOferta ? green : undefined
       if (esMayMin) {
-        txtR(Number(p.precio_minorista) > 0 ? money(p.precio_minorista) : '—', COL_MIN)
-        txtR(Number(p.precio_mayorista) > 0 ? money(p.precio_mayorista) : '—', COL_MAY, { bold: true })
+        txtR(Number(p.precio_minorista) > 0 ? money(p.precio_minorista) : '—', COL_MIN, { color: precioColor })
+        txtR(Number(p.precio_mayorista) > 0 ? money(p.precio_mayorista) : '—', COL_MAY, { bold: true, color: precioColor })
       } else {
-        txtR(money(p.precio_carniceria), COL_MAY, { bold: true })
+        txtR(money(p.precio_carniceria), COL_MAY, { bold: true, color: precioColor })
       }
       y -= 13
     })
     y -= 12
   })
+
+  // Si la lista lleva ofertas, aclararlo al final (que nadie tome el
+  // precio promocional como el precio de lista permanente).
+  if (precios.some(p => p.enOferta)) {
+    saltoSiHaceFalta(16)
+    page.drawText('Los precios en verde marcados OFERTA son promocionales, por tiempo limitado.',
+      { x: ML, y, size: 8.5, font: bold, color: green })
+  }
 
   // Pie en cada página
   doc.getPages().forEach((pg, i) => {
