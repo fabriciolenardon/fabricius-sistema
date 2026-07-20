@@ -13,7 +13,7 @@ const CATEGORIAS = {
   bovino_corte: '🥩 Bovino Cortes',
   bovino_pieza: '🍖 Piezas Bovinas',
   bovino_brosa: '🫀 Brosas',
-  bovino_caja_cb: '📦 Bovino Caja CB',
+  // bovino_caja_cb eliminada (mig 88): lista sin uso — 0 cajas y 0 ventas en la historia
   bovino_caja_pt: '📦 Bovino Caja PT',
   cerdo_corte: '🐷 Cerdo Cortes',
   cerdo_pieza: '🐷 Cerdo Piezas',
@@ -1192,7 +1192,7 @@ function PLUTab({ precios, ofertas = [] }) {
   function categoriaASector(cat) {
     const map = {
       bovino_mr: 1, bovino_corte: 2, bovino_brosa: 3, bovino_pieza: 4,
-      bovino_caja_cb: 5, bovino_caja_pt: 5,
+      bovino_caja_pt: 5,
       cerdo_corte: 6, cerdo_pieza: 6,
       embutido: 7, pollo: 8, rebozado: 9, almacen: 10, bebidas: 11,
     }
