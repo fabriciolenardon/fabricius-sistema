@@ -408,10 +408,14 @@ export default function Precios() {
   }
 
   // PDFs de listas de precios (archivo real, compartible por WhatsApp).
-  // Usa preciosConOfertas: la lista que sale refleja las ofertas vigentes.
+  // Va con los precios de lista NORMALES, sin aplicar ofertas: la oferta es
+  // del mostrador, no de la lista que se le manda a un cliente (pedido de
+  // Fabricio 20/07 — la falda especial salía a precio de oferta y parecía
+  // que ese era el precio de lista). Si algún día se quiere mandar la lista
+  // promocional, pasar preciosConOfertas acá: el PDF ya sabe marcar OFERTA.
   async function pdfLista(tipo) {
     try {
-      const res = await compartirListaPrecios({ tipo, precios: preciosConOfertas, categorias: categoriasVisibles })
+      const res = await compartirListaPrecios({ tipo, precios, categorias: categoriasVisibles })
       if (res === 'descargado') mostrarMsg('✅ PDF descargado — arrastralo al chat de WhatsApp')
       if (res === 'compartido') mostrarMsg('✅ Lista compartida')
     } catch (e) {
