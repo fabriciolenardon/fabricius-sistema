@@ -1,5 +1,5 @@
 // Precios — gestión completa de listas, PLUs e importadores
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
 import Paginador, { usePaginacion } from '../../components/Paginador'
@@ -8,24 +8,13 @@ import ImportarPLUQendra from './ImportarPLUQendra'
 import CombosEditor from './CombosEditor'
 import { abrirVentanaImprimible } from '../../lib/pdfPrintable'
 import { compartirListaPrecios } from '../../lib/listasPreciosPdf'
-const CATEGORIAS = {
-  bovino_mr: '🐄 Media Reses',
-  bovino_corte: '🥩 Bovino Cortes',
-  bovino_pieza: '🍖 Piezas Bovinas',
-  bovino_brosa: '🫀 Brosas',
-  // bovino_caja_cb eliminada (mig 88): lista sin uso — 0 cajas y 0 ventas en la historia
-  bovino_caja_pt: '📦 Bovino Caja PT',
-  cerdo_corte: '🐷 Cerdo Cortes',
-  cerdo_pieza: '🐷 Cerdo Piezas',
-  embutido: '🌭 Embutidos',
-  pollo: '🍗 Pollo X Kilo',
-  pollo_cajon: '🍗 Pollo Cajón',
-  rebozado: '🧊 Rebozado X Kilo',
-  rebozado_cajon: '🧊 Rebozado Cajón',
-  almacen: '🛒 Almacén',
-  bebidas: '🥤 Bebidas',
-  insumos: '🧰 Insumos',
-}
+// Las categorías ya no son un objeto hardcodeado: viven en config_sistema
+// ('categorias_precios') y se administran desde la solapa 🗂️ Categorías.
+// Ver src/lib/categoriasPrecios.js (las de sistema no se pueden eliminar).
+import {
+  cargarCategoriasPrecios, guardarCategoriasPrecios, categoriasDefault,
+  labelsDeCategorias, claveDesdeNombre,
+} from '../../lib/categoriasPrecios'
 
 // Subgrupos dentro de Insumos (como en el PDF original)
 const INSUMO_SUBCAT = { descartables: '📦 Descartables', limpieza: '🧽 Limpieza', carniceria: '🔪 Insumos Carnicería' }
@@ -38,6 +27,9 @@ const VACIO = { categoria: 'bovino_corte', subcategoria: 'descartables', nombre:
 // "huérfanos": se venden pero NO descuentan stock. Los bovinos NO van acá: se
 // trackean por categoría/pieza, su stock_origen debe ser NULL.
 const CATEGORIAS_CON_STOCK_ORIGEN = new Set(['cerdo_corte', 'cerdo_pieza', 'embutido'])
+// Las categorías personalizadas (cat_*) también pueden enlazar stock_origen:
+// sin enlace no descuentan stock (igual que un embutido comprado).
+const permiteStockOrigen = cat => CATEGORIAS_CON_STOCK_ORIGEN.has(cat) || String(cat || '').startsWith('cat_')
 const prettyBucket = b => String(b || '')
   .replace(/^cerdo_/, '🐷 ')
   .replace(/^emb_/, '🌭 ')
@@ -61,6 +53,16 @@ export default function Precios() {
   const [precios, setPrecios] = useState([])
   const [stockBuckets, setStockBuckets] = useState([])  // tipos de stock_actual (cerdo_*, emb_*) para enlazar
   const [filtro, setFiltro] = useState('bovino_corte')
+  // Catálogo de categorías (config_sistema). CATEGORIAS mantiene la forma
+  // { clave: label } que usaba el viejo objeto hardcodeado — incluye las
+  // ocultas para poder etiquetar productos de una categoría escondida.
+  const [categorias, setCategorias] = useState(categoriasDefault())
+  const CATEGORIAS = useMemo(() => labelsDeCategorias(categorias), [categorias])
+  const categoriasVisibles = useMemo(() => categorias.filter(c => c.activa !== false), [categorias])
+  // Editor de categorías (solapa 🗂️): copia local + form de alta
+  const [catEdit, setCatEdit] = useState(null)         // null = sin cambios sin guardar
+  const [catNueva, setCatNueva] = useState('')
+  const [catGuardando, setCatGuardando] = useState(false)
   const [loading, setLoading] = useState(true)
   const [form, setForm] = useState(VACIO)
   const [editando, setEditando] = useState(null)
@@ -91,7 +93,7 @@ export default function Precios() {
   const [promoPctInput, setPromoPctInput] = useState('10')
   const [promoLoading, setPromoLoading] = useState(false)
 
-  useEffect(() => { cargar(); cargarOfertas(); cargarPromoMundial() }, [])
+  useEffect(() => { cargar(); cargarOfertas(); cargarPromoMundial(); cargarCategoriasPrecios().then(setCategorias) }, [])
 
   async function cargarPromoMundial() {
     const { data } = await supabase.from('config_sistema').select('*').eq('clave', 'promo_mundial').maybeSingle()
@@ -203,10 +205,10 @@ export default function Precios() {
       // embutido; el resto (bovino, pollo, etc.) SIEMPRE va NULL para no
       // reintroducir mapeos malos (bug 09/06: cortes de vaca descontando cerdo).
       // stock_no_aplica = comprado/reventa: no descuenta y no se marca huérfano.
-      stock_origen: CATEGORIAS_CON_STOCK_ORIGEN.has(form.categoria) && !form.stock_no_aplica
+      stock_origen: permiteStockOrigen(form.categoria) && !form.stock_no_aplica
         ? (form.stock_origen || null)
         : null,
-      stock_no_aplica: CATEGORIAS_CON_STOCK_ORIGEN.has(form.categoria) ? !!form.stock_no_aplica : false,
+      stock_no_aplica: permiteStockOrigen(form.categoria) ? !!form.stock_no_aplica : false,
     }
 
     // Si está asignando un PLU, verificar si ya está ocupado por OTRO producto
@@ -409,7 +411,7 @@ export default function Precios() {
   // Usa preciosConOfertas: la lista que sale refleja las ofertas vigentes.
   async function pdfLista(tipo) {
     try {
-      const res = await compartirListaPrecios({ tipo, precios: preciosConOfertas })
+      const res = await compartirListaPrecios({ tipo, precios: preciosConOfertas, categorias: categoriasVisibles })
       if (res === 'descargado') mostrarMsg('✅ PDF descargado — arrastralo al chat de WhatsApp')
       if (res === 'compartido') mostrarMsg('✅ Lista compartida')
     } catch (e) {
@@ -501,6 +503,7 @@ export default function Precios() {
         {tabBtn('masivo', '🚀 Actualización masiva')}
         {tabBtn('ofertas', `🏷️ Ofertas${ofertasVigentes.length > 0 ? ` (${ofertasVigentes.length})` : ''}`)}
         {tabBtn('combos', '🍱 Combos')}
+        {tabBtn('categorias', '🗂️ Categorías')}
         {tabBtn('chat', '🤖 Asistente IA')}
 {tabBtn('plu', '🏷️ PLU / Balanza')}
 {tabBtn('limpieza', '🧹 Limpieza duplicados')}
@@ -522,6 +525,10 @@ export default function Precios() {
             style={{ padding: '8px 14px', background: '#25D366', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
             📄 PDF Carnicerías → WhatsApp
           </button>
+          <button onClick={() => pdfLista('franquicia')} title="Lista de carnicerías + insumos (la central les vende insumos solo a las franquicias)"
+            style={{ padding: '8px 14px', background: '#25D366', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+            🏪 PDF Franquicias (c/insumos) → WhatsApp
+          </button>
         </div>
       )}
       {tab === 'ver' && (
@@ -541,7 +548,7 @@ export default function Precios() {
             </div>
           )}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 20 }}>
-            {Object.entries(CATEGORIAS).map(([id, label]) => (
+            {categoriasVisibles.map(({ clave: id, label }) => (
               <button key={id} onClick={() => setFiltro(id)}
                 style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid var(--border)', background: filtro === id ? 'var(--gold)' : 'transparent', color: filtro === id ? '#000' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
                 {label}
@@ -631,7 +638,7 @@ export default function Precios() {
               <div style={{ gridColumn: '1/-1' }}>
                 <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Categoría</label>
                 <select value={form.categoria} onChange={e => setForm({ ...form, categoria: e.target.value })} style={inp}>
-                  {Object.entries(CATEGORIAS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                  {categoriasVisibles.map(({ clave: id, label }) => <option key={id} value={id}>{label}</option>)}
                 </select>
               </div>
               {form.categoria === 'insumos' && (
@@ -703,7 +710,7 @@ export default function Precios() {
                   </div>
                 </div>
               )}
-              {CATEGORIAS_CON_STOCK_ORIGEN.has(form.categoria) && (
+              {permiteStockOrigen(form.categoria) && (
                 <div style={{ gridColumn: '1/-1', background: '#10231a', border: `1px solid ${(form.stock_origen || form.stock_no_aplica) ? '#2d5a2d' : 'var(--amber)'}`, borderRadius: 8, padding: 12 }}>
                   <label style={{ fontSize: 12, color: '#7dff7d', display: 'block', marginBottom: 4, fontWeight: 600 }}>
                     📦 Stock que descuenta (de qué bucket sale al vender)
@@ -747,7 +754,7 @@ export default function Precios() {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-            {Object.entries(CATEGORIAS).map(([id, label]) => (
+            {categoriasVisibles.map(({ clave: id, label }) => (
               <button key={id} onClick={() => setFiltro(id)}
                 style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid var(--border)', background: filtro === id ? 'var(--gold)' : 'transparent', color: filtro === id ? '#000' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
                 {label}
@@ -799,7 +806,7 @@ export default function Precios() {
                 <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Categoría</label>
                 <select value={masivoCat} onChange={e => { setMasivoCat(e.target.value); setMasivoPreview([]) }} style={inp}>
                   <option value="todas">📦 Todas las categorías</option>
-                  {Object.entries(CATEGORIAS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                  {categoriasVisibles.map(({ clave: id, label }) => <option key={id} value={id}>{label}</option>)}
                 </select>
               </div>
               <div>
@@ -1163,6 +1170,119 @@ export default function Precios() {
      {tab === 'plu' && (
   <PLUTab precios={precios} ofertas={ofertas} onRecargar={cargar} />
 )}
+      {tab === 'categorias' && (() => {
+        // Copia editable: se trabaja sobre catEdit y recién al Guardar se
+        // persiste en config_sistema. Las de sistema no se pueden eliminar
+        // (tienen lógica de stock/cajones asociada); eliminar exige 0 productos.
+        const lista = catEdit || categorias
+        const productosPorCat = precios.reduce((acc, p) => { acc[p.categoria] = (acc[p.categoria] || 0) + 1; return acc }, {})
+        const mover = (i, dir) => {
+          const j = i + dir
+          if (j < 0 || j >= lista.length) return
+          const copia = [...lista]
+          ;[copia[i], copia[j]] = [copia[j], copia[i]]
+          setCatEdit(copia)
+        }
+        const setLabel = (i, label) => {
+          const copia = [...lista]
+          copia[i] = { ...copia[i], label }
+          setCatEdit(copia)
+        }
+        const toggleActiva = i => {
+          const copia = [...lista]
+          copia[i] = { ...copia[i], activa: copia[i].activa === false }
+          setCatEdit(copia)
+        }
+        const eliminar = i => {
+          const c = lista[i]
+          if (c.sistema || (productosPorCat[c.clave] || 0) > 0) return
+          setCatEdit(lista.filter((_, k) => k !== i))
+        }
+        const agregar = () => {
+          const nombre = catNueva.trim()
+          if (!nombre) return
+          const clave = claveDesdeNombre(nombre)
+          if (!clave) { mostrarMsg('❌ El nombre no genera una clave válida'); return }
+          if (lista.some(c => c.clave === clave)) { mostrarMsg('❌ Ya existe una categoría con esa clave (' + clave + ')'); return }
+          setCatEdit([...lista, { clave, label: nombre, activa: true, sistema: false }])
+          setCatNueva('')
+        }
+        const guardar = async () => {
+          setCatGuardando(true)
+          const { error } = await guardarCategoriasPrecios(lista)
+          if (error) mostrarMsg('❌ No se pudo guardar: ' + error.message)
+          else {
+            setCategorias(lista)
+            setCatEdit(null)
+            mostrarMsg('✅ Categorías guardadas')
+          }
+          setCatGuardando(false)
+        }
+        return (
+          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 16, alignItems: 'start' }}>
+            <div className="card">
+              <div className="card-title">🗂️ Categorías de la lista de precios</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
+                Ordená con ⬆️⬇️, renombrá tocando el nombre, ocultá con 👁 y eliminá con 🗑 (solo categorías propias y vacías).
+                Las categorías 🔒 son del sistema: tienen lógica de stock asociada, se pueden ocultar o renombrar pero no eliminar.
+              </div>
+              {lista.map((c, i) => {
+                const cant = productosPorCat[c.clave] || 0
+                const oculta = c.activa === false
+                return (
+                  <div key={c.clave} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderBottom: '1px solid var(--border)', opacity: oculta ? 0.5 : 1 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <button onClick={() => mover(i, -1)} disabled={i === 0} style={{ background: 'none', border: 'none', color: i === 0 ? 'var(--border)' : 'var(--muted)', cursor: i === 0 ? 'default' : 'pointer', fontSize: 11, padding: 0, lineHeight: 1 }}>▲</button>
+                      <button onClick={() => mover(i, 1)} disabled={i === lista.length - 1} style={{ background: 'none', border: 'none', color: i === lista.length - 1 ? 'var(--border)' : 'var(--muted)', cursor: i === lista.length - 1 ? 'default' : 'pointer', fontSize: 11, padding: 0, lineHeight: 1 }}>▼</button>
+                    </div>
+                    <input value={c.label} onChange={e => setLabel(i, e.target.value)}
+                      style={{ ...inp, flex: 1, padding: '6px 10px', fontSize: 13, textDecoration: oculta ? 'line-through' : 'none' }} />
+                    <span style={{ fontSize: 11, color: 'var(--muted)', minWidth: 74, textAlign: 'right' }}>
+                      {cant} producto{cant === 1 ? '' : 's'}
+                    </span>
+                    <span title={c.sistema ? 'Categoría del sistema — no se puede eliminar' : 'Categoría propia'} style={{ fontSize: 13, width: 20, textAlign: 'center' }}>
+                      {c.sistema ? '🔒' : '✨'}
+                    </span>
+                    <button onClick={() => toggleActiva(i)} title={oculta ? 'Mostrar' : 'Ocultar (no aparece en solapas, buscadores ni PDF)'}
+                      style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 13, color: oculta ? 'var(--muted)' : 'var(--text)' }}>
+                      {oculta ? '🚫' : '👁'}
+                    </button>
+                    <button onClick={() => eliminar(i)} disabled={c.sistema || cant > 0}
+                      title={c.sistema ? 'Del sistema: solo se puede ocultar' : cant > 0 ? 'Tiene productos: movelos o borralos primero' : 'Eliminar categoría'}
+                      style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 8px', cursor: (c.sistema || cant > 0) ? 'not-allowed' : 'pointer', fontSize: 13, opacity: (c.sistema || cant > 0) ? 0.35 : 1 }}>
+                      🗑
+                    </button>
+                  </div>
+                )
+              })}
+              <div style={{ display: 'flex', gap: 10, marginTop: 14, alignItems: 'center' }}>
+                <button className="btn btn-gold" onClick={guardar} disabled={catGuardando || !catEdit}>
+                  {catGuardando ? '⏳ Guardando…' : '💾 Guardar cambios'}
+                </button>
+                {catEdit && (
+                  <button className="btn" onClick={() => setCatEdit(null)}>Descartar</button>
+                )}
+                {!catEdit && <span style={{ fontSize: 11, color: 'var(--muted)' }}>Sin cambios pendientes</span>}
+              </div>
+            </div>
+            <div className="card">
+              <div className="card-title">➕ Nueva categoría</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
+                Nombre visible (podés incluir un emoji). Ej: <em>🐟 Pescados</em>. Después cargale productos desde ✏️ Administrar.
+              </div>
+              <input value={catNueva} onChange={e => setCatNueva(e.target.value)} placeholder="🐟 Pescados y Mariscos"
+                onKeyDown={e => { if (e.key === 'Enter') agregar() }} style={{ ...inp, marginBottom: 10 }} />
+              {catNueva.trim() && (
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>Clave interna: <code>{claveDesdeNombre(catNueva)}</code></div>
+              )}
+              <button className="btn btn-gold" onClick={agregar} disabled={!catNueva.trim()} style={{ width: '100%' }}>➕ Agregar a la lista</button>
+              <div style={{ background: '#1a1a2a', border: '1px solid #2a2a5a', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#7db5ff', marginTop: 14 }}>
+                ℹ️ Los productos de una categoría nueva se venden por kg y <strong>no descuentan stock</strong>, salvo que en ✏️ Administrar los enlaces a un bucket de stock. Los portales de clientes/franquicias no muestran categorías nuevas automáticamente.
+              </div>
+            </div>
+          </div>
+        )
+      })()}
       {tab === 'combos' && <CombosEditor precios={precios} />}
       {tab === 'limpieza' && <LimpiezaDuplicados />}
       {tab === 'importar_plu' && <ImportarPLUQendra />}
@@ -1236,6 +1356,10 @@ function PLUTab({ precios, ofertas = [], onRecargar }) {
     if (onRecargar) await onRecargar()
   }
 
+  // % de descuento para Precio Lista 2 de la balanza (en Qendra la Lista 2
+  // está cargada ~10% abajo de la Lista 1). 0 = Lista 2 igual a Lista 1.
+  const [lista2Pct, setLista2Pct] = useState('10')
+
   // PLUs REALES: productos en `precios` que tienen codigo_balanza asignado.
   // El código viene de la asignación que hizo Fabri (vía Importar PLUs CSV
   // o editando manualmente desde Administrar). Ordenados por PLU.
@@ -1251,65 +1375,64 @@ function PLUTab({ precios, ofertas = [], onRecargar }) {
     }))
     .sort((a, b) => a.codigoNum - b.codigoNum)
 
-  // Mapeo de categorías Fabricius a Sectores de la balanza
-  function categoriaASector(cat) {
-    const map = {
-      bovino_mr: 1, bovino_corte: 2, bovino_brosa: 3, bovino_pieza: 4,
-      bovino_caja_pt: 5,
-      cerdo_corte: 6, cerdo_pieza: 6,
-      embutido: 7, pollo: 8, rebozado: 9, almacen: 10, bebidas: 11,
+  // Precio minorista vigente de un PLU, respetando ofertas activas
+  // (tanto por precio fijo como por % de descuento — mismo criterio que
+  // aplicarOferta del componente principal).
+  function precioMinoristaVigente(p) {
+    const hoy = fechaHoyARG()
+    const base = Number(p.precio) || 0
+    const oferta = ofertas?.find(o =>
+      o.precio_id === p.precio_id &&
+      o.activa &&
+      o.fecha_inicio <= hoy &&
+      o.fecha_fin >= hoy &&
+      o.aplica_minorista !== false
+    )
+    if (!oferta || base <= 0) return base
+    if (oferta.descuento_pct != null && Number(oferta.descuento_pct) > 0) {
+      return Math.round(base * (1 - Number(oferta.descuento_pct) / 100))
     }
-    return map[cat] || 1
+    if (oferta.precio_oferta != null && Number(oferta.precio_oferta) > 0) {
+      return Number(oferta.precio_oferta)
+    }
+    return base
   }
 
-  // Días de vencimiento sugeridos por categoría
-  function diasVencDefault(cat) {
-    if (cat?.startsWith('bovino_pieza') || cat?.startsWith('bovino_caja')) return 7
-    if (cat?.startsWith('bovino') || cat?.startsWith('cerdo')) return 3
-    if (cat === 'pollo') return 2
-    if (cat === 'embutido') return 10
-    return 5
+  // Qendra trunca descripciones largas y la balanza no imprime bien
+  // caracteres fuera de ASCII: mayúsculas, sin acentos, máx. 18 caracteres.
+  function nombreParaQendra(nombre) {
+    return (nombre || '')
+      .toUpperCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^A-Z0-9 \-\/.]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 18)
   }
 
   function exportarCSV() {
-    const hoy = fechaHoyARG()
-
     // Formato simple (compatible con muchos importadores)
     const header = 'Codigo,Nombre,Precio\n'
-    const rows = plus.map(p => {
-      const ofertaVigente = ofertas?.find(o =>
-        o.precio_id === p.precio_id &&
-        o.activa &&
-        o.fecha_inicio <= hoy &&
-        o.fecha_fin >= hoy &&
-        o.aplica_minorista !== false
-      )
-      const precioFinal = ofertaVigente ? ofertaVigente.precio_oferta : p.precio
-      return `${p.codigo},"${p.nombre}",${precioFinal}`
-    }).join('\n')
+    const rows = plus.map(p =>
+      `${p.codigo},"${p.nombre}",${Math.round(precioMinoristaVigente(p))}`
+    ).join('\n')
     descargar(header + rows, 'PLU_Fabricius_simple.csv')
   }
 
-  // Formato Qendra extendido (con sector, tipo, vencimiento, etc.)
+  // CSV para el Asistente de importación de Qendra (Archivo → Importar).
+  // Mismas columnas que muestra la grilla de Productos de Qendra, así el
+  // "Mapeo de campos" del asistente es directo. Separador ";" y primera
+  // fila como títulos (tildar "Utilizar la primer fila como títulos").
   function exportarQendra() {
-    const hoy = fechaHoyARG()
-    // Header con formato Qendra: separador punto y coma, más campos
-    const header = 'codigo;descripcion;precio_lista1;tipo;tara;sector;dias_vencimiento;origen\n'
+    const pct = Number(lista2Pct) || 0
+    const header = '"Numero de seccion";"Nombre de seccion";"Codigo de PLU";"Descripcion";"Numero de PLU";"Precio lista 1";"Precio lista 2"\n'
     const rows = plus.map(p => {
-      const ofertaVigente = ofertas?.find(o =>
-        o.precio_id === p.precio_id &&
-        o.activa &&
-        o.fecha_inicio <= hoy &&
-        o.fecha_fin >= hoy &&
-        o.aplica_minorista !== false
-      )
-      const precio = ofertaVigente ? ofertaVigente.precio_oferta : p.precio
-      const sector = categoriaASector(p.categoria)
-      const diasVenc = diasVencDefault(p.categoria)
-      const nombre = (p.nombre || '').replace(/"/g, '').replace(/;/g, ',').toUpperCase().slice(0, 32)
-      return `${p.codigo};${nombre};${Number(precio).toFixed(2)};P;0.000;${sector};${diasVenc};ARGENTINA`
+      const precio1 = Math.round(precioMinoristaVigente(p))
+      // Lista 2 redondeada a $10 (mismo redondeo que usa la lista cargada en Qendra)
+      const precio2 = pct > 0 ? Math.round(precio1 * (1 - pct / 100) / 10) * 10 : precio1
+      return `1;"CARNICERIA";${p.codigoNum};"${nombreParaQendra(p.nombre)}";${p.codigoNum};${precio1};${precio2}`
     }).join('\n')
-    descargar(header + rows, 'PLU_Fabricius_Qendra.csv')
+    descargar(header + rows, `PLU_Qendra_${fechaHoyARG()}.csv`)
   }
 
   function descargar(contenido, nombre) {
@@ -1340,13 +1463,29 @@ function PLUTab({ precios, ofertas = [], onRecargar }) {
             <strong>{plus.length}</strong> productos con PLU asignado.
           </div>
         )}
-        <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
           <button onClick={exportarCSV} className="btn btn-ghost" disabled={plus.length === 0}>📥 Exportar CSV simple</button>
-          <button onClick={exportarQendra} className="btn btn-ghost" style={{ background: 'var(--gold)', color: '#000', fontWeight: 700 }} disabled={plus.length === 0}>⚖️ Exportar para Qendra (completo)</button>
+          <button onClick={exportarQendra} className="btn btn-ghost" style={{ background: 'var(--gold)', color: '#000', fontWeight: 700 }} disabled={plus.length === 0}>⚖️ Exportar CSV para Qendra</button>
           <button onClick={() => { setConfirmandoRenum(c => !c); setRenumMsg(null) }} className="btn btn-ghost" disabled={renumerando}
             style={{ borderColor: 'var(--amber)', color: 'var(--amber)' }}>
             🔁 Renumerar PLUs (alfabético)
           </button>
+          <label style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+            Lista 2: −
+            <input type="number" min="0" max="50" step="0.5" value={lista2Pct}
+              onChange={e => setLista2Pct(e.target.value)}
+              style={{ width: 55, background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '4px 8px', fontSize: 12 }} />
+            % (0 = igual a Lista 1)
+          </label>
+        </div>
+        <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
+          <strong style={{ color: 'var(--text)' }}>Cómo actualizar los precios de la balanza:</strong> descargá el CSV para Qendra
+          y en Qendra andá a <strong>Archivo → Importar → Asistente de importación</strong> →
+          Productos, formato <strong>Archivo delimitado (*.csv)</strong>, tildá <strong>"Utilizar la primer fila como títulos"</strong>,
+          delimitador <strong>punto y coma (;)</strong>. En el <strong>Mapeo de campos</strong> asigná cada columna a su campo
+          (los nombres coinciden). Si solo querés actualizar precios, mapeá <strong>Código de PLU</strong> +
+          <strong> Precio lista 1</strong> (y Lista 2 si la usás) y dejá el resto sin asignar.
+          Después mandá los datos a la balanza como siempre (Comunicación).
         </div>
 
         {confirmandoRenum && (
