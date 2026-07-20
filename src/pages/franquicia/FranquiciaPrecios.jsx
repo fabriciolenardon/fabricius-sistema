@@ -9,7 +9,6 @@ const CATEGORIAS = {
   bovino_corte: '🥩 Bovinos — Cortes',
   bovino_pieza: '🍖 Piezas',
   bovino_brosa: '🫀 Brosas',
-  bovino_caja_cb: '📦 Bovino Caja CB',
   bovino_caja_pt: '📦 Bovino Caja PT',
   cerdo_corte: '🐷 Cerdo — Cortes',
   cerdo_pieza: '🐷 Cerdo — Piezas',
