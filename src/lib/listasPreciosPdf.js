@@ -30,7 +30,6 @@ const SECCIONES = [
   { cat: 'bovino_pieza',   titulo: 'BOVINO — PIEZAS' },
   { cat: 'bovino_corte',   titulo: 'BOVINO — CORTES' },
   { cat: 'bovino_brosa',   titulo: 'BROSAS / ACHURAS' },
-  { cat: 'bovino_caja_cb', titulo: 'CAJAS BOVINAS — ENVASADOS CB' },
   { cat: 'bovino_caja_pt', titulo: 'CAJAS BOVINAS — ENVASADOS PT' },
   { cat: 'cerdo_corte',    titulo: 'CERDO — CORTES' },
   { cat: 'cerdo_pieza',    titulo: 'CERDO — PIEZAS' },
