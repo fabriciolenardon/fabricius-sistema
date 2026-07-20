@@ -1454,7 +1454,10 @@ function PLUTab({ precios, ofertas = [], onRecargar, categoriasOrden = [] }) {
     // Agrupar por categor\u00EDa respetando el orden del cat\u00E1logo (\uD83D\uDDC2\uFE0F Categor\u00EDas);
     // categor\u00EDas que no est\u00E9n en el cat\u00E1logo (ocultas/viejas) van al final.
     const porCat = {}
-    plus.forEach(p => { (porCat[p.categoria] = porCat[p.categoria] || []).push(p) })
+    // Las cajas PT no van en la hoja del mostrador (no se pesan en la
+    // balanza); sí siguen saliendo en los CSV para Qendra.
+    plus.filter(p => p.categoria !== 'bovino_caja_pt')
+      .forEach(p => { (porCat[p.categoria] = porCat[p.categoria] || []).push(p) })
     const clavesOrdenadas = [
       ...categoriasOrden.map(c => c.clave).filter(c => porCat[c]),
       ...Object.keys(porCat).filter(c => !categoriasOrden.some(k => k.clave === c)),
