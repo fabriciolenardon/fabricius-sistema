@@ -1376,6 +1376,7 @@ function PLUTab({ precios, ofertas = [], onRecargar, categoriasOrden = [] }) {
       precio: p.precio_minorista || 0,
       categoria: p.categoria,
       precio_id: p.id,
+      pesable: p.pesable !== false, // false → se vende por Unidad en la balanza
     }))
     .sort((a, b) => a.codigoNum - b.codigoNum)
 
@@ -1423,23 +1424,40 @@ function PLUTab({ precios, ofertas = [], onRecargar, categoriasOrden = [] }) {
     descargar(header + rows, 'PLU_Fabricius_simple.csv')
   }
 
-  // CSV para el Asistente de importación de Qendra (Archivo → Importar).
-  // Mismas columnas que muestra la grilla de Productos de Qendra, así el
-  // "Mapeo de campos" del asistente es directo. Separador ";" y primera
-  // fila como títulos (tildar "Utilizar la primer fila como títulos").
+  // CSV para el Asistente de importación de Qendra, en el FORMATO NATIVO
+  // que exporta el propio Qendra (calcado de productos_fabricius.csv, el
+  // export original de la balanza): SIN fila de títulos, 48 columnas,
+  // precios con coma decimal ("20800,00") y tipo de venta como texto
+  // rellenado a 11 caracteres ("Peso       "/"Unidad     "). El asistente
+  // viejo rechazaba en silencio nuestro formato propio de 7 columnas con
+  // cabecera — "0 registros a importar" sin explicación (odisea 20/07).
+  // En el asistente: DESTILDAR "primer fila como títulos"; mapear por
+  // posición (col 1 sección, 2 nro PLU, 3 descripción, 4 código, 5 lista 1,
+  // 6 lista 2, 7 tipo de venta), resto sin asignar; sección por NOMBRE.
   function exportarQendra() {
     const pct = Number(lista2Pct) || 0
-    const header = '"Numero de seccion";"Nombre de seccion";"Codigo de PLU";"Descripcion";"Numero de PLU";"Precio lista 1";"Precio lista 2"\n'
+    const f = fechaHoyARG()
+    const fechaQendra = `${f.slice(8, 10)}/${f.slice(5, 7)}/${f.slice(0, 4)} 12:00:00`
+    const conComa = n => `${n},00`
     const rows = plus.map(p => {
       const precio1 = Math.round(precioMinoristaVigente(p))
       // Lista 2 redondeada a $10 (mismo redondeo que usa la lista cargada en Qendra)
       const precio2 = pct > 0 ? Math.round(precio1 * (1 - pct / 100) / 10) * 10 : precio1
-      return `1;"CARNICERIA";${p.codigoNum};"${nombreParaQendra(p.nombre)}";${p.codigoNum};${precio1};${precio2}`
+      const tipoVenta = (p.pesable ? 'Peso' : 'Unidad').padEnd(11, ' ')
+      return [
+        'CARNICERIA', p.codigoNum, nombreParaQendra(p.nombre), p.codigoNum,
+        conComa(precio1), conComa(precio2), tipoVenta,
+        '0', '""', '0', '0', '""', '""', '""', 'N', '100', '1', '100', '""',
+        '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', 'G', '""',
+        fechaQendra, 'ADMIN', String(precio1),
+        '0', '0', '0', '0', '0', '0', '0', '0', '0',
+        '""', '""', '""', '""', '""',
+      ].join(';')
     }).join('\n')
     // SIN BOM: el asistente viejo de Qendra se atraganta con la marca UTF-8
     // al inicio del archivo. El contenido es ASCII puro (nombreParaQendra
     // ya filtr\u00F3 acentos), as\u00ED que no se pierde nada.
-    descargar(header + rows, `PLU_Qendra_${fechaHoyARG()}.csv`, { conBom: false })
+    descargar(rows, `PLU_Qendra_${fechaHoyARG()}.csv`, { conBom: false })
   }
 
   function descargar(contenido, nombre, { conBom = true } = {}) {
@@ -1542,11 +1560,13 @@ function PLUTab({ precios, ofertas = [], onRecargar, categoriasOrden = [] }) {
         </div>
         <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
           <strong style={{ color: 'var(--text)' }}>Cómo actualizar los precios de la balanza:</strong> descargá el CSV para Qendra
-          y en Qendra andá a <strong>Archivo → Importar → Asistente de importación</strong> →
-          Productos, formato <strong>Archivo delimitado (*.csv)</strong>, tildá <strong>"Utilizar la primer fila como títulos"</strong>,
-          delimitador <strong>punto y coma (;)</strong>. En el <strong>Mapeo de campos</strong> asigná cada columna a su campo
-          (los nombres coinciden). Si solo querés actualizar precios, mapeá <strong>Código de PLU</strong> +
-          <strong> Precio lista 1</strong> (y Lista 2 si la usás) y dejá el resto sin asignar.
+          (sale en el formato NATIVO de Qendra, sin fila de títulos) y en Qendra andá a
+          <strong> Archivo → Importar → Asistente de importación</strong> →
+          Productos, formato <strong>Archivo delimitado (*.csv)</strong>, delimitador <strong>punto y coma (;)</strong> y
+          <strong> "Utilizar la primer fila como títulos" DESTILDADO</strong>. En el <strong>Mapeo de campos</strong> asigná por posición:
+          Columna 1 = Nombre de sección, 2 = Número de PLU, 3 = Descripción, 4 = Código de PLU,
+          5 = Precio lista 1, 6 = Precio lista 2, 7 = Tipo de venta — el resto sin asignar.
+          Sección: elegí la opción "contiene el <strong>nombre</strong> de la sección".
           Después mandá los datos a la balanza como siempre (Comunicación).
         </div>
 
