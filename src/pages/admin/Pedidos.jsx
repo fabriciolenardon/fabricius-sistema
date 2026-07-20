@@ -14,7 +14,7 @@ const uLabel = u => u === 'unidad' ? 'u' : u === 'tiras' ? 'tiras' : 'kg'
 
 const ESTADO_INFO = {
   pendiente:  { label: '🟡 Pendiente',   color: 'var(--amber)' },
-  confirmado: { label: '🟢 Confirmado',  color: 'var(--green)' },
+  confirmado: { label: '🟢 En Depósito', color: 'var(--green)' },
   listo:      { label: '📦 Listo',       color: 'var(--gold)' },
   incompleto: { label: '🟠 Incompleto',  color: '#ff9d3a' },
   despachado: { label: '🚚 Despachado',  color: 'var(--blue)' },
@@ -35,6 +35,13 @@ export function Pedidos() {
   const [modalDespacho, setModalDespacho] = useState(null)
   const [remitosCliente, setRemitosCliente] = useState([])
   const [modalNuevo, setModalNuevo] = useState(false)
+  // Toast de confirmación (ej. "pedido enviado a Depósito") — sin window.alert
+  const [aviso, setAviso] = useState(null)
+
+  function mostrarAviso(texto, tipo = 'success') {
+    setAviso({ texto, tipo })
+    setTimeout(() => setAviso(null), 6000)
+  }
 
   useEffect(() => {
     cargar()
@@ -79,8 +86,8 @@ export function Pedidos() {
       timestamp: ahora(),
       autor: 'admin',
       texto: huboCambios
-        ? `✅ Pedido confirmado con ajustes por ${profile?.nombre || 'Admin'}.`
-        : `✅ Pedido confirmado por ${profile?.nombre || 'Admin'}.`
+        ? `✅ Pedido confirmado con ajustes por ${profile?.nombre || 'Admin'}. 📦 Enviado a Depósito para su preparación.`
+        : `✅ Pedido confirmado por ${profile?.nombre || 'Admin'}. 📦 Enviado a Depósito para su preparación.`
     }]
     const update = {
       estado: 'confirmado',
@@ -96,6 +103,7 @@ export function Pedidos() {
     }
     const { error } = await supabase.from('pedidos').update(update).eq('id', pedido.id)
     if (error) { alert('❌ Error: ' + error.message); return }
+    mostrarAviso(`📦 Pedido de ${pedido.cliente_nombre} enviado a Depósito — el sector ya lo ve en su panel para prepararlo. Te llega la notificación acá cuando esté LISTO.`)
     setPedidoAbierto(null)
     cargar()
   }
@@ -294,6 +302,17 @@ export function Pedidos() {
         </button>
       </div>
 
+      {aviso && (
+        <div style={{
+          position: 'fixed', top: 20, right: 20, zIndex: 1100,
+          padding: '14px 20px', borderRadius: 10, fontSize: 14, fontWeight: 700,
+          background: aviso.tipo === 'error' ? '#3a1a1a' : '#1a2a1a',
+          color: aviso.tipo === 'error' ? '#ff8b8b' : '#7dff7d',
+          border: `1px solid ${aviso.tipo === 'error' ? '#ff6b6b' : '#3f6d2f'}`,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.5)', maxWidth: 420,
+        }}>{aviso.texto}</div>
+      )}
+
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
         {['pendiente', 'confirmado', 'listo', 'incompleto', 'despachado', 'rechazado', 'cancelado', 'todos'].map(e => {
           const info = ESTADO_INFO[e] || { label: 'Todos', color: 'var(--gold)' }
@@ -346,7 +365,7 @@ export function Pedidos() {
       {pedidosFiltrados.length > 0 && <Paginador {...pag.controles} label="pedidos" />}
 
       {modalDespacho && <ModalDespacho m={modalDespacho} setModalDespacho={setModalDespacho} remitosCliente={remitosCliente} actualizarKgDespacho={actualizarKgDespacho} confirmarDespacho={confirmarDespacho} />}
-      {modalNuevo && <ModalNuevoPedido cerrar={() => setModalNuevo(false)} onCreado={() => { setModalNuevo(false); setFiltro('confirmado'); cargar() }} profile={profile} />}
+      {modalNuevo && <ModalNuevoPedido cerrar={() => setModalNuevo(false)} onCreado={() => { setModalNuevo(false); setFiltro('confirmado'); mostrarAviso('📦 Pedido creado y enviado a Depósito — el sector ya lo ve en su panel para prepararlo.'); cargar() }} profile={profile} />}
     </div>
   )
 }
@@ -628,13 +647,15 @@ function DetallePedido({ p, editingItems, editingDia, editingHorario, editingNot
 
           {p.estado === 'pendiente' && (
             <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-              <button onClick={() => confirmarPedido(p)} className="btn btn-gold" style={{ flex: 1 }}>✅ Confirmar pedido</button>
+              <button onClick={() => confirmarPedido(p)} className="btn btn-gold" style={{ flex: 1 }} title="Confirma el pedido y lo manda al panel del sector Depósito para que lo preparen">📦 Confirmar y enviar a Depósito</button>
               <button onClick={() => rechazarPedido(p)} style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: 'var(--red-light)' }}>❌ Rechazar</button>
             </div>
           )}
           {p.estado === 'confirmado' && (
             <div style={{ marginTop: 14 }}>
-              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>🔪 En preparación: el sector desposte lo ve en su panel y lo marca LISTO al terminarlo.</div>
+              <div style={{ background: '#14230f', border: '1px solid #3f6d2f', borderRadius: 8, padding: '8px 12px', fontSize: 12, marginBottom: 8 }}>
+                📦 <strong>Enviado a Depósito</strong> — el sector lo ve en su panel, carga los kg reales y lo marca LISTO. Te llega la notificación acá; no hace falta cargarlo a mano.
+              </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={() => abrirModalDespacho(p, 'completo')} style={{ background: 'var(--blue)', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#fff', flex: 1 }}>🚚 Despachar completo</button>
                 <button onClick={() => abrirModalDespacho(p, 'parcial')} style={{ background: '#ff9d3a', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#000' }}>⚠️ Despacho parcial</button>
