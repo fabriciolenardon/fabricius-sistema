@@ -1168,7 +1168,7 @@ export default function Precios() {
       )}
 
      {tab === 'plu' && (
-  <PLUTab precios={precios} ofertas={ofertas} onRecargar={cargar} />
+  <PLUTab precios={precios} ofertas={ofertas} onRecargar={cargar} categoriasOrden={categoriasVisibles} />
 )}
       {tab === 'categorias' && (() => {
         // Copia editable: se trabaja sobre catEdit y recién al Guardar se
@@ -1297,7 +1297,7 @@ const ORDEN_RENUM_PLU = ['bovino_corte', 'bovino_pieza', 'bovino_brosa', 'cerdo_
 const CAT_CAJAS_PLU = 'bovino_caja_pt'
 const PLU_INICIO_CAJAS = 120
 
-function PLUTab({ precios, ofertas = [], onRecargar }) {
+function PLUTab({ precios, ofertas = [], onRecargar, categoriasOrden = [] }) {
   const [msg, setMsg] = useState('')
   const [confirmandoRenum, setConfirmandoRenum] = useState(false)
   const [renumerando, setRenumerando] = useState(false)
@@ -1446,6 +1446,40 @@ function PLUTab({ precios, ofertas = [], onRecargar }) {
     a.click()
     URL.revokeObjectURL(url)
   }
+
+  // PDF imprimible con todos los PLUs agrupados por categor\u00EDa \u2014 para pegar
+  // en el mostrador / balanza y que los empleados sepan qu\u00E9 PLU es cada
+  // producto. Mismo patr\u00F3n de ventana imprimible que el cat\u00E1logo.
+  function pdfPlusEmpleados() {
+    // Agrupar por categor\u00EDa respetando el orden del cat\u00E1logo (\uD83D\uDDC2\uFE0F Categor\u00EDas);
+    // categor\u00EDas que no est\u00E9n en el cat\u00E1logo (ocultas/viejas) van al final.
+    const porCat = {}
+    plus.forEach(p => { (porCat[p.categoria] = porCat[p.categoria] || []).push(p) })
+    const clavesOrdenadas = [
+      ...categoriasOrden.map(c => c.clave).filter(c => porCat[c]),
+      ...Object.keys(porCat).filter(c => !categoriasOrden.some(k => k.clave === c)),
+    ]
+    const labelDe = clave => categoriasOrden.find(c => c.clave === clave)?.label || clave
+    const fechaTxt = new Date().toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'America/Argentina/Buenos_Aires' })
+    let html = `<div class="badge">CARNICER\u00CDAS FABRICIUS</div>`
+    html += `<h1 class="h1">\uD83C\uDFF7\uFE0F PLUs de la Balanza</h1>`
+    html += `<div class="sub">Qu\u00E9 c\u00F3digo tiene cada producto \u00B7 Vigente al ${fechaTxt}</div>`
+    clavesOrdenadas.forEach(clave => {
+      const items = [...porCat[clave]].sort((a, b) => a.codigoNum - b.codigoNum)
+      html += `<h2 class="h2">${labelDe(clave)}</h2>`
+      html += '<table><thead><tr><th style="width:70px">PLU</th><th>Producto</th><th class="right">Precio minorista</th></tr></thead><tbody>'
+      items.forEach(p => {
+        html += '<tr>'
+        html += `<td class="bold" style="font-family:monospace;font-size:15px">${p.codigo}</td>`
+        html += `<td>${p.nombre}</td>`
+        html += `<td class="right">${fmt(precioMinoristaVigente(p))}</td>`
+        html += '</tr>'
+      })
+      html += '</tbody></table>'
+    })
+    html += `<div class="footer">Generado desde el sistema de Carnicer\u00EDas Fabricius \u00B7 ${new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })}</div>`
+    abrirVentanaImprimible({ titulo: `PLUs Balanza Fabricius ${fechaHoyARG()}`, contenidoHtml: html })
+  }
   return (
     <div>
       <div className="card" style={{ marginBottom: 16, borderColor: 'var(--gold)' }}>
@@ -1466,6 +1500,7 @@ function PLUTab({ precios, ofertas = [], onRecargar }) {
         <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
           <button onClick={exportarCSV} className="btn btn-ghost" disabled={plus.length === 0}>📥 Exportar CSV simple</button>
           <button onClick={exportarQendra} className="btn btn-ghost" style={{ background: 'var(--gold)', color: '#000', fontWeight: 700 }} disabled={plus.length === 0}>⚖️ Exportar CSV para Qendra</button>
+          <button onClick={pdfPlusEmpleados} className="btn btn-ghost" title="Lista imprimible con el PLU de cada producto, agrupada por categoría — para el mostrador" disabled={plus.length === 0}>🖨️ PDF PLUs para empleados</button>
           <button onClick={() => { setConfirmandoRenum(c => !c); setRenumMsg(null) }} className="btn btn-ghost" disabled={renumerando}
             style={{ borderColor: 'var(--amber)', color: 'var(--amber)' }}>
             🔁 Renumerar PLUs (alfabético)
