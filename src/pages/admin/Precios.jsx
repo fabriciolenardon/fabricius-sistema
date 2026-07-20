@@ -1172,6 +1172,9 @@ export default function Precios() {
 
 function PLUTab({ precios, ofertas = [] }) {
   const [msg, setMsg] = useState('')
+  // % de descuento para Precio Lista 2 de la balanza (en Qendra la Lista 2
+  // está cargada ~10% abajo de la Lista 1). 0 = Lista 2 igual a Lista 1.
+  const [lista2Pct, setLista2Pct] = useState('10')
 
   // PLUs REALES: productos en `precios` que tienen codigo_balanza asignado.
   // El código viene de la asignación que hizo Fabri (vía Importar PLUs CSV
@@ -1188,65 +1191,64 @@ function PLUTab({ precios, ofertas = [] }) {
     }))
     .sort((a, b) => a.codigoNum - b.codigoNum)
 
-  // Mapeo de categorías Fabricius a Sectores de la balanza
-  function categoriaASector(cat) {
-    const map = {
-      bovino_mr: 1, bovino_corte: 2, bovino_brosa: 3, bovino_pieza: 4,
-      bovino_caja_cb: 5, bovino_caja_pt: 5,
-      cerdo_corte: 6, cerdo_pieza: 6,
-      embutido: 7, pollo: 8, rebozado: 9, almacen: 10, bebidas: 11,
+  // Precio minorista vigente de un PLU, respetando ofertas activas
+  // (tanto por precio fijo como por % de descuento — mismo criterio que
+  // aplicarOferta del componente principal).
+  function precioMinoristaVigente(p) {
+    const hoy = fechaHoyARG()
+    const base = Number(p.precio) || 0
+    const oferta = ofertas?.find(o =>
+      o.precio_id === p.precio_id &&
+      o.activa &&
+      o.fecha_inicio <= hoy &&
+      o.fecha_fin >= hoy &&
+      o.aplica_minorista !== false
+    )
+    if (!oferta || base <= 0) return base
+    if (oferta.descuento_pct != null && Number(oferta.descuento_pct) > 0) {
+      return Math.round(base * (1 - Number(oferta.descuento_pct) / 100))
     }
-    return map[cat] || 1
+    if (oferta.precio_oferta != null && Number(oferta.precio_oferta) > 0) {
+      return Number(oferta.precio_oferta)
+    }
+    return base
   }
 
-  // Días de vencimiento sugeridos por categoría
-  function diasVencDefault(cat) {
-    if (cat?.startsWith('bovino_pieza') || cat?.startsWith('bovino_caja')) return 7
-    if (cat?.startsWith('bovino') || cat?.startsWith('cerdo')) return 3
-    if (cat === 'pollo') return 2
-    if (cat === 'embutido') return 10
-    return 5
+  // Qendra trunca descripciones largas y la balanza no imprime bien
+  // caracteres fuera de ASCII: mayúsculas, sin acentos, máx. 18 caracteres.
+  function nombreParaQendra(nombre) {
+    return (nombre || '')
+      .toUpperCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^A-Z0-9 \-\/.]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 18)
   }
 
   function exportarCSV() {
-    const hoy = fechaHoyARG()
-
     // Formato simple (compatible con muchos importadores)
     const header = 'Codigo,Nombre,Precio\n'
-    const rows = plus.map(p => {
-      const ofertaVigente = ofertas?.find(o =>
-        o.precio_id === p.precio_id &&
-        o.activa &&
-        o.fecha_inicio <= hoy &&
-        o.fecha_fin >= hoy &&
-        o.aplica_minorista !== false
-      )
-      const precioFinal = ofertaVigente ? ofertaVigente.precio_oferta : p.precio
-      return `${p.codigo},"${p.nombre}",${precioFinal}`
-    }).join('\n')
+    const rows = plus.map(p =>
+      `${p.codigo},"${p.nombre}",${Math.round(precioMinoristaVigente(p))}`
+    ).join('\n')
     descargar(header + rows, 'PLU_Fabricius_simple.csv')
   }
 
-  // Formato Qendra extendido (con sector, tipo, vencimiento, etc.)
+  // CSV para el Asistente de importación de Qendra (Archivo → Importar).
+  // Mismas columnas que muestra la grilla de Productos de Qendra, así el
+  // "Mapeo de campos" del asistente es directo. Separador ";" y primera
+  // fila como títulos (tildar "Utilizar la primer fila como títulos").
   function exportarQendra() {
-    const hoy = fechaHoyARG()
-    // Header con formato Qendra: separador punto y coma, más campos
-    const header = 'codigo;descripcion;precio_lista1;tipo;tara;sector;dias_vencimiento;origen\n'
+    const pct = Number(lista2Pct) || 0
+    const header = '"Numero de seccion";"Nombre de seccion";"Codigo de PLU";"Descripcion";"Numero de PLU";"Precio lista 1";"Precio lista 2"\n'
     const rows = plus.map(p => {
-      const ofertaVigente = ofertas?.find(o =>
-        o.precio_id === p.precio_id &&
-        o.activa &&
-        o.fecha_inicio <= hoy &&
-        o.fecha_fin >= hoy &&
-        o.aplica_minorista !== false
-      )
-      const precio = ofertaVigente ? ofertaVigente.precio_oferta : p.precio
-      const sector = categoriaASector(p.categoria)
-      const diasVenc = diasVencDefault(p.categoria)
-      const nombre = (p.nombre || '').replace(/"/g, '').replace(/;/g, ',').toUpperCase().slice(0, 32)
-      return `${p.codigo};${nombre};${Number(precio).toFixed(2)};P;0.000;${sector};${diasVenc};ARGENTINA`
+      const precio1 = Math.round(precioMinoristaVigente(p))
+      // Lista 2 redondeada a $10 (mismo redondeo que usa la lista cargada en Qendra)
+      const precio2 = pct > 0 ? Math.round(precio1 * (1 - pct / 100) / 10) * 10 : precio1
+      return `1;"CARNICERIA";${p.codigoNum};"${nombreParaQendra(p.nombre)}";${p.codigoNum};${precio1};${precio2}`
     }).join('\n')
-    descargar(header + rows, 'PLU_Fabricius_Qendra.csv')
+    descargar(header + rows, `PLU_Qendra_${fechaHoyARG()}.csv`)
   }
 
   function descargar(contenido, nombre) {
@@ -1277,9 +1279,25 @@ function PLUTab({ precios, ofertas = [] }) {
             <strong>{plus.length}</strong> productos con PLU asignado.
           </div>
         )}
-        <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
           <button onClick={exportarCSV} className="btn btn-ghost" disabled={plus.length === 0}>📥 Exportar CSV simple</button>
-          <button onClick={exportarQendra} className="btn btn-ghost" style={{ background: 'var(--gold)', color: '#000', fontWeight: 700 }} disabled={plus.length === 0}>⚖️ Exportar para Qendra (completo)</button>
+          <button onClick={exportarQendra} className="btn btn-ghost" style={{ background: 'var(--gold)', color: '#000', fontWeight: 700 }} disabled={plus.length === 0}>⚖️ Exportar CSV para Qendra</button>
+          <label style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+            Lista 2: −
+            <input type="number" min="0" max="50" step="0.5" value={lista2Pct}
+              onChange={e => setLista2Pct(e.target.value)}
+              style={{ width: 55, background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '4px 8px', fontSize: 12 }} />
+            % (0 = igual a Lista 1)
+          </label>
+        </div>
+        <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
+          <strong style={{ color: 'var(--text)' }}>Cómo actualizar los precios de la balanza:</strong> descargá el CSV para Qendra
+          y en Qendra andá a <strong>Archivo → Importar → Asistente de importación</strong> →
+          Productos, formato <strong>Archivo delimitado (*.csv)</strong>, tildá <strong>"Utilizar la primer fila como títulos"</strong>,
+          delimitador <strong>punto y coma (;)</strong>. En el <strong>Mapeo de campos</strong> asigná cada columna a su campo
+          (los nombres coinciden). Si solo querés actualizar precios, mapeá <strong>Código de PLU</strong> +
+          <strong> Precio lista 1</strong> (y Lista 2 si la usás) y dejá el resto sin asignar.
+          Después mandá los datos a la balanza como siempre (Comunicación).
         </div>
         {plus.length > 0 && (
           <table>
