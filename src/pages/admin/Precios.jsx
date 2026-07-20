@@ -1559,15 +1559,21 @@ function PLUTab({ precios, ofertas = [], onRecargar, categoriasOrden = [] }) {
           </label>
         </div>
         <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
-          <strong style={{ color: 'var(--text)' }}>Cómo actualizar los precios de la balanza:</strong> descargá el CSV para Qendra
-          (sale en el formato NATIVO de Qendra, sin fila de títulos) y en Qendra andá a
-          <strong> Archivo → Importar → Asistente de importación</strong> →
-          Productos, formato <strong>Archivo delimitado (*.csv)</strong>, delimitador <strong>punto y coma (;)</strong> y
-          <strong> "Utilizar la primer fila como títulos" DESTILDADO</strong>. En el <strong>Mapeo de campos</strong> asigná por posición:
-          Columna 1 = Nombre de sección, 2 = Número de PLU, 3 = Descripción, 4 = Código de PLU,
-          5 = Precio lista 1, 6 = Precio lista 2, 7 = Tipo de venta — el resto sin asignar.
-          Sección: elegí la opción "contiene el <strong>nombre</strong> de la sección".
-          Después mandá los datos a la balanza como siempre (Comunicación).
+          <strong style={{ color: 'var(--text)' }}>Cómo actualizar los precios de la balanza</strong> (probado 20/07/2026):
+          descargá el CSV para Qendra (formato NATIVO, sin fila de títulos) y en Qendra:
+          <strong> Archivo → Importar → Asistente de importación</strong> → Productos,
+          formato <strong>Archivo delimitado (*.csv)</strong>, delimitador <strong>punto y coma (;)</strong>,
+          <strong> "Utilizar la primer fila como títulos" DESTILDADO</strong>.
+          ⚠️ <strong>Elegí el archivo A MANO con el botón "..."</strong> — el asistente recuerda la ruta anterior y si no
+          la cambiás importa el archivo viejo. En el <strong>Mapeo de campos</strong> (las columnas se cuentan <strong>desde CERO</strong>):
+          Nombre de sección = <strong>Columna 0</strong> · Número de PLU = <strong>Columna 1</strong> · Descripción = <strong>Columna 2</strong> ·
+          Código de PLU = <strong>Columna 3</strong> · Precio lista 1 = <strong>Columna 4</strong> · Precio lista 2 = <strong>Columna 5</strong> ·
+          Tipo de venta = <strong>Columna 6</strong> — el resto sin asignar.
+          Sección: opción "contiene el <strong>nombre</strong> de la sección" (CARNICERIA → CARNICERIA); tipo de venta Peso→Peso, Unidad→Unidad.
+          Controles: la vista previa arranca con AGUJA ECONOMICA y la pantalla final dice <strong>"128 registros a importar"</strong> (si dice
+          "0 registros", el archivo o el mapeo están mal — NO inicies). Verificá en Productos/Secciones que la cantidad sea la esperada y
+          recién ahí mandá los datos a la balanza (Comunicación). Si Chrome baja un archivo con formato viejo, exportá desde una
+          ventana de incógnito (Ctrl+Shift+N).
         </div>
 
         {confirmandoRenum && (
