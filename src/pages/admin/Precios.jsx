@@ -1161,7 +1161,7 @@ export default function Precios() {
       )}
 
      {tab === 'plu' && (
-  <PLUTab precios={precios} ofertas={ofertas} />
+  <PLUTab precios={precios} ofertas={ofertas} onRecargar={cargar} />
 )}
       {tab === 'combos' && <CombosEditor precios={precios} />}
       {tab === 'limpieza' && <LimpiezaDuplicados />}
@@ -1170,8 +1170,71 @@ export default function Precios() {
   )
 }
 
-function PLUTab({ precios, ofertas = [] }) {
+// Orden de las listas para renumerar PLUs: mismo orden de categorías que el
+// catálogo impreso, correlativo desde 1; las cajas PT van en bloque aparte
+// desde 120 para no mezclarse con las listas del mostrador.
+const ORDEN_RENUM_PLU = ['bovino_corte', 'bovino_pieza', 'bovino_brosa', 'cerdo_corte', 'cerdo_pieza', 'embutido', 'pollo', 'rebozado']
+const CAT_CAJAS_PLU = 'bovino_caja_pt'
+const PLU_INICIO_CAJAS = 120
+
+function PLUTab({ precios, ofertas = [], onRecargar }) {
   const [msg, setMsg] = useState('')
+  const [confirmandoRenum, setConfirmandoRenum] = useState(false)
+  const [renumerando, setRenumerando] = useState(false)
+  const [renumMsg, setRenumMsg] = useState(null) // { tipo, texto }
+
+  // Renumera TODOS los PLUs: alfabético dentro de cada categoría (mismo sort
+  // que el catálogo impreso), bloques correlativos por categoría. Dos fases
+  // porque codigo_balanza tiene índice UNIQUE: primero se liberan todos y
+  // después se asignan los nuevos. Si falla a mitad, volver a ejecutar lo
+  // deja consistente (recalcula todo desde cero).
+  async function renumerarPLUs() {
+    setRenumerando(true)
+    setRenumMsg(null)
+    const activos = (precios || []).filter(p => !p.nombre?.startsWith('ZZ_'))
+    const asignacion = []
+    let n = 1
+    for (const cat of ORDEN_RENUM_PLU) {
+      activos.filter(p => p.categoria === cat)
+        .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '', 'es'))
+        .forEach(p => asignacion.push({ id: p.id, plu: n++ }))
+    }
+    let nc = PLU_INICIO_CAJAS
+    activos.filter(p => p.categoria === CAT_CAJAS_PLU)
+      .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '', 'es'))
+      .forEach(p => asignacion.push({ id: p.id, plu: nc++ }))
+
+    // Fase 1: liberar todos los PLUs de las categorías con lista
+    const { error: eLib } = await supabase.from('precios')
+      .update({ codigo_balanza: null })
+      .in('categoria', [...ORDEN_RENUM_PLU, CAT_CAJAS_PLU])
+    if (eLib) {
+      setRenumMsg({ tipo: 'error', texto: '❌ Error liberando PLUs: ' + eLib.message })
+      setRenumerando(false)
+      return
+    }
+    // Fase 2: asignar los nuevos, en tandas para no saturar
+    for (let i = 0; i < asignacion.length; i += 25) {
+      const tanda = asignacion.slice(i, i + 25)
+      const resultados = await Promise.all(
+        tanda.map(a => supabase.from('precios').update({ codigo_balanza: a.plu }).eq('id', a.id))
+      )
+      const conError = resultados.find(r => r.error)
+      if (conError) {
+        setRenumMsg({ tipo: 'error', texto: `❌ Error asignando PLUs: ${conError.error.message}. Volvé a apretar Renumerar para completar.` })
+        setRenumerando(false)
+        if (onRecargar) await onRecargar()
+        return
+      }
+    }
+    setRenumMsg({
+      tipo: 'ok',
+      texto: `✅ ${asignacion.length} PLUs renumerados en orden alfabético. ⚠️ AHORA: exportá el CSV para Qendra (botón de arriba) y cargalo en la balanza — hasta que no la actualices, las etiquetas que imprima decodifican al producto equivocado. Tirá también las etiquetas ya impresas con PLUs viejos.`,
+    })
+    setConfirmandoRenum(false)
+    setRenumerando(false)
+    if (onRecargar) await onRecargar()
+  }
 
   // PLUs REALES: productos en `precios` que tienen codigo_balanza asignado.
   // El código viene de la asignación que hizo Fabri (vía Importar PLUs CSV
@@ -1280,7 +1343,40 @@ function PLUTab({ precios, ofertas = [] }) {
         <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
           <button onClick={exportarCSV} className="btn btn-ghost" disabled={plus.length === 0}>📥 Exportar CSV simple</button>
           <button onClick={exportarQendra} className="btn btn-ghost" style={{ background: 'var(--gold)', color: '#000', fontWeight: 700 }} disabled={plus.length === 0}>⚖️ Exportar para Qendra (completo)</button>
+          <button onClick={() => { setConfirmandoRenum(c => !c); setRenumMsg(null) }} className="btn btn-ghost" disabled={renumerando}
+            style={{ borderColor: 'var(--amber)', color: 'var(--amber)' }}>
+            🔁 Renumerar PLUs (alfabético)
+          </button>
         </div>
+
+        {confirmandoRenum && (
+          <div style={{ background: '#3a2a1a', border: '1px solid var(--amber)', borderRadius: 10, padding: 14, marginBottom: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--amber)', marginBottom: 6 }}>
+              🔁 ¿Renumerar TODOS los PLUs?
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text)', marginBottom: 10 }}>
+              Se eliminan todos los PLUs actuales y se reasignan en <strong>orden alfabético dentro de cada lista</strong>, correlativos por categoría
+              (cortes bovinos desde 1, después piezas, brosas, cerdo, embutidos, pollo, rebozados; cajas PT desde {PLU_INICIO_CAJAS}).
+              Los productos nuevos sin PLU quedan integrados en su lugar.
+              <br /><strong style={{ color: 'var(--amber)' }}>⚠️ Después hay que exportar el CSV para Qendra y recargar la balanza Cuora Max</strong> — con la balanza desactualizada, las etiquetas cobran el producto equivocado. Las etiquetas ya impresas quedan inválidas.
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={renumerarPLUs} disabled={renumerando} className="btn btn-gold">
+                {renumerando ? '⏳ Renumerando…' : '✅ Sí, renumerar todo'}
+              </button>
+              <button onClick={() => setConfirmandoRenum(false)} disabled={renumerando} className="btn btn-ghost">Cancelar</button>
+            </div>
+          </div>
+        )}
+
+        {renumMsg && (
+          <div style={{
+            background: renumMsg.tipo === 'error' ? '#3a1a1a' : '#1a2a1a',
+            border: `1px solid ${renumMsg.tipo === 'error' ? '#ff6b6b' : '#3f6d2f'}`,
+            color: renumMsg.tipo === 'error' ? '#ff8b8b' : '#7dff7d',
+            borderRadius: 10, padding: '12px 16px', marginBottom: 16, fontSize: 13, fontWeight: 600,
+          }}>{renumMsg.texto}</div>
+        )}
         {plus.length > 0 && (
           <table>
             <thead>
