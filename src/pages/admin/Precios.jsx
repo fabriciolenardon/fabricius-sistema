@@ -525,6 +525,10 @@ export default function Precios() {
             style={{ padding: '8px 14px', background: '#25D366', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
             📄 PDF Carnicerías → WhatsApp
           </button>
+          <button onClick={() => pdfLista('franquicia')} title="Lista de carnicerías + insumos (la central les vende insumos solo a las franquicias)"
+            style={{ padding: '8px 14px', background: '#25D366', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+            🏪 PDF Franquicias (c/insumos) → WhatsApp
+          </button>
         </div>
       )}
       {tab === 'ver' && (
