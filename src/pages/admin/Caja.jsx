@@ -875,6 +875,7 @@ export default function Caja() {
           { id: 'vender',    label: '💵 Vender' },
           { id: 'historial', label: '📊 Historial' },
           { id: 'arqueo',    label: '🧾 Arqueo' },
+          { id: 'ticket_manual', label: '📝 Ticket manual' },
         ].map(t => (
           <button key={t.id} onClick={() => setVistaCaja(t.id)}
             style={{
@@ -890,6 +891,7 @@ export default function Caja() {
 
       {vistaCaja === 'historial' && <HistorialCaja />}
       {vistaCaja === 'arqueo' && <ArqueoCaja />}
+      {vistaCaja === 'ticket_manual' && <TicketManualCaja onGuardado={cargarTodo} />}
       {/* Vista vender: se oculta con display:none para no desmontar el estado/foco */}
       <div style={{ display: vistaCaja === 'vender' ? 'block' : 'none' }}>
 
@@ -1543,4 +1545,111 @@ const kbdStyle = {
   display: 'inline-block', minWidth: 28, padding: '2px 6px', background: 'var(--surface2)',
   border: '1px solid var(--border)', borderRadius: 4, fontFamily: 'monospace',
   fontSize: 11, fontWeight: 700, color: 'var(--gold)', marginRight: 8, textAlign: 'center',
+}
+
+// ============================================================
+// TICKET MANUAL — cargar una venta que no se registró en su momento
+// ------------------------------------------------------------
+// Para los tickets "olvidados": se cobró en el mostrador pero no se
+// cargó en la Caja (sistema caído, apuro, etc.). Se registra con la
+// FECHA REAL de la venta para que el día cierre bien en historial,
+// cierre semanal y reportes. Entra como origen 'caja' (cuenta como
+// venta minorista normal) con categoría 'manual': NO descuenta stock
+// (si era carne pesada, se cuadra en Ajuste Stock) y la anulación no
+// intenta revertir ningún bucket.
+// ============================================================
+function TicketManualCaja({ onGuardado }) {
+  const [form, setForm] = useState({ fecha: fechaHoyARG(), hora: '12:00', descripcion: '', kg: '', total: '', medio: 'efectivo' })
+  const [guardando, setGuardando] = useState(false)
+  const [msg, setMsg] = useState(null)
+
+  const inp = {
+    background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)',
+    borderRadius: 8, padding: '10px 14px', fontFamily: "'DM Sans',sans-serif", fontSize: 14,
+    width: '100%', boxSizing: 'border-box',
+  }
+
+  async function guardar() {
+    const total = parseNumero(form.total)
+    const hoy = fechaHoyARG()
+    if (!(total > 0)) { setMsg({ t: 'error', m: '❌ Ingresá el total del ticket' }); return }
+    if (!form.fecha || form.fecha > hoy) { setMsg({ t: 'error', m: '❌ La fecha no puede ser futura' }); return }
+    setGuardando(true)
+    const hora = form.hora || '12:00'
+    const { error } = await supabase.from('ventas_minoristas').insert({
+      fecha: form.fecha,
+      hora,
+      turno: (parseInt(hora, 10) || 12) < 14 ? 'mañana' : 'tarde',
+      origen: 'caja',
+      items: [{
+        descripcion: (form.descripcion || '').trim() || 'Ticket cargado a mano',
+        categoria: 'manual',
+        kg: parseNumero(form.kg) || 0,
+        precio: null,
+        importe: total,
+        producto_id: null,
+        stock_origen: null,
+      }],
+      total,
+      efectivo: form.medio === 'efectivo' ? total : 0,
+      debito: form.medio === 'debito' ? total : 0,
+      transferencia: form.medio === 'transferencia' ? total : 0,
+      notas: `Ticket cargado manualmente el ${hoy} (venta no registrada en su momento)`,
+    })
+    setGuardando(false)
+    if (error) { setMsg({ t: 'error', m: '❌ ' + error.message }); return }
+    setMsg({ t: 'ok', m: `✅ Ticket de ${fmt(total)} registrado con fecha ${form.fecha}` })
+    setForm({ fecha: fechaHoyARG(), hora: '12:00', descripcion: '', kg: '', total: '', medio: 'efectivo' })
+    onGuardado?.()
+  }
+
+  return (
+    <div style={{ maxWidth: 640 }}>
+      <div className="card">
+        <div className="card-title">📝 Cargar ticket manual (venta olvidada)</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
+          Para ventas que se cobraron en el mostrador pero no se registraron en su momento.
+          Se guarda con la fecha real así el día queda bien en el historial y el cierre.
+        </div>
+        <div className="form-row">
+          <div className="form-group"><label>Fecha de la venta</label>
+            <input type="date" max={fechaHoyARG()} value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} style={inp} />
+          </div>
+          <div className="form-group"><label>Hora (aprox.)</label>
+            <input type="time" value={form.hora} onChange={e => setForm(f => ({ ...f, hora: e.target.value }))} style={inp} />
+          </div>
+        </div>
+        <div className="form-group"><label>Descripción</label>
+          <input placeholder="Ej: Asado + chorizos (ticket sin cargar)" value={form.descripcion} onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))} style={inp} />
+        </div>
+        <div className="form-row">
+          <div className="form-group"><label>Total cobrado ($)</label>
+            <input type="number" step="0.01" min="0" placeholder="0" value={form.total} onChange={e => setForm(f => ({ ...f, total: e.target.value }))} style={{ ...inp, borderColor: 'var(--gold)', fontSize: 18, fontWeight: 700 }} />
+          </div>
+          <div className="form-group"><label>Kg (opcional)</label>
+            <input type="number" step="0.001" min="0" placeholder="0" value={form.kg} onChange={e => setForm(f => ({ ...f, kg: e.target.value }))} style={inp} />
+          </div>
+          <div className="form-group"><label>Medio de pago</label>
+            <select value={form.medio} onChange={e => setForm(f => ({ ...f, medio: e.target.value }))} style={inp}>
+              <option value="efectivo">💵 Efectivo</option>
+              <option value="debito">💳 Débito</option>
+              <option value="transferencia">🏦 Transferencia</option>
+            </select>
+          </div>
+        </div>
+        {msg && (
+          <div style={{ background: msg.t === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${msg.t === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 14px', marginBottom: 12, color: msg.t === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600, fontSize: 13 }}>
+            {msg.m}
+          </div>
+        )}
+        <button className="btn btn-gold" onClick={guardar} disabled={guardando} style={{ width: '100%', fontSize: 15, padding: '12px' }}>
+          {guardando ? '⏳ Guardando…' : '📝 Registrar ticket'}
+        </button>
+        <div style={{ background: '#1a1a2a', border: '1px solid #2a2a5a', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#7db5ff', marginTop: 14 }}>
+          ℹ️ El ticket manual <strong>no descuenta stock</strong> (si era carne pesada, cuadralo en Ajuste Stock) y
+          si el día ya tenía el arqueo cerrado, ese arqueo no se recalcula — la venta suma igual al historial y al cierre semanal.
+        </div>
+      </div>
+    </div>
+  )
 }
