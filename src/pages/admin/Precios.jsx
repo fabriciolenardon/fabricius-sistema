@@ -1461,23 +1461,31 @@ function PLUTab({ precios, ofertas = [], onRecargar, categoriasOrden = [] }) {
     ]
     const labelDe = clave => categoriasOrden.find(c => c.clave === clave)?.label || clave
     const fechaTxt = new Date().toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'America/Argentina/Buenos_Aires' })
-    let html = `<div class="badge">CARNICER\u00CDAS FABRICIUS</div>`
-    html += `<h1 class="h1">\uD83C\uDFF7\uFE0F PLUs de la Balanza</h1>`
-    html += `<div class="sub">Qu\u00E9 c\u00F3digo tiene cada producto \u00B7 Vigente al ${fechaTxt}</div>`
+    // Layout a DOS COLUMNAS compacto (CSS multicol): entra el doble por hoja.
+    // Filas chicas tipo listado, sin tabla \u2014 las tablas no fragmentan bien
+    // entre columnas al imprimir. Cada fila evita cortarse al medio.
+    let html = `<style>
+      .plu-cols { column-count: 2; column-gap: 18px; column-rule: 1px solid #ddd; }
+      .plu-cat { break-inside: avoid; background: #1a1408; color: #c9a84c; font-size: 11px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; padding: 3px 8px; border-radius: 3px; margin: 8px 0 3px; }
+      .plu-cols > .plu-cat:first-child { margin-top: 0; }
+      .plu-fila { break-inside: avoid; display: flex; align-items: baseline; gap: 7px; padding: 1.5px 2px; border-bottom: 1px solid #eee; font-size: 10.5px; }
+      .plu-cod { font-family: monospace; font-weight: 800; font-size: 11.5px; background: #f0e6c8; border-radius: 3px; padding: 0 5px; min-width: 34px; text-align: center; }
+      .plu-nom { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+      .plu-pre { font-weight: 700; white-space: nowrap; font-size: 10px; color: #444; }
+    </style>`
+    html += `<div class="badge">CARNICER\u00CDAS FABRICIUS</div>`
+    html += `<h1 class="h1" style="font-size:20px">\uD83C\uDFF7\uFE0F PLUs de la Balanza</h1>`
+    html += `<div class="sub" style="margin-bottom:8px">Qu\u00E9 c\u00F3digo tiene cada producto \u00B7 Vigente al ${fechaTxt}</div>`
+    html += '<div class="plu-cols">'
     clavesOrdenadas.forEach(clave => {
       const items = [...porCat[clave]].sort((a, b) => a.codigoNum - b.codigoNum)
-      html += `<h2 class="h2">${labelDe(clave)}</h2>`
-      html += '<table><thead><tr><th style="width:70px">PLU</th><th>Producto</th><th class="right">Precio minorista</th></tr></thead><tbody>'
+      html += `<div class="plu-cat">${labelDe(clave)}</div>`
       items.forEach(p => {
-        html += '<tr>'
-        html += `<td class="bold" style="font-family:monospace;font-size:15px">${p.codigo}</td>`
-        html += `<td>${p.nombre}</td>`
-        html += `<td class="right">${fmt(precioMinoristaVigente(p))}</td>`
-        html += '</tr>'
+        html += `<div class="plu-fila"><span class="plu-cod">${p.codigo}</span><span class="plu-nom">${p.nombre}</span><span class="plu-pre">${fmt(precioMinoristaVigente(p))}</span></div>`
       })
-      html += '</tbody></table>'
     })
-    html += `<div class="footer">Generado desde el sistema de Carnicer\u00EDas Fabricius \u00B7 ${new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })}</div>`
+    html += '</div>'
+    html += `<div class="footer" style="margin-top:14px">Generado desde el sistema de Carnicer\u00EDas Fabricius \u00B7 ${new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })}</div>`
     abrirVentanaImprimible({ titulo: `PLUs Balanza Fabricius ${fechaHoyARG()}`, contenidoHtml: html })
   }
   return (
