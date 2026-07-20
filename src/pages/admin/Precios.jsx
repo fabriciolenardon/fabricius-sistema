@@ -1380,27 +1380,15 @@ function PLUTab({ precios, ofertas = [], onRecargar, categoriasOrden = [] }) {
     }))
     .sort((a, b) => a.codigoNum - b.codigoNum)
 
-  // Precio minorista vigente de un PLU, respetando ofertas activas
-  // (tanto por precio fijo como por % de descuento — mismo criterio que
-  // aplicarOferta del componente principal).
-  function precioMinoristaVigente(p) {
-    const hoy = fechaHoyARG()
-    const base = Number(p.precio) || 0
-    const oferta = ofertas?.find(o =>
-      o.precio_id === p.precio_id &&
-      o.activa &&
-      o.fecha_inicio <= hoy &&
-      o.fecha_fin >= hoy &&
-      o.aplica_minorista !== false
-    )
-    if (!oferta || base <= 0) return base
-    if (oferta.descuento_pct != null && Number(oferta.descuento_pct) > 0) {
-      return Math.round(base * (1 - Number(oferta.descuento_pct) / 100))
-    }
-    if (oferta.precio_oferta != null && Number(oferta.precio_oferta) > 0) {
-      return Number(oferta.precio_oferta)
-    }
-    return base
+  // Precio para la BALANZA: SIEMPRE el precio de lista normal, SIN ofertas.
+  // Regla de Fabricio (20/07/2026): la oferta la aplica la CAJA cuando
+  // escanea el producto — si la balanza llevara el precio promocional, la
+  // etiqueta saldría con el importe ya rebajado y la Caja descontaría DE
+  // NUEVO (doble descuento), además de derivar mal el peso (importe ÷
+  // precio normal). Antes acá se aplicaban las ofertas vigentes y la
+  // balanza quedó cargada con la falda especial a precio de oferta.
+  function precioBalanza(p) {
+    return Number(p.precio) || 0
   }
 
   // Qendra trunca descripciones largas y la balanza no imprime bien
@@ -1419,7 +1407,7 @@ function PLUTab({ precios, ofertas = [], onRecargar, categoriasOrden = [] }) {
     // Formato simple (compatible con muchos importadores)
     const header = 'Codigo,Nombre,Precio\n'
     const rows = plus.map(p =>
-      `${p.codigo},"${p.nombre}",${Math.round(precioMinoristaVigente(p))}`
+      `${p.codigo},"${p.nombre}",${Math.round(precioBalanza(p))}`
     ).join('\n')
     descargar(header + rows, 'PLU_Fabricius_simple.csv')
   }
@@ -1440,7 +1428,7 @@ function PLUTab({ precios, ofertas = [], onRecargar, categoriasOrden = [] }) {
     const fechaQendra = `${f.slice(8, 10)}/${f.slice(5, 7)}/${f.slice(0, 4)} 12:00:00`
     const conComa = n => `${n},00`
     const rows = plus.map(p => {
-      const precio1 = Math.round(precioMinoristaVigente(p))
+      const precio1 = Math.round(precioBalanza(p))
       // Lista 2 redondeada a $10 (mismo redondeo que usa la lista cargada en Qendra)
       const precio2 = pct > 0 ? Math.round(precio1 * (1 - pct / 100) / 10) * 10 : precio1
       const tipoVenta = (p.pesable ? 'Peso' : 'Unidad').padEnd(11, ' ')
@@ -1560,7 +1548,11 @@ function PLUTab({ precios, ofertas = [], onRecargar, categoriasOrden = [] }) {
         </div>
         <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
           <strong style={{ color: 'var(--text)' }}>Cómo actualizar los precios de la balanza</strong> (probado 20/07/2026):
-          descargá el CSV para Qendra (formato NATIVO, sin fila de títulos) y en Qendra:
+          el CSV va SIEMPRE con los <strong>precios de lista normales, sin ofertas</strong> (la oferta la aplica la Caja al escanear —
+          con el precio promocional en la balanza se descontaría dos veces).
+          ⚠️ Si Qendra YA tiene productos cargados, <strong>primero borralos todos</strong> (Productos → seleccionar todo → Borrar):
+          la importación NO pisa los existentes — los saltea en silencio y quedan los precios viejos.
+          Descargá el CSV para Qendra (formato NATIVO, sin fila de títulos) y en Qendra:
           <strong> Archivo → Importar → Asistente de importación</strong> → Productos,
           formato <strong>Archivo delimitado (*.csv)</strong>, delimitador <strong>punto y coma (;)</strong>,
           <strong> "Utilizar la primer fila como títulos" DESTILDADO</strong>.
