@@ -1564,8 +1564,16 @@ function mapearStock(cat, stockOrigen) {
 // persistido, así la anulación revierte al mismo bucket). También se
 // puede sumar una línea libre (categoría 'manual') que no toca stock.
 // ============================================================
+// Listas de precios disponibles en el ticket manual: qué campo de `precios`
+// se usa para valorizar cada producto agregado.
+const LISTAS_TICKET_MANUAL = {
+  minorista:  { label: '🟢 Minorista',  campo: 'precio_minorista' },
+  mayorista:  { label: '🟡 Mayorista',  campo: 'precio_mayorista' },
+  carniceria: { label: '🔴 Carnicería', campo: 'precio_carniceria' },
+}
+
 function TicketManualCaja({ onGuardado }) {
-  const [form, setForm] = useState({ fecha: fechaHoyARG(), hora: '12:00', medio: 'efectivo' })
+  const [form, setForm] = useState({ fecha: fechaHoyARG(), hora: '12:00', medio: 'efectivo', lista: 'minorista' })
   const [items, setItems] = useState([])
   const [precios, setPrecios] = useState([])
   const [busqueda, setBusqueda] = useState('')
@@ -1577,10 +1585,13 @@ function TicketManualCaja({ onGuardado }) {
 
   useEffect(() => {
     supabase.from('precios')
-      .select('id, nombre, categoria, precio_minorista, stock_origen, kg_por_unidad')
+      .select('id, nombre, categoria, precio_minorista, precio_mayorista, precio_carniceria, stock_origen, kg_por_unidad')
       .order('nombre')
       .then(({ data }) => setPrecios((data || []).filter(p => !p.nombre?.startsWith('ZZ_'))))
   }, [])
+
+  // Precio del producto según la lista elegida para este ticket
+  const precioDe = p => Number(p?.[LISTAS_TICKET_MANUAL[form.lista]?.campo || 'precio_minorista']) || 0
 
   const inp = {
     background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)',
@@ -1604,7 +1615,7 @@ function TicketManualCaja({ onGuardado }) {
     if (!prodSel) { setMsg({ t: 'error', m: '❌ Elegí un producto de la lista' }); return }
     const kg = parseNumero(kgInput)
     if (!(kg > 0)) { setMsg({ t: 'error', m: '❌ Ingresá los kg (o unidades) vendidos' }); return }
-    const precio = Number(prodSel.precio_minorista) || 0
+    const precio = precioDe(prodSel)
     setItems(prev => [...prev, {
       descripcion: prodSel.nombre,
       categoria: prodSel.categoria,
@@ -1615,7 +1626,10 @@ function TicketManualCaja({ onGuardado }) {
       stock_origen: stockOrigenDe(prodSel),
       kg_por_unidad: prodSel.kg_por_unidad || null,
     }])
-    setProdSel(null); setBusqueda(''); setKgInput(''); setMsg(null)
+    setProdSel(null); setBusqueda(''); setKgInput('')
+    // Si el producto no tiene precio en la lista elegida, se agrega en $0 y
+    // se avisa para que el importe se corrija a mano en la línea.
+    setMsg(precio > 0 ? null : { t: 'error', m: `⚠️ ${prodSel.nombre} no tiene precio en la lista ${LISTAS_TICKET_MANUAL[form.lista].label} — corregí el importe de la línea a mano` })
   }
 
   function agregarLibre() {
@@ -1704,6 +1718,11 @@ function TicketManualCaja({ onGuardado }) {
               <option value="transferencia">🏦 Transferencia</option>
             </select>
           </div>
+          <div className="form-group"><label>Lista de precios</label>
+            <select value={form.lista} onChange={e => setForm(f => ({ ...f, lista: e.target.value }))} style={{ ...inp, borderColor: 'var(--gold)' }}>
+              {Object.entries(LISTAS_TICKET_MANUAL).map(([id, l]) => <option key={id} value={id}>{l.label}</option>)}
+            </select>
+          </div>
         </div>
 
         {/* Agregar producto real (descuenta stock) */}
@@ -1719,7 +1738,7 @@ function TicketManualCaja({ onGuardado }) {
                     style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border)', fontSize: 13 }}
                     onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
                     onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                    {p.nombre} <span style={{ color: 'var(--muted)', fontSize: 11 }}>· {fmt(p.precio_minorista)}/kg</span>
+                    {p.nombre} <span style={{ color: 'var(--muted)', fontSize: 11 }}>· {fmt(precioDe(p))}/kg ({LISTAS_TICKET_MANUAL[form.lista].label.slice(2).trim()})</span>
                   </div>
                 ))}
               </div>
@@ -1729,7 +1748,7 @@ function TicketManualCaja({ onGuardado }) {
             <input type="number" step="0.001" min="0" placeholder="Kg / unidades" value={kgInput} onChange={e => setKgInput(e.target.value)}
               style={{ ...inp, width: 140, borderColor: 'var(--gold)' }} />
             {prodSel && parseNumero(kgInput) > 0 && (
-              <span style={{ fontSize: 13, color: 'var(--muted)' }}>= <strong style={{ color: 'var(--gold)' }}>{fmt(parseNumero(kgInput) * (Number(prodSel.precio_minorista) || 0))}</strong></span>
+              <span style={{ fontSize: 13, color: 'var(--muted)' }}>= <strong style={{ color: 'var(--gold)' }}>{fmt(parseNumero(kgInput) * precioDe(prodSel))}</strong></span>
             )}
             <button className="btn btn-gold" onClick={agregarProducto} style={{ marginLeft: 'auto' }}>➕ Agregar</button>
           </div>
