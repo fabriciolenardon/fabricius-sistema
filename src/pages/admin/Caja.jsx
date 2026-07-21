@@ -85,6 +85,11 @@ export default function Caja() {
   // que tienen tracking individual en piezas_stock).
   const [selectorPieza, setSelectorPieza] = useState(null)    // { producto } | null
   const [piezasDisp, setPiezasDisp] = useState([])            // piezas disponibles
+  // 🛡️ Guardia anti-disparate: cantidad enorme en un ítem del mostrador =
+  // casi seguro un escaneo/tipeo roto. Pide confirmación inline antes de
+  // agregarlo al carrito (20/07: una etiqueta de prueba de la balanza metió
+  // 1.060 kg de puchero en una venta y dejó el stock bovino en −812 kg).
+  const [confirmarCantidad, setConfirmarCantidad] = useState(null) // { producto, cantidad, precioOverride } | null
   const [ultimaVenta, setUltimaVenta] = useState(null)
   const [ventasHoy, setVentasHoy] = useState([])
   const [vistaCaja, setVistaCaja] = useState('vender') // 'vender' | 'historial' | 'arqueo'
@@ -253,7 +258,7 @@ export default function Caja() {
     showMsg(`❌ Código ${clean} no reconocido`, 'error', 3000)
   }
 
-  function agregarItem(producto, cantidad, precioOverride = null) {
+  function agregarItem(producto, cantidad, precioOverride = null, cantidadConfirmada = false) {
     // Interceptar productos de categoría caja CB/PT: en vez de agregar al
     // carrito directo, abrir el selector de caja individual del stock.
     if (producto?.categoria === 'bovino_caja_cb' || producto?.categoria === 'bovino_caja_pt') {
@@ -264,6 +269,15 @@ export default function Caja() {
     // el selector de piezas individuales del stock (piezas_stock).
     if (producto?.vende_por_pieza) {
       setSelectorPieza({ producto, precioOverride })
+      return
+    }
+
+    // 🛡️ Más de 50 kg/unidades en un solo ítem de mostrador: frenar y pedir
+    // confirmación inline (modal propio — window.confirm NO: iOS lo suprime
+    // y la acción se pierde). Un escaneo con el EAN a medio configurar puede
+    // derivar un peso disparatado (caso real 20/07: 1.060 kg de puchero).
+    if (!cantidadConfirmada && parseFloat(cantidad) > 50) {
+      setConfirmarCantidad({ producto, cantidad: parseFloat(cantidad), precioOverride })
       return
     }
 
@@ -1208,6 +1222,32 @@ export default function Caja() {
       </div>
 
       {/* ============ MODAL SELECTOR DE CAJA CB/PT ============ */}
+      {confirmarCantidad && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div style={{ background: 'var(--surface)', border: '2px solid var(--amber)', borderRadius: 12, padding: 24, maxWidth: 440, width: '100%' }}>
+            <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--amber)', marginBottom: 10 }}>⚠️ Cantidad inusual — verificá</div>
+            <div style={{ fontSize: 14, marginBottom: 8 }}>
+              Estás por cargar{' '}
+              <strong style={{ color: 'var(--amber)', fontSize: 18 }}>
+                {confirmarCantidad.cantidad.toLocaleString('es-AR', { maximumFractionDigits: 2 })} {esPesable(confirmarCantidad.producto) ? 'kg' : 'unidades'}
+              </strong>{' '}
+              de <strong>{confirmarCantidad.producto.nombre}</strong>.
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 18 }}>
+              Una cantidad así de grande en el mostrador suele ser un escaneo o tipeo erróneo (el stock lo descuenta tal cual). Si es una venta grande de verdad, confirmala y sigue normal.
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button className="btn btn-ghost" onClick={() => setConfirmarCantidad(null)}>✗ Cancelar</button>
+              <button className="btn btn-gold" onClick={() => {
+                const c = confirmarCantidad
+                setConfirmarCantidad(null)
+                agregarItem(c.producto, c.cantidad, c.precioOverride, true)
+              }}>✓ Sí, es correcto</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {selectorCaja && (() => {
         const tipoCaja = CATEGORIA_A_TIPO_CAJA[selectorCaja.producto.categoria]
         const productoId = selectorCaja.producto.id
