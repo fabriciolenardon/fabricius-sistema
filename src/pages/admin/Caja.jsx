@@ -661,41 +661,8 @@ export default function Caja() {
     //   3) Cajones de pollo/rebozado → descuenta KG DEL PRODUCTO BASE
     //      multiplicando unidades × kg_por_cajón (parseado del nombre,
     //      ej. "X20KG" → 20 kg por cada cajón vendido).
-    // Función que decide a qué tipo de stock_actual va una venta.
-    // Para cerdo_corte/cerdo_pieza SIEMPRE se usa el stock_origen del producto
-    // (ej. cerdo_bondiola, cerdo_pierna). Ya no existe el bucket genérico
-    // 'cerdo_pieza' (eliminado): si un producto de cerdo no tiene stock_origen
-    // configurado, NO se descuenta de ningún stock (return null) para no
-    // resucitar el bucket buggy. NUNCA descuenta de 'cerdo' (capones) — esos
-    // sólo bajan al despostar.
-    function mapearStock(cat, stockOrigen) {
-      if (!cat) return null
-      if (stockOrigen) return stockOrigen
-      if (cat === 'bovino_mr')        return 'bovino_mr'
-      if (cat === 'bovino_corte')     return 'bovino_corte'
-      // bovino_pieza: los productos de pieza llegan con stock_origen resuelto
-      // por nombre al agregarse al carrito (pieza_costillar, pieza_pierna…),
-      // así que este fallback solo aplica a nombres no reconocidos (medias
-      // res). Se mantiene el genérico para no perder el tracking y quedar
-      // simétrico con la anulación (mapearStockTipo en anularVenta.js).
-      if (cat === 'bovino_pieza')     return 'bovino_pieza'
-      if (cat === 'bovino_brosa')     return 'bovino_brosa'
-      if (cat === 'cerdo')            return 'cerdo'         // capón entero
-      if (cat === 'cerdo_corte')      return null            // sin origen → no descontar (no recrear cerdo_pieza)
-      if (cat === 'cerdo_pieza')      return null
-      if (cat === 'pollo')            return 'pollo'
-      if (cat === 'pollo_cajon')      return 'pollo'         // unidad × kg_por_cajón
-      if (cat === 'rebozado')         return 'rebozado'
-      if (cat === 'rebozado_cajon')   return 'rebozado'      // unidad × kg_por_cajón
-      // embutido: los de elaboración propia llegan con stock_origen (emb_*,
-      // mig 60); el resto no trackea stock — el bucket genérico se eliminó
-      if (cat === 'embutido')         return null
-      if (cat === 'almacen')          return 'almacen'
-      if (cat === 'bebidas')          return 'bebidas'
-      if (cat === 'bovino_caja_cb')   return 'caja_cb'
-      if (cat === 'bovino_caja_pt')   return 'caja_pt'
-      return null
-    }
+    // mapearStock se movió a nivel de módulo (después del componente) para
+    // que el Ticket Manual descuente stock con exactamente las mismas reglas.
     for (const item of carrito) {
       // Caja individual: la maneja venderCaja() abajo, que ya decrementa
       // stock_actual.caja_cb / caja_pt por su peso individual.
@@ -1547,21 +1514,73 @@ const kbdStyle = {
   fontSize: 11, fontWeight: 700, color: 'var(--gold)', marginRight: 8, textAlign: 'center',
 }
 
+// Función que decide a qué tipo de stock_actual va una venta. A nivel de
+// módulo porque la usan DOS flujos: la venta normal de Caja Rápida y el
+// Ticket Manual (mismas reglas exactas, sin duplicar lógica).
+// Para cerdo_corte/cerdo_pieza SIEMPRE se usa el stock_origen del producto
+// (ej. cerdo_bondiola, cerdo_pierna). Ya no existe el bucket genérico
+// 'cerdo_pieza' (eliminado): si un producto de cerdo no tiene stock_origen
+// configurado, NO se descuenta de ningún stock (return null) para no
+// resucitar el bucket buggy. NUNCA descuenta de 'cerdo' (capones) — esos
+// sólo bajan al despostar.
+function mapearStock(cat, stockOrigen) {
+  if (!cat) return null
+  if (stockOrigen) return stockOrigen
+  if (cat === 'bovino_mr')        return 'bovino_mr'
+  if (cat === 'bovino_corte')     return 'bovino_corte'
+  // bovino_pieza: los productos de pieza llegan con stock_origen resuelto
+  // por nombre al agregarse al carrito (pieza_costillar, pieza_pierna…),
+  // así que este fallback solo aplica a nombres no reconocidos (medias
+  // res). Se mantiene el genérico para no perder el tracking y quedar
+  // simétrico con la anulación (mapearStockTipo en anularVenta.js).
+  if (cat === 'bovino_pieza')     return 'bovino_pieza'
+  if (cat === 'bovino_brosa')     return 'bovino_brosa'
+  if (cat === 'cerdo')            return 'cerdo'         // capón entero
+  if (cat === 'cerdo_corte')      return null            // sin origen → no descontar (no recrear cerdo_pieza)
+  if (cat === 'cerdo_pieza')      return null
+  if (cat === 'pollo')            return 'pollo'
+  if (cat === 'pollo_cajon')      return 'pollo'         // unidad × kg_por_cajón
+  if (cat === 'rebozado')         return 'rebozado'
+  if (cat === 'rebozado_cajon')   return 'rebozado'      // unidad × kg_por_cajón
+  // embutido: los de elaboración propia llegan con stock_origen (emb_*,
+  // mig 60); el resto no trackea stock — el bucket genérico se eliminó
+  if (cat === 'embutido')         return null
+  if (cat === 'almacen')          return 'almacen'
+  if (cat === 'bebidas')          return 'bebidas'
+  if (cat === 'bovino_caja_cb')   return 'caja_cb'
+  if (cat === 'bovino_caja_pt')   return 'caja_pt'
+  return null
+}
+
 // ============================================================
 // TICKET MANUAL — cargar una venta que no se registró en su momento
 // ------------------------------------------------------------
 // Para los tickets "olvidados": se cobró en el mostrador pero no se
 // cargó en la Caja (sistema caído, apuro, etc.). Se registra con la
 // FECHA REAL de la venta para que el día cierre bien en historial,
-// cierre semanal y reportes. Entra como origen 'caja' (cuenta como
-// venta minorista normal) con categoría 'manual': NO descuenta stock
-// (si era carne pesada, se cuadra en Ajuste Stock) y la anulación no
-// intenta revertir ningún bucket.
+// cierre semanal y reportes. Entra como origen 'caja' (venta minorista
+// normal) y DESCUENTA STOCK igual que una venta de Caja Rápida: los
+// ítems son productos reales de la lista (mapearStock + stock_origen
+// persistido, así la anulación revierte al mismo bucket). También se
+// puede sumar una línea libre (categoría 'manual') que no toca stock.
 // ============================================================
 function TicketManualCaja({ onGuardado }) {
-  const [form, setForm] = useState({ fecha: fechaHoyARG(), hora: '12:00', descripcion: '', kg: '', total: '', medio: 'efectivo' })
+  const [form, setForm] = useState({ fecha: fechaHoyARG(), hora: '12:00', medio: 'efectivo' })
+  const [items, setItems] = useState([])
+  const [precios, setPrecios] = useState([])
+  const [busqueda, setBusqueda] = useState('')
+  const [kgInput, setKgInput] = useState('')
+  const [prodSel, setProdSel] = useState(null)
+  const [libre, setLibre] = useState({ descripcion: '', importe: '' })
   const [guardando, setGuardando] = useState(false)
   const [msg, setMsg] = useState(null)
+
+  useEffect(() => {
+    supabase.from('precios')
+      .select('id, nombre, categoria, precio_minorista, stock_origen, kg_por_unidad')
+      .order('nombre')
+      .then(({ data }) => setPrecios((data || []).filter(p => !p.nombre?.startsWith('ZZ_'))))
+  }, [])
 
   const inp = {
     background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)',
@@ -1569,10 +1588,61 @@ function TicketManualCaja({ onGuardado }) {
     width: '100%', boxSizing: 'border-box',
   }
 
+  const resultados = busqueda.trim().length >= 2
+    ? precios.filter(p => p.nombre.toLowerCase().includes(busqueda.toLowerCase())).slice(0, 8)
+    : []
+
+  // Mismo criterio que el carrito de Caja Rápida: los productos de pieza
+  // bovina resuelven su bucket específico por nombre (PR #236).
+  function stockOrigenDe(p) {
+    if (p.stock_origen) return p.stock_origen
+    if (p.categoria === 'bovino_pieza') return bucketPiezaBovina(p.nombre) || null
+    return null
+  }
+
+  function agregarProducto() {
+    if (!prodSel) { setMsg({ t: 'error', m: '❌ Elegí un producto de la lista' }); return }
+    const kg = parseNumero(kgInput)
+    if (!(kg > 0)) { setMsg({ t: 'error', m: '❌ Ingresá los kg (o unidades) vendidos' }); return }
+    const precio = Number(prodSel.precio_minorista) || 0
+    setItems(prev => [...prev, {
+      descripcion: prodSel.nombre,
+      categoria: prodSel.categoria,
+      kg,
+      precio,
+      importe: Math.round(kg * precio * 100) / 100,
+      producto_id: prodSel.id,
+      stock_origen: stockOrigenDe(prodSel),
+      kg_por_unidad: prodSel.kg_por_unidad || null,
+    }])
+    setProdSel(null); setBusqueda(''); setKgInput(''); setMsg(null)
+  }
+
+  function agregarLibre() {
+    const importe = parseNumero(libre.importe)
+    if (!(importe > 0)) { setMsg({ t: 'error', m: '❌ Ingresá el importe de la línea libre' }); return }
+    setItems(prev => [...prev, {
+      descripcion: (libre.descripcion || '').trim() || 'Ítem manual',
+      categoria: 'manual',
+      kg: 0,
+      precio: null,
+      importe,
+      producto_id: null,
+      stock_origen: null,
+    }])
+    setLibre({ descripcion: '', importe: '' }); setMsg(null)
+  }
+
+  function setImporteItem(i, val) {
+    setItems(prev => prev.map((it, k) => k === i ? { ...it, importe: parseNumero(val) } : it))
+  }
+
+  const total = items.reduce((s, i) => s + (Number(i.importe) || 0), 0)
+
   async function guardar() {
-    const total = parseNumero(form.total)
     const hoy = fechaHoyARG()
-    if (!(total > 0)) { setMsg({ t: 'error', m: '❌ Ingresá el total del ticket' }); return }
+    if (!items.length) { setMsg({ t: 'error', m: '❌ Agregá al menos un ítem al ticket' }); return }
+    if (!(total > 0)) { setMsg({ t: 'error', m: '❌ El total tiene que ser mayor a 0' }); return }
     if (!form.fecha || form.fecha > hoy) { setMsg({ t: 'error', m: '❌ La fecha no puede ser futura' }); return }
     setGuardando(true)
     const hora = form.hora || '12:00'
@@ -1581,35 +1651,44 @@ function TicketManualCaja({ onGuardado }) {
       hora,
       turno: (parseInt(hora, 10) || 12) < 14 ? 'mañana' : 'tarde',
       origen: 'caja',
-      items: [{
-        descripcion: (form.descripcion || '').trim() || 'Ticket cargado a mano',
-        categoria: 'manual',
-        kg: parseNumero(form.kg) || 0,
-        precio: null,
-        importe: total,
-        producto_id: null,
-        stock_origen: null,
-      }],
+      items,
       total,
       efectivo: form.medio === 'efectivo' ? total : 0,
       debito: form.medio === 'debito' ? total : 0,
       transferencia: form.medio === 'transferencia' ? total : 0,
       notas: `Ticket cargado manualmente el ${hoy} (venta no registrada en su momento)`,
     })
+    if (error) { setGuardando(false); setMsg({ t: 'error', m: '❌ ' + error.message }); return }
+    // Descontar stock — mismas reglas que la venta normal de Caja Rápida
+    // (mapearStock + cajones × kg_por_unidad). Las líneas libres no tocan stock.
+    for (const item of items) {
+      const tipoStock = mapearStock(item.categoria, item.stock_origen)
+      if (!tipoStock) continue
+      const esCajon = item.categoria === 'pollo_cajon' || item.categoria === 'rebozado_cajon'
+      const cantidad = esCajon ? (item.kg || 0) * (item.kg_por_unidad || kgPorUnidadDeProducto(item) || 1) : (item.kg || 0)
+      const { data: stock } = await supabase.from('stock_actual').select('*').eq('tipo', tipoStock).maybeSingle()
+      if (stock) {
+        await supabase.from('stock_actual')
+          .update({ kg_disponible: (stock.kg_disponible || 0) - cantidad })
+          .eq('tipo', tipoStock)
+      } else {
+        await supabase.from('stock_actual').insert({ tipo: tipoStock, kg_disponible: -cantidad })
+      }
+    }
     setGuardando(false)
-    if (error) { setMsg({ t: 'error', m: '❌ ' + error.message }); return }
-    setMsg({ t: 'ok', m: `✅ Ticket de ${fmt(total)} registrado con fecha ${form.fecha}` })
-    setForm({ fecha: fechaHoyARG(), hora: '12:00', descripcion: '', kg: '', total: '', medio: 'efectivo' })
+    setMsg({ t: 'ok', m: `✅ Ticket de ${fmt(total)} registrado con fecha ${form.fecha} — stock descontado` })
+    setItems([])
+    setForm({ fecha: fechaHoyARG(), hora: '12:00', medio: 'efectivo' })
     onGuardado?.()
   }
 
   return (
-    <div style={{ maxWidth: 640 }}>
+    <div style={{ maxWidth: 760 }}>
       <div className="card">
         <div className="card-title">📝 Cargar ticket manual (venta olvidada)</div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
           Para ventas que se cobraron en el mostrador pero no se registraron en su momento.
-          Se guarda con la fecha real así el día queda bien en el historial y el cierre.
+          Se guarda con la fecha real y <strong>descuenta stock</strong> igual que una venta normal.
         </div>
         <div className="form-row">
           <div className="form-group"><label>Fecha de la venta</label>
@@ -1617,17 +1696,6 @@ function TicketManualCaja({ onGuardado }) {
           </div>
           <div className="form-group"><label>Hora (aprox.)</label>
             <input type="time" value={form.hora} onChange={e => setForm(f => ({ ...f, hora: e.target.value }))} style={inp} />
-          </div>
-        </div>
-        <div className="form-group"><label>Descripción</label>
-          <input placeholder="Ej: Asado + chorizos (ticket sin cargar)" value={form.descripcion} onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))} style={inp} />
-        </div>
-        <div className="form-row">
-          <div className="form-group"><label>Total cobrado ($)</label>
-            <input type="number" step="0.01" min="0" placeholder="0" value={form.total} onChange={e => setForm(f => ({ ...f, total: e.target.value }))} style={{ ...inp, borderColor: 'var(--gold)', fontSize: 18, fontWeight: 700 }} />
-          </div>
-          <div className="form-group"><label>Kg (opcional)</label>
-            <input type="number" step="0.001" min="0" placeholder="0" value={form.kg} onChange={e => setForm(f => ({ ...f, kg: e.target.value }))} style={inp} />
           </div>
           <div className="form-group"><label>Medio de pago</label>
             <select value={form.medio} onChange={e => setForm(f => ({ ...f, medio: e.target.value }))} style={inp}>
@@ -1637,17 +1705,79 @@ function TicketManualCaja({ onGuardado }) {
             </select>
           </div>
         </div>
+
+        {/* Agregar producto real (descuenta stock) */}
+        <div style={{ background: 'var(--surface2)', borderRadius: 10, padding: 14, marginBottom: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--gold)', marginBottom: 8 }}>🥩 Agregar producto (descuenta stock)</div>
+          <div style={{ position: 'relative', marginBottom: 8 }}>
+            <input placeholder="Buscá el producto por nombre… (mín. 2 letras)" value={busqueda}
+              onChange={e => { setBusqueda(e.target.value); setProdSel(null) }} style={inp} />
+            {resultados.length > 0 && !prodSel && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 20, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, maxHeight: 240, overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
+                {resultados.map(p => (
+                  <div key={p.id} onClick={() => { setProdSel(p); setBusqueda(p.nombre) }}
+                    style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border)', fontSize: 13 }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                    {p.nombre} <span style={{ color: 'var(--muted)', fontSize: 11 }}>· {fmt(p.precio_minorista)}/kg</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input type="number" step="0.001" min="0" placeholder="Kg / unidades" value={kgInput} onChange={e => setKgInput(e.target.value)}
+              style={{ ...inp, width: 140, borderColor: 'var(--gold)' }} />
+            {prodSel && parseNumero(kgInput) > 0 && (
+              <span style={{ fontSize: 13, color: 'var(--muted)' }}>= <strong style={{ color: 'var(--gold)' }}>{fmt(parseNumero(kgInput) * (Number(prodSel.precio_minorista) || 0))}</strong></span>
+            )}
+            <button className="btn btn-gold" onClick={agregarProducto} style={{ marginLeft: 'auto' }}>➕ Agregar</button>
+          </div>
+        </div>
+
+        {/* Línea libre (no descuenta stock) */}
+        <div style={{ background: 'var(--surface2)', borderRadius: 10, padding: 14, marginBottom: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 8 }}>✍️ Línea libre (no descuenta stock)</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input placeholder="Descripción (ej: varios)" value={libre.descripcion} onChange={e => setLibre(l => ({ ...l, descripcion: e.target.value }))} style={{ ...inp, flex: 2 }} />
+            <input type="number" step="0.01" min="0" placeholder="$" value={libre.importe} onChange={e => setLibre(l => ({ ...l, importe: e.target.value }))} style={{ ...inp, flex: 1 }} />
+            <button className="btn" onClick={agregarLibre}>➕</button>
+          </div>
+        </div>
+
+        {/* Ítems del ticket */}
+        {items.length > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            {items.map((it, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 4px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
+                <span style={{ flex: 1 }}>{it.descripcion}{it.categoria === 'manual' ? ' ✍️' : ''}</span>
+                {it.kg > 0 && <span style={{ color: 'var(--muted)', fontSize: 12 }}>{fmtKg(it.kg)}</span>}
+                <input type="number" step="0.01" value={it.importe} onChange={e => setImporteItem(i, e.target.value)}
+                  title="Importe cobrado por esta línea (editalo si difiere del precio de lista)"
+                  style={{ ...inp, width: 110, padding: '5px 8px', textAlign: 'right', fontWeight: 700 }} />
+                <button onClick={() => setItems(prev => prev.filter((_, k) => k !== i))}
+                  style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', padding: '4px 8px', color: 'var(--red-light)' }}>✕</button>
+              </div>
+            ))}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, alignItems: 'center', paddingTop: 10 }}>
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>TOTAL</span>
+              <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 26, color: 'var(--gold)' }}>{fmt(total)}</span>
+            </div>
+          </div>
+        )}
+
         {msg && (
           <div style={{ background: msg.t === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${msg.t === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 14px', marginBottom: 12, color: msg.t === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600, fontSize: 13 }}>
             {msg.m}
           </div>
         )}
-        <button className="btn btn-gold" onClick={guardar} disabled={guardando} style={{ width: '100%', fontSize: 15, padding: '12px' }}>
-          {guardando ? '⏳ Guardando…' : '📝 Registrar ticket'}
+        <button className="btn btn-gold" onClick={guardar} disabled={guardando || items.length === 0} style={{ width: '100%', fontSize: 15, padding: '12px' }}>
+          {guardando ? '⏳ Guardando…' : `📝 Registrar ticket${total > 0 ? ` — ${fmt(total)}` : ''}`}
         </button>
         <div style={{ background: '#1a1a2a', border: '1px solid #2a2a5a', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#7db5ff', marginTop: 14 }}>
-          ℹ️ El ticket manual <strong>no descuenta stock</strong> (si era carne pesada, cuadralo en Ajuste Stock) y
-          si el día ya tenía el arqueo cerrado, ese arqueo no se recalcula — la venta suma igual al historial y al cierre semanal.
+          ℹ️ Los productos de la lista <strong>descuentan stock</strong> igual que una venta normal (y la anulación lo devuelve).
+          Las líneas libres ✍️ no tocan stock. Si el día ya tenía el arqueo cerrado, ese arqueo no se recalcula —
+          la venta suma igual al historial y al cierre semanal.
         </div>
       </div>
     </div>
