@@ -111,6 +111,11 @@ const TIPOS_COMPRA_POR_KG = new Set([
   'bovino_mr', 'cerdo',
   'pieza_pierna', 'pieza_cuarto_pistola', 'pieza_costillar', 'pieza_cortito',
   'pieza_costeletal', 'pieza_paleta', 'pieza_parrillero',
+  // Piezas de cerdo compradas directas para reventa (no salidas de despostar
+  // un capón propio): suman a su bucket cerdo_* y se compran por kg.
+  'cerdo_pierna', 'cerdo_carre', 'cerdo_pechito', 'cerdo_matambre',
+  'cerdo_paleta', 'cerdo_parrillero', 'cerdo_bondiola', 'cerdo_tocino',
+  'cerdo_cuero', 'cerdo_cabeza', 'cerdo_huesos',
 ])
 
 // ── Detector de posibles cargas duplicadas ──────────────────
@@ -2800,6 +2805,13 @@ async function eliminar(entrada) {
   const TIPOS = {
     bovino_mr: '🐄 Media Res', bovino_corte: '🥩 Bovino Corte',
     bovino_brosa: '🫀 Brosa', cerdo: '🐷 Cerdo',
+    // Piezas de cerdo compradas directas (reventa) — suman a su bucket cerdo_*
+    cerdo_pierna: '🐷 Cerdo Pierna', cerdo_carre: '🐷 Cerdo Carré',
+    cerdo_pechito: '🐷 Cerdo Pechito', cerdo_matambre: '🐷 Cerdo Matambre',
+    cerdo_paleta: '🐷 Cerdo Paleta', cerdo_parrillero: '🐷 Cerdo Carnaza',
+    cerdo_bondiola: '🐷 Cerdo Bondiola', cerdo_tocino: '🐷 Cerdo Tocino',
+    cerdo_cuero: '🐷 Cerdo Cuero', cerdo_cabeza: '🐷 Cerdo Cabeza',
+    cerdo_huesos: '🐷 Cerdo Huesos',
     pollo: '🍗 Pollo', embutido: '🌭 Embutido',
     // Embutidos con stock propio (mig 60): las entradas nuevas se guardan
     // con el tipo del bucket para que la reversión pegue donde corresponde.
@@ -2849,6 +2861,17 @@ async function eliminar(entrada) {
 <option value="caja_pt">📦 Caja bovina PT</option>
 <option value="bovino_brosa">🫀 Bovino — Brosa</option>
 <option value="cerdo">🐷 Cerdo — Capón</option>
+<option value="cerdo_pierna">🐷 Cerdo — Pierna (pieza comprada)</option>
+<option value="cerdo_carre">🐷 Cerdo — Carré (pieza comprada)</option>
+<option value="cerdo_pechito">🐷 Cerdo — Pechito (pieza comprada)</option>
+<option value="cerdo_matambre">🐷 Cerdo — Matambre (pieza comprada)</option>
+<option value="cerdo_paleta">🐷 Cerdo — Paleta (pieza comprada)</option>
+<option value="cerdo_parrillero">🐷 Cerdo — Carnaza (pieza comprada)</option>
+<option value="cerdo_bondiola">🐷 Cerdo — Bondiola (pieza comprada)</option>
+<option value="cerdo_tocino">🐷 Cerdo — Tocino (pieza comprada)</option>
+<option value="cerdo_cuero">🐷 Cerdo — Cuero (pieza comprada)</option>
+<option value="cerdo_cabeza">🐷 Cerdo — Cabeza (pieza comprada)</option>
+<option value="cerdo_huesos">🐷 Cerdo — Huesos (pieza comprada)</option>
 <option value="pollo">🍗 Pollo por Cajones</option>
 <option value="embutido">🌭 Embutido</option>
 <option value="rebozado">🧊 Rebozado por Cajones</option>
