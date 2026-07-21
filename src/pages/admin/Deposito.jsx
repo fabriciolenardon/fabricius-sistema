@@ -938,6 +938,77 @@ async function confirmarElaboracionSalame() {
     } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
     setLoading(false)
   }
+
+  // Corregir los PRODUCTOS TERMINADOS de una elaboración ya confirmada — para
+  // cuando se olvidó cargar un producto de la tanda (ej: hicieron chorizos Y
+  // salchichas pero solo cargaron chorizos) o se cargó un kg equivocado.
+  // El stock se ajusta por DIFERENCIA contra lo guardado (subas suman, bajas
+  // restan del bucket correspondiente, con verificación) y cada corrección
+  // deja una entrada informativa destino='elaboracion' con el delta en kg,
+  // así el historial y el Control Semanal quedan consistentes.
+  async function editarProductosElaboracion(elab, finales) {
+    const bucketDe = t => BUCKET_EMBUTIDO[t] || BUCKET_HAMBURGUESA[t] || null
+    // Kg previos por producto: de productos_finales, o del tipo único (legacy)
+    const previos = {}
+    if (Array.isArray(elab.productos_finales) && elab.productos_finales.length) {
+      elab.productos_finales.forEach(p => { previos[p.tipo] = Number(p.kg_final ?? p.kg ?? p.kg_neto) || 0 })
+    } else if (elab.tipo_embutido) {
+      previos[elab.tipo_embutido] = Number(elab.kg_final) || 0
+    }
+    const nuevos = {}
+    Object.entries(finales || {}).forEach(([t, v]) => {
+      const kg = parseNumero(v)
+      if (kg > 0) nuevos[t] = kg
+    })
+    if (!Object.keys(nuevos).length) { showAlert('La elaboración tiene que quedar con al menos un producto con kg', 'error'); return }
+    const tipos = [...new Set([...Object.keys(previos), ...Object.keys(nuevos)])]
+    const deltas = tipos
+      .map(t => ({ tipo: t, delta: (nuevos[t] || 0) - (previos[t] || 0) }))
+      .filter(d => Math.abs(d.delta) > 0.001)
+    if (!deltas.length) { showAlert('No hay cambios para guardar', 'error'); return }
+    setLoading(true)
+    try {
+      // 1) Ajustar el stock de cada bucket por la diferencia (verificado)
+      for (const d of deltas) {
+        const bucket = bucketDe(d.tipo)
+        if (!bucket) throw new Error(`No sé a qué stock va "${d.tipo}"`)
+        await sumarStockVerificado(bucket, d.delta)
+      }
+      // 2) Actualizar la elaboración (productos, total y % real)
+      const totalNuevo = Object.values(nuevos).reduce((s, k) => s + k, 0)
+      const pct = Number(elab.kg_elaborado) > 0 ? parseFloat(((totalNuevo / Number(elab.kg_elaborado) - 1) * 100).toFixed(2)) : 0
+      const { error: errUpd } = await supabase.from('elaboraciones_embutidos')
+        .update({
+          productos_finales: Object.entries(nuevos).map(([tipo, kg]) => ({ tipo, kg })),
+          kg_final: totalNuevo,
+          pct_aumento: pct,
+        })
+        .eq('id', elab.id)
+      if (errUpd) throw new Error(`No se actualizó la elaboración: ${errUpd.message}`)
+      // 3) Entrada informativa por cada corrección (kg puede ser negativo:
+      // resta del "elaborado" del Control Semanal, que es lo correcto)
+      for (const d of deltas) {
+        const { error: errEnt } = await supabase.from('entradas_deposito').insert({
+          fecha: fechaHoyARG(),
+          tipo: bucketDe(d.tipo),
+          proveedor_nombre: 'Elaboración propia',
+          descripcion: `Corrección elaboración del ${elab.fecha}: ${NOMBRE_EMBUTIDO[d.tipo] || d.tipo} ${d.delta > 0 ? '+' : ''}${d.delta.toFixed(1)} kg`,
+          kg: d.delta,
+          kg_real: d.delta,
+          merma_pct: 0,
+          precio_kg: 0,
+          importe: 0,
+          destino: 'elaboracion',
+          cantidad: 1,
+        })
+        if (errEnt) console.warn('No se registró la entrada de la corrección:', errEnt.message)
+      }
+      showAlert(`✅ Elaboración corregida — ${deltas.map(d => `${NOMBRE_EMBUTIDO[d.tipo] || d.tipo}: ${d.delta > 0 ? '+' : ''}${d.delta.toFixed(1)} kg`).join(' · ')} (stock ajustado)`)
+      await cargarDatos(); onSaved()
+    } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
+    setLoading(false)
+  }
+
 async function confirmarDesposteCerdo() {
   if (!caponSeleccionado) { showAlert('Seleccioná un capón', 'error'); return }
   const kgCapon = caponSeleccionado.kg_real || caponSeleccionado.kg || 0
@@ -1797,7 +1868,7 @@ async function confirmarDesposteCerdo() {
     </div>
   </div>
   <div style={{ marginTop: 16 }}>
-    <HistorialElaboraciones elaboraciones={elaboraciones} onFinalizarSalame={finalizarMaduracionSalame} loading={loading} />
+    <HistorialElaboraciones elaboraciones={elaboraciones} onFinalizarSalame={finalizarMaduracionSalame} onEditarProductos={editarProductosElaboracion} loading={loading} />
   </div>
   </>
 )}
@@ -1809,7 +1880,7 @@ async function confirmarDesposteCerdo() {
 {subtab === 'historial' && (
   <div>
     <HistorialDespostes despostes={despostes} />
-    <HistorialElaboraciones elaboraciones={elaboraciones} onFinalizarSalame={finalizarMaduracionSalame} loading={loading} />
+    <HistorialElaboraciones elaboraciones={elaboraciones} onFinalizarSalame={finalizarMaduracionSalame} onEditarProductos={editarProductosElaboracion} loading={loading} />
   </div>
 )}
 {false && (
@@ -2039,11 +2110,34 @@ function HistorialDespostes({ despostes }) {
   )
 }
 
-function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, loading }) {
+// Productos que puede producir cada familia de elaboración — para el panel
+// de corrección (permite AGREGAR un producto que faltó en la tanda).
+const PRODUCTOS_POR_FAMILIA = {
+  embutido: ['chorizo_parrillero', 'chorizo_saborizado', 'chorizo_colorado', 'salchicha_parrillera', 'morcilla'],
+  salame: ['salame_comun', 'salame_rockeford', 'salame_holanda'],
+  hamburguesa: ['hamburguesa_carne', 'hamburguesa_pollo', 'hamburguesa_cerdo'],
+}
+
+function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, onEditarProductos, loading }) {
   const pag = usePaginacion(elaboraciones || [], 15)
   // id del salame cuyo candado está abierto + kg finales tipeados por variedad
   const [finId, setFinId] = useState(null)
   const [kgFinales, setKgFinales] = useState({})  // { [tipo_salame]: kg }
+  // Corrección de una elaboración confirmada: id abierto + kg por producto
+  const [editId, setEditId] = useState(null)
+  const [kgEdit, setKgEdit] = useState({})  // { [tipo_producto]: kg }
+
+  // Abre el panel de corrección precargando los kg actuales de la elaboración
+  function abrirEdicion(e) {
+    const actuales = {}
+    if (Array.isArray(e.productos_finales) && e.productos_finales.length) {
+      e.productos_finales.forEach(p => { actuales[p.tipo] = String(Number(p.kg_final ?? p.kg ?? p.kg_neto) || '') })
+    } else if (e.tipo_embutido) {
+      actuales[e.tipo_embutido] = String(Number(e.kg_final) || '')
+    }
+    setKgEdit(actuales)
+    setEditId(e.id)
+  }
   return (
     <div className="card">
       <div className="card-title">🌭 Historial de elaboraciones ({(elaboraciones || []).length})</div>
@@ -2131,6 +2225,47 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, loading }) {
                   style={{ fontSize: 12, marginTop: 6, borderColor: 'var(--gold)', color: 'var(--gold)' }}
                 >
                   🔒 Cargar peso final (secado listo)
+                </button>
+              )
+            )}
+            {/* Corrección de una elaboración YA confirmada (embutidos,
+                hamburguesas o salames finalizados): editar kg por producto o
+                agregar el que faltó. El stock se ajusta por diferencia. */}
+            {onEditarProductos && (e.tipo !== 'salame' || e.maduracion_completa) && (
+              editId === e.id ? (
+                <div style={{ marginTop: 8, padding: 10, background: 'var(--surface2)', borderRadius: 8 }}>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
+                    ✏️ Kg finales de cada producto de esta tanda (0 o vacío = no se hizo). El stock se ajusta solo por la diferencia.
+                  </div>
+                  {(PRODUCTOS_POR_FAMILIA[e.tipo] || Object.keys(kgEdit)).map(tipo => (
+                    <div key={tipo} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <span style={{ fontSize: 13 }}>{NOMBRE_EMBUTIDO[tipo] || tipo.replace(/_/g, ' ')}</span>
+                      <input
+                        type="number" step="0.1" min="0"
+                        value={kgEdit[tipo] || ''}
+                        onChange={ev => setKgEdit(prev => ({ ...prev, [tipo]: ev.target.value }))}
+                        placeholder="0 kg"
+                        style={{ background: 'var(--surface)', border: '1px solid var(--gold)', color: 'var(--text)', borderRadius: 8, padding: '7px 10px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, width: 130, boxSizing: 'border-box' }}
+                      />
+                    </div>
+                  ))}
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                    <button className="btn btn-gold" disabled={loading}
+                      onClick={async () => { await onEditarProductos(e, kgEdit); setEditId(null); setKgEdit({}) }}
+                      style={{ fontSize: 12 }}>
+                      {loading ? '⏳' : '💾 Guardar corrección (ajusta stock)'}
+                    </button>
+                    <button className="btn" onClick={() => { setEditId(null); setKgEdit({}) }} style={{ fontSize: 12 }}>Cancelar</button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  className="btn"
+                  title="Corregir los productos/kg de esta elaboración — el stock se ajusta por diferencia"
+                  onClick={() => abrirEdicion(e)}
+                  style={{ fontSize: 12, marginTop: 6 }}
+                >
+                  ✏️ Corregir
                 </button>
               )
             )}
