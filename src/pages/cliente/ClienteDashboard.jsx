@@ -150,7 +150,13 @@ export function ClienteDashboard() {
               <tr key={m.id}>
                 <td>{m.fecha}</td>
                 <td><span className={`badge ${m.tipo === 'compra' ? 'badge-red' : 'badge-green'}`}>{m.tipo}</span></td>
-                <td>{m.descripcion}</td>
+                <td>
+                  {m.descripcion}
+                  {m.remito_id && m.tipo === 'compra' && (
+                    <button onClick={() => imprimirRemitoPorId(m.remito_id)} title="Ver / imprimir el remito"
+                      style={{ marginLeft: 8, background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', fontWeight: 700, fontSize: 11 }}>🖨️</button>
+                  )}
+                </td>
                 <td style={{ color: 'var(--red-light)' }}>{m.debe > 0 ? fmt(m.debe) : '—'}</td>
                 <td style={{ color: 'var(--green)' }}>{m.haber > 0 ? fmt(m.haber) : '—'}</td>
                 <td style={{ fontWeight: 600, color: m.saldoCalc > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(m.saldoCalc)}</td>
@@ -208,7 +214,13 @@ export function ClienteCtaCte() {
               <tr key={m.id}>
                 <td>{m.fecha}</td>
                 <td><span className={`badge ${m.tipo === 'compra' ? 'badge-red' : 'badge-green'}`}>{m.tipo}</span></td>
-                <td>{m.descripcion}</td>
+                <td>
+                  {m.descripcion}
+                  {m.remito_id && m.tipo === 'compra' && (
+                    <button onClick={() => imprimirRemitoPorId(m.remito_id)} title="Ver / imprimir el remito"
+                      style={{ marginLeft: 8, background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', fontWeight: 700, fontSize: 11 }}>🖨️</button>
+                  )}
+                </td>
                 <td style={{ color: 'var(--red-light)' }}>{m.debe > 0 ? fmt(m.debe) : '—'}</td>
                 <td style={{ color: 'var(--green)' }}>{m.haber > 0 ? fmt(m.haber) : '—'}</td>
                 <td style={{ fontWeight: 600, color: m.saldoCalc > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(m.saldoCalc)}</td>
@@ -226,24 +238,13 @@ export function ClienteCtaCte() {
 // ============================================================
 // REMITOS
 // ============================================================
-export function ClienteRemitos() {
-  const { cliente } = useCliente()
-  const [remitos, setRemitos] = useState([])
-  const [remitoAbierto, setRemitoAbierto] = useState(null)
-
-  useEffect(() => {
-    if (!cliente) return
-    fetchAllRows(() => supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false })).then(({ data }) => setRemitos(data || []))
-    const canal = supabase.channel('remitos-cliente-lista')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'remitos', filter: `cliente_id=eq.${cliente.id}` }, () => {
-        fetchAllRows(() => supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false })).then(({ data }) => setRemitos(data || []))
-      }).subscribe()
-    return () => supabase.removeChannel(canal)
-  }, [cliente])
-
-  function imprimir(remito) {
-    const items = remito.items || []
-    const html = `
+// Imprime un remito en la ventana de impresión del navegador (formato X —
+// documento no válido como factura, el mismo de siempre). A nivel módulo
+// para compartirla entre Mis Remitos, la cuenta corriente y el inicio del
+// portal (botón 🖨️ en los movimientos que vienen de un remito).
+export function imprimirRemitoPortal(remito) {
+  const items = remito.items || []
+  const html = `
       <html><head><title>Remito N° ${remito.numero}</title>
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -296,8 +297,33 @@ export function ClienteRemitos() {
         <div class="firma">Firma y aclaración: ________________________________</div>
       </body></html>
     `
-    imprimirHTML(html)
-  }
+  imprimirHTML(html)
+}
+
+// Trae el remito por id y lo imprime — para los movimientos de cuenta
+// corriente, que guardan remito_id pero no el remito completo.
+export async function imprimirRemitoPorId(remitoId) {
+  if (!remitoId) return
+  const { data } = await supabase.from('remitos').select('*').eq('id', remitoId).maybeSingle()
+  if (data && !data.eliminado) imprimirRemitoPortal(data)
+}
+
+export function ClienteRemitos() {
+  const { cliente } = useCliente()
+  const [remitos, setRemitos] = useState([])
+  const [remitoAbierto, setRemitoAbierto] = useState(null)
+
+  useEffect(() => {
+    if (!cliente) return
+    fetchAllRows(() => supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false })).then(({ data }) => setRemitos(data || []))
+    const canal = supabase.channel('remitos-cliente-lista')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'remitos', filter: `cliente_id=eq.${cliente.id}` }, () => {
+        fetchAllRows(() => supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false })).then(({ data }) => setRemitos(data || []))
+      }).subscribe()
+    return () => supabase.removeChannel(canal)
+  }, [cliente])
+
+  const imprimir = imprimirRemitoPortal
 
   // Paginación del listado completo de remitos del cliente
   const pagRemitos = usePaginacion(remitos, 20)
