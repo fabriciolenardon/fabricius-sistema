@@ -696,7 +696,7 @@ async function eliminarMovimiento(mov) {
               })()}
             </div>
 
-            <MovimientosCliente movimientos={movimientos} fmt={fmt} />
+            <MovimientosCliente movimientos={movimientos} fmt={fmt} remitos={remitos} imprimirRemito={imprimirRemito} />
             <RemitosCliente remitos={remitos} imprimirRemito={imprimirRemito} />
             <PagosCliente movimientos={movimientos} onAnular={anularPago} onEditar={editarPago} fmt={fmt} />
 {false && (
@@ -1097,8 +1097,11 @@ function ListaClientes({ clientes, seleccionado, onSeleccionar, onEditar, onElim
 // con botón 🗑️ Anular que revierte el saldo al cliente.
 // Cuenta corriente completa: debe / haber / saldo corrido (en orden de fecha,
 // igual que el portal del cliente). 10 filas por página.
-function MovimientosCliente({ movimientos, fmt }) {
+function MovimientosCliente({ movimientos, fmt, remitos = [], imprimirRemito }) {
   const pag = usePaginacion(movimientos, 10)
+  // Abrir el remito directo desde el movimiento de la cta cte, sin ir a
+  // buscarlo a Mayorista → Remitos (pedido de Fabricio 21/07).
+  const remitoDe = (m) => m.remito_id ? remitos.find(r => r.id === m.remito_id && !r.eliminado) : null
   return (
     <div className="card" style={{ marginBottom: 16 }}>
       <div className="card-title">📒 Cuenta corriente ({movimientos.length} movimientos)</div>
@@ -1109,7 +1112,13 @@ function MovimientosCliente({ movimientos, fmt }) {
             <tr key={m.id}>
               <td>{m.fecha}</td>
               <td><span className={`badge ${m.tipo === 'compra' ? 'badge-red' : 'badge-green'}`}>{m.tipo}</span></td>
-              <td>{m.descripcion || '—'}</td>
+              <td>
+                {m.descripcion || '—'}
+                {remitoDe(m) && imprimirRemito && (
+                  <button onClick={() => imprimirRemito(remitoDe(m))} title="Ver / imprimir el remito"
+                    style={{ marginLeft: 8, background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', fontWeight: 700, fontSize: 11 }}>🖨️</button>
+                )}
+              </td>
               <td style={{ textAlign: 'right', color: 'var(--red-light)' }}>{m.debe > 0 ? fmt(m.debe) : '—'}</td>
               <td style={{ textAlign: 'right', color: 'var(--green)' }}>{m.haber > 0 ? fmt(m.haber) : '—'}</td>
               <td style={{ textAlign: 'right', fontWeight: 700, color: m.saldoCalc > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(m.saldoCalc)}</td>
