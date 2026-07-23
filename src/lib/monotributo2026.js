@@ -1,30 +1,34 @@
 // ============================================================
 // MONOTRIBUTO 2026 — Valores oficiales ARCA
 // ============================================================
-// Vigencia: FEBRERO – JULIO 2026.
+// Vigencia: AGOSTO 2026 – ENERO 2027 (desde el 1/08/2026).
 // ARCA actualiza semestralmente (en enero y julio).
 // Cuando salgan los nuevos valores: actualizar este archivo
 // y subir el bump de fecha en VIGENCIA_HASTA.
 //
+// Actualización JULIO 2026: índice IPC 1er semestre = +16,8459%
+// (todas las categorías y cuotas escalan por el mismo factor).
+// Recategorización: hasta el 05/08/2026.
+//
 // Fuente:
-//   - Resolución ARCA / Boletín Oficial diciembre 2025
-//   - https://www.afip.gob.ar/monotributo/categorias.asp
-//   - iProfesional 06/05/2026
+//   - https://www.afip.gob.ar/monotributo/categorias.asp (21/07/2026)
+//   - Cargado el 22/07/2026 — verificado contra el tope K oficial
+//     $126.610.838,75 que pasó Fabricio.
 //
 // El tope de FACTURACIÓN ANUAL es lo que dispara la
 // recategorización obligatoria (parámetro: últimos 12 meses
 // corridos previos a enero y julio).
 // ============================================================
 
-export const VIGENCIA_DESDE = '2026-02-01'
-export const VIGENCIA_HASTA = '2026-07-31'
+export const VIGENCIA_DESDE = '2026-08-01'
+export const VIGENCIA_HASTA = '2027-01-31'
 
 // Precio unitario máximo de venta de cosas muebles
 // (si vendés algún producto por encima de este precio, no podés ser monotributista)
-export const PRECIO_UNITARIO_MAX = 536767.47
+export const PRECIO_UNITARIO_MAX = 716840.77
 
 // Tope absoluto del régimen — superar esto te excluye del monotributo
-export const TOPE_MAX_ABSOLUTO = 108357084.05
+export const TOPE_MAX_ABSOLUTO = 126610838.75
 
 // ============================================================
 // Categorías
@@ -33,17 +37,17 @@ export const TOPE_MAX_ABSOLUTO = 108357084.05
 // cuota_comercio: cuota mensual para venta de cosas muebles
 // ============================================================
 export const CATEGORIAS = [
-  { cat: 'A', tope_anual: 10277988.13, cuota_servicios: 42386.74,  cuota_comercio: 42386.74  },
-  { cat: 'B', tope_anual: 15058447.71, cuota_servicios: 48250.78,  cuota_comercio: 48250.78  },
-  { cat: 'C', tope_anual: 21113696.52, cuota_servicios: 56501.85,  cuota_comercio: 55227.06  },
-  { cat: 'D', tope_anual: 26212853.42, cuota_servicios: 72414.10,  cuota_comercio: 70661.26  },
-  { cat: 'E', tope_anual: 30833964.37, cuota_servicios: 102537.97, cuota_comercio: 92658.35  },
-  { cat: 'F', tope_anual: 38642048.36, cuota_servicios: 129045.32, cuota_comercio: 111198.27 },
-  { cat: 'G', tope_anual: 46211109.37, cuota_servicios: 197108.23, cuota_comercio: 135918.34 },
-  { cat: 'H', tope_anual: 70113407.33, cuota_servicios: 447346.93, cuota_comercio: 272063.40 },
-  { cat: 'I', tope_anual: 78479211.62, cuota_servicios: 824802.26, cuota_comercio: 406512.05 },
-  { cat: 'J', tope_anual: 89872640.30, cuota_servicios: 999007.65, cuota_comercio: 497059.41 },
-  { cat: 'K', tope_anual: 108357084.05, cuota_servicios: 1381687.90, cuota_comercio: 600879.51 },
+  { cat: 'A', tope_anual: 12009410.45, cuota_servicios: 49527.18,  cuota_comercio: 49527.18  },
+  { cat: 'B', tope_anual: 17595182.74, cuota_servicios: 56379.08,  cuota_comercio: 56379.08  },
+  { cat: 'C', tope_anual: 24670494.31, cuota_servicios: 66020.12,  cuota_comercio: 64530.58  },
+  { cat: 'D', tope_anual: 30628651.43, cuota_servicios: 84612.93,  cuota_comercio: 82564.81  },
+  { cat: 'E', tope_anual: 36028231.33, cuota_servicios: 119811.45, cuota_comercio: 108267.51 },
+  { cat: 'F', tope_anual: 45151659.41, cuota_servicios: 150784.21, cuota_comercio: 129930.65 },
+  { cat: 'G', tope_anual: 53995798.87, cuota_servicios: 230312.94, cuota_comercio: 158815.05 },
+  { cat: 'H', tope_anual: 81924660.37, cuota_servicios: 522706.68, cuota_comercio: 317895.01 },
+  { cat: 'I', tope_anual: 91699761.90, cuota_servicios: 963747.86, cuota_comercio: 474992.78 },
+  { cat: 'J', tope_anual: 105012519.20, cuota_servicios: 1167299.76, cuota_comercio: 580793.69 },
+  { cat: 'K', tope_anual: 126610838.75, cuota_servicios: 1614446.04, cuota_comercio: 702103.24 },
 ]
 
 // Devuelve la categoría que correspondería según la facturación anual.
