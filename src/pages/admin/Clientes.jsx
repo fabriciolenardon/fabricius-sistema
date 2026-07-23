@@ -7,6 +7,7 @@ import { fechaHoyARG } from '../../lib/fechas'
 import { parseNumero, fmtPrecio } from '../../lib/formatos'
 import { imprimirHTML } from '../../lib/imprimir'
 import { recomputarSaldoCliente, conSaldoCorriente } from '../../lib/ctaCorriente'
+import { lunesDeLaSemana } from '../../lib/cierreAuto'
 import { getEtiquetaLista } from '../../lib/listasPrecios'
 import { useEsMovil } from '../../lib/useEsMovil'
 import Paginador, { usePaginacion } from '../../components/Paginador'
@@ -37,11 +38,36 @@ export function Clientes() {
   const [cobData, setCobData] = useState(null)
   const [cobLoading, setCobLoading] = useState(false)
 
+  // 🕐 MORA vs deuda corriente: la deuda que nace de las compras de ESTA
+  // semana (lun→hoy) es "corriente" — el mayorista la paga la semana que
+  // viene. Lo que el saldo excede a esas compras es deuda VIEJA (plata en
+  // la calle). FIFO implícito: los pagos cancelan primero lo más viejo,
+  // así que  mora = max(0, saldo − compras de la semana en curso).
+  const [debeSemana, setDebeSemana] = useState({}) // cliente_id → Σ debe (semana actual)
+
   useEffect(() => { fetchClientes() }, [])
 
   async function fetchClientes() {
     const { data } = await supabase.from('clientes').select('*').order('nombre')
     setClientes(data || [])
+    // Compras (debe) de la semana en curso por cliente — pagina con
+    // fetchAllRows por si una semana supera las 1000 filas de movimientos.
+    const lunes = lunesDeLaSemana()
+    const { data: movs } = await fetchAllRows(() => supabase
+      .from('movimientos_ctacte')
+      .select('cliente_id, debe')
+      .gte('fecha', lunes)
+      .gt('debe', 0))
+    const m = {}
+    for (const r of (movs || [])) m[r.cliente_id] = (m[r.cliente_id] || 0) + (Number(r.debe) || 0)
+    setDebeSemana(m)
+  }
+
+  // Mora de un cliente = lo que su saldo excede a sus compras de esta semana.
+  const moraDe = (c) => {
+    const saldo = Number(c.saldo) || 0
+    if (saldo <= 0) return 0
+    return Math.max(0, saldo - (debeSemana[c.id] || 0))
   }
 async function seleccionar(cliente) {
     setSeleccionado(cliente)
@@ -536,8 +562,23 @@ async function eliminarMovimiento(mov) {
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 14, marginBottom: 20 }}>
+      <div style={{ display: 'flex', gap: 14, marginBottom: 20, flexWrap: 'wrap' }}>
         <div className="stat"><div className="stat-label">Total adeudado</div><div className="stat-value" style={{ color: 'var(--red-light)' }}>{fmt(totalDeuda)}</div></div>
+        {(() => {
+          // Desglose del total: corriente (compras de esta semana, se cobra
+          // la semana próxima) vs MORA (deuda anterior = plata en la calle).
+          const totalMora = clientes.reduce((s, c) => s + moraDe(c), 0)
+          const corriente = Math.max(0, totalDeuda - totalMora)
+          const clientesConMora = clientes.filter(c => moraDe(c) > 0).length
+          return (<>
+            <div className="stat"><div className="stat-label">🟢 Corriente (de esta semana)</div><div className="stat-value" style={{ color: 'var(--green)' }}>{fmt(corriente)}</div></div>
+            <div className="stat">
+              <div className="stat-label">⏰ En mora (anterior)</div>
+              <div className="stat-value" style={{ color: 'var(--amber)' }}>{fmt(totalMora)}</div>
+              {clientesConMora > 0 && <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>{clientesConMora} cliente{clientesConMora === 1 ? '' : 's'}</div>}
+            </div>
+          </>)
+        })()}
         <div className="stat"><div className="stat-label">Clientes registrados</div><div className="stat-value" style={{ color: 'var(--gold)' }}>{clientes.length}</div></div>
       </div>
 
@@ -551,6 +592,7 @@ async function eliminarMovimiento(mov) {
           busqueda={busquedaCliente}
           setBusqueda={setBusquedaCliente}
           filtroSaldo={filtroSaldo}
+          moraDe={moraDe}
           setFiltroSaldo={setFiltroSaldo}
           fmt={fmt}
         />
@@ -930,7 +972,7 @@ const TIPO_INFO = {
 const TIPO_ORDEN = ['carniceria', 'mayorista', 'minorista', 'sucursal', 'otro']
 const ordenTipo = t => { const i = TIPO_ORDEN.indexOf(t); return i === -1 ? 99 : i }
 
-function ListaClientes({ clientes, seleccionado, onSeleccionar, onEditar, onEliminar, busqueda, setBusqueda, filtroSaldo, setFiltroSaldo, fmt }) {
+function ListaClientes({ clientes, seleccionado, onSeleccionar, onEditar, onEliminar, busqueda, setBusqueda, filtroSaldo, setFiltroSaldo, fmt, moraDe = () => 0 }) {
   // Solapa de tipo: 'todos' muestra las secciones agrupadas; cada otra aísla un tipo.
   const [filtroTipo, setFiltroTipo] = useState('todos')
 
@@ -944,9 +986,10 @@ function ListaClientes({ clientes, seleccionado, onSeleccionar, onEditar, onElim
       }
       if (filtroSaldo === 'con_deuda' && !(Number(c.saldo) > 0)) return false
       if (filtroSaldo === 'al_dia' && Number(c.saldo) > 0) return false
+      if (filtroSaldo === 'con_mora' && !(moraDe(c) > 0)) return false
       return true
     })
-  }, [clientes, busqueda, filtroSaldo])
+  }, [clientes, busqueda, filtroSaldo, moraDe])
 
   // Conteo por tipo (para las solapas)
   const conteoTipo = useMemo(() => {
@@ -1027,6 +1070,7 @@ function ListaClientes({ clientes, seleccionado, onSeleccionar, onEditar, onElim
         {[
           { id: 'todos',     label: `Todos los saldos` },
           { id: 'con_deuda', label: `💳 Con deuda` },
+          { id: 'con_mora',  label: `⏰ En mora` },
           { id: 'al_dia',    label: `✅ Al día` },
         ].map(opt => (
           <button key={opt.id} onClick={() => setFiltroSaldo(opt.id)}
@@ -1066,9 +1110,17 @@ function ListaClientes({ clientes, seleccionado, onSeleccionar, onEditar, onElim
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 {c.tiene_portal && <span title="Portal habilitado" style={{ fontSize: 13, color: 'var(--green)' }}>📱</span>}
-                <span style={{ color: c.saldo > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap' }}>
-                  {c.saldo > 0 ? fmt(c.saldo) + ' debe' : c.saldo < 0 ? fmt(Math.abs(c.saldo)) + ' a favor' : '✅ Al día'}
-                </span>
+                <div style={{ textAlign: 'right' }}>
+                  <span style={{ color: c.saldo > 0 ? 'var(--red-light)' : 'var(--green)', fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap' }}>
+                    {c.saldo > 0 ? fmt(c.saldo) + ' debe' : c.saldo < 0 ? fmt(Math.abs(c.saldo)) + ' a favor' : '✅ Al día'}
+                  </span>
+                  {moraDe(c) > 0 && (
+                    <div title="Deuda anterior a esta semana (las compras de la semana en curso no cuentan como mora)"
+                      style={{ fontSize: 10, fontWeight: 800, color: 'var(--amber)', whiteSpace: 'nowrap', marginTop: 1 }}>
+                      ⏰ {fmt(moraDe(c))} en mora
+                    </div>
+                  )}
+                </div>
                 <button onClick={() => onEditar(c)}
                   style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#000' }}>✏️</button>
                 <button onClick={() => onEliminar(c)}
