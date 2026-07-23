@@ -8,7 +8,7 @@
 // Devuelve un array de frases cortas (máx 3) listas para mostrar/leer.
 
 import { supabase } from './supabase'
-import { fechaHoyARG, fechaRelativaARG } from './fechas'
+import { fechaHoyARG, fechaRelativaARG, diaSemanaARG } from './fechas'
 import { fmtArs } from './whatsapp'
 
 export async function armarBriefing() {
@@ -30,6 +30,29 @@ export async function armarBriefing() {
 
     const items = []
     const sumar = (r) => (r.data || []).reduce((s, v) => s + (Number(v.total) || 0), 0)
+
+    // ⏰ LUNES DE COBRANZAS: ranking de morosos. Mismo criterio que las
+    // tarjetas de Clientes: mora = saldo − compras de la semana en curso
+    // (lo de esta semana se cobra la próxima, no es mora). Un lunes a la
+    // mañana la semana recién arranca → casi toda la deuda visible es
+    // vieja: el día perfecto para salir a cobrarla.
+    if (diaSemanaARG() === 'lunes') {
+      const [{ data: clis }, { data: movsSem }] = await Promise.all([
+        supabase.from('clientes').select('id, nombre, saldo').gt('saldo', 0),
+        supabase.from('movimientos_ctacte').select('cliente_id, debe').gte('fecha', hoy).gt('debe', 0),
+      ])
+      const debeSem = {}
+      ;(movsSem || []).forEach(m => { debeSem[m.cliente_id] = (debeSem[m.cliente_id] || 0) + (Number(m.debe) || 0) })
+      const morosos = (clis || [])
+        .map(c => ({ nombre: (c.nombre || '').trim(), mora: Math.max(0, (Number(c.saldo) || 0) - (debeSem[c.id] || 0)) }))
+        .filter(c => c.mora > 0.01)
+        .sort((a, b) => b.mora - a.mora)
+      if (morosos.length > 0) {
+        const total = morosos.reduce((s, c) => s + c.mora, 0)
+        const top = morosos.slice(0, 3).map(c => `${c.nombre} (${fmtArs(c.mora)})`).join(', ')
+        items.push(`⏰ Lunes de cobranzas: ${fmtArs(total)} en la calle de ${morosos.length} clientes. Los más grandes: ${top}.`)
+      }
+    }
 
     // 💵 Cómo cerró ayer la caja (vs anteayer si hay dato)
     const tAyer = sumar(ventasAyer)

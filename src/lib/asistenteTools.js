@@ -449,6 +449,11 @@ El saldo del cliente se actualiza AUTOMÁTICAMENTE por un trigger en la base de 
     parameters: { type: 'object', properties: {} }
   },
   {
+    name: 'consultar_morosos',
+    description: 'Clientes con deuda VIEJA (mora): la parte del saldo que excede sus compras de la semana en curso — la plata "en la calle". Usar para "quién está en mora", "a quién tengo que cobrarle", "cuánta plata tengo en la calle", "ranking de morosos".',
+    parameters: { type: 'object', properties: { limite: { type: 'number', description: 'Cantidad de clientes a listar (default 10)' } } }
+  },
+  {
     name: 'consultar_ofertas',
     description: 'Ofertas activas hoy (producto, precio de oferta o % de descuento, vigencia). Usar para "qué ofertas tenemos".',
     parameters: { type: 'object', properties: {} }
@@ -1310,6 +1315,30 @@ export async function ejecutarFuncion(nombre, args) {
           `• ${formatearFecha(p.dia_entrega)}${p.horario_entrega ? ` ${p.horario_entrega}` : ''} · ${p.cliente_nombre} · ${formatearPesos(p.total_estimado)} · ${(p.estado || '').toUpperCase()}`
         ).join('\n')
         return { resultado: `Pedidos:\n${lista}` }
+      }
+
+      case 'consultar_morosos': {
+        // Mora = saldo − compras (debe) de la semana en curso. Lo de esta
+        // semana es deuda corriente (se cobra la próxima), NO mora. Mismo
+        // criterio que las tarjetas de Clientes & Cta Cte (PR #284).
+        const [{ data: clis, error: errClis }, { data: movsSem }] = await Promise.all([
+          supabase.from('clientes').select('id, nombre, saldo').gt('saldo', 0),
+          fetchAllRows(() => supabase.from('movimientos_ctacte').select('cliente_id, debe').gte('fecha', inicioSemanaARG()).gt('debe', 0)),
+        ])
+        if (errClis) throw errClis
+        const debeSem = {}
+        for (const m of (movsSem || [])) debeSem[m.cliente_id] = (debeSem[m.cliente_id] || 0) + (Number(m.debe) || 0)
+        const morosos = (clis || [])
+          .map(c => ({ nombre: (c.nombre || '').trim(), mora: Math.max(0, (Number(c.saldo) || 0) - (debeSem[c.id] || 0)), saldo: Number(c.saldo) || 0 }))
+          .filter(c => c.mora > 0.01)
+          .sort((a, b) => b.mora - a.mora)
+        if (morosos.length === 0) return { resultado: 'No hay clientes en mora: toda la deuda pendiente es de compras de esta semana (corriente). 👏' }
+        const lim = args?.limite || 10
+        const total = morosos.reduce((s, c) => s + c.mora, 0)
+        const lista = morosos.slice(0, lim).map(c =>
+          `• ${c.nombre}: ${formatearPesos(c.mora)} en mora${c.saldo > c.mora + 0.01 ? ` (saldo total ${formatearPesos(c.saldo)})` : ''}`
+        ).join('\n')
+        return { resultado: `Plata en la calle (deuda anterior a esta semana): ${formatearPesos(total)} entre ${morosos.length} clientes.\n${lista}${morosos.length > lim ? `\n(+${morosos.length - lim} clientes más)` : ''}\n\nCriterio: mora = saldo − compras de la semana en curso (lun→hoy).` }
       }
 
       case 'consultar_ofertas': {
