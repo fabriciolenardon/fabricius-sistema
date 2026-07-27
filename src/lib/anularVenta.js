@@ -28,6 +28,8 @@ export function mapearStockTipo(cat, stockOrigen) {
   // Este fallback cubre ventas viejas sin stock_origen, que debitaron el
   // genérico: se les devuelve al genérico para mantener la simetría.
   if (cat === 'bovino_pieza')     return 'bovino_pieza'
+  // bovino_brosa: ídem — las ventas nuevas guardan stock_origen (brosa_*,
+  // mig 89) y revierten contra ese bucket; el genérico cubre ventas viejas.
   if (cat === 'bovino_brosa')     return 'bovino_brosa'
   if (cat === 'cerdo')            return 'cerdo'        // capón
   if (cat === 'cerdo_corte')      return null           // sin origen → no revertir (cerdo_pieza eliminado)

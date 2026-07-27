@@ -1574,6 +1574,10 @@ function mapearStock(cat, stockOrigen) {
   // res). Se mantiene el genérico para no perder el tracking y quedar
   // simétrico con la anulación (mapearStockTipo en anularVenta.js).
   if (cat === 'bovino_pieza')     return 'bovino_pieza'
+  // bovino_brosa: los productos llegan con stock_origen propio (brosa_*,
+  // mig 89) y entran por el early-return de arriba. Este fallback cubre
+  // solo productos sin stock_origen asignado — debita el genérico legacy,
+  // simétrico con la anulación (mapearStockTipo en anularVenta.js).
   if (cat === 'bovino_brosa')     return 'bovino_brosa'
   if (cat === 'cerdo')            return 'cerdo'         // capón entero
   if (cat === 'cerdo_corte')      return null            // sin origen → no descontar (no recrear cerdo_pieza)
