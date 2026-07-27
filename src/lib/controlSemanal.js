@@ -30,6 +30,10 @@ const kgRealCajon = (tipo, kg, ref) =>
 // Nombres lindos para los tipos técnicos.
 export const NOMBRE_TIPO = {
   bovino_mr: 'Media res', bovino_corte: 'Bovino cortes', bovino_brosa: 'Brosas',
+  brosa_chinchulin: 'Chinchulín', brosa_corazon: 'Corazón', brosa_entrana: 'Entraña de costillar',
+  brosa_higado: 'Hígado', brosa_lengua: 'Lengua', brosa_molleja: 'Molleja',
+  brosa_mondongo: 'Mondongo', brosa_rabo: 'Rabo', brosa_rinon: 'Riñón',
+  brosa_sesos: 'Sesos', brosa_tripa_gorda: 'Tripa gorda',
   cerdo: 'Cerdo (capones)', cerdo_corte: 'Cerdo cortes', cerdo_pieza: 'Cerdo piezas',
   cerdo_tocino: 'Cerdo tocino', cerdo_cabeza: 'Cerdo cabeza', cerdo_cuero: 'Cerdo cuero',
   cerdo_carre: 'Cerdo carré', cerdo_huesos: 'Cerdo huesos', cerdo_pierna: 'Cerdo pierna',

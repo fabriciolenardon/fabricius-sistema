@@ -2282,7 +2282,7 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, onEditarProd
 }
 
 function EntradaForm({ onSaved, showAlert, proveedores }) {
-  const [form, setForm] = useState({ tipo: '', proveedor: '', descripcion: '', fecha: fechaHoyARG(), kg: '', precioKg: '9800', merma: '', destino: 'DEPOSITO', importe: '', cantidad: '1', cajaProductoId: '', polloProductoId: '', embutidoProductoId: '' })
+  const [form, setForm] = useState({ tipo: '', proveedor: '', descripcion: '', fecha: fechaHoyARG(), kg: '', precioKg: '9800', merma: '', destino: 'DEPOSITO', importe: '', cantidad: '1', cajaProductoId: '', polloProductoId: '', embutidoProductoId: '', brosaProductoId: '' })
   const [historial, setHistorial] = useState([])
   const [editando, setEditando] = useState(null)
   const [formEdit, setFormEdit] = useState({})
@@ -2304,9 +2304,12 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
   // Embutidos COMPRADOS elaborados (ej. morcilla): el selector solo lista los
   // que tienen stock propio (stock_origen emb_*) — la entrada suma a ese bucket.
   const [productosEmbutido, setProductosEmbutido] = useState([])
+  // Brosas (mig 89): cada producto tiene su bucket brosa_* propio — la
+  // entrada se guarda con ese tipo y suma a su stock individual.
+  const [productosBrosa, setProductosBrosa] = useState([])
   useEffect(() => {
     supabase.from('precios').select('id, nombre, categoria, kg_por_unidad, stock_origen')
-      .in('categoria', ['bovino_caja_cb', 'bovino_caja_pt', 'pollo_cajon', 'rebozado_cajon', 'embutido'])
+      .in('categoria', ['bovino_caja_cb', 'bovino_caja_pt', 'pollo_cajon', 'rebozado_cajon', 'embutido', 'bovino_brosa'])
       .order('nombre')
       .then(({ data }) => {
         const all = data || []
@@ -2314,6 +2317,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
         setProductosPolloCajon(all.filter(p => p.categoria === 'pollo_cajon'))
         setProductosRebozadoCajon(all.filter(p => p.categoria === 'rebozado_cajon'))
         setProductosEmbutido(all.filter(p => p.categoria === 'embutido' && String(p.stock_origen || '').startsWith('emb_')))
+        setProductosBrosa(all.filter(p => p.categoria === 'bovino_brosa' && String(p.stock_origen || '').startsWith('brosa_')))
       })
   }, [])
 
@@ -2321,6 +2325,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
   const esPolloCajon = form.tipo === 'pollo'
   const esRebozadoCajon = form.tipo === 'rebozado'
   const esEmbutido = form.tipo === 'embutido'
+  const esBrosa = form.tipo === 'bovino_brosa'
   const productosFiltradosTipo = esPolloCajon ? productosPolloCajon
                                 : esRebozadoCajon ? productosRebozadoCajon
                                 : []
@@ -2528,6 +2533,14 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
       showAlert({ type: 'error', msg: 'Seleccioná qué embutido estás ingresando (Morcilla, Chorizo, Salame...) — la entrada suma a su stock propio' })
       return
     }
+    // Brosas (mig 89): producto obligatorio — define a qué stock propio
+    // (brosa_*) suma la entrada. El bucket genérico 'bovino_brosa' queda
+    // legacy y no recibe más créditos.
+    const prodBrosa = esBrosa ? productosBrosa.find(p => p.id === form.brosaProductoId) : null
+    if (esBrosa && !prodBrosa) {
+      showAlert({ type: 'error', msg: 'Seleccioná qué brosa estás ingresando (Chinchulín, Hígado, Mondongo...) — la entrada suma a su stock propio' })
+      return
+    }
 
     const esEnUnidades = TIPOS_EN_UNIDADES.includes(form.tipo)
     const cantidad = esEnUnidades ? Math.max(1, parseInt(form.cantidad) || 1) : 1
@@ -2560,14 +2573,16 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     // Para media res, el nombre siempre es canónico (uno de los 2 de la lista).
     const descripcionBase = form.tipo === 'bovino_mr'
       ? nombreCanonicoMediaRes(form.descripcion)
-      : (prodEmbutido?.nombre?.trim() || productoSelec?.nombre || form.descripcion || form.tipo)
+      : (prodEmbutido?.nombre?.trim() || prodBrosa?.nombre?.trim() || productoSelec?.nombre || form.descripcion || form.tipo)
     const descripcionFinal = esEnUnidades && cantidad > 1
       ? `${descripcionBase} ×${cantidad}`
       : descripcionBase
-    // Embutidos: la entrada se guarda con el tipo del BUCKET (emb_morcilla,
-    // emb_salame_comun, etc.) — así suma al stock correcto y, si se edita o
-    // elimina, la reversión también pega en el bucket correcto.
-    const tipoEntrada = prodEmbutido ? prodEmbutido.stock_origen : form.tipo
+    // Embutidos y brosas: la entrada se guarda con el tipo del BUCKET
+    // (emb_morcilla, brosa_higado, etc.) — así suma al stock correcto y, si
+    // se edita o elimina, la reversión también pega en el bucket correcto.
+    const tipoEntrada = prodEmbutido ? prodEmbutido.stock_origen
+      : prodBrosa ? prodBrosa.stock_origen
+      : form.tipo
     // Para bovino_mr necesitamos el id de la entrada insertada para crear
     // la fila correspondiente en medias_stock (el codigo MR-XXX se genera
     // automaticamente desde el id de medias_stock por columna generada).
@@ -2656,7 +2671,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
       ? `✅ ${cantidad} unidades de ${descripcionBase} registradas — ${kgTotal.toFixed(1)} kg al stock`
       : '✅ Entrada registrada — Stock actualizado'
     showAlert({ type: 'success', msg: msgOK })
-    setForm(f => ({ ...f, descripcion: '', kg: '', importe: '', precioKg: '9800', cantidad: '1', polloProductoId: '', embutidoProductoId: '' }))
+    setForm(f => ({ ...f, descripcion: '', kg: '', importe: '', precioKg: '9800', cantidad: '1', polloProductoId: '', embutidoProductoId: '', brosaProductoId: '' }))
     onSaved()
     cargarHistorial()
     setTimeout(() => showAlert(null), 3000)
@@ -2805,6 +2820,14 @@ async function eliminar(entrada) {
   const TIPOS = {
     bovino_mr: '🐄 Media Res', bovino_corte: '🥩 Bovino Corte',
     bovino_brosa: '🫀 Brosa', cerdo: '🐷 Cerdo',
+    // Brosas con stock propio (mig 89): las entradas nuevas se guardan con
+    // el tipo del bucket para que la reversión pegue donde corresponde.
+    brosa_chinchulin: '🫀 Chinchulín', brosa_corazon: '🫀 Corazón',
+    brosa_entrana: '🫀 Entraña de Costillar', brosa_higado: '🫀 Hígado',
+    brosa_lengua: '🫀 Lengua', brosa_molleja: '🫀 Molleja',
+    brosa_mondongo: '🫀 Mondongo', brosa_rabo: '🫀 Rabo',
+    brosa_rinon: '🫀 Riñón', brosa_sesos: '🫀 Sesos',
+    brosa_tripa_gorda: '🫀 Tripa Gorda',
     // Piezas de cerdo compradas directas (reventa) — suman a su bucket cerdo_*
     cerdo_pierna: '🐷 Cerdo Pierna', cerdo_carre: '🐷 Cerdo Carré',
     cerdo_pechito: '🐷 Cerdo Pechito', cerdo_matambre: '🐷 Cerdo Matambre',
@@ -2947,6 +2970,32 @@ async function eliminar(entrada) {
                 {productosEmbutido.length === 0
                   ? <span style={{ color: '#ff8b8b' }}>⚠️ No hay embutidos con stock propio — asignales su "stock origen" en /admin/precios.</span>
                   : 'La entrada suma directo al stock propio de ese producto (el mismo que descuentan las ventas). Si falta alguno, asignale su stock origen en Precios.'}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Selector de producto para BROSAS (mig 89): define a qué stock
+            propio (brosa_*) suma la entrada — cada brosa tiene su bucket
+            individual, el genérico 'bovino_brosa' quedó legacy. */}
+        {esBrosa && (
+          <div className="form-row">
+            <div className="form-group" style={{ gridColumn: '1/-1' }}>
+              <label>🫀 ¿Qué brosa ingresa?</label>
+              <select
+                value={form.brosaProductoId || ''}
+                onChange={e => setForm(f => ({ ...f, brosaProductoId: e.target.value }))}
+                style={{ borderColor: 'var(--gold)' }}
+              >
+                <option value="">— Seleccioná la brosa —</option>
+                {productosBrosa.map(p => (
+                  <option key={p.id} value={p.id}>{(p.nombre || '').trim()}</option>
+                ))}
+              </select>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                {productosBrosa.length === 0
+                  ? <span style={{ color: '#ff8b8b' }}>⚠️ No hay brosas con stock propio — asignales su "stock origen" en /admin/precios (o aplicá la migración 89).</span>
+                  : 'La entrada suma directo al stock propio de esa brosa (el mismo que descuentan las ventas). Si vino un surtido, cargá una entrada por producto.'}
               </div>
             </div>
           </div>
@@ -5316,7 +5365,7 @@ const GRUPOS_COMPRA = [
   { key: 'mr',        titulo: '🐄 Media res',       match: t => t === 'bovino_mr' },
   { key: 'piezas',    titulo: '🍖 Piezas bovinas',  match: t => t === 'bovino_pieza' || t.startsWith('pieza_'), mostrarTipo: true },
   { key: 'cortes',    titulo: '🥩 Cortes bovinos',  match: t => t === 'bovino_corte' },
-  { key: 'brosas',    titulo: '🫀 Brosas',          match: t => t === 'bovino_brosa' },
+  { key: 'brosas',    titulo: '🫀 Brosas',          match: t => t === 'bovino_brosa' || t.startsWith('brosa_'), mostrarTipo: true },
   { key: 'capones',   titulo: '🐷 Capones',         match: t => t === 'cerdo' },
   { key: 'cerdocorte', titulo: '🥓 Cortes de cerdo', match: t => t.startsWith('cerdo_'), mostrarTipo: true },
   { key: 'pollo',     titulo: '🍗 Pollo',           match: t => t === 'pollo' || t === 'pollo_cajon' },
@@ -5338,10 +5387,12 @@ const TIPO_ENTRADA_LABEL = {
   bovino_pieza: 'Pieza bovina',
   cerdo_carre: 'Carré', embutido: 'Embutido', emb_salame_comun: 'Salame común',
   caja_cb: 'Caja CB', caja_pt: 'Caja PT',
+  bovino_brosa: 'Brosa (genérico)', brosa_higado: 'Hígado', brosa_rinon: 'Riñón',
+  brosa_entrana: 'Entraña de costillar', brosa_chinchulin: 'Chinchulín', brosa_corazon: 'Corazón',
 }
 function labelTipoEntrada(t) {
   if (TIPO_ENTRADA_LABEL[t]) return TIPO_ENTRADA_LABEL[t]
-  const s = String(t || '').replace(/^(pieza_|cerdo_|emb_)/, '').replace(/_/g, ' ')
+  const s = String(t || '').replace(/^(pieza_|cerdo_|emb_|brosa_)/, '').replace(/_/g, ' ')
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
 

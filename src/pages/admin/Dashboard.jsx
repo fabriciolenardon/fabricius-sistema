@@ -205,7 +205,9 @@ export default function Dashboard() {
     (stock.cerdo_huesos || 0)
   )
   const stockPollo = Math.max(0, stock.pollo || 0)
-  const stockBrosas = Math.max(0, stock.bovino_brosa || 0)
+  // Brosas = genérico legacy + suma de los buckets por producto (brosa_*, mig 89)
+  const stockBrosas = Math.max(0, (Number(stock.bovino_brosa) || 0) +
+    Object.entries(stock).reduce((s, [t, v]) => t.startsWith('brosa_') ? s + (Number(v) || 0) : s, 0))
   // Embutidos = suma EN VIVO de los buckets por producto de elaboración
   // propia (emb_*, mig 60). El bucket genérico 'embutido' fue eliminado;
   // se suma igual por si reaparece (ej. una compra legacy), normalmente es 0.
@@ -428,7 +430,7 @@ export default function Dashboard() {
             { label: '🐷 Cerdo Capones', valor: fmtKg(stockCerdo), color: 'var(--amber)', aprox: Math.round(stockCerdo / 107) + ' capones', bajo: stockCerdo < 50, stockKg: stockCerdo, tiposEntradas: ['cerdo'], tiposSalidas: ['cerdo'], despostesCerdo: true },
             { label: '🐷 Cerdo Piezas', valor: fmtKg(stockCerdoPiezas), color: 'var(--amber)', aprox: 'al peso', bajo: stockCerdoPiezas < 20, stockKg: stockCerdoPiezas, tiposEntradas: ['cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza','cerdo_huesos'], tiposSalidas: ['cerdo_pieza','cerdo_corte','cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza','cerdo_huesos'] },
             { label: '🍗 Pollo', valor: fmtKg(stockPollo), color: 'var(--blue)', aprox: Math.round(stockPollo / 20) + ' cajones', bajo: stockPollo < 50, stockKg: stockPollo, tiposEntradas: ['pollo'], tiposSalidas: ['pollo'] },
-            { label: '🫀 Brosas', valor: fmtKg(stockBrosas), color: 'var(--amber)', aprox: 'al peso', bajo: stockBrosas < 20, stockKg: stockBrosas, tiposEntradas: ['bovino_brosa'], tiposSalidas: ['bovino_brosa'] },
+            { label: '🫀 Brosas', valor: fmtKg(stockBrosas), color: 'var(--amber)', aprox: 'al peso', bajo: stockBrosas < 20, stockKg: stockBrosas, tiposEntradas: ['bovino_brosa', 'brosa_chinchulin', 'brosa_corazon', 'brosa_entrana', 'brosa_higado', 'brosa_lengua', 'brosa_molleja', 'brosa_mondongo', 'brosa_rabo', 'brosa_rinon', 'brosa_sesos', 'brosa_tripa_gorda'], tiposSalidas: ['bovino_brosa', 'brosa_chinchulin', 'brosa_corazon', 'brosa_entrana', 'brosa_higado', 'brosa_lengua', 'brosa_molleja', 'brosa_mondongo', 'brosa_rabo', 'brosa_rinon', 'brosa_sesos', 'brosa_tripa_gorda'] },
             { label: '🌭 Embutidos', valor: fmtKg(stockEmbutido), color: 'var(--purple)', aprox: 'al peso', bajo: stockEmbutido < 20, stockKg: stockEmbutido, tiposEntradas: ['embutido', 'emb_chorizo_parrillero', 'emb_chorizo_saborizado', 'emb_chorizo_colorado', 'emb_salchicha_parrillera', 'emb_morcilla', 'emb_salame_comun', 'emb_salame_holanda', 'emb_salame_rockeford'], tiposSalidas: ['embutido', 'emb_chorizo_parrillero', 'emb_chorizo_saborizado', 'emb_chorizo_colorado', 'emb_salchicha_parrillera', 'emb_morcilla', 'emb_salame_comun', 'emb_salame_holanda', 'emb_salame_rockeford'] },
             { label: '🍔 Hamburguesas', valor: fmtKg(stockHamburguesas), color: 'var(--purple)', aprox: 'al peso', bajo: false, stockKg: stockHamburguesas, tiposEntradas: ['hamb_carne', 'hamb_pollo', 'hamb_cerdo'], tiposSalidas: ['hamb_carne', 'hamb_pollo', 'hamb_cerdo'] },
             { label: '🧊 Rebozados/Congelados', valor: fmtKg(stockRebozado), color: 'var(--blue)', aprox: 'al peso', bajo: stockRebozado < 20, stockKg: stockRebozado, tiposEntradas: ['rebozado'], tiposSalidas: ['rebozado'] },

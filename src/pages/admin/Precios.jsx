@@ -23,16 +23,18 @@ const INSUMO_SUBCAT_OPCIONES = [['descartables', '📦 Descartables'], ['limpiez
 const VACIO = { categoria: 'bovino_corte', subcategoria: 'descartables', nombre: '', precio_carniceria: '', precio_mayorista: '', precio_minorista: '', codigo_balanza: '', dias_vencimiento: '3', descripcion_etiqueta: '', pesable: true, kg_por_unidad: '', vende_por_pieza: false, stock_origen: '', stock_no_aplica: false }
 
 // Categorías cuyos productos descuentan de un bucket de stock específico
-// (cerdo por pieza, embutidos de elaboración propia). Sin stock_origen quedan
-// "huérfanos": se venden pero NO descuentan stock. Los bovinos NO van acá: se
-// trackean por categoría/pieza, su stock_origen debe ser NULL.
-const CATEGORIAS_CON_STOCK_ORIGEN = new Set(['cerdo_corte', 'cerdo_pieza', 'embutido'])
+// (cerdo por pieza, embutidos de elaboración propia, brosas por producto —
+// mig 89). Sin stock_origen quedan "huérfanos": se venden pero NO descuentan
+// stock. Los bovinos de carne NO van acá: se trackean por categoría/pieza,
+// su stock_origen debe ser NULL.
+const CATEGORIAS_CON_STOCK_ORIGEN = new Set(['cerdo_corte', 'cerdo_pieza', 'embutido', 'bovino_brosa'])
 // Las categorías personalizadas (cat_*) también pueden enlazar stock_origen:
 // sin enlace no descuentan stock (igual que un embutido comprado).
 const permiteStockOrigen = cat => CATEGORIAS_CON_STOCK_ORIGEN.has(cat) || String(cat || '').startsWith('cat_')
 const prettyBucket = b => String(b || '')
   .replace(/^cerdo_/, '🐷 ')
   .replace(/^emb_/, '🌭 ')
+  .replace(/^brosa_/, '🫀 ')
   .replace(/_/g, ' ')
 
 // Categorías que se venden por cajón (unidad con peso fijo) y por lo tanto
@@ -135,9 +137,10 @@ export default function Precios() {
       supabase.from('stock_actual').select('tipo'),
     ])
     setPrecios(data || [])
-    // Buckets enlazables: cerdo_* (piezas) y emb_* (embutidos). Excluye el 'cerdo'
-    // genérico (capón entero), que no es a donde van los cortes.
-    setStockBuckets((stk || []).map(s => s.tipo).filter(t => /^cerdo_|^emb_/.test(t)).sort())
+    // Buckets enlazables: cerdo_* (piezas), emb_* (embutidos) y brosa_*
+    // (brosas por producto, mig 89). Excluye el 'cerdo' genérico (capón
+    // entero), que no es a donde van los cortes.
+    setStockBuckets((stk || []).map(s => s.tipo).filter(t => /^cerdo_|^emb_|^brosa_/.test(t)).sort())
     setLoading(false)
   }
 
@@ -623,7 +626,7 @@ export default function Precios() {
               <div className="card" style={{ marginBottom: 16, borderColor: 'var(--amber)', background: '#2a1f0a' }}>
                 <div className="card-title" style={{ color: 'var(--amber)' }}>📦 {orfanos.length} producto{orfanos.length === 1 ? '' : 's'} sin stock asignado — enlazalos</div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
-                  Estos productos de cerdo/embutido se venden pero NO descuentan stock. Tocá cada uno para asignarle el bucket del que sale (o marcalo "no descuenta" si es comprado para reventa).
+                  Estos productos de cerdo/embutido/brosa se venden pero NO descuentan stock. Tocá cada uno para asignarle el bucket del que sale (o marcalo "no descuenta" si es comprado para reventa).
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {orfanos.map(p => (
@@ -730,7 +733,9 @@ export default function Precios() {
                   >
                     <option value="">— Sin asignar (huérfano: se vende pero NO descuenta) —</option>
                     {stockBuckets
-                      .filter(b => form.categoria === 'embutido' ? b.startsWith('emb_') : b.startsWith('cerdo_'))
+                      .filter(b => form.categoria === 'embutido' ? b.startsWith('emb_')
+                        : form.categoria === 'bovino_brosa' ? b.startsWith('brosa_')
+                        : b.startsWith('cerdo_'))
                       .map(b => <option key={b} value={b}>{prettyBucket(b)}</option>)}
                     <option value="__no__">🚫 No descuenta (comprado / reventa)</option>
                   </select>

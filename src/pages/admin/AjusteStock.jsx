@@ -24,7 +24,18 @@ const LABELS = {
   bovino_mr: '🐄 Media Reses',
   bovino_corte: '🥩 Bovino Cortes',
   bovino_pieza: '🍖 Piezas Bovinas',
-  bovino_brosa: '🫀 Brosa',
+  bovino_brosa: '🫀 Brosa (genérico legacy — repartir y dejar en 0)',
+  brosa_chinchulin: '🫀 Brosa — Chinchulín',
+  brosa_corazon: '🫀 Brosa — Corazón',
+  brosa_entrana: '🫀 Brosa — Entraña de Costillar',
+  brosa_higado: '🫀 Brosa — Hígado',
+  brosa_lengua: '🫀 Brosa — Lengua',
+  brosa_molleja: '🫀 Brosa — Molleja',
+  brosa_mondongo: '🫀 Brosa — Mondongo',
+  brosa_rabo: '🫀 Brosa — Rabo',
+  brosa_rinon: '🫀 Brosa — Riñón',
+  brosa_sesos: '🫀 Brosa — Sesos (por unidad)',
+  brosa_tripa_gorda: '🫀 Brosa — Tripa Gorda',
   cerdo: '🐷 Cerdo (capón entero)',
   cerdo_pierna: '🦵 Cerdo — Piernas',
   cerdo_carre: '🥩 Cerdo — Carré',
@@ -66,7 +77,9 @@ const LABELS = {
 
 // Tipos que se manejan por unidad (no por kg). La columna kg_disponible
 // guarda la cantidad de unidades para estos. Se muestra "u" en vez de "kg".
-const TIPOS_POR_UNIDAD = new Set(['almacen', 'bebidas', 'pollo', 'caja_cb', 'caja_pt', 'rebozado'])
+// brosa_sesos: el producto "SESOS (la unidad)" se vende por unidad (no
+// pesable), así que su bucket también cuenta unidades.
+const TIPOS_POR_UNIDAD = new Set(['almacen', 'bebidas', 'pollo', 'caja_cb', 'caja_pt', 'rebozado', 'brosa_sesos'])
 
 const fmt = n => Math.round((Number(n) || 0) * 100) / 100
 const fFecha = s => s ? new Date(s).toLocaleString('es-AR', {
