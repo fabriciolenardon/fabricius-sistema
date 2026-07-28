@@ -18,6 +18,8 @@ import AjusteStock from './AjusteStock'
 import CajasTab from './CajasTab'
 import PolloCajonesTab from './PolloCajonesTab'
 import { cargarCategoriasPrecios, labelsDeCategorias } from '../../lib/categoriasPrecios'
+import { estadoBloqueoCliente, DIAS_BLOQUEO } from '../../lib/moraClientes'
+import { logAuditoria } from '../../lib/auditoria'
 
 // Nombre legible de cada tipo de embutido/salame (para descripciones de
 // historial y entradas registradas). El <select> usa estas mismas claves.
@@ -3224,6 +3226,10 @@ export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   const [mostrarClientes, setMostrarClientes] = useState(false)
   // Cliente que se está editando en el modal (✏️ desde el buscador de clientes)
   const [clienteEditando, setClienteEditando] = useState(null)
+  // Bloqueo por saldo vencido (> 15 días, lib/moraClientes): estado del
+  // cliente seleccionado + excepción explícita (queda en auditoría).
+  const [bloqueo, setBloqueo] = useState(null)          // { saldo, vencido, bloqueado }
+  const [overrideBloqueo, setOverrideBloqueo] = useState(false)
   const [mediasDisponibles, setMediasDisponibles] = useState([])
   const [mediaSeleccionada, setMediaSeleccionada] = useState(null)
   const [formManual, setFormManual] = useState({ descripcion: '', importe: '' })
@@ -3415,6 +3421,10 @@ const CATEGORIAS = {
     setForm(f => ({ ...f, clienteId: c.id, clienteNombre: c.nombre, domicilio: c.domicilio || '' }))
     setBusqueda(c.nombre)
     setMostrarClientes(false)
+    // Chequear saldo vencido del cliente recién elegido (bloqueo a 15 días)
+    setBloqueo(null)
+    setOverrideBloqueo(false)
+    estadoBloqueoCliente(c.id).then(setBloqueo).catch(() => {})
     // Si ya había un producto seleccionado, recalcular el precio con la
     // lista del cliente recién elegido (puede tener lista distinta al destino),
     // aplicando la oferta vigente si corresponde.
@@ -3593,6 +3603,29 @@ const item = {
     if (form.cobro === 'cta_cte' && !esFranquicia && !form.clienteId) {
       showAlert({ type: 'error', msg: '⛔ Venta a CUENTA CORRIENTE: elegí el cliente de la lista (tiene que aparecer "✅ Cliente vinculado"). Escribir el nombre a mano NO lo imputa a su cuenta corriente.' })
       return
+    }
+    // BLOQUEO por saldo vencido (> 15 días): una venta a cuenta corriente a un
+    // cliente con deuda vieja no sale, salvo excepción explícita (que queda en
+    // auditoría). Se re-chequea acá con datos frescos (no el estado de la UI)
+    // para que no se cuele un despacho con la pantalla abierta desde ayer.
+    // Contado (efectivo/transferencia/mixto) no genera deuda → no se bloquea.
+    // Franquicias (sucursales propias) quedan exentas.
+    if (form.cobro === 'cta_cte' && !esFranquicia && form.clienteId) {
+      const est = await estadoBloqueoCliente(form.clienteId)
+      setBloqueo(est)
+      if (est.bloqueado && !overrideBloqueo) {
+        showAlert({ type: 'error', msg: `🚫 CLIENTE BLOQUEADO: tiene ${fmtPrecio(est.vencido)} vencidos (deuda con más de ${DIAS_BLOQUEO} días). No se puede despachar a cuenta corriente hasta que regularice el pago. Podés cobrarle de contado, o autorizar una excepción desde el aviso rojo de arriba.` })
+        return
+      }
+      if (est.bloqueado && overrideBloqueo) {
+        await logAuditoria({
+          accion: 'update',
+          modulo: 'deposito',
+          entidad: 'clientes',
+          entidad_id: form.clienteId,
+          descripcion: `EXCEPCIÓN DE BLOQUEO: se despachó a cuenta corriente a "${form.clienteNombre}" con ${fmtPrecio(est.vencido)} vencidos (> ${DIAS_BLOQUEO} días). Total del remito: ${fmtPrecio(total)}.`,
+        })
+      }
     }
     // Guardia anti-"media res sin media física": una media res debe venderse
     // ELIGIÉNDOLA de la lista de "Medias Reses disponibles" (eso marca la MR-XXX
@@ -3883,7 +3916,7 @@ for (const item of items) {
           <div style={{ position: 'relative', marginBottom: 12 }}>
             <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Buscar cliente</label>
             <input value={busqueda}
-              onChange={e => { setBusqueda(e.target.value); setMostrarClientes(true); setForm(f => ({ ...f, clienteId: '', clienteNombre: e.target.value })) }}
+              onChange={e => { setBusqueda(e.target.value); setMostrarClientes(true); setBloqueo(null); setOverrideBloqueo(false); setForm(f => ({ ...f, clienteId: '', clienteNombre: e.target.value })) }}
               onFocus={() => setMostrarClientes(true)}
               placeholder="Escribí el nombre del cliente..."
               style={{ background: 'var(--surface)', border: '1px solid var(--gold)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }} />
@@ -3914,6 +3947,26 @@ for (const item of items) {
                   style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text2)', cursor: 'pointer', fontSize: 11, padding: '2px 8px' }}>
                   ✏️ Editar cliente
                 </button>
+              </div>
+            )}
+            {/* BLOQUEO por saldo vencido (> 15 días): cartel apenas se elige el
+                cliente. La venta a cta cte no sale salvo excepción explícita
+                (queda en auditoría). De contado puede comprar igual. */}
+            {form.clienteId && bloqueo?.bloqueado && (
+              <div style={{ marginTop: 8, background: '#3a1a1a', border: '1px solid var(--red-light)', borderRadius: 8, padding: '10px 14px' }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: '#ff6b6b' }}>
+                  🚫 CLIENTE BLOQUEADO — {fmtPrecio(bloqueo.vencido)} vencidos (deuda con más de {DIAS_BLOQUEO} días)
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, lineHeight: 1.5 }}>
+                  Saldo total: {fmtPrecio(bloqueo.saldo)}. No se puede despachar a <b>cuenta corriente</b> hasta que
+                  regularice el pago. De <b>contado</b> (efectivo/transferencia) puede comprar igual.
+                </div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, cursor: 'pointer', fontSize: 12, fontWeight: 600, color: overrideBloqueo ? 'var(--amber)' : 'var(--text)' }}>
+                  <input type="checkbox" checked={overrideBloqueo}
+                    onChange={e => setOverrideBloqueo(e.target.checked)}
+                    style={{ width: 16, height: 16, cursor: 'pointer' }} />
+                  ⚠️ Autorizo despachar igual por esta vez (queda registrado en auditoría)
+                </label>
               </div>
             )}
           </div>
