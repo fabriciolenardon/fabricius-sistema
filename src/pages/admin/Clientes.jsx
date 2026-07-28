@@ -9,6 +9,7 @@ import { imprimirHTML } from '../../lib/imprimir'
 import { recomputarSaldoCliente, conSaldoCorriente } from '../../lib/ctaCorriente'
 import { lunesDeLaSemana } from '../../lib/cierreAuto'
 import { getEtiquetaLista } from '../../lib/listasPrecios'
+import { vencidoPorCliente, DIAS_BLOQUEO } from '../../lib/moraClientes'
 import { useEsMovil } from '../../lib/useEsMovil'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
@@ -44,6 +45,10 @@ export function Clientes() {
   // la calle). FIFO implícito: los pagos cancelan primero lo más viejo,
   // así que  mora = max(0, saldo − compras de la semana en curso).
   const [debeSemana, setDebeSemana] = useState({}) // cliente_id → Σ debe (semana actual)
+  // 🚫 BLOQUEO: cliente_id → $ vencido (deuda con más de 15 días, FIFO).
+  // Con vencido > 0 el cliente queda bloqueado para nuevas ventas a cta cte
+  // (despacho en Depósito y pedidos del portal). Ver lib/moraClientes.js.
+  const [vencidos, setVencidos] = useState({})
 
   useEffect(() => { fetchClientes() }, [])
 
@@ -61,6 +66,8 @@ export function Clientes() {
     const m = {}
     for (const r of (movs || [])) m[r.cliente_id] = (m[r.cliente_id] || 0) + (Number(r.debe) || 0)
     setDebeSemana(m)
+    // Vencidos a 15 días (para el badge 🚫 Bloqueado de la lista)
+    vencidoPorCliente(data || []).then(setVencidos).catch(() => {})
   }
 
   // Mora de un cliente = lo que su saldo excede a sus compras de esta semana.
@@ -593,6 +600,7 @@ async function eliminarMovimiento(mov) {
           setBusqueda={setBusquedaCliente}
           filtroSaldo={filtroSaldo}
           moraDe={moraDe}
+          vencidos={vencidos}
           setFiltroSaldo={setFiltroSaldo}
           fmt={fmt}
         />
@@ -972,7 +980,7 @@ const TIPO_INFO = {
 const TIPO_ORDEN = ['carniceria', 'mayorista', 'minorista', 'sucursal', 'otro']
 const ordenTipo = t => { const i = TIPO_ORDEN.indexOf(t); return i === -1 ? 99 : i }
 
-function ListaClientes({ clientes, seleccionado, onSeleccionar, onEditar, onEliminar, busqueda, setBusqueda, filtroSaldo, setFiltroSaldo, fmt, moraDe = () => 0 }) {
+function ListaClientes({ clientes, seleccionado, onSeleccionar, onEditar, onEliminar, busqueda, setBusqueda, filtroSaldo, setFiltroSaldo, fmt, moraDe = () => 0, vencidos = {} }) {
   // Solapa de tipo: 'todos' muestra las secciones agrupadas; cada otra aísla un tipo.
   const [filtroTipo, setFiltroTipo] = useState('todos')
 
@@ -987,9 +995,10 @@ function ListaClientes({ clientes, seleccionado, onSeleccionar, onEditar, onElim
       if (filtroSaldo === 'con_deuda' && !(Number(c.saldo) > 0)) return false
       if (filtroSaldo === 'al_dia' && Number(c.saldo) > 0) return false
       if (filtroSaldo === 'con_mora' && !(moraDe(c) > 0)) return false
+      if (filtroSaldo === 'bloqueados' && !(vencidos[c.id] > 0)) return false
       return true
     })
-  }, [clientes, busqueda, filtroSaldo, moraDe])
+  }, [clientes, busqueda, filtroSaldo, moraDe, vencidos])
 
   // Conteo por tipo (para las solapas)
   const conteoTipo = useMemo(() => {
@@ -1071,6 +1080,7 @@ function ListaClientes({ clientes, seleccionado, onSeleccionar, onEditar, onElim
           { id: 'todos',     label: `Todos los saldos` },
           { id: 'con_deuda', label: `💳 Con deuda` },
           { id: 'con_mora',  label: `⏰ En mora` },
+          { id: 'bloqueados', label: `🚫 Bloqueados` },
           { id: 'al_dia',    label: `✅ Al día` },
         ].map(opt => (
           <button key={opt.id} onClick={() => setFiltroSaldo(opt.id)}
@@ -1103,6 +1113,12 @@ function ListaClientes({ clientes, seleccionado, onSeleccionar, onEditar, onElim
                 <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                   <span>{c.nombre}</span>
                   {c.es_franquicia && <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 0.5, background: 'var(--gold)', color: '#000', borderRadius: 4, padding: '1px 6px' }}>🏪 FRANQUICIA</span>}
+                  {vencidos[c.id] > 0 && (
+                    <span title={`${fmt(vencidos[c.id])} vencidos (deuda con más de ${DIAS_BLOQUEO} días) — bloqueado para nuevas ventas a cta cte`}
+                      style={{ fontSize: 9, fontWeight: 800, letterSpacing: 0.5, background: '#3a1a1a', color: '#ff6b6b', border: '1px solid var(--red-light)', borderRadius: 4, padding: '1px 6px' }}>
+                      🚫 BLOQUEADO
+                    </span>
+                  )}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {[c.nombre_fantasia ? `"${c.nombre_fantasia}"` : '', c.titular ? `👤 ${c.titular}` : '', c.localidad].filter(Boolean).join(' · ') || '—'}
