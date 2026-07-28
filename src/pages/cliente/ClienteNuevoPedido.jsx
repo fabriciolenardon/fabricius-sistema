@@ -37,8 +37,8 @@ export default function ClienteNuevoPedido() {
   const [cliente, setCliente] = useState(null)
   const [precios, setPrecios] = useState([])
   const [loading, setLoading] = useState(true)
-  // Bloqueo por saldo vencido (> 15 días): si el cliente tiene deuda vieja
-  // sin pagar, no puede hacer pedidos nuevos hasta regularizar.
+  // Bloqueo de cta cte (flag manual que maneja Fabricio desde Clientes,
+  // mig 90): si la cuenta está bloqueada, no puede hacer pedidos nuevos.
   const [bloqueo, setBloqueo] = useState(null)
 
   // Estado del wizard
@@ -240,19 +240,24 @@ export default function ClienteNuevoPedido() {
   if (loading) return <div style={{ padding: 40, color: 'var(--muted)', textAlign: 'center' }}>Cargando...</div>
   if (!cliente) return <div style={{ padding: 40, color: 'var(--muted)', textAlign: 'center' }}>Tu perfil de cliente no pudo cargarse. Contactá al administrador.</div>
 
-  // 🚫 Cuenta bloqueada por saldo vencido: no puede armar pedidos nuevos
-  // hasta regularizar. El detalle de su deuda lo ve en "Mi Cuenta".
+  // 🚫 Cuenta bloqueada (flag manual de Fabricius): no puede armar pedidos
+  // nuevos hasta que la desbloqueen. El detalle de su deuda lo ve en su
+  // cuenta corriente.
   if (bloqueo?.bloqueado) return (
     <div style={{ maxWidth: 640, margin: '40px auto', textAlign: 'center' }}>
       <div className="card" style={{ borderColor: 'var(--red-light)', background: '#2a1414', padding: 28 }}>
         <div style={{ fontSize: 40, marginBottom: 10 }}>🚫</div>
         <div style={{ fontSize: 18, fontWeight: 800, color: '#ff6b6b', marginBottom: 10 }}>
-          Pedidos suspendidos por saldo vencido
+          Pedidos suspendidos
         </div>
         <div style={{ fontSize: 14, color: 'var(--text)', lineHeight: 1.6 }}>
-          Tu cuenta tiene <b style={{ color: '#ff8b8b' }}>{fmt(bloqueo.vencido)}</b> con más de {DIAS_BLOQUEO} días
-          de antigüedad (saldo total: {fmt(bloqueo.saldo)}).
-          <br />Para volver a hacer pedidos, regularizá el pago pendiente.
+          {bloqueo.vencido > 0 ? (<>
+            Tu cuenta tiene <b style={{ color: '#ff8b8b' }}>{fmt(bloqueo.vencido)}</b> con más de {DIAS_BLOQUEO} días
+            de antigüedad (saldo total: {fmt(bloqueo.saldo)}).
+            <br />Para volver a hacer pedidos, regularizá el pago pendiente.
+          </>) : (<>
+            Tu cuenta corriente está suspendida temporalmente para pedidos nuevos.
+          </>)}
         </div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 14, lineHeight: 1.6 }}>
           Podés ver el detalle en <b>Mi Cuenta</b>. Si ya hiciste la transferencia o creés que hay un error,

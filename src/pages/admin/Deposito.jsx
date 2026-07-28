@@ -3226,9 +3226,10 @@ export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   const [mostrarClientes, setMostrarClientes] = useState(false)
   // Cliente que se está editando en el modal (✏️ desde el buscador de clientes)
   const [clienteEditando, setClienteEditando] = useState(null)
-  // Bloqueo por saldo vencido (> 15 días, lib/moraClientes): estado del
-  // cliente seleccionado + excepción explícita (queda en auditoría).
-  const [bloqueo, setBloqueo] = useState(null)          // { saldo, vencido, bloqueado }
+  // Bloqueo de cta cte (flag manual de la ficha del cliente, mig 90 —
+  // lib/moraClientes): estado del cliente seleccionado + excepción
+  // explícita (queda en auditoría).
+  const [bloqueo, setBloqueo] = useState(null)          // { saldo, vencido, bloqueado, motivo }
   const [overrideBloqueo, setOverrideBloqueo] = useState(false)
   const [mediasDisponibles, setMediasDisponibles] = useState([])
   const [mediaSeleccionada, setMediaSeleccionada] = useState(null)
@@ -3604,17 +3605,18 @@ const item = {
       showAlert({ type: 'error', msg: '⛔ Venta a CUENTA CORRIENTE: elegí el cliente de la lista (tiene que aparecer "✅ Cliente vinculado"). Escribir el nombre a mano NO lo imputa a su cuenta corriente.' })
       return
     }
-    // BLOQUEO por saldo vencido (> 15 días): una venta a cuenta corriente a un
-    // cliente con deuda vieja no sale, salvo excepción explícita (que queda en
-    // auditoría). Se re-chequea acá con datos frescos (no el estado de la UI)
-    // para que no se cuele un despacho con la pantalla abierta desde ayer.
-    // Contado (efectivo/transferencia/mixto) no genera deuda → no se bloquea.
-    // Franquicias (sucursales propias) quedan exentas.
+    // BLOQUEO de cta cte: si Fabricio marcó al cliente como bloqueado (flag
+    // en su ficha), la venta a cuenta corriente no sale — salvo excepción
+    // explícita (que queda en auditoría). Se re-chequea acá con datos frescos
+    // (no el estado de la UI) para que no se cuele un despacho con la
+    // pantalla abierta desde antes del bloqueo. Contado (efectivo/
+    // transferencia/mixto) no genera deuda → no se bloquea. Franquicias
+    // (sucursales propias) quedan exentas.
     if (form.cobro === 'cta_cte' && !esFranquicia && form.clienteId) {
       const est = await estadoBloqueoCliente(form.clienteId)
       setBloqueo(est)
       if (est.bloqueado && !overrideBloqueo) {
-        showAlert({ type: 'error', msg: `🚫 CLIENTE BLOQUEADO: tiene ${fmtPrecio(est.vencido)} vencidos (deuda con más de ${DIAS_BLOQUEO} días). No se puede despachar a cuenta corriente hasta que regularice el pago. Podés cobrarle de contado, o autorizar una excepción desde el aviso rojo de arriba.` })
+        showAlert({ type: 'error', msg: `🚫 CLIENTE BLOQUEADO por Fabricio (${est.motivo || 'sin motivo cargado'}). No se puede despachar a cuenta corriente. Podés cobrarle de contado, autorizar una excepción desde el aviso rojo de arriba, o desbloquearlo desde Clientes.` })
         return
       }
       if (est.bloqueado && overrideBloqueo) {
@@ -3623,7 +3625,7 @@ const item = {
           modulo: 'deposito',
           entidad: 'clientes',
           entidad_id: form.clienteId,
-          descripcion: `EXCEPCIÓN DE BLOQUEO: se despachó a cuenta corriente a "${form.clienteNombre}" con ${fmtPrecio(est.vencido)} vencidos (> ${DIAS_BLOQUEO} días). Total del remito: ${fmtPrecio(total)}.`,
+          descripcion: `EXCEPCIÓN DE BLOQUEO: se despachó a cuenta corriente a "${form.clienteNombre}" estando bloqueado (${est.motivo || 'sin motivo'}${est.vencido > 0 ? `, ${fmtPrecio(est.vencido)} vencidos` : ''}). Total del remito: ${fmtPrecio(total)}.`,
         })
       }
     }
@@ -3949,17 +3951,18 @@ for (const item of items) {
                 </button>
               </div>
             )}
-            {/* BLOQUEO por saldo vencido (> 15 días): cartel apenas se elige el
-                cliente. La venta a cta cte no sale salvo excepción explícita
-                (queda en auditoría). De contado puede comprar igual. */}
+            {/* BLOQUEO de cta cte (flag manual de la ficha): cartel apenas se
+                elige el cliente. La venta a cta cte no sale salvo excepción
+                explícita (queda en auditoría). De contado puede comprar igual. */}
             {form.clienteId && bloqueo?.bloqueado && (
               <div style={{ marginTop: 8, background: '#3a1a1a', border: '1px solid var(--red-light)', borderRadius: 8, padding: '10px 14px' }}>
                 <div style={{ fontSize: 13, fontWeight: 800, color: '#ff6b6b' }}>
-                  🚫 CLIENTE BLOQUEADO — {fmtPrecio(bloqueo.vencido)} vencidos (deuda con más de {DIAS_BLOQUEO} días)
+                  🚫 CLIENTE BLOQUEADO — {bloqueo.motivo || 'bloqueo manual'}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, lineHeight: 1.5 }}>
-                  Saldo total: {fmtPrecio(bloqueo.saldo)}. No se puede despachar a <b>cuenta corriente</b> hasta que
-                  regularice el pago. De <b>contado</b> (efectivo/transferencia) puede comprar igual.
+                  Saldo total: {fmtPrecio(bloqueo.saldo)}{bloqueo.vencido > 0 && <> · {fmtPrecio(bloqueo.vencido)} con más de {DIAS_BLOQUEO} días</>}.
+                  No se puede despachar a <b>cuenta corriente</b> (se desbloquea desde Clientes).
+                  De <b>contado</b> (efectivo/transferencia) puede comprar igual.
                 </div>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, cursor: 'pointer', fontSize: 12, fontWeight: 600, color: overrideBloqueo ? 'var(--amber)' : 'var(--text)' }}>
                   <input type="checkbox" checked={overrideBloqueo}

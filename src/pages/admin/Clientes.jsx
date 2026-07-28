@@ -9,7 +9,7 @@ import { imprimirHTML } from '../../lib/imprimir'
 import { recomputarSaldoCliente, conSaldoCorriente } from '../../lib/ctaCorriente'
 import { lunesDeLaSemana } from '../../lib/cierreAuto'
 import { getEtiquetaLista } from '../../lib/listasPrecios'
-import { vencidoPorCliente, DIAS_BLOQUEO } from '../../lib/moraClientes'
+import { vencidoPorCliente, setBloqueoCliente, DIAS_BLOQUEO } from '../../lib/moraClientes'
 import { useEsMovil } from '../../lib/useEsMovil'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
@@ -45,10 +45,14 @@ export function Clientes() {
   // la calle). FIFO implícito: los pagos cancelan primero lo más viejo,
   // así que  mora = max(0, saldo − compras de la semana en curso).
   const [debeSemana, setDebeSemana] = useState({}) // cliente_id → Σ debe (semana actual)
-  // 🚫 BLOQUEO: cliente_id → $ vencido (deuda con más de 15 días, FIFO).
-  // Con vencido > 0 el cliente queda bloqueado para nuevas ventas a cta cte
-  // (despacho en Depósito y pedidos del portal). Ver lib/moraClientes.js.
+  // 🚫 BLOQUEO manual (mig 90): el flag clientes.bloqueo_ctacte lo marca
+  // Fabricio. `vencidos` (cliente_id → $ con más de 15 días, FIFO) es el
+  // detector que alimenta el ANUNCIO de sugerencias — el sistema nunca
+  // bloquea solo. Ver lib/moraClientes.js.
   const [vencidos, setVencidos] = useState({})
+  // Confirmación inline de bloqueo/desbloqueo: { cliente, bloquear, motivo }
+  const [confirmBloq, setConfirmBloq] = useState(null)
+  const [bloqLoading, setBloqLoading] = useState(false)
 
   useEffect(() => { fetchClientes() }, [])
 
@@ -75,6 +79,19 @@ export function Clientes() {
     const saldo = Number(c.saldo) || 0
     if (saldo <= 0) return 0
     return Math.max(0, saldo - (debeSemana[c.id] || 0))
+  }
+
+  // Ejecutar el bloqueo/desbloqueo YA CONFIRMADO en la UI (confirmBloq).
+  async function ejecutarBloqueo(cliente, bloquear, motivo) {
+    setBloqLoading(true)
+    const { error } = await setBloqueoCliente(cliente, bloquear, motivo)
+    setBloqLoading(false)
+    setConfirmBloq(null)
+    if (error) { alert('❌ No se pudo actualizar el bloqueo: ' + error); return }
+    // Refrescar lista y ficha abierta con el flag nuevo
+    const actualizado = { ...cliente, bloqueo_ctacte: bloquear, bloqueo_motivo: bloquear ? (motivo || 'Bloqueo manual') : null }
+    setClientes(prev => prev.map(c => c.id === cliente.id ? { ...c, ...actualizado } : c))
+    if (seleccionado?.id === cliente.id) setSeleccionado(s => ({ ...s, ...actualizado }))
   }
 async function seleccionar(cliente) {
     setSeleccionado(cliente)
@@ -589,6 +606,67 @@ async function eliminarMovimiento(mov) {
         <div className="stat"><div className="stat-label">Clientes registrados</div><div className="stat-value" style={{ color: 'var(--gold)' }}>{clientes.length}</div></div>
       </div>
 
+      {/* 🔔 ANUNCIO DE BLOQUEOS — el sistema detecta y SUGIERE, Fabricio decide.
+          Cada acción pide confirmación inline (nada de window.confirm, iOS lo
+          suprime) y queda registrada en auditoría. */}
+      {(() => {
+        const aBloquear = clientes.filter(c => vencidos[c.id] > 0 && !c.bloqueo_ctacte && !c.es_franquicia)
+          .sort((a, b) => (vencidos[b.id] || 0) - (vencidos[a.id] || 0))
+        const aDesbloquear = clientes.filter(c => c.bloqueo_ctacte && !(vencidos[c.id] > 0))
+        if (aBloquear.length === 0 && aDesbloquear.length === 0) return null
+        const filaBtn = (c, bloquear) => {
+          const enConfirm = confirmBloq?.cliente?.id === c.id && confirmBloq?.bloquear === bloquear && confirmBloq?.origen === 'banner'
+          const motivo = bloquear ? `Saldo vencido ${fmt(vencidos[c.id] || 0)} (más de ${DIAS_BLOQUEO} días)` : null
+          if (enConfirm) return (
+            <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <span style={{ fontSize: 11, color: 'var(--text)', fontWeight: 700 }}>¿Confirmás?</span>
+              <button disabled={bloqLoading} onClick={() => ejecutarBloqueo(c, bloquear, motivo)}
+                style={{ background: bloquear ? '#5a1a1a' : '#0f4220', border: `1px solid ${bloquear ? 'var(--red-light)' : 'var(--green)'}`, color: bloquear ? '#ff8b8b' : 'var(--green)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 11, fontWeight: 800 }}>
+                {bloqLoading ? '⏳' : bloquear ? 'Sí, bloquear' : 'Sí, desbloquear'}
+              </button>
+              <button disabled={bloqLoading} onClick={() => setConfirmBloq(null)}
+                style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 11 }}>
+                Cancelar
+              </button>
+            </span>
+          )
+          return (
+            <button onClick={() => setConfirmBloq({ cliente: c, bloquear, origen: 'banner' })}
+              style={{ background: bloquear ? '#3a1a1a' : '#12301c', border: `1px solid ${bloquear ? '#5a2a2a' : '#2d5a2d'}`, color: bloquear ? 'var(--red-light)' : 'var(--green)', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
+              {bloquear ? '🚫 Bloquear' : '✅ Desbloquear'}
+            </button>
+          )
+        }
+        return (
+          <div className="card" style={{ marginBottom: 16, borderColor: 'var(--amber)' }}>
+            <div className="card-title" style={{ color: 'var(--amber)' }}>🔔 Cuentas corrientes para revisar</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10, lineHeight: 1.5 }}>
+              El sistema detecta saldos vencidos (más de {DIAS_BLOQUEO} días sin pagar, semanas lun→dom) pero <b>no bloquea solo</b>:
+              vos confirmás cada bloqueo. También podés bloquear/desbloquear a cualquier cliente desde su ficha.
+            </div>
+            {aBloquear.map(c => (
+              <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '8px 4px', borderTop: '1px solid var(--border)', flexWrap: 'wrap' }}>
+                <div style={{ cursor: 'pointer', minWidth: 0 }} onClick={() => seleccionar(c)}>
+                  <span style={{ fontWeight: 700 }}>{c.nombre}</span>
+                  <span style={{ fontSize: 11, color: 'var(--red-light)', marginLeft: 8 }}>{fmt(vencidos[c.id])} vencidos</span>
+                  <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 8 }}>saldo {fmt(c.saldo)}</span>
+                </div>
+                {filaBtn(c, true)}
+              </div>
+            ))}
+            {aDesbloquear.map(c => (
+              <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '8px 4px', borderTop: '1px solid var(--border)', flexWrap: 'wrap' }}>
+                <div style={{ cursor: 'pointer', minWidth: 0 }} onClick={() => seleccionar(c)}>
+                  <span style={{ fontWeight: 700 }}>{c.nombre}</span>
+                  <span style={{ fontSize: 11, color: 'var(--green)', marginLeft: 8 }}>🚫 bloqueado pero sin vencido — regularizó</span>
+                </div>
+                {filaBtn(c, false)}
+              </div>
+            ))}
+          </div>
+        )
+      })()}
+
       <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : (seleccionado ? '1fr 2fr' : '1fr'), gap: 16 }}>
         <ListaClientes
           clientes={clientes}
@@ -613,6 +691,7 @@ async function eliminarMovimiento(mov) {
                   <div className="card-title" style={{ marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     {seleccionado.nombre}
                     {seleccionado.es_franquicia && <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.5, background: 'var(--gold)', color: '#000', borderRadius: 5, padding: '2px 8px' }}>🏪 FRANQUICIA</span>}
+                    {seleccionado.bloqueo_ctacte && <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.5, background: '#3a1a1a', color: '#ff6b6b', border: '1px solid var(--red-light)', borderRadius: 5, padding: '2px 8px' }}>🚫 CTA CTE BLOQUEADA</span>}
                   </div>
                   {seleccionado.nombre_fantasia && <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>"{seleccionado.nombre_fantasia}"</div>}
                 </div>
@@ -637,6 +716,44 @@ async function eliminarMovimiento(mov) {
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{d.val}</div>
                   </div>
                 ))}
+              </div>
+
+              {/* BLOQUEO DE CTA CTE — marca manual de Fabricio (mig 90).
+                  Confirmación inline; el despacho y el portal obedecen este flag. */}
+              <div style={{ background: seleccionado.bloqueo_ctacte ? '#2a1414' : 'var(--surface2)', border: `1px solid ${seleccionado.bloqueo_ctacte ? 'var(--red-light)' : 'var(--border)'}`, borderRadius: 10, padding: '12px 14px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: seleccionado.bloqueo_ctacte ? '#ff6b6b' : 'var(--muted)', marginBottom: 4 }}>
+                    {seleccionado.bloqueo_ctacte ? '🚫 Cuenta corriente BLOQUEADA' : '💳 Cuenta corriente habilitada'}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                    {seleccionado.bloqueo_ctacte
+                      ? (seleccionado.bloqueo_motivo || 'Bloqueo manual') + ' — no se le puede despachar a cta cte ni hacer pedidos por el portal.'
+                      : vencidos[seleccionado.id] > 0
+                        ? `⚠️ Tiene ${fmt(vencidos[seleccionado.id])} con más de ${DIAS_BLOQUEO} días — el sistema sugiere bloquearlo.`
+                        : 'Puede comprar a cuenta corriente con normalidad.'}
+                  </div>
+                </div>
+                <div>
+                  {confirmBloq?.cliente?.id === seleccionado.id && confirmBloq?.origen === 'ficha' ? (
+                    <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <span style={{ fontSize: 11, fontWeight: 700 }}>¿Confirmás?</span>
+                      <button disabled={bloqLoading}
+                        onClick={() => ejecutarBloqueo(seleccionado, !seleccionado.bloqueo_ctacte, !seleccionado.bloqueo_ctacte ? (vencidos[seleccionado.id] > 0 ? `Saldo vencido ${fmt(vencidos[seleccionado.id])} (más de ${DIAS_BLOQUEO} días)` : 'Bloqueo manual') : null)}
+                        style={{ background: seleccionado.bloqueo_ctacte ? '#0f4220' : '#5a1a1a', border: `1px solid ${seleccionado.bloqueo_ctacte ? 'var(--green)' : 'var(--red-light)'}`, color: seleccionado.bloqueo_ctacte ? 'var(--green)' : '#ff8b8b', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 800 }}>
+                        {bloqLoading ? '⏳' : seleccionado.bloqueo_ctacte ? 'Sí, desbloquear' : 'Sí, bloquear'}
+                      </button>
+                      <button disabled={bloqLoading} onClick={() => setConfirmBloq(null)}
+                        style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 12 }}>
+                        Cancelar
+                      </button>
+                    </span>
+                  ) : (
+                    <button onClick={() => setConfirmBloq({ cliente: seleccionado, bloquear: !seleccionado.bloqueo_ctacte, origen: 'ficha' })}
+                      style={{ background: seleccionado.bloqueo_ctacte ? '#12301c' : '#3a1a1a', border: `1px solid ${seleccionado.bloqueo_ctacte ? '#2d5a2d' : '#5a2a2a'}`, color: seleccionado.bloqueo_ctacte ? 'var(--green)' : 'var(--red-light)', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+                      {seleccionado.bloqueo_ctacte ? '✅ Desbloquear cta cte' : '🚫 Bloquear cta cte'}
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* PORTAL DEL CLIENTE */}
@@ -995,7 +1112,7 @@ function ListaClientes({ clientes, seleccionado, onSeleccionar, onEditar, onElim
       if (filtroSaldo === 'con_deuda' && !(Number(c.saldo) > 0)) return false
       if (filtroSaldo === 'al_dia' && Number(c.saldo) > 0) return false
       if (filtroSaldo === 'con_mora' && !(moraDe(c) > 0)) return false
-      if (filtroSaldo === 'bloqueados' && !(vencidos[c.id] > 0)) return false
+      if (filtroSaldo === 'bloqueados' && !c.bloqueo_ctacte) return false
       return true
     })
   }, [clientes, busqueda, filtroSaldo, moraDe, vencidos])
@@ -1113,10 +1230,16 @@ function ListaClientes({ clientes, seleccionado, onSeleccionar, onEditar, onElim
                 <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                   <span>{c.nombre}</span>
                   {c.es_franquicia && <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 0.5, background: 'var(--gold)', color: '#000', borderRadius: 4, padding: '1px 6px' }}>🏪 FRANQUICIA</span>}
-                  {vencidos[c.id] > 0 && (
-                    <span title={`${fmt(vencidos[c.id])} vencidos (deuda con más de ${DIAS_BLOQUEO} días) — bloqueado para nuevas ventas a cta cte`}
+                  {c.bloqueo_ctacte && (
+                    <span title={c.bloqueo_motivo || 'Bloqueo manual'}
                       style={{ fontSize: 9, fontWeight: 800, letterSpacing: 0.5, background: '#3a1a1a', color: '#ff6b6b', border: '1px solid var(--red-light)', borderRadius: 4, padding: '1px 6px' }}>
                       🚫 BLOQUEADO
+                    </span>
+                  )}
+                  {!c.bloqueo_ctacte && vencidos[c.id] > 0 && (
+                    <span title={`${fmt(vencidos[c.id])} con más de ${DIAS_BLOQUEO} días — el sistema sugiere bloquearlo (ver anuncio arriba)`}
+                      style={{ fontSize: 9, fontWeight: 800, letterSpacing: 0.5, background: '#2a1f0a', color: 'var(--amber)', border: '1px solid #6a5a2a', borderRadius: 4, padding: '1px 6px' }}>
+                      ⚠️ VENCIDO
                     </span>
                   )}
                 </div>
