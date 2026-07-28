@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import { fechaHoyARG } from '../../lib/fechas'
 import { getCampoPrecio } from '../../lib/listasPrecios'
+import { estadoBloqueoCliente } from '../../lib/moraClientes'
 
 const CATEGORIAS = {
   bovino_corte: '🥩 Bovinos — Cortes',
@@ -36,6 +37,9 @@ export default function ClienteNuevoPedido() {
   const [cliente, setCliente] = useState(null)
   const [precios, setPrecios] = useState([])
   const [loading, setLoading] = useState(true)
+  // Bloqueo de cta cte (flag manual que maneja Fabricio desde Clientes,
+  // mig 90): si la cuenta está bloqueada, no puede hacer pedidos nuevos.
+  const [bloqueo, setBloqueo] = useState(null)
 
   // Estado del wizard
   const [paso, setPaso] = useState('inicio')  // inicio | categoria | producto | unidad | cantidad | otro | dia | horario | notas | resumen | enviando | enviado
@@ -63,12 +67,14 @@ export default function ClienteNuevoPedido() {
 
   async function cargar() {
     setLoading(true)
-    const [{ data: cli }, { data: pr }] = await Promise.all([
+    const [{ data: cli }, { data: pr }, estBloqueo] = await Promise.all([
       supabase.from('clientes').select('*').eq('id', profile.cliente_id).maybeSingle(),
       supabase.from('precios').select('*').order('nombre'),
+      estadoBloqueoCliente(profile.cliente_id).catch(() => null),
     ])
     setCliente(cli)
     setPrecios(pr || [])
+    setBloqueo(estBloqueo)
     setLoading(false)
     // Mensaje inicial del bot
     setChat([{
@@ -195,6 +201,13 @@ export default function ClienteNuevoPedido() {
   async function confirmarPedido() {
     if (!cliente) return
     if (carrito.length === 0) { alert('No hay productos en el pedido'); return }
+    // Re-chequear el bloqueo con datos frescos antes de mandar (por si la
+    // pantalla quedó abierta de antes o la deuda venció mientras armaba).
+    const est = await estadoBloqueoCliente(cliente.id).catch(() => null)
+    if (est?.bloqueado) {
+      setBloqueo(est)
+      return
+    }
     setPaso('enviando')
 
     const horarioFinal = horarioTipo === 'especifico'
@@ -226,6 +239,36 @@ export default function ClienteNuevoPedido() {
 
   if (loading) return <div style={{ padding: 40, color: 'var(--muted)', textAlign: 'center' }}>Cargando...</div>
   if (!cliente) return <div style={{ padding: 40, color: 'var(--muted)', textAlign: 'center' }}>Tu perfil de cliente no pudo cargarse. Contactá al administrador.</div>
+
+  // 🚫 Cuenta bloqueada (flag manual de Fabricius): no puede armar pedidos
+  // nuevos hasta que la desbloqueen. El detalle de su deuda lo ve en su
+  // cuenta corriente.
+  if (bloqueo?.bloqueado) return (
+    <div style={{ maxWidth: 640, margin: '40px auto', textAlign: 'center' }}>
+      <div className="card" style={{ borderColor: 'var(--red-light)', background: '#2a1414', padding: 28 }}>
+        <div style={{ fontSize: 40, marginBottom: 10 }}>🚫</div>
+        <div style={{ fontSize: 18, fontWeight: 800, color: '#ff6b6b', marginBottom: 10 }}>
+          Pedidos suspendidos
+        </div>
+        <div style={{ fontSize: 14, color: 'var(--text)', lineHeight: 1.6 }}>
+          {bloqueo.vencido > 0 ? (<>
+            Tu cuenta tiene <b style={{ color: '#ff8b8b' }}>{fmt(bloqueo.vencido)}</b> con más de {bloqueo.dias} días
+            de antigüedad (saldo total: {fmt(bloqueo.saldo)}).
+            <br />Para volver a hacer pedidos, regularizá el pago pendiente.
+          </>) : (<>
+            Tu cuenta corriente está suspendida temporalmente para pedidos nuevos.
+          </>)}
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 14, lineHeight: 1.6 }}>
+          Podés ver el detalle en <b>Mi Cuenta</b>. Si ya hiciste la transferencia o creés que hay un error,
+          comunicate con Carnicerías Fabricius y te lo destrabamos al momento.
+        </div>
+        <button onClick={() => navigate('/cliente/ctacte')} className="btn btn-gold" style={{ marginTop: 18, padding: '10px 24px' }}>
+          Ver mi cuenta corriente
+        </button>
+      </div>
+    </div>
+  )
 
   const total = carrito.reduce((s, i) => s + i.subtotal, 0)
 
