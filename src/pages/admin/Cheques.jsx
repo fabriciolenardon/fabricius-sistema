@@ -26,6 +26,9 @@ const FORM_EMITIDO = { numero: '', fechaEmision: fechaHoyARG(), fechaPago: '', b
 
 const BANCOS = ['Banco Macro', 'Banco Nación', 'Banco Provincia', 'BBVA', 'Santander', 'Galicia', 'HSBC', 'ICBC', 'Credicoop', 'Otro']
 
+// Normaliza para buscar: minúsculas y sin acentos (así "PEREZ" matchea "Pérez")
+const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+
 export default function Cheques() {
   const [cheques, setCheques] = useState([])
   const [clientes, setClientes] = useState([])
@@ -35,9 +38,22 @@ export default function Cheques() {
   const [form, setForm] = useState(FORM_RECIBIDO)
   const [formEm, setFormEm] = useState(FORM_EMITIDO)
   const [alert, setAlert] = useState(null)
+  // 🔍 Buscador: por número de serie, cliente, beneficiario/endosado, banco o nota.
+  // Filtra las DOS pestañas a la vez — abajo del input se ve cuántos matchean en cada una.
+  const [busqueda, setBusqueda] = useState('')
 
-  const recibidos = cheques.filter(ch => ch.origen !== 'emitido')
-  const emitidos = cheques.filter(ch => ch.origen === 'emitido')
+  const recibidosTodos = cheques.filter(ch => ch.origen !== 'emitido')
+  const emitidosTodos = cheques.filter(ch => ch.origen === 'emitido')
+
+  const q = norm(busqueda.trim())
+  const matchCheque = ch => !q
+    || norm(ch.numero).includes(q)
+    || norm(ch.cliente_nombre).includes(q)
+    || norm(ch.proveedor_nombre).includes(q)
+    || norm(ch.banco).includes(q)
+    || norm(ch.notas).includes(q)
+  const recibidos = recibidosTodos.filter(matchCheque)
+  const emitidos = emitidosTodos.filter(matchCheque)
 
   // Paginación de cada listado — el historial puede tener cientos de cheques
   const pag = usePaginacion(recibidos, 20)
@@ -115,9 +131,11 @@ export default function Cheques() {
     fetchCheques()
   }
 
-  // Emitidos pendientes cuya fecha ya llegó (hoy o vencidos) → hay que cubrirlos
-  const aCubrir = emitidos.filter(ch => ch.estado !== 'imputado' && diasHasta(ch.fecha_pago) !== null && diasHasta(ch.fecha_pago) <= 0)
-  const porVencerEm = emitidos.filter(ch => {
+  // Emitidos pendientes cuya fecha ya llegó (hoy o vencidos) → hay que cubrirlos.
+  // Sobre el listado COMPLETO (no el filtrado): buscar algo no puede esconder
+  // el aviso de un cheque propio que hay que levantar.
+  const aCubrir = emitidosTodos.filter(ch => ch.estado !== 'imputado' && diasHasta(ch.fecha_pago) !== null && diasHasta(ch.fecha_pago) <= 0)
+  const porVencerEm = emitidosTodos.filter(ch => {
     const d = diasHasta(ch.fecha_pago)
     return ch.estado !== 'imputado' && d !== null && d > 0 && d <= 7
   })
@@ -157,6 +175,39 @@ export default function Cheques() {
           ))}
         </div>
       )}
+
+      {/* 🔍 BUSCADOR — por número de serie, nombre (cliente/beneficiario), banco o nota */}
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input
+            value={busqueda}
+            onChange={e => setBusqueda(e.target.value)}
+            placeholder="🔍 Buscar cheque por número de serie, nombre, banco o nota..."
+            style={{ flex: 1, background: 'var(--surface)', border: `1px solid ${q ? 'var(--gold)' : 'var(--border)'}`, color: 'var(--text)', borderRadius: 8, padding: '10px 14px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, boxSizing: 'border-box' }}
+          />
+          {q && (
+            <button onClick={() => setBusqueda('')}
+              style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 8, padding: '10px 14px', cursor: 'pointer', fontSize: 13 }}>
+              ✕ Limpiar
+            </button>
+          )}
+        </div>
+        {q && (
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>
+            <span>
+              📥 <b style={{ color: 'var(--text)' }}>{recibidos.length}</b> recibido{recibidos.length !== 1 ? 's' : ''}
+              {recibidos.length > 0 && <> por <b style={{ color: 'var(--green)' }}>{fmt(recibidos.reduce((s, ch) => s + (Number(ch.monto) || 0), 0))}</b></>}
+            </span>
+            <span>
+              📤 <b style={{ color: 'var(--text)' }}>{emitidos.length}</b> emitido{emitidos.length !== 1 ? 's' : ''}
+              {emitidos.length > 0 && <> por <b style={{ color: 'var(--red-light)' }}>{fmt(emitidos.reduce((s, ch) => s + (Number(ch.monto) || 0), 0))}</b></>}
+            </span>
+            {recibidos.length === 0 && emitidos.length === 0 && <span style={{ color: 'var(--amber)' }}>Sin resultados para "{busqueda.trim()}"</span>}
+            {vista === 'recibidos' && recibidos.length === 0 && emitidos.length > 0 && <span style={{ color: 'var(--amber)' }}>→ los resultados están en la pestaña Emitidos</span>}
+            {vista === 'emitidos' && emitidos.length === 0 && recibidos.length > 0 && <span style={{ color: 'var(--amber)' }}>→ los resultados están en la pestaña Recibidos</span>}
+          </div>
+        )}
+      </div>
 
       {/* TABS Recibidos / Emitidos */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
@@ -250,7 +301,7 @@ export default function Cheques() {
               </div>
             </div>
           ))}
-          {recibidos.length === 0 && <div className="empty">Sin cheques registrados</div>}
+          {recibidos.length === 0 && <div className="empty">{q ? `Ningún cheque recibido matchea "${busqueda.trim()}"` : 'Sin cheques registrados'}</div>}
           <Paginador {...pag.controles} label="cheques" />
         </div>
       </div>
@@ -342,7 +393,7 @@ export default function Cheques() {
               </div>
             )
           })}
-          {emitidos.length === 0 && <div className="empty">Sin cheques emitidos.<br /><span style={{ fontSize: 12 }}>Registrá acá los cheques que entregás a proveedores o terceros.</span></div>}
+          {emitidos.length === 0 && <div className="empty">{q ? `Ningún cheque emitido matchea "${busqueda.trim()}"` : <>Sin cheques emitidos.<br /><span style={{ fontSize: 12 }}>Registrá acá los cheques que entregás a proveedores o terceros.</span></>}</div>}
           <Paginador {...pagEm.controles} label="cheques" />
         </div>
       </div>
