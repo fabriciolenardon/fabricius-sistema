@@ -18,7 +18,7 @@ import AjusteStock from './AjusteStock'
 import CajasTab from './CajasTab'
 import PolloCajonesTab from './PolloCajonesTab'
 import { cargarCategoriasPrecios, labelsDeCategorias } from '../../lib/categoriasPrecios'
-import { estadoBloqueoCliente, DIAS_BLOQUEO } from '../../lib/moraClientes'
+import { estadoBloqueoCliente } from '../../lib/moraClientes'
 import { logAuditoria } from '../../lib/auditoria'
 
 // Nombre legible de cada tipo de embutido/salame (para descripciones de
@@ -3960,7 +3960,7 @@ for (const item of items) {
                   🚫 CLIENTE BLOQUEADO — {bloqueo.motivo || 'bloqueo manual'}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, lineHeight: 1.5 }}>
-                  Saldo total: {fmtPrecio(bloqueo.saldo)}{bloqueo.vencido > 0 && <> · {fmtPrecio(bloqueo.vencido)} con más de {DIAS_BLOQUEO} días</>}.
+                  Saldo total: {fmtPrecio(bloqueo.saldo)}{bloqueo.vencido > 0 && <> · {fmtPrecio(bloqueo.vencido)} con más de {bloqueo.dias} días</>}.
                   No se puede despachar a <b>cuenta corriente</b> (se desbloquea desde Clientes).
                   De <b>contado</b> (efectivo/transferencia) puede comprar igual.
                 </div>

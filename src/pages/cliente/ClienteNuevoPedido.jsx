@@ -5,7 +5,7 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import { fechaHoyARG } from '../../lib/fechas'
 import { getCampoPrecio } from '../../lib/listasPrecios'
-import { estadoBloqueoCliente, DIAS_BLOQUEO } from '../../lib/moraClientes'
+import { estadoBloqueoCliente } from '../../lib/moraClientes'
 
 const CATEGORIAS = {
   bovino_corte: '🥩 Bovinos — Cortes',
@@ -252,7 +252,7 @@ export default function ClienteNuevoPedido() {
         </div>
         <div style={{ fontSize: 14, color: 'var(--text)', lineHeight: 1.6 }}>
           {bloqueo.vencido > 0 ? (<>
-            Tu cuenta tiene <b style={{ color: '#ff8b8b' }}>{fmt(bloqueo.vencido)}</b> con más de {DIAS_BLOQUEO} días
+            Tu cuenta tiene <b style={{ color: '#ff8b8b' }}>{fmt(bloqueo.vencido)}</b> con más de {bloqueo.dias} días
             de antigüedad (saldo total: {fmt(bloqueo.saldo)}).
             <br />Para volver a hacer pedidos, regularizá el pago pendiente.
           </>) : (<>
