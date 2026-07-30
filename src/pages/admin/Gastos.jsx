@@ -10,6 +10,9 @@ import { useEsMovil } from '../../lib/useEsMovil'
 import { fmtPrecio } from '../../lib/formatos'
 function fmt(n) { return fmtPrecio(Math.abs(Number(n) || 0)) }
 
+// Normaliza para buscar: minúsculas y sin acentos (así "CAMION" matchea "Camión")
+const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+
 // Fecha DD/MM/YYYY (las fechas vienen como 'YYYY-MM-DD')
 function fmtFecha(f) {
   if (!f) return '—'
@@ -94,6 +97,10 @@ export default function Gastos() {
   const [filtroMes, setFiltroMes] = useState(fechaHoyARG().substring(0, 7))
   const [filtroPeriodo, setFiltroPeriodo] = useState('mes')
   const [vista, setVista] = useState('todos') // 'todos' | 'facturas'
+  // 🔍 Buscador: por descripción, nota, categoría, forma de pago, socio, fecha
+  // o monto. Con búsqueda activa se ignora el filtro de período (busca en TODO
+  // el historial — si buscás "ferretería" la querés encontrar aunque sea vieja).
+  const [busqueda, setBusqueda] = useState('')
   const [guardando, setGuardando] = useState(false)
   const [exportando, setExportando] = useState('')
   const guardandoRef = useRef(false)
@@ -312,9 +319,20 @@ export default function Gastos() {
     }
   }
 
-  // Filtrar por período (vista "Todos")
+  // Filtrar por período (vista "Todos") — salvo que haya una búsqueda activa,
+  // que busca sobre TODO el historial sin importar el período elegido.
   const hoy = new Date()
-  const gastosFiltrados = gastos.filter(g => {
+  const q = norm(busqueda.trim())
+  const matchGasto = g =>
+    norm(g.descripcion).includes(q)
+    || norm(g.notas).includes(q)
+    || norm(g.forma).includes(q)
+    || norm(g.socio).includes(q)
+    || norm(g.categoria).includes(q)
+    || norm(CATEGORIAS.find(c => c.value === g.categoria)?.label).includes(q)
+    || String(g.fecha || '').includes(q)
+    || String(Math.round(Number(g.monto) || 0)).includes(q)
+  const gastosFiltrados = q ? gastos.filter(matchGasto) : gastos.filter(g => {
     if (filtroPeriodo === 'mes') return g.fecha?.startsWith(filtroMes)
     if (filtroPeriodo === 'semana') {
       const d = new Date(g.fecha + 'T12:00')
@@ -398,20 +416,45 @@ export default function Gastos() {
             onExport={exportarMes} exportando={exportando} />
         : (
         <>
+      {/* 🔍 BUSCADOR — busca en TODO el historial, ignora el filtro de período */}
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input
+            value={busqueda}
+            onChange={e => setBusqueda(e.target.value)}
+            placeholder="🔍 Buscar gasto por descripción, categoría, forma de pago, socio, fecha o monto..."
+            style={{ flex: 1, background: 'var(--surface)', border: `1px solid ${q ? 'var(--gold)' : 'var(--border)'}`, color: 'var(--text)', borderRadius: 8, padding: '10px 14px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, boxSizing: 'border-box' }}
+          />
+          {q && (
+            <button onClick={() => setBusqueda('')}
+              style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 8, padding: '10px 14px', cursor: 'pointer', fontSize: 13 }}>
+              ✕ Limpiar
+            </button>
+          )}
+        </div>
+        {q && (
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
+            🔎 <b style={{ color: 'var(--text)' }}>{gastosFiltrados.length}</b> resultado{gastosFiltrados.length !== 1 ? 's' : ''} en todo el historial
+            {gastosFiltrados.length > 0 && <> · egresos <b style={{ color: 'var(--red-light)' }}>{fmt(gastosFiltrados.filter(g => !g.solo_balance && g.tipo !== 'ingreso').reduce((s, g) => s + (Number(g.monto) || 0), 0))}</b></>}
+            {' '}<span style={{ color: 'var(--amber)' }}>(la búsqueda ignora el filtro de período)</span>
+          </div>
+        )}
+      </div>
+
       {/* FILTROS */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center', opacity: q ? 0.45 : 1 }}>
         {[
           { id: 'semana', label: '📅 Esta semana' },
           { id: 'mes', label: '📆 Este mes' },
           { id: 'todos', label: '📋 Todos' },
         ].map(p => (
-          <button key={p.id} onClick={() => setFiltroPeriodo(p.id)}
+          <button key={p.id} onClick={() => { setBusqueda(''); setFiltroPeriodo(p.id) }}
             style={{ padding: '7px 14px', borderRadius: 8, border: `1px solid ${filtroPeriodo === p.id ? 'var(--gold)' : 'var(--border)'}`, background: filtroPeriodo === p.id ? 'var(--gold)' : 'transparent', color: filtroPeriodo === p.id ? '#000' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
             {p.label}
           </button>
         ))}
         {filtroPeriodo === 'mes' && (
-          <select value={filtroMes} onChange={e => setFiltroMes(e.target.value)}
+          <select value={filtroMes} onChange={e => { setBusqueda(''); setFiltroMes(e.target.value) }}
             style={{ ...inp, width: 'auto', fontSize: 13 }}>
             {mesesDisp.map(m => (
               <option key={m} value={m}>{nombreMes(m)}</option>
@@ -626,11 +669,12 @@ export default function Gastos() {
         {/* LISTADO */}
         <div className="card">
           <div className="card-title">
-            {filtroPeriodo === 'semana' ? 'Gastos de la semana' : filtroPeriodo === 'mes' ? `Gastos de ${nombreMes(filtroMes)}` : 'Todos los gastos'}
+            {q ? `🔍 Resultados de "${busqueda.trim()}" (${gastosFiltrados.length})`
+              : filtroPeriodo === 'semana' ? 'Gastos de la semana' : filtroPeriodo === 'mes' ? `Gastos de ${nombreMes(filtroMes)}` : 'Todos los gastos'}
           </div>
 
           {gastosFiltrados.length === 0
-            ? <div className="empty">Sin registros para este período</div>
+            ? <div className="empty">{q ? `Ningún gasto matchea "${busqueda.trim()}"` : 'Sin registros para este período'}</div>
             : pag.items.map(g => {
                 const t = TIPOS.find(x => x.id === g.tipo) || TIPOS[0]
                 return (
