@@ -104,8 +104,14 @@ export default function Gastos() {
   const [guardando, setGuardando] = useState(false)
   const [exportando, setExportando] = useState('')
   const guardandoRef = useRef(false)
+  // 🎯 Tope mensual de gastos de socios (config_sistema, clave
+  // 'tope_gastos_socios'). Al llegar al 80% y al 100% Iris avisa por
+  // WhatsApp (endpoint /api/aviso-tope-gastos, una vez por nivel por mes).
+  const [topeCfg, setTopeCfg] = useState({ activo: false, tope: 0 })
+  const [topeInput, setTopeInput] = useState('')
+  const [topeGuardando, setTopeGuardando] = useState(false)
 
-  useEffect(() => { fetchGastos() }, [])
+  useEffect(() => { fetchGastos(); fetchTope() }, [])
 
   async function fetchGastos() {
     // Sin .limit — paginamos en cliente para mostrar TODOS los gastos
@@ -116,6 +122,49 @@ export default function Gastos() {
   function showAlert(msg, type = 'success') {
     setAlert({ msg, type })
     setTimeout(() => setAlert(null), 4000)
+  }
+
+  async function fetchTope() {
+    const { data } = await supabase.from('config_sistema').select('valor').eq('clave', 'tope_gastos_socios').maybeSingle()
+    if (data?.valor) {
+      setTopeCfg({ activo: !!data.valor.activo, tope: Number(data.valor.tope) || 0 })
+      setTopeInput(data.valor.tope != null ? String(data.valor.tope) : '')
+    }
+  }
+
+  async function guardarTope(activo) {
+    const monto = parseNumero(topeInput)
+    if (activo && (!monto || monto <= 0)) { showAlert('Ingresá un monto de tope válido', 'error'); return }
+    setTopeGuardando(true)
+    const nuevo = { activo, tope: activo ? monto : (topeCfg.tope || monto || 0) }
+    const { error } = await supabase.from('config_sistema').upsert({
+      clave: 'tope_gastos_socios',
+      valor: nuevo,
+      descripcion: 'Tope mensual de gastos de socios. Iris avisa por WhatsApp al 80% y al 100%.',
+      updated_at: new Date().toISOString(),
+    })
+    setTopeGuardando(false)
+    if (error) { showAlert('❌ Error al guardar el tope: ' + error.message, 'error'); return }
+    setTopeCfg(nuevo)
+    showAlert(activo ? `🎯 Tope de socios activado: ${fmt(nuevo.tope)} por mes` : '🎯 Tope de socios desactivado')
+  }
+
+  // Verificación server-side del tope (fire-and-forget): el endpoint suma
+  // los gastos de socios del mes y, si cruzó un nivel, Iris manda el
+  // WhatsApp. Acá solo reflejamos si efectivamente avisó.
+  async function verificarTopeSocios() {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+      if (!token) return
+      const r = await fetch('/api/aviso-tope-gastos', { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+      const j = await r.json().catch(() => null)
+      if (j?.enviado) {
+        showAlert(j.nivel >= 100
+          ? '🚨 Tope de gastos de socios alcanzado — Iris avisó por WhatsApp'
+          : '⚠️ Gastos de socios al 80% del tope — Iris avisó por WhatsApp', 'error')
+      }
+    } catch { /* sin red o en dev local: el aviso queda para el próximo gasto */ }
   }
 
   async function guardar() {
@@ -178,6 +227,7 @@ export default function Gastos() {
       setForm(FORM_VACIO)
       setFacturaFile(null)
       fetchGastos()
+      if (tipo === 'socio') verificarTopeSocios()
     } finally {
       guardandoRef.current = false
       setGuardando(false)
@@ -361,6 +411,10 @@ export default function Gastos() {
   const acumFijo  = acum.filter(g => g.tipo === 'fijo').reduce((s, g) => s + (Number(g.monto) || 0), 0)
   const acumFabri = acum.filter(g => g.tipo === 'socio' && g.socio === 'fabricio').reduce((s, g) => s + (Number(g.monto) || 0), 0)
   const acumAriel = acum.filter(g => g.tipo === 'socio' && g.socio === 'ariel').reduce((s, g) => s + (Number(g.monto) || 0), 0)
+  // Estado del tope de socios contra el acumulado del mes
+  const acumSocios = acumFabri + acumAriel
+  const topePct = topeCfg.activo && topeCfg.tope > 0 ? Math.round((acumSocios / topeCfg.tope) * 100) : 0
+  const topeColor = topePct >= 100 ? 'var(--red-light)' : topePct >= 80 ? 'var(--gold)' : 'var(--green)'
 
   // Meses disponibles
   const mesesDisp = [...new Set(gastos.map(g => g.fecha?.substring(0, 7)))].filter(Boolean).sort().reverse()
@@ -662,6 +716,45 @@ export default function Gastos() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', paddingTop: 11, marginTop: 4, borderTop: '1px solid var(--border)' }}>
               <span style={{ fontSize: 12, letterSpacing: 1, color: 'var(--muted)', fontWeight: 700 }}>TOTAL EGRESOS</span>
               <span style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 23, color: 'var(--red-light)' }}>{fmt(acumVar + acumFijo + acumFabri + acumAriel)}</span>
+            </div>
+          </div>
+
+          {/* ── Tope mensual de gastos de socios ── */}
+          <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+            <div style={{ fontSize: 11, letterSpacing: 1.5, color: 'var(--muted)', fontWeight: 700, marginBottom: 12 }}>
+              🎯 TOPE GASTOS SOCIOS (MES)
+            </div>
+            {topeCfg.activo && topeCfg.tope > 0 && (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+                  <span style={{ fontSize: 13, color: 'var(--text2)' }}>{fmt(acumSocios)} de {fmt(topeCfg.tope)}</span>
+                  <span style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 19, color: topeColor }}>{topePct}%</span>
+                </div>
+                <div style={{ height: 8, borderRadius: 4, background: 'var(--surface)', border: '1px solid var(--border)', overflow: 'hidden', marginBottom: 10 }}>
+                  <div style={{ width: Math.min(topePct, 100) + '%', height: '100%', background: topeColor, transition: 'width .3s' }} />
+                </div>
+                {topePct >= 100 && (
+                  <div style={{ fontSize: 12, color: 'var(--red-light)', fontWeight: 700, marginBottom: 10 }}>
+                    🚨 Tope del mes alcanzado
+                  </div>
+                )}
+              </>
+            )}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input value={topeInput} onChange={e => setTopeInput(e.target.value)}
+                placeholder="Tope mensual $" inputMode="decimal" style={{ ...inp, flex: 1 }} />
+              <button className="btn btn-gold" onClick={() => guardarTope(true)} disabled={topeGuardando}
+                style={{ whiteSpace: 'nowrap', opacity: topeGuardando ? 0.6 : 1 }}>
+                {topeGuardando ? '⏳' : topeCfg.activo ? '💾 Actualizar' : '✅ Activar'}
+              </button>
+              {topeCfg.activo && (
+                <button className="btn btn-ghost" onClick={() => guardarTope(false)} disabled={topeGuardando}>
+                  Desactivar
+                </button>
+              )}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>
+              Iris avisa por WhatsApp al llegar al 80% y al 100% del tope (una vez por mes).
             </div>
           </div>
         </div>
