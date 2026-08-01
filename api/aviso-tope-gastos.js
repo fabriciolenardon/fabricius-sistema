@@ -3,12 +3,14 @@
 // gastos de socios del mes llegan al tope configurado
 // ───────────────────────────────────────────────────────────
 // Lo dispara el panel de Gastos después de registrar/editar un gasto
-// de socio. Todo el cálculo es server-side (service role): lee el tope
-// de config_sistema (clave 'tope_gastos_socios'), suma los gastos
-// tipo='socio' del mes calendario ARG y, si cruzó el 80% o el 100%,
-// manda UN aviso por nivel por mes. El dedupe vive en config_sistema
-// (clave 'tope_gastos_socios_aviso'); si cambia el mes o el tope se
-// rearma. No bloquea nada: Iris avisa, Fabricio decide.
+// de socio. Todo el cálculo es server-side (service role): lee la config
+// de config_sistema (clave 'tope_gastos_socios': tope total y/o tope
+// individual por socio), suma los gastos tipo='socio' del mes calendario
+// ARG y, por cada tope que cruce el 80% o el 100%, manda UN aviso por
+// nivel por mes (varios cruces en el mismo gasto salen en un solo
+// mensaje). El dedupe vive en config_sistema (clave
+// 'tope_gastos_socios_aviso'); si cambia el mes o algún tope se rearma.
+// No bloquea nada: Iris avisa, Fabricio decide.
 //
 // Env (Vercel, ya configuradas para el recordatorio de compras):
 //   WHATSAPP_TOKEN, WHATSAPP_AVISOS_TO, VITE_SUPABASE_URL,
@@ -46,16 +48,30 @@ export default async function handler(req, res) {
     const prof = await (await fetch(`${SB_URL}/rest/v1/profiles?id=eq.${user.id}&select=rol`, { headers: svc })).json()
     if (prof?.[0]?.rol !== 'admin') return res.status(403).json({ error: 'solo admin' })
 
-    // ── Tope configurado ──
+    // ── Topes configurados (total y/o individuales por socio) ──
     const cfgTope = await (await fetch(`${SB_URL}/rest/v1/config_sistema?clave=eq.tope_gastos_socios&select=valor`, { headers: svc })).json()
-    const tope = Number(cfgTope?.[0]?.valor?.tope) || 0
-    const activo = !!cfgTope?.[0]?.valor?.activo
-    if (!activo || tope <= 0) return res.status(200).json({ ok: true, enviado: false, motivo: 'tope inactivo' })
+    const v = cfgTope?.[0]?.valor || {}
+    const topeTotal = Number(v.tope) || 0
+    const topeFabri = Number(v.topes?.fabricio) || 0
+    const topeAriel = Number(v.topes?.ariel) || 0
+    if (!v.activo || (topeTotal <= 0 && topeFabri <= 0 && topeAriel <= 0)) {
+      return res.status(200).json({ ok: true, enviado: false, motivo: 'tope inactivo' })
+    }
 
-    // ── Gastos de socios del mes calendario ARG (01 → hoy) ──
+    // ── Rango del MES OPERATIVO (Cierre → Por Mes): si hoy cae dentro de
+    //    un mes operativo, el tope se mide desde su fecha_inicio (mismo
+    //    criterio que el "Mensual en vivo" del Dashboard Ejecutivo).
+    //    Fallback al mes calendario si no hay mes operativo configurado. ──
     const hoy = fechaARG(new Date())
-    const mesIni = hoy.slice(0, 8) + '01'
-    const mes = hoy.slice(0, 7)
+    const mesesOp = await (await fetch(
+      `${SB_URL}/rest/v1/meses_operativos?select=etiqueta,fecha_inicio,fecha_cierre&order=fecha_inicio.desc`,
+      { headers: svc },
+    )).json().catch(() => [])
+    const mesOp = (Array.isArray(mesesOp) ? mesesOp : []).find(m => hoy >= m.fecha_inicio && hoy <= m.fecha_cierre) || null
+    const mesIni = mesOp ? mesOp.fecha_inicio : hoy.slice(0, 8) + '01'
+    // Identificador del período para el dedupe (único por mes operativo)
+    const mes = mesOp ? `op:${mesOp.fecha_inicio}` : hoy.slice(0, 7)
+    const nombrePeriodo = mesOp ? `el mes operativo${mesOp.etiqueta ? ` ${mesOp.etiqueta}` : ''}` : 'este mes'
     const gastos = await (await fetch(
       `${SB_URL}/rest/v1/gastos?select=monto,socio,solo_balance&tipo=eq.socio&fecha=gte.${mesIni}&fecha=lte.${hoy}`,
       { headers: svc },
@@ -64,22 +80,36 @@ export default async function handler(req, res) {
     const total = lista.reduce((s, g) => s + (Number(g.monto) || 0), 0)
     const fabri = lista.filter(g => g.socio === 'fabricio').reduce((s, g) => s + (Number(g.monto) || 0), 0)
     const ariel = lista.filter(g => g.socio === 'ariel').reduce((s, g) => s + (Number(g.monto) || 0), 0)
-    const pct = Math.round((total / tope) * 100)
 
-    // ── Dedupe: un aviso por nivel por mes; si cambia el tope se rearma ──
+    const scopes = [
+      { key: 'total', label: 'Total socios', gastado: total, tope: topeTotal },
+      { key: 'fabricio', label: 'Fabri', gastado: fabri, tope: topeFabri },
+      { key: 'ariel', label: 'Ariel', gastado: ariel, tope: topeAriel },
+    ].filter(s => s.tope > 0)
+
+    // ── Dedupe: un aviso por nivel por tope por mes; si cambia algún
+    //    tope (firma) o el mes, se rearma todo ──
+    const firma = `${topeTotal}|${topeFabri}|${topeAriel}`
     const cfgAviso = await (await fetch(`${SB_URL}/rest/v1/config_sistema?clave=eq.tope_gastos_socios_aviso&select=valor`, { headers: svc })).json()
     const prev = cfgAviso?.[0]?.valor || {}
-    const niveles = (prev.mes === mes && Number(prev.tope) === tope && Array.isArray(prev.niveles)) ? prev.niveles : []
+    const niveles = (prev.mes === mes && prev.firma === firma && prev.niveles && !Array.isArray(prev.niveles)) ? prev.niveles : {}
 
-    let nivel = 0
-    if (pct >= 100 && !niveles.includes(100)) nivel = 100
-    else if (pct >= 80 && !niveles.includes(80)) nivel = 80
-    if (!nivel) return res.status(200).json({ ok: true, enviado: false, pct, total })
+    const avisos = []
+    const nuevos = {}
+    for (const s of scopes) {
+      const pct = Math.round((s.gastado / s.tope) * 100)
+      const ya = Array.isArray(niveles[s.key]) ? niveles[s.key] : []
+      let nivel = 0
+      if (pct >= 100 && !ya.includes(100)) nivel = 100
+      else if (pct >= 80 && !ya.includes(80)) nivel = 80
+      nuevos[s.key] = nivel ? [...ya, nivel] : ya
+      if (nivel === 100) avisos.push(`🚨 *${s.label}*: tope alcanzado — ${fmtP(s.gastado)} de ${fmtP(s.tope)} (${pct}%)`)
+      else if (nivel === 80) avisos.push(`⚠️ *${s.label}*: al ${pct}% del tope — ${fmtP(s.gastado)} de ${fmtP(s.tope)}, queda ${fmtP(Math.max(s.tope - s.gastado, 0))}`)
+    }
+    if (!avisos.length) return res.status(200).json({ ok: true, enviado: false, total })
 
-    const detalle = `👤 Fabri: ${fmtP(fabri)}\n👤 Ariel: ${fmtP(ariel)}`
-    const cuerpo = nivel === 100
-      ? `🚨 *Tope de gastos de socios alcanzado*\n\nJefe, este mes ya se gastaron ${fmtP(total)} de los ${fmtP(tope)} del tope (${pct}%).\n\n${detalle}\n\nTodo gasto de socio que se cargue de acá en adelante queda por encima del tope. 🧐`
-      : `⚠️ *Ojo con los gastos de socios*\n\nJefe, ya van ${fmtP(total)} gastados de los ${fmtP(tope)} del tope del mes (${pct}%). Queda ${fmtP(Math.max(tope - total, 0))} de margen.\n\n${detalle}`
+    const grave = avisos.some(l => l.startsWith('🚨'))
+    const cuerpo = `${grave ? '🚨' : '⚠️'} *Gastos de socios — aviso de tope*\n\nJefe, en ${nombrePeriodo} se cruzó un límite:\n\n${avisos.join('\n')}\n\n👤 Fabri: ${fmtP(fabri)} · 👤 Ariel: ${fmtP(ariel)} · Total: ${fmtP(total)}${grave ? '\n\nTodo gasto que se cargue de acá en adelante queda por encima del tope. 🧐' : ''}`
 
     // phone_id del negocio (lo guarda el webhook en wa_config)
     let phoneId = PHONE_FALLBACK
@@ -95,22 +125,22 @@ export default async function handler(req, res) {
     })
     if (!wr.ok) {
       console.error('aviso-tope-gastos envío WA', wr.status, await wr.text().catch(() => ''))
-      return res.status(200).json({ ok: false, enviado: false, pct, motivo: 'no se pudo enviar el WhatsApp' })
+      return res.status(200).json({ ok: false, enviado: false, motivo: 'no se pudo enviar el WhatsApp' })
     }
 
-    // Marcar el nivel como avisado ANTES de responder (una vez por mes)
+    // Marcar los niveles como avisados (una vez por tope por mes)
     await fetch(`${SB_URL}/rest/v1/config_sistema?on_conflict=clave`, {
       method: 'POST',
       headers: { ...svc, Prefer: 'resolution=merge-duplicates,return=minimal' },
       body: JSON.stringify({
         clave: 'tope_gastos_socios_aviso',
-        valor: { mes, tope, niveles: [...niveles, nivel] },
-        descripcion: 'Dedupe del aviso de tope de gastos de socios: niveles ya avisados este mes',
+        valor: { mes, firma, niveles: nuevos },
+        descripcion: 'Dedupe del aviso de tope de gastos de socios: niveles ya avisados este mes por tope (total/fabricio/ariel)',
         updated_at: new Date().toISOString(),
       }),
     })
 
-    return res.status(200).json({ ok: true, enviado: true, nivel, pct, total })
+    return res.status(200).json({ ok: true, enviado: true, grave, avisos: avisos.length, total })
   } catch (err) {
     console.error('aviso-tope-gastos error', err)
     return res.status(200).json({ ok: false, error: String(err?.message || err) })
