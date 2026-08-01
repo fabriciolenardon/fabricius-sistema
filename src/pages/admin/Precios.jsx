@@ -35,6 +35,7 @@ const prettyBucket = b => String(b || '')
   .replace(/^cerdo_/, '🐷 ')
   .replace(/^emb_/, '🌭 ')
   .replace(/^brosa_/, '🫀 ')
+  .replace(/^bovino_/, '🐄 ')
   .replace(/_/g, ' ')
 
 // Categorías que se venden por cajón (unidad con peso fijo) y por lo tanto
@@ -139,8 +140,10 @@ export default function Precios() {
     setPrecios(data || [])
     // Buckets enlazables: cerdo_* (piezas), emb_* (embutidos) y brosa_*
     // (brosas por producto, mig 89). Excluye el 'cerdo' genérico (capón
-    // entero), que no es a donde van los cortes.
-    setStockBuckets((stk || []).map(s => s.tipo).filter(t => /^cerdo_|^emb_|^brosa_/.test(t)).sort())
+    // entero), que no es a donde van los cortes. 'bovino_corte' entra para
+    // brosas SIN stock propio (ej. entraña de costillar): salen del desposte
+    // que acredita a Bovino Cortes, así que la venta debita de ahí.
+    setStockBuckets((stk || []).map(s => s.tipo).filter(t => t === 'bovino_corte' || /^cerdo_|^emb_|^brosa_/.test(t)).sort())
     setLoading(false)
   }
 
@@ -734,7 +737,7 @@ export default function Precios() {
                     <option value="">— Sin asignar (huérfano: se vende pero NO descuenta) —</option>
                     {stockBuckets
                       .filter(b => form.categoria === 'embutido' ? b.startsWith('emb_')
-                        : form.categoria === 'bovino_brosa' ? b.startsWith('brosa_')
+                        : form.categoria === 'bovino_brosa' ? (b.startsWith('brosa_') || b === 'bovino_corte')
                         : b.startsWith('cerdo_'))
                       .map(b => <option key={b} value={b}>{prettyBucket(b)}</option>)}
                     <option value="__no__">🚫 No descuenta (comprado / reventa)</option>
