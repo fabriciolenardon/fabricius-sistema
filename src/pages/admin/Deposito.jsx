@@ -3231,6 +3231,11 @@ export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   // explícita (queda en auditoría).
   const [bloqueo, setBloqueo] = useState(null)          // { saldo, vencido, bloqueado, motivo }
   const [overrideBloqueo, setOverrideBloqueo] = useState(false)
+  // 🔁 Aviso anti-remito DUPLICADO: si en los últimos días ya salió un remito
+  // igual o casi igual al MISMO cliente, el guardado se frena y pide
+  // confirmación inline (nada de window.confirm — iOS/PWA lo suprime).
+  const [avisoDuplicado, setAvisoDuplicado] = useState(null)   // { remito, motivo } | null
+  const [overrideDuplicado, setOverrideDuplicado] = useState(false)
   const [mediasDisponibles, setMediasDisponibles] = useState([])
   const [mediaSeleccionada, setMediaSeleccionada] = useState(null)
   const [formManual, setFormManual] = useState({ descripcion: '', importe: '' })
@@ -3655,6 +3660,44 @@ const item = {
         showAlert({ type: 'error', msg: `Los pagos suman $${Math.round(sumaPagos).toLocaleString('es-AR')} pero el total es $${Math.round(total).toLocaleString('es-AR')}. Tienen que coincidir.` }); return
       }
     }
+    // 🔁 Guardia anti-remito DUPLICADO: buscar remitos de los últimos 3 días
+    // al MISMO cliente que sean iguales (mismos productos y kg) o casi iguales
+    // (misma cantidad de items con kg y total dentro del 3%). Si aparece uno,
+    // NO se guarda: se muestra el aviso amarillo arriba del botón y hay que
+    // tildar "despachar igual" para confirmar que es otro pedido de verdad.
+    if (!overrideDuplicado) {
+      try {
+        const dDup = new Date((form.fecha || fechaHoyARG()) + 'T12:00')
+        dDup.setDate(dDup.getDate() - 3)
+        const desdeDup = dDup.toISOString().slice(0, 10)
+        let qDup = supabase.from('remitos').select('id, numero, fecha, total, items, cliente_nombre')
+          .eq('eliminado', false).gte('fecha', desdeDup)
+          .order('created_at', { ascending: false }).limit(30)
+        if (form.clienteId) qDup = qDup.eq('cliente_id', form.clienteId)
+        else if (esFranquicia) qDup = qDup.ilike('cliente_nombre', `%${DESTINOS_FRANQUICIA[form.destino] || form.destino}%`)
+        else qDup = qDup.ilike('cliente_nombre', (form.clienteNombre || form.destino).trim())
+        const { data: recientes } = await qDup
+        const firmaDe = its => (Array.isArray(its) ? its : []).map(it => `${String(it.descripcion || '').trim().toLowerCase()}|${(Number(it.kg) || 0).toFixed(2)}`).sort().join(' · ')
+        const kgDe = its => (Array.isArray(its) ? its : []).reduce((s, it) => s + (Number(it.kg) || 0), 0)
+        const miFirma = firmaDe(items)
+        const misKg = kgDe(items)
+        let dup = null
+        for (const r of (recientes || [])) {
+          if (firmaDe(r.items) === miFirma) { dup = { remito: r, motivo: 'los mismos productos con los mismos kg' }; break }
+          const casiTotal = Math.abs((Number(r.total) || 0) - total) <= Math.max(total * 0.03, 1)
+          const casiKg = Math.abs(kgDe(r.items) - misKg) <= Math.max(misKg * 0.03, 0.5)
+          if ((Array.isArray(r.items) ? r.items : []).length === items.length && casiTotal && casiKg) {
+            dup = { remito: r, motivo: 'misma cantidad de productos, con kg y total casi iguales' }; break
+          }
+        }
+        if (dup) {
+          setAvisoDuplicado(dup)
+          showAlert({ type: 'error', msg: '⚠️ Posible remito duplicado — revisá el aviso amarillo arriba del botón antes de despachar.' })
+          return
+        }
+        setAvisoDuplicado(null)
+      } catch { /* si la consulta falla no bloqueamos el despacho */ }
+    }
     guardandoRef.current = true
     setGuardando(true)
     try {
@@ -3818,6 +3861,8 @@ for (const item of items) {
     }
 
     showAlert({ type: 'success', msg: '✅ Despacho registrado — Stock descontado — Remito generado' })
+    setAvisoDuplicado(null)
+    setOverrideDuplicado(false)
     onRemito(remitoData)
     setItems([])
     setBusqueda('')
@@ -3843,7 +3888,7 @@ for (const item of items) {
         <div className="card-title">Registrar despacho</div>
         <div className="form-row">
           <div className="form-group"><label>Destino</label>
-            <select value={form.destino} onChange={e => setForm(f => ({ ...f, destino: e.target.value, clienteId: '', clienteNombre: '' }))}>
+            <select value={form.destino} onChange={e => { setAvisoDuplicado(null); setOverrideDuplicado(false); setForm(f => ({ ...f, destino: e.target.value, clienteId: '', clienteNombre: '' })) }}>
               <option value="">— Seleccioná destino —</option>
               <option value="CENTRO">🏪 Suc. Alvear (franquicia)</option>
               <option value="MONTE CRISTO">🏪 Suc. Monte Cristo (franquicia)</option>
@@ -3918,7 +3963,7 @@ for (const item of items) {
           <div style={{ position: 'relative', marginBottom: 12 }}>
             <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Buscar cliente</label>
             <input value={busqueda}
-              onChange={e => { setBusqueda(e.target.value); setMostrarClientes(true); setBloqueo(null); setOverrideBloqueo(false); setForm(f => ({ ...f, clienteId: '', clienteNombre: e.target.value })) }}
+              onChange={e => { setBusqueda(e.target.value); setMostrarClientes(true); setBloqueo(null); setOverrideBloqueo(false); setAvisoDuplicado(null); setOverrideDuplicado(false); setForm(f => ({ ...f, clienteId: '', clienteNombre: e.target.value })) }}
               onFocus={() => setMostrarClientes(true)}
               placeholder="Escribí el nombre del cliente..."
               style={{ background: 'var(--surface)', border: '1px solid var(--gold)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }} />
@@ -4207,6 +4252,21 @@ for (const item of items) {
           )
         })()}
 
+        {avisoDuplicado && (
+          <div style={{ background: '#2a1f0a', border: '2px solid var(--amber)', borderRadius: 10, padding: '12px 14px', marginBottom: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--amber)', marginBottom: 6 }}>⚠️ POSIBLE REMITO DUPLICADO</div>
+            <div style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.5 }}>
+              Ya salió el remito <b>N° {String(avisoDuplicado.remito.numero || avisoDuplicado.remito.id).padStart(5, '0')}</b> ({avisoDuplicado.remito.fecha}) a <b>{avisoDuplicado.remito.cliente_nombre}</b> por <b>{fmtPrecio(avisoDuplicado.remito.total)}</b> con <b>{avisoDuplicado.motivo}</b>.
+              Revisá que no estés cargando el mismo despacho dos veces.
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, cursor: 'pointer', fontSize: 12, fontWeight: 600, color: overrideDuplicado ? 'var(--amber)' : 'var(--text)' }}>
+              <input type="checkbox" checked={overrideDuplicado}
+                onChange={e => setOverrideDuplicado(e.target.checked)}
+                style={{ width: 16, height: 16, cursor: 'pointer' }} />
+              ✅ Es un pedido distinto de verdad — despachar igual
+            </label>
+          </div>
+        )}
         <button className="btn btn-gold" onClick={guardar} disabled={guardando} style={{ opacity: guardando ? 0.5 : 1, cursor: guardando ? 'not-allowed' : 'pointer' }}>{guardando ? '⏳ Registrando…' : '📤 Registrar despacho y generar remito'}</button>
       </div>
 
