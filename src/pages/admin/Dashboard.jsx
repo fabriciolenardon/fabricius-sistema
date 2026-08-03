@@ -109,6 +109,44 @@ export default function Dashboard() {
       salidas = [...despostesComoSalidas, ...salidas]
         .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)))
     }
+    // Elaboración interna (chorizos/salames/hamburguesas): consume piezas de
+    // cerdo, bovino_corte o pollo SIN pasar por salidas_deposito (descuenta
+    // stock directo, ver lib/elaborar.js). Las mostramos como salidas
+    // sintéticas — mismo patrón que los despostes de capones de arriba.
+    if (cat.elaboraciones) {
+      const { data: elabs } = await supabase.from('elaboraciones_embutidos')
+        .select('*').order('fecha', { ascending: false }).order('created_at', { ascending: false })
+      const buckets = new Set(cat.tiposEntradas)
+      const NOMBRE_ELAB = { embutido: '🌭 Elaboración embutidos', salame: '🥩 Elaboración salames', hamburguesa: '🍔 Elaboración hamburguesas' }
+      const elabsComoSalidas = (elabs || []).map(e => {
+        const usadas = (Array.isArray(e.piezas_usadas) ? e.piezas_usadas : []).filter(p => buckets.has(p.tipo))
+        let kg = usadas.reduce((s, p) => s + (Number(p.kg) || 0), 0)
+        const partes = usadas.map(p => `${String(p.tipo).replace(/^cerdo_/, '').replace(/^bovino_corte$/, 'bovino').replace(/_/g, ' ')} ${fmtKg(p.kg)}`)
+        // Consumos que NO viajan en piezas_usadas: en embutidos kg_carne_bovina
+        // son retazos de cerdo (descuentan cerdo_cabeza); en salames sí es
+        // carne bovina (descuenta bovino_corte).
+        if (e.tipo === 'embutido' && buckets.has('cerdo_cabeza') && Number(e.kg_carne_bovina) > 0) {
+          kg += Number(e.kg_carne_bovina); partes.push(`retazos ${fmtKg(e.kg_carne_bovina)}`)
+        }
+        if (e.tipo === 'salame' && buckets.has('bovino_corte') && Number(e.kg_carne_bovina) > 0) {
+          kg += Number(e.kg_carne_bovina); partes.push(`bovino ${fmtKg(e.kg_carne_bovina)}`)
+        }
+        if (kg <= 0) return null
+        const hecho = (Array.isArray(e.productos_finales) ? e.productos_finales : [])
+          .map(p => String(p.tipo).replace(/_/g, ' ')).join(' + ')
+        return {
+          id: 'elab-' + e.id,
+          fecha: e.fecha,
+          descripcion: `${NOMBRE_ELAB[e.tipo] || '🌭 Elaboración'}${hecho ? ` (${hecho})` : ''} → usó ${partes.join(' · ')}`,
+          cliente_nombre: 'Elaboración propia',
+          kg,
+          total: 0,
+          esDesposte: true,
+        }
+      }).filter(Boolean)
+      salidas = [...elabsComoSalidas, ...salidas]
+        .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)))
+    }
     setDetalleSalidas(salidas)
     setLoadingDetalle(false)
   }
@@ -422,14 +460,14 @@ export default function Dashboard() {
             { label: '🐄 Bovino Media Res', valor: fmtKg(stockBovino), color: 'var(--gold)', aprox: (mediasMR.count > 0 ? mediasMR.count : Math.round(stockBovino / 105)) + ' medias', bajo: stockBovino < 100, stockKg: stockBovino, tiposEntradas: ['bovino_mr'], tiposSalidas: ['bovino_mr'] },
             { label: '🍖 Piezas Bovinas', valor: fmtKg(stockPiezas), color: 'var(--gold)', aprox: 'al peso', bajo: stockPiezas < 30, stockKg: stockPiezas, tiposEntradas: ['pieza_pierna','pieza_cuarto_pistola','pieza_costillar','pieza_cortito','pieza_costeletal','pieza_paleta','pieza_parrillero'], tiposSalidas: ['pieza_entera','pieza_pierna','pieza_cuarto_pistola','pieza_costillar','pieza_cortito','pieza_costeletal','pieza_paleta','pieza_parrillero'] },
             { label: '📦 Cajas Bovinas', valor: fmtKg(stockCajas), color: 'var(--gold)', aprox: 'al peso', bajo: stockCajas < 20, stockKg: stockCajas, tiposEntradas: ['caja_cb','caja_pt'], tiposSalidas: ['bovino_caja_cb','bovino_caja_pt','caja_cb','caja_pt'] },
-            { label: '🥩 Bovino Cortes', valor: fmtKg(stockCortes), color: 'var(--gold)', aprox: 'al peso', bajo: stockCortes < 50, stockKg: stockCortes, tiposEntradas: ['bovino_corte'], tiposSalidas: ['bovino_corte'] },
+            { label: '🥩 Bovino Cortes', valor: fmtKg(stockCortes), color: 'var(--gold)', aprox: 'al peso', bajo: stockCortes < 50, stockKg: stockCortes, tiposEntradas: ['bovino_corte'], tiposSalidas: ['bovino_corte'], elaboraciones: true },
             // Capones: ingresan ENTEROS y "salen" del stock de capones al despostarse
             // (capón entero → piezas). Por eso sus salidas son los despostes de cerdo
             // (despostesCerdo), NO las ventas de piezas. Las ventas/elaborados de piezas
             // (matambre, pulpa, etc. = cerdo_corte/cerdo_pieza) se descuentan de Cerdo Piezas.
             { label: '🐷 Cerdo Capones', valor: fmtKg(stockCerdo), color: 'var(--amber)', aprox: Math.round(stockCerdo / 107) + ' capones', bajo: stockCerdo < 50, stockKg: stockCerdo, tiposEntradas: ['cerdo'], tiposSalidas: ['cerdo'], despostesCerdo: true },
-            { label: '🐷 Cerdo Piezas', valor: fmtKg(stockCerdoPiezas), color: 'var(--amber)', aprox: 'al peso', bajo: stockCerdoPiezas < 20, stockKg: stockCerdoPiezas, tiposEntradas: ['cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza','cerdo_huesos'], tiposSalidas: ['cerdo_pieza','cerdo_corte','cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza','cerdo_huesos'] },
-            { label: '🍗 Pollo', valor: fmtKg(stockPollo), color: 'var(--blue)', aprox: Math.round(stockPollo / 20) + ' cajones', bajo: stockPollo < 50, stockKg: stockPollo, tiposEntradas: ['pollo'], tiposSalidas: ['pollo'] },
+            { label: '🐷 Cerdo Piezas', valor: fmtKg(stockCerdoPiezas), color: 'var(--amber)', aprox: 'al peso', bajo: stockCerdoPiezas < 20, stockKg: stockCerdoPiezas, tiposEntradas: ['cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza','cerdo_huesos'], tiposSalidas: ['cerdo_pieza','cerdo_corte','cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza','cerdo_huesos'], elaboraciones: true },
+            { label: '🍗 Pollo', valor: fmtKg(stockPollo), color: 'var(--blue)', aprox: Math.round(stockPollo / 20) + ' cajones', bajo: stockPollo < 50, stockKg: stockPollo, tiposEntradas: ['pollo'], tiposSalidas: ['pollo'], elaboraciones: true },
             { label: '🫀 Brosas', valor: fmtKg(stockBrosas), color: 'var(--amber)', aprox: 'al peso', bajo: stockBrosas < 20, stockKg: stockBrosas, tiposEntradas: ['bovino_brosa', 'brosa_chinchulin', 'brosa_corazon', 'brosa_entrana', 'brosa_higado', 'brosa_lengua', 'brosa_molleja', 'brosa_mondongo', 'brosa_rabo', 'brosa_rinon', 'brosa_sesos', 'brosa_tripa_gorda'], tiposSalidas: ['bovino_brosa', 'brosa_chinchulin', 'brosa_corazon', 'brosa_entrana', 'brosa_higado', 'brosa_lengua', 'brosa_molleja', 'brosa_mondongo', 'brosa_rabo', 'brosa_rinon', 'brosa_sesos', 'brosa_tripa_gorda'] },
             { label: '🌭 Embutidos', valor: fmtKg(stockEmbutido), color: 'var(--purple)', aprox: 'al peso', bajo: stockEmbutido < 20, stockKg: stockEmbutido, tiposEntradas: ['embutido', 'emb_chorizo_parrillero', 'emb_chorizo_saborizado', 'emb_chorizo_colorado', 'emb_salchicha_parrillera', 'emb_morcilla', 'emb_salame_comun', 'emb_salame_holanda', 'emb_salame_rockeford'], tiposSalidas: ['embutido', 'emb_chorizo_parrillero', 'emb_chorizo_saborizado', 'emb_chorizo_colorado', 'emb_salchicha_parrillera', 'emb_morcilla', 'emb_salame_comun', 'emb_salame_holanda', 'emb_salame_rockeford'] },
             { label: '🍔 Hamburguesas', valor: fmtKg(stockHamburguesas), color: 'var(--purple)', aprox: 'al peso', bajo: false, stockKg: stockHamburguesas, tiposEntradas: ['hamb_carne', 'hamb_pollo', 'hamb_cerdo'], tiposSalidas: ['hamb_carne', 'hamb_pollo', 'hamb_cerdo'] },
