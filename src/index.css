@@ -38,6 +38,50 @@ body {
 ::-webkit-scrollbar-track { background: var(--surface); }
 ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
 
+/* CHECKBOXES — tilde dorada bien visible en vez del puntito oscuro nativo
+   que no se distinguía marcado de desmarcado en el tema oscuro (pedido de
+   Fabricio 30/07). Aplica a TODOS los checkboxes del sistema. */
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  padding: 0;
+  margin: 0;
+  border: 2px solid var(--muted);
+  border-radius: 5px;
+  background: var(--surface);
+  cursor: pointer;
+  position: relative;
+  vertical-align: middle;
+  transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
+}
+input[type="checkbox"]:hover {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px rgba(201, 168, 76, 0.15);
+}
+input[type="checkbox"]:checked {
+  background: var(--gold);
+  border-color: var(--gold-light);
+}
+/* Tilde negra dibujada con bordes (dos lados de un cuadrado rotado 45°) */
+input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 1px;
+  width: 5px;
+  height: 10px;
+  border: solid #111;
+  border-width: 0 3px 3px 0;
+  transform: rotate(45deg);
+}
+input[type="checkbox"]:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* INPUTS GLOBALES */
 input, select, textarea {
   width: 100%;
