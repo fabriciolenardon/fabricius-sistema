@@ -445,6 +445,30 @@ export async function calcularCierreAuto(desde, hasta) {
     .filter(s => s > 0.01)
     .reduce((s, v) => s + v, 0)
 
+  // ====== SALDO ADEUDADO (ARRASTRE DE SEMANAS ANTERIORES) ======
+  // Deuda VIEJA que sigue impaga: por proveedor, compras anteriores al inicio
+  // del período menos TODOS los pagos hasta hoy (los pagos cancelan primero
+  // lo más viejo). Si da positivo, ese proveedor arrastra deuda de semanas
+  // pasadas — ej. PRETTO: compraste $31,1M la semana del 20/07, pagaste
+  // $29,05M → arrastra $2,03M. Es INFORMATIVO y se muestra con nombre propio
+  // en el cierre: NO se resta de la ganancia (esas compras ya se descontaron
+  // completas en la semana en que se compraron — restarlo de nuevo sería
+  // doble descuento; decisión Fabricio 04/08/2026).
+  const arrastreMap = new Map()   // key → { nombre, viejo, pagos }
+  for (const m of (saldoProvR.data || [])) {
+    if (m.anulado) continue
+    const key = m.proveedor_id || m.proveedor_nombre || 'desconocido'
+    const cur = arrastreMap.get(key) || { nombre: m.proveedor_nombre || '(sin nombre)', viejo: 0, pagos: 0 }
+    if (m.fecha && m.fecha < desde) cur.viejo += Number(m.debe) || 0   // deuda generada ANTES del período
+    cur.pagos += Number(m.haber) || 0                                  // pagos: todos hasta hoy
+    arrastreMap.set(key, cur)
+  }
+  const saldoAdeudadoProveedores = [...arrastreMap.values()]
+    .map(p => ({ nombre: p.nombre, total: p.viejo - p.pagos }))
+    .filter(p => p.total > 0.01)
+    .sort((a, b) => b.total - a.total)
+  const saldoAdeudadoTotal = saldoAdeudadoProveedores.reduce((s, p) => s + p.total, 0)
+
   // ====== GANANCIAS ======
   // Devengada: facturado - todos los costos del período (a precio de compra).
   // Aguinaldo/vacaciones se restan como un costo más del período.
@@ -486,6 +510,12 @@ export async function calcularCierreAuto(desde, hasta) {
       total: totalPorPagar,
       comprasMes: comprasMesTotal,
       pagadoMes: pagadoMesTotal,
+    },
+    // Arrastre: deuda de semanas ANTERIORES aún impaga (informativo, con
+    // nombre propio en el cierre — no se resta de la ganancia).
+    saldoAdeudado: {
+      total: saldoAdeudadoTotal,
+      proveedores: saldoAdeudadoProveedores.slice(0, 10),
     },
     // Desgloses POR PERÍODO (no históricos): vendido a cada cliente y comprado
     // a cada proveedor dentro de [desde, hasta].
@@ -542,6 +572,7 @@ export function cierreAutoAFila(cierre, mes) {
       por_cobrar: cierre.porCobrar.total,
       pagado_prov: cierre.pagadoProv.total,
       por_pagar_prov: cierre.porPagarProv.total,
+      saldo_adeudado: cierre.saldoAdeudado?.total || 0,
       gastos_fijos: cierre.gastos.fijos,
       gastos_variables: cierre.gastos.variables,
       gastos_socios: cierre.gastos.socios,
