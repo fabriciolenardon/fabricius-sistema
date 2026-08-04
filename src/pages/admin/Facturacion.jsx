@@ -962,10 +962,46 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
     return () => { vivo = false }
   }, [cuentaId, rDesde, rHasta, refrescar])
 
+  // 🗑️ Borrado de comprobantes mal cargados/importados (ej: las ventas de un
+  // CSV de Mis Comprobantes que entraron a Recibidos por error). Confirmación
+  // inline por fila + borrado en LOTE de todo lo listado con el filtro actual.
+  const [confirmarBorrarId, setConfirmarBorrarId] = useState(null)
+  const [confirmarBorrarTodo, setConfirmarBorrarTodo] = useState(false)
+  const [borrandoComp, setBorrandoComp] = useState(false)
+
+  async function borrarComprobante(f) {
+    setBorrandoComp(true)
+    const { error } = await supabase.from('facturas').delete().eq('id', f.id)
+    setBorrandoComp(false)
+    setConfirmarBorrarId(null)
+    if (error) { alert('❌ No se pudo borrar: ' + error.message); return }
+    setRefrescar(x => x + 1)
+    onChange()
+  }
+
+  // Borra TODO lo que matchea el filtro actual (cuenta + período + clasificación),
+  // no solo la página visible. Mismo criterio de filtrado que el listado.
+  async function borrarTodoListado() {
+    setBorrandoComp(true)
+    let q = supabase.from('facturas').delete()
+      .eq('cuenta_id', Number(cuentaId)).gte('fecha', rDesde).lte('fecha', rHasta)
+    if (filtro === 'venta') q = q.or('clasificacion.eq.venta,and(clasificacion.is.null,tipo.eq.emitida)')
+    else if (filtro === 'compra') q = q.or('clasificacion.eq.compra,and(clasificacion.is.null,tipo.eq.recibida)')
+    else if (filtro === 'gasto') q = q.eq('clasificacion', 'gasto')
+    const { error } = await q
+    setBorrandoComp(false)
+    setConfirmarBorrarTodo(false)
+    if (error) { alert('❌ No se pudo borrar: ' + error.message); return }
+    setRefrescar(x => x + 1)
+    onChange()
+  }
+
   // Detalle paginado del rango (server-side, con filtro).
   useEffect(() => {
     let vivo = true
     setCargandoDet(true)
+    setConfirmarBorrarId(null)
+    setConfirmarBorrarTodo(false)
     let q = supabase.from('facturas').select('*', { count: 'exact' })
       .eq('cuenta_id', Number(cuentaId)).gte('fecha', rDesde).lte('fecha', rHasta)
     if (filtro === 'venta') q = q.or('clasificacion.eq.venta,and(clasificacion.is.null,tipo.eq.emitida)')
@@ -1189,10 +1225,35 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
       )}
 
       {/* Filtros */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         {[['todos', 'Todos'], ['venta', 'Ventas'], ['compra', 'Compras'], ['gasto', 'Gastos']].map(([v, l]) => (
           <button key={v} onClick={() => { setFiltro(v); setPagDet(1) }} style={chip(filtro === v)}>{l}</button>
         ))}
+        {/* Borrado en lote de lo filtrado (solo con una clasificación elegida,
+            para no volar el historial completo de un clic). Pensado para
+            deshacer un CSV importado a la pestaña equivocada. */}
+        {filtro !== 'todos' && totalDet > 0 && (
+          !confirmarBorrarTodo ? (
+            <button onClick={() => setConfirmarBorrarTodo(true)}
+              style={{ marginLeft: 'auto', padding: '6px 14px', borderRadius: 20, border: '1px solid #5a2a2a', background: 'var(--surface)', color: '#ff8b8b', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
+              🗑️ Borrar {totalDet === 1 ? 'el comprobante listado' : `los ${totalDet} comprobantes listados`}
+            </button>
+          ) : (
+            <span style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', fontSize: 12 }}>
+              <span style={{ color: '#ff8b8b', fontWeight: 700 }}>
+                ¿Borrar {totalDet === 1 ? 'este comprobante' : `los ${totalDet} comprobantes`} ({filtro === 'compra' ? 'compras' : filtro === 'venta' ? 'ventas' : 'gastos'}) de {etiquetaPeriodo}? No se puede deshacer.
+              </span>
+              <button onClick={borrarTodoListado} disabled={borrandoComp}
+                style={{ background: '#ff8b8b', border: 'none', color: '#000', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontWeight: 800, fontSize: 12, opacity: borrandoComp ? 0.6 : 1 }}>
+                {borrandoComp ? '⏳ Borrando…' : '✅ Sí, borrar'}
+              </button>
+              <button onClick={() => setConfirmarBorrarTodo(false)}
+                style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontSize: 12 }}>
+                Cancelar
+              </button>
+            </span>
+          )
+        )}
       </div>
 
       {/* Detalle paginado */}
@@ -1227,8 +1288,21 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
                     {esRI && <td style={{ padding: '6px 6px', textAlign: 'right', color: 'var(--muted)' }}>{fmt$(sg * (Number(f.monto_neto) || 0))}</td>}
                     {esRI && <td style={{ padding: '6px 6px', textAlign: 'right', color: letraFactura(f) === 'A' ? 'var(--text)' : 'var(--muted)' }}>{fmt$(sg * (Number(f.monto_iva) || 0))}</td>}
                     <td style={{ padding: '6px 6px', textAlign: 'right', fontWeight: 700, color: sg < 0 ? '#ff8b8b' : 'var(--text)' }}>{sg < 0 ? '−' : ''}{fmt$(Number(f.monto_total) || 0)}</td>
-                    <td style={{ padding: '6px 6px', textAlign: 'center' }}>
+                    <td style={{ padding: '6px 6px', textAlign: 'center', whiteSpace: 'nowrap' }}>
                       {(f.cae || f.archivo_url) && <button onClick={() => abrirPdf(f)} style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--gold)', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', fontSize: 11 }}>{f.cae ? '🖨️' : '📎'}</button>}
+                      {confirmarBorrarId === f.id ? (
+                        <span style={{ whiteSpace: 'nowrap', marginLeft: 4 }}>
+                          <button onClick={() => borrarComprobante(f)} disabled={borrandoComp}
+                            style={{ background: '#ff8b8b', border: 'none', color: '#000', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 800, marginRight: 4, opacity: borrandoComp ? 0.6 : 1 }}>
+                            {borrandoComp ? '⏳' : '✓ Borrar'}
+                          </button>
+                          <button onClick={() => setConfirmarBorrarId(null)}
+                            style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', fontSize: 11 }}>✕</button>
+                        </span>
+                      ) : (
+                        <button onClick={() => setConfirmarBorrarId(f.id)} title="Eliminar este comprobante"
+                          style={{ background: 'none', border: '1px solid #5a2a2a', color: '#ff8b8b', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', fontSize: 11, marginLeft: 4 }}>🗑️</button>
+                      )}
                     </td>
                   </tr>
                 )
