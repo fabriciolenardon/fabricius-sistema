@@ -184,6 +184,24 @@ export default async function handler(req, res) {
     if (!contacto) {
       await enviarWhatsApp(phoneId, from, PRESENTACION)
       await guardarMensaje(from, 'out', 'iris', 'text', PRESENTACION)
+      // 🎁 Si el PRIMER mensaje ya pide ofertas/promos, no lo dejamos morir en
+      // el saludo (antes el contenido del primer mensaje se ignoraba — caso
+      // Angela 04/08: "algún ofertas tendrán" → solo recibió la presentación).
+      // Todavía no sabemos si es mayorista o minorista → van las dos placas.
+      if (pideOfertas(texto)) {
+        try {
+          const imgs = await traerImagenesPromo(['oferta_min', 'oferta_may'])
+          if (imgs.length) {
+            const intro = '¡Sí! 🎁 Te paso las ofertas de esta semana. Las SEMANALES son del mostrador minorista; las MAYORISTAS son únicamente efectivo/transferencia y se despachan por Casa Central (Av. Mitre 670). 🥩'
+            await enviarWhatsApp(phoneId, from, intro)
+            await guardarMensaje(from, 'out', 'iris', 'text', intro)
+            for (const url of imgs) {
+              await enviarImagenWhatsApp(phoneId, from, url)
+              await guardarMensaje(from, 'out', 'iris', 'text', '📷 (oferta enviada)')
+            }
+          }
+        } catch (e) { console.error('Ofertas en primer mensaje WA error', e) }
+      }
       return res.status(200).end()
     }
 
@@ -759,6 +777,14 @@ async function traerImagenesPromo(categoria) {
     const rows = await sbGet(`combos_imagenes?select=url&activo=eq.true&categoria=${filtro}&order=orden,creado_at`, sbHeaders())
     return (rows || []).map(r => r.url).filter(Boolean)
   } catch { return [] }
+}
+
+// ¿El texto pide ofertas/promos? Detección barata por keywords (sin IA) —
+// se usa en el primer mensaje de un número nuevo, que no pasa por la IA.
+// Normaliza acentos así "promoción" matchea igual que "promocion".
+function pideOfertas(texto) {
+  const t = String(texto || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  return /(ofert|promo|descuent|rebaj|precios? especial)/.test(t)
 }
 
 function formatearPesos(n) {
