@@ -39,12 +39,15 @@ export function Clientes() {
   const [cobData, setCobData] = useState(null)
   const [cobLoading, setCobLoading] = useState(false)
 
-  // 🕐 MORA vs deuda corriente: la deuda que nace de las compras de ESTA
-  // semana (lun→hoy) es "corriente" — el mayorista la paga la semana que
-  // viene. Lo que el saldo excede a esas compras es deuda VIEJA (plata en
-  // la calle). FIFO implícito: los pagos cancelan primero lo más viejo,
-  // así que  mora = max(0, saldo − compras de la semana en curso).
+  // 🕐 MORA vs deuda corriente (3 capas FIFO, pedido de Fabricio 04/08):
+  //   1. CORRIENTE  = compras de ESTA semana (lun→hoy) — recién nace.
+  //   2. SEMANA PASADA = aún NO vencida: el ciclo comercial es que el
+  //      mayorista paga esta semana lo que compró la anterior.
+  //   3. MORA REAL  = lo anterior a la semana pasada (plata en la calle).
+  // FIFO implícito: los pagos cancelan primero lo más viejo, así que
+  // mora = max(0, saldo − compras esta semana − compras semana pasada).
   const [debeSemana, setDebeSemana] = useState({}) // cliente_id → Σ debe (semana actual)
+  const [debeSemanaPasada, setDebeSemanaPasada] = useState({}) // cliente_id → Σ debe (semana pasada, aún no vencida)
   // 🚫 BLOQUEO manual (mig 90): el flag clientes.bloqueo_ctacte lo marca
   // Fabricio. `vencidos` (cliente_id → $ con más de 15 días, FIFO) es el
   // detector que alimenta el ANUNCIO de sugerencias — el sistema nunca
@@ -62,26 +65,46 @@ export function Clientes() {
   async function fetchClientes() {
     const { data } = await supabase.from('clientes').select('*').order('nombre')
     setClientes(data || [])
-    // Compras (debe) de la semana en curso por cliente — pagina con
-    // fetchAllRows por si una semana supera las 1000 filas de movimientos.
+    // Compras (debe) de ESTA semana y de la SEMANA PASADA por cliente — pagina
+    // con fetchAllRows por si el rango supera las 1000 filas de movimientos.
     const lunes = lunesDeLaSemana()
+    const dLun = new Date(lunes + 'T12:00')
+    dLun.setDate(dLun.getDate() - 7)
+    const lunesPasado = dLun.toISOString().slice(0, 10)
     const { data: movs } = await fetchAllRows(() => supabase
       .from('movimientos_ctacte')
-      .select('cliente_id, debe')
-      .gte('fecha', lunes)
+      .select('cliente_id, debe, fecha')
+      .gte('fecha', lunesPasado)
       .gt('debe', 0))
-    const m = {}
-    for (const r of (movs || [])) m[r.cliente_id] = (m[r.cliente_id] || 0) + (Number(r.debe) || 0)
+    const m = {}, mp = {}
+    for (const r of (movs || [])) {
+      const dest = r.fecha >= lunes ? m : mp
+      dest[r.cliente_id] = (dest[r.cliente_id] || 0) + (Number(r.debe) || 0)
+    }
     setDebeSemana(m)
+    setDebeSemanaPasada(mp)
     // Vencidos a 15 días (para el badge 🚫 Bloqueado de la lista)
     vencidoPorCliente(data || []).then(setVencidos).catch(() => {})
   }
 
-  // Mora de un cliente = lo que su saldo excede a sus compras de esta semana.
+  // Capas FIFO del saldo de un cliente (los pagos cancelan lo más viejo
+  // primero): corriente = compras de ESTA semana · semana pasada = aún no
+  // vencida (el mayorista la paga esta semana) · MORA = lo anterior a la
+  // semana pasada (plata en la calle de verdad).
+  const corrienteDe = (c) => {
+    const saldo = Number(c.saldo) || 0
+    if (saldo <= 0) return 0
+    return Math.min(saldo, debeSemana[c.id] || 0)
+  }
+  const semanaPasadaDe = (c) => {
+    const saldo = Number(c.saldo) || 0
+    if (saldo <= 0) return 0
+    return Math.min(Math.max(saldo - (debeSemana[c.id] || 0), 0), debeSemanaPasada[c.id] || 0)
+  }
   const moraDe = (c) => {
     const saldo = Number(c.saldo) || 0
     if (saldo <= 0) return 0
-    return Math.max(0, saldo - (debeSemana[c.id] || 0))
+    return Math.max(0, saldo - (debeSemana[c.id] || 0) - (debeSemanaPasada[c.id] || 0))
   }
 
   // Ejecutar el bloqueo/desbloqueo YA CONFIRMADO en la UI (confirmBloq).
@@ -620,17 +643,24 @@ async function eliminarMovimiento(mov) {
       <div style={{ display: 'flex', gap: 14, marginBottom: 20, flexWrap: 'wrap' }}>
         <div className="stat"><div className="stat-label">Total adeudado</div><div className="stat-value" style={{ color: 'var(--red-light)' }}>{fmt(totalDeuda)}</div></div>
         {(() => {
-          // Desglose del total: corriente (compras de esta semana, se cobra
-          // la semana próxima) vs MORA (deuda anterior = plata en la calle).
+          // Desglose del total en 3 capas FIFO: corriente (esta semana) +
+          // semana pasada (por cobrar esta semana, aún no vencida) + MORA
+          // real (anterior a la semana pasada = plata en la calle).
+          const totalCorriente = clientes.reduce((s, c) => s + corrienteDe(c), 0)
+          const totalPasada = clientes.reduce((s, c) => s + semanaPasadaDe(c), 0)
           const totalMora = clientes.reduce((s, c) => s + moraDe(c), 0)
-          const corriente = Math.max(0, totalDeuda - totalMora)
           const clientesConMora = clientes.filter(c => moraDe(c) > 0).length
           return (<>
-            <div className="stat"><div className="stat-label">🟢 Corriente (de esta semana)</div><div className="stat-value" style={{ color: 'var(--green)' }}>{fmt(corriente)}</div></div>
+            <div className="stat"><div className="stat-label">🟢 Corriente (esta semana)</div><div className="stat-value" style={{ color: 'var(--green)' }}>{fmt(totalCorriente)}</div></div>
             <div className="stat">
-              <div className="stat-label">⏰ En mora (anterior)</div>
-              <div className="stat-value" style={{ color: 'var(--amber)' }}>{fmt(totalMora)}</div>
-              {clientesConMora > 0 && <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>{clientesConMora} cliente{clientesConMora === 1 ? '' : 's'}</div>}
+              <div className="stat-label">🔵 Por cobrar (semana pasada)</div>
+              <div className="stat-value" style={{ color: '#7a9dff' }}>{fmt(totalPasada)}</div>
+              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>vence esta semana</div>
+            </div>
+            <div className="stat">
+              <div className="stat-label">🔴 En mora real (anterior)</div>
+              <div className="stat-value" style={{ color: 'var(--red-light)' }}>{fmt(totalMora)}</div>
+              {clientesConMora > 0 && <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>{clientesConMora} cliente{clientesConMora === 1 ? '' : 's'} · anterior a la semana pasada</div>}
             </div>
           </>)
         })()}
