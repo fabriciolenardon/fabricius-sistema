@@ -800,7 +800,33 @@ export default function Cierre() {
                   sub="acumulado del mes (sin 1ª semana)" />
                 <MetricCard label="📥 Por pagar al cierre" value={fmt(view.porPagarProv.total)} color="var(--amber)"
                   sub="saldo real cta. cte. al cierre" />
+                {view.saldoAdeudado && (
+                  <MetricCard label="🔴 Saldo adeudado (arrastre)" value={fmt(view.saldoAdeudado.total || 0)} color="var(--red-light)"
+                    sub="deuda de semanas anteriores sin pagar" />
+                )}
               </div>
+
+              {/* SALDO ADEUDADO (ARRASTRE) — deuda vieja impaga, con nombre
+                  propio para que no se escape al pagar la semana. Informativo:
+                  NO se resta de la ganancia (esas compras ya se descontaron
+                  completas la semana en que se compraron; restarlas de nuevo
+                  sería doble descuento — decisión Fabricio 04/08/2026). */}
+              {(view.saldoAdeudado?.total || 0) > 0.01 && (
+                <div className="card" style={{ border: '1px solid var(--red-light)', background: 'rgba(192,57,43,0.06)', marginBottom: 14 }}>
+                  <div className="card-title" style={{ color: 'var(--red-light)' }}>🔴 Saldo adeudado a proveedores — arrastre de semanas anteriores</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
+                    Deuda vieja que sigue impaga (compras de semanas anteriores menos todos los pagos hechos hasta hoy).
+                    Esta semana correspondería pagar: <strong style={{ color: 'var(--text)' }}>compras del período {fmt(view.compras.total)} + arrastre {fmt(view.saldoAdeudado.total)} = {fmt((Number(view.compras.total) || 0) + (Number(view.saldoAdeudado.total) || 0))}</strong>.
+                    No se resta de la ganancia: ya se descontó en la semana en que se compró.
+                  </div>
+                  {(view.saldoAdeudado.proveedores || []).map((p, i) => (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px dashed var(--border)', fontSize: 13 }}>
+                      <span>{p.nombre}</span>
+                      <span style={{ fontWeight: 700, color: 'var(--red-light)' }}>{fmt(p.total)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* GANANCIA (siempre derivada de los valores de arriba) */}
               <div className="card" style={{ background: 'linear-gradient(135deg, #1a2a1a 0%, #1a1a2a 100%)' }}>
