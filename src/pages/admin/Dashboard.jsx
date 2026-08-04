@@ -83,7 +83,31 @@ export default function Dashboard() {
       supabase.from('entradas_deposito').select('*').eq('eliminado', false).in('tipo', cat.tiposEntradas).order('fecha', { ascending: false }).order('created_at', { ascending: false }),
       supabase.from('salidas_deposito').select('*').in('tipo', cat.tiposSalidas).order('fecha', { ascending: false }).order('created_at', { ascending: false })
     ])
-    setDetalleEntradas(entradasRes.data || [])
+    let entradas = entradasRes.data || []
+    // Bovino Cortes: el stock NO entra por compras sino por CONVERSIONES
+    // internas — media res despostada a cortes (tipo_desposte 'kilo') y
+    // piezas convertidas a cortes ('pieza_kilo'). Viven en `despostes`, no
+    // en entradas_deposito, así que el modal mostraba "Entradas (0)" aunque
+    // se despostara todos los días. Las mostramos como entradas sintéticas.
+    if (cat.conversionesACortes) {
+      const { data: despCortes } = await supabase.from('despostes')
+        .select('*').in('tipo_desposte', ['kilo', 'pieza_kilo', 'bovino'])
+        .order('fecha', { ascending: false }).order('created_at', { ascending: false })
+      const conversiones = (despCortes || []).map(d => ({
+        id: 'desp-' + d.id,
+        fecha: d.fecha,
+        descripcion: d.tipo_desposte === 'pieza_kilo'
+          ? `🔪 Pieza convertida a cortes (${fmtKg(d.kg_media_res)} bruto → ${fmtKg(d.kg_neto)} netos)`
+          : `🔪 Media res despostada a cortes (${fmtKg(d.kg_media_res)} bruto → ${fmtKg(d.kg_neto)} netos)`,
+        proveedor_nombre: 'Conversión interna',
+        kg: d.kg_neto || 0,
+        kg_real: d.kg_neto || 0,
+        esDesposte: true,
+      }))
+      entradas = [...conversiones, ...entradas]
+        .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)))
+    }
+    setDetalleEntradas(entradas)
 
     let salidas = salidasRes.data || []
     // Capones: la "salida" real del stock de capones es el desposte (capón
@@ -460,7 +484,7 @@ export default function Dashboard() {
             { label: '🐄 Bovino Media Res', valor: fmtKg(stockBovino), color: 'var(--gold)', aprox: (mediasMR.count > 0 ? mediasMR.count : Math.round(stockBovino / 105)) + ' medias', bajo: stockBovino < 100, stockKg: stockBovino, tiposEntradas: ['bovino_mr'], tiposSalidas: ['bovino_mr'] },
             { label: '🍖 Piezas Bovinas', valor: fmtKg(stockPiezas), color: 'var(--gold)', aprox: 'al peso', bajo: stockPiezas < 30, stockKg: stockPiezas, tiposEntradas: ['pieza_pierna','pieza_cuarto_pistola','pieza_costillar','pieza_cortito','pieza_costeletal','pieza_paleta','pieza_parrillero'], tiposSalidas: ['pieza_entera','pieza_pierna','pieza_cuarto_pistola','pieza_costillar','pieza_cortito','pieza_costeletal','pieza_paleta','pieza_parrillero'] },
             { label: '📦 Cajas Bovinas', valor: fmtKg(stockCajas), color: 'var(--gold)', aprox: 'al peso', bajo: stockCajas < 20, stockKg: stockCajas, tiposEntradas: ['caja_cb','caja_pt'], tiposSalidas: ['bovino_caja_cb','bovino_caja_pt','caja_cb','caja_pt'] },
-            { label: '🥩 Bovino Cortes', valor: fmtKg(stockCortes), color: 'var(--gold)', aprox: 'al peso', bajo: stockCortes < 50, stockKg: stockCortes, tiposEntradas: ['bovino_corte'], tiposSalidas: ['bovino_corte'], elaboraciones: true },
+            { label: '🥩 Bovino Cortes', valor: fmtKg(stockCortes), color: 'var(--gold)', aprox: 'al peso', bajo: stockCortes < 50, stockKg: stockCortes, tiposEntradas: ['bovino_corte'], tiposSalidas: ['bovino_corte'], elaboraciones: true, conversionesACortes: true },
             // Capones: ingresan ENTEROS y "salen" del stock de capones al despostarse
             // (capón entero → piezas). Por eso sus salidas son los despostes de cerdo
             // (despostesCerdo), NO las ventas de piezas. Las ventas/elaborados de piezas
