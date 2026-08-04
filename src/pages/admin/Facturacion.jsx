@@ -1277,6 +1277,12 @@ function TabFacturas({ cuentas, facturas, contrapartes, onChange }) {
   const [filtroTipo, setFiltroTipo] = useState('todas')
   const [mostrarForm, setMostrarForm] = useState(false)
   const [mostrarLibro, setMostrarLibro] = useState(false)
+  // ☑️ Selección múltiple para borrar en LOTE (ej: un CSV de Mis Comprobantes
+  // importado a Recibidos en vez de Emitidos). El check del encabezado tilda
+  // TODO lo filtrado (no solo la página visible) y la confirmación es inline.
+  const [seleccion, setSeleccion] = useState(() => new Set())
+  const [confirmarBorrado, setConfirmarBorrado] = useState(false)
+  const [borrando, setBorrando] = useState(false)
 
   const filtradas = useMemo(() => {
     return facturas.filter(f => {
@@ -1287,6 +1293,37 @@ function TabFacturas({ cuentas, facturas, contrapartes, onChange }) {
   }, [facturas, filtroCuenta, filtroTipo])
 
   const pag = usePaginacion(filtradas, 20)
+
+  // Cambiar de filtro deselecciona todo (evita borrar filas que ya no se ven)
+  useEffect(() => { setSeleccion(new Set()); setConfirmarBorrado(false) }, [filtroCuenta, filtroTipo])
+
+  function toggleSel(id) {
+    setConfirmarBorrado(false)
+    setSeleccion(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  }
+  const todasFiltradasSel = filtradas.length > 0 && filtradas.every(f => seleccion.has(f.id))
+  function toggleTodas() {
+    setConfirmarBorrado(false)
+    setSeleccion(todasFiltradasSel ? new Set() : new Set(filtradas.map(f => f.id)))
+  }
+
+  async function borrarSeleccionadas() {
+    const ids = [...seleccion]
+    if (!ids.length) return
+    setBorrando(true)
+    // Borrar en lotes: un .in() con miles de ids supera el límite del request
+    const CHUNK = 200
+    let err = null
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const { error } = await supabase.from('facturas').delete().in('id', ids.slice(i, i + CHUNK))
+      if (error) { err = error; break }
+    }
+    setBorrando(false)
+    setConfirmarBorrado(false)
+    setSeleccion(new Set())
+    if (err) alert('❌ Se cortó el borrado: ' + err.message)
+    onChange()
+  }
 
   const totales = useMemo(() => {
     const t = { emitido: 0, recibido: 0, ivaEmitido: 0, ivaRecibido: 0 }
@@ -1351,12 +1388,49 @@ function TabFacturas({ cuentas, facturas, contrapartes, onChange }) {
         <KPI label="📊 Resultado IVA" value={fmt$(totales.ivaEmitido - totales.ivaRecibido)} sub="Débito − Crédito" color={totales.ivaEmitido >= totales.ivaRecibido ? '#7dff7d' : '#ff8b8b'} />
       </div>
 
+      {/* Barra de selección múltiple (borrado en lote) */}
+      {seleccion.size > 0 && (
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', background: '#2a1f0a', border: '1px solid var(--amber)', borderRadius: 8, padding: '8px 12px', marginBottom: 10, fontSize: 13 }}>
+          <b style={{ color: 'var(--amber)' }}>☑️ {seleccion.size} seleccionada{seleccion.size === 1 ? '' : 's'}</b>
+          <span style={{ color: 'var(--muted)', fontSize: 12 }}>
+            Total {fmt$(facturas.filter(f => seleccion.has(f.id)).reduce((s, f) => s + (Number(f.monto_total) || 0), 0))}
+          </span>
+          {!confirmarBorrado ? (
+            <button onClick={() => setConfirmarBorrado(true)}
+              style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', color: '#ff8b8b', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
+              🗑️ Borrar seleccionadas
+            </button>
+          ) : (
+            <>
+              <span style={{ color: '#ff8b8b', fontWeight: 700, fontSize: 12 }}>¿Borrar {seleccion.size} comprobante{seleccion.size === 1 ? '' : 's'}? No se puede deshacer.</span>
+              <button onClick={borrarSeleccionadas} disabled={borrando}
+                style={{ background: '#ff8b8b', border: 'none', color: '#000', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontWeight: 800, fontSize: 12, opacity: borrando ? 0.6 : 1 }}>
+                {borrando ? '⏳ Borrando…' : '✅ Sí, borrar'}
+              </button>
+              <button onClick={() => setConfirmarBorrado(false)}
+                style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontSize: 12 }}>
+                Cancelar
+              </button>
+            </>
+          )}
+          <button onClick={() => { setSeleccion(new Set()); setConfirmarBorrado(false) }}
+            style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 12 }}>
+            ✕ Deseleccionar
+          </button>
+        </div>
+      )}
+
       {/* Tabla */}
       <div className="card" style={{ padding: 0 }}>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', fontSize: 12, minWidth: 900 }}>
             <thead>
               <tr style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase' }}>
+                <th style={{ width: 30, padding: '8px 6px' }}>
+                  <input type="checkbox" checked={todasFiltradasSel} onChange={toggleTodas}
+                    title={`Seleccionar TODAS las filtradas (${filtradas.length})`}
+                    style={{ width: 15, height: 15, cursor: 'pointer' }} />
+                </th>
                 <th style={{ textAlign: 'left', padding: '8px 6px' }}>Fecha</th>
                 <th style={{ textAlign: 'left', padding: '8px 6px' }}>Cuenta</th>
                 <th style={{ textAlign: 'center', padding: '8px 6px' }}>Tipo</th>
@@ -1371,7 +1445,11 @@ function TabFacturas({ cuentas, facturas, contrapartes, onChange }) {
             </thead>
             <tbody>
               {pag.items.map(f => (
-                <tr key={f.id} style={{ borderTop: '1px solid var(--border)' }}>
+                <tr key={f.id} style={{ borderTop: '1px solid var(--border)', background: seleccion.has(f.id) ? 'rgba(255,184,107,0.06)' : undefined }}>
+                  <td style={{ textAlign: 'center', padding: '6px 6px' }}>
+                    <input type="checkbox" checked={seleccion.has(f.id)} onChange={() => toggleSel(f.id)}
+                      style={{ width: 15, height: 15, cursor: 'pointer' }} />
+                  </td>
                   <td style={{ padding: '6px 6px' }}>{fmtFecha(f.fecha)}</td>
                   <td style={{ padding: '6px 6px', fontWeight: 600 }}>{nombreCuenta(f.cuenta_id)}</td>
                   <td style={{ textAlign: 'center', padding: '6px 6px' }}>
@@ -1412,7 +1490,7 @@ function TabFacturas({ cuentas, facturas, contrapartes, onChange }) {
                 </tr>
               ))}
               {filtradas.length === 0 && (
-                <tr><td colSpan="10" style={{ textAlign: 'center', padding: 30, color: 'var(--muted)' }}>Sin facturas con esos filtros.</td></tr>
+                <tr><td colSpan="11" style={{ textAlign: 'center', padding: 30, color: 'var(--muted)' }}>Sin facturas con esos filtros.</td></tr>
               )}
             </tbody>
           </table>
