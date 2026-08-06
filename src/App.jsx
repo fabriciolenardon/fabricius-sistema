@@ -19,7 +19,7 @@
 // ============================================================
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
-import { rutaRestringida } from './lib/restricciones'
+import { rutaRestringida, rutaInicio } from './lib/restricciones'
 import { lazy, Suspense } from 'react'
 import LoginPage from './pages/LoginPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
@@ -77,7 +77,9 @@ const DesposteElaborar = lazy(() => import('./pages/desposte/DesposteElaborar'))
 // (lib/restricciones.js). El menú ya lo oculta; esto cubre el link tipeado.
 function SinRestriccion({ ruta, children }) {
   const { user } = useAuth()
-  if (rutaRestringida(user?.email, ruta)) return <Navigate to="/admin/dashboard" replace />
+  // El redirect va a la ruta de inicio del usuario (no siempre el Dashboard:
+  // si justamente el Dashboard es lo vedado, su inicio es Productividad).
+  if (rutaRestringida(user?.email, ruta)) return <Navigate to={rutaInicio(user?.email)} replace />
   return children
 }
 
@@ -87,7 +89,7 @@ function SoloCEO({ children }) {
   if (!user) return <Navigate to="/login" replace />
   if (profileMissing) return <PerfilPendiente />
   if (profile?.rol !== 'admin') return <Navigate to="/" replace />
-  if (user?.email !== 'fabriciolenardon@gmail.com') return <Navigate to="/admin/dashboard" replace />
+  if (user?.email !== 'fabriciolenardon@gmail.com') return <Navigate to={rutaInicio(user?.email)} replace />
   return children
 }
 
@@ -123,7 +125,7 @@ function RootRedirect() {
   if (!user) return <Navigate to="/login" replace />
   if (profileMissing) return <Navigate to="/perfil-pendiente" replace />
   if (!profile) return <Navigate to="/login" replace />
-  if (profile.rol === 'admin') return <Navigate to="/admin/dashboard" replace />
+  if (profile.rol === 'admin') return <Navigate to={rutaInicio(user?.email)} replace />
   if (profile.rol === 'cliente_mayorista') return <Navigate to="/cliente/dashboard" replace />
   if (profile.rol === 'cajero') return <Navigate to="/cajero/caja" replace />
   if (profile.rol === 'desposte') return <Navigate to="/desposte/pedidos" replace />
@@ -143,7 +145,7 @@ export default function App() {
         <Route path="/perfil-pendiente" element={<PerfilPendienteRoute />} />
         <Route path="/" element={<RootRedirect />} />
         <Route path="/admin" element={<ProtectedRoute requiredRole="admin"><AdminLayout /></ProtectedRoute>}>
-          <Route path="dashboard" element={<Dashboard />} />
+          <Route path="dashboard" element={<SinRestriccion ruta="/admin/dashboard"><Dashboard /></SinRestriccion>} />
           <Route path="deposito" element={<Deposito />} />
           <Route path="precios" element={<Precios />} />
           <Route path="presupuestos" element={<Presupuestos />} />
