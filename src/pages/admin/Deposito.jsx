@@ -1641,7 +1641,7 @@ async function confirmarDesposteCerdo() {
         )}
         {tipoElaboracion === 'salame' && (
           <div>
-            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>Variedades de salame — kg netos que entran al secado</label>
+            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>Variedades de salame — kg FRESCOS recién embutidos (peso 1ª etapa)</label>
             {[
               { id: 'salame_comun', label: '🥩 Salame Común' },
               { id: 'salame_rockeford', label: '🧀 Salame Rockeford' },
@@ -1656,7 +1656,7 @@ async function confirmarDesposteCerdo() {
               </div>
             ))}
             <div style={{ background: '#1a1a2a', border: '1px solid #2a2a5a', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#7db5ff', marginTop: 4 }}>
-              ℹ️ Cargá los <strong>kg netos de cada variedad</strong> que se hicieron en esta tanda. <strong>No se aplica merma automática.</strong> Quedan "🔒 en proceso de secado" y NO suman al stock hasta que, una vez secos, peses y cargues los <strong>kg finales</strong> de cada variedad desde el historial — ahí cada uno va a su stock (común/holanda/rockeford).
+              ℹ️ La elaboración registra <strong>los 3 pesos</strong>: ① la <strong>materia prima</strong> (piezas + carne bovina + queso), ② el <strong>peso fresco</strong> de cada variedad recién embutida — cargalo acá, puede tener merma o incremento vs la materia prima — y ③ el <strong>peso final seco</strong>, que cargás desde el historial cuando terminan (recién ahí suma al stock, sin merma automática).
             </div>
           </div>
         )}
@@ -1838,14 +1838,32 @@ async function confirmarDesposteCerdo() {
           const kgBovino = parseNumero(kgCarneBovinaEmbutido)
           const kgQueso = parseNumero(kgQuesoEmbutido)
           const kgTotal = kgCerdo + kgBovino + kgQueso
-          // SALAME: sin merma automática. Solo se muestra el peso neto que entra
-          // al secado; el peso final real se carga después desde el historial.
+          // SALAME: se muestran los DOS primeros pesos de la tanda — materia
+          // prima (①) y frescos embutidos (②, suma de las variedades) con su
+          // merma/incremento. El tercero (③ seco) se carga desde el historial
+          // al finalizar; sin merma automática en ninguna etapa.
           if (tipoElaboracion === 'salame') {
+            const kgFrescos = Object.values(salameNeto).reduce((s, v) => s + parseNumero(v), 0)
+            const pctFresco = (kgTotal > 0 && kgFrescos > 0) ? ((kgFrescos / kgTotal - 1) * 100) : null
             return (
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Kg netos que entran al secado</div>
-                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 30, color: 'var(--gold)' }}>{kgTotal.toFixed(1)} kg</div>
-                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>🔒 No suma al stock todavía. El peso final se carga seco, sin merma automática.</div>
+              <div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>① Materia prima</div>
+                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 26 }}>{kgTotal.toFixed(1)} kg</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>② Frescos embutidos</div>
+                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 26, color: 'var(--gold)' }}>{kgFrescos > 0 ? `${kgFrescos.toFixed(1)} kg` : '—'}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>{pctFresco === null ? 'Merma / incremento' : pctFresco >= 0 ? 'Incremento 1ª etapa' : 'Merma 1ª etapa'}</div>
+                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 26, color: pctFresco === null ? 'var(--muted)' : pctFresco >= 0 ? 'var(--green)' : 'var(--red-light)' }}>
+                      {pctFresco === null ? '—' : `${pctFresco >= 0 ? '+' : ''}${pctFresco.toFixed(1)}%`}
+                    </div>
+                  </div>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8, textAlign: 'center' }}>🔒 No suma al stock todavía. El ③ peso final se carga SECO desde el historial — ahí sale la merma total.</div>
               </div>
             )
           }
@@ -2171,12 +2189,29 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, onEditarProd
                     ))}
                   </div>
                 )}
-                {e.tipo === 'salame' && !e.maduracion_completa && (
-                  <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 2 }}>🔒 En proceso de secado · {fmtKg(e.kg_elaborado)} netos (no suma al stock todavía)</div>
-                )}
-                {e.tipo === 'salame' && e.maduracion_completa && (
-                  <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 2 }}>✅ Secado finalizado · {fmtKg(e.kg_final)} finales al stock{Number(e.kg_elaborado) > 0 ? ` · merma ${(((Number(e.kg_final) || 0) / Number(e.kg_elaborado) - 1) * 100).toFixed(1)}%` : ''}</div>
-                )}
+                {/* Los 3 pesos de la tanda de salames: ① materia prima
+                    (kg_elaborado) → ② frescos embutidos (Σ kg_neto de las
+                    variedades) → ③ secos finales (kg_final), con la merma
+                    de cada etapa. Pedido Fabricio 06/08/2026. */}
+                {e.tipo === 'salame' && (() => {
+                  const prima = Number(e.kg_elaborado) || 0
+                  const frescos = (Array.isArray(e.productos_finales) ? e.productos_finales : [])
+                    .reduce((s, p) => s + (Number(p?.kg_neto) || 0), 0)
+                  const seco = Number(e.kg_final) || 0
+                  const pct = (a, b) => (a > 0 && b > 0) ? ` (${b >= a ? '+' : ''}${(((b / a) - 1) * 100).toFixed(1)}%)` : ''
+                  if (!e.maduracion_completa) {
+                    return (
+                      <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 2 }}>
+                        🔒 En secado · ① prima {fmtKg(prima)}{frescos > 0 ? <> → ② frescos {fmtKg(frescos)}{pct(prima, frescos)}</> : ''} · no suma al stock todavía
+                      </div>
+                    )
+                  }
+                  return (
+                    <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 2 }}>
+                      ✅ ① prima {fmtKg(prima)}{frescos > 0 ? <> → ② frescos {fmtKg(frescos)}{pct(prima, frescos)}</> : ''} → ③ secos {fmtKg(seco)}{frescos > 0 ? pct(frescos, seco) : pct(prima, seco)} al stock{prima > 0 ? ` · merma total ${(((seco / prima) - 1) * 100).toFixed(1)}%` : ''}
+                    </div>
+                  )
+                })()}
                 {e.notas && <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>{e.notas}</div>}
               </div>
               <div style={{ textAlign: 'right' }}>
