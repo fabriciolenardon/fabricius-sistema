@@ -22,6 +22,11 @@ import Paginador, { usePaginacion } from '../../components/Paginador'
 import { fmtPrecio, fmtKg } from '../../lib/formatos'
 // fmt sin signo $ — formato AR para mostrar números genéricos con 2 decimales
 const fmt = n => (Number(n) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+// Fecha+hora de la aprobación en horario ARG (regla de oro: nunca la TZ del navegador)
+const fmtFechaHora = ts => ts ? new Date(ts).toLocaleString('es-AR', {
+  day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit',
+  timeZone: 'America/Argentina/Buenos_Aires',
+}) : ''
 
 const LABEL_TIPO = {
   media_res_piezas:     { label: 'En piezas', icono: '🥩', color: 'var(--gold)' },
@@ -60,6 +65,13 @@ export default function FlujoDeposito() {
     setTimeout(() => setMsg(null), 4000)
   }
 
+  // Actualiza el flujo en el estado local AL INSTANTE — sin esperar el realtime
+  // (que puede no llegar) ni recargar la lista entera. Así la tarjeta cambia
+  // de estado apenas se aprueba/rechaza y sale sola del filtro "Pendiente".
+  function marcarLocal(id, cambios) {
+    setFlujos(fs => fs.map(x => x.id === id ? { ...x, ...cambios } : x))
+  }
+
   const filtrados = useMemo(() => {
     if (filtroEstado === 'todos') return flujos
     return flujos.filter(f => f.estado === filtroEstado)
@@ -71,14 +83,16 @@ export default function FlujoDeposito() {
   async function rechazar(f) {
     const motivo = prompt('Motivo del rechazo (opcional):', '')
     if (motivo === null) return
-    const { error } = await supabase.from('flujo_deposito').update({
+    const cambios = {
       estado: 'rechazado',
       notas_admin: motivo || 'Rechazado sin motivo',
       aprobado_por: user?.id,
       aprobado_por_nombre: profile?.nombre || null,
       aprobado_at: new Date().toISOString(),
-    }).eq('id', f.id)
+    }
+    const { error } = await supabase.from('flujo_deposito').update(cambios).eq('id', f.id)
     if (error) { aviso('❌ ' + error.message, 'error'); return }
+    marcarLocal(f.id, cambios)
     // Liberar la media res reservada: vuelve a estar disponible para el desposte
     if (f.entrada_id) {
       await supabase.from('entradas_deposito').update({ reservada: false }).eq('id', f.entrada_id)
@@ -98,15 +112,16 @@ export default function FlujoDeposito() {
       'El stock NO se toca acá — el despacho/desposte de esta media res ' +
       'lo cargás vos a mano desde Depósito.'
     )) return
-    const { error } = await supabase.from('flujo_deposito').update({
+    const cambios = {
       estado: 'aprobado',
       notas_admin: 'Recepción confirmada. El despacho/desposte se carga manualmente desde Depósito.',
       aprobado_por: user?.id,
       aprobado_por_nombre: profile?.nombre || null,
       aprobado_at: new Date().toISOString(),
-    }).eq('id', f.id)
+    }
+    const { error } = await supabase.from('flujo_deposito').update(cambios).eq('id', f.id)
     if (error) aviso('❌ ' + error.message, 'error')
-    else aviso('✅ Recepción confirmada')
+    else { marcarLocal(f.id, cambios); aviso('✅ Recepción confirmada') }
   }
 
   // Ejecuta la aprobación (llamada desde el modal de confirmación)
@@ -196,17 +211,19 @@ export default function FlujoDeposito() {
     }
 
     // Marcar flujo como aprobado
-    const { error: e2 } = await supabase.from('flujo_deposito').update({
+    const cambios = {
       estado: 'aprobado',
       desposte_id: desp.id,
       notas_admin: 'Procesado automáticamente con confirmación',
       aprobado_por: user?.id,
       aprobado_por_nombre: profile?.nombre || null,
       aprobado_at: new Date().toISOString(),
-    }).eq('id', f.id)
+    }
+    const { error: e2 } = await supabase.from('flujo_deposito').update(cambios).eq('id', f.id)
     setProcesando(false)
     setConfirmando(null)
     if (e2) { aviso('Desposte creado pero falló enlazar flujo: ' + e2.message, 'error'); return }
+    marcarLocal(f.id, cambios)
     aviso('✅ Flujo aprobado y desposte creado en el sistema')
   }
 
@@ -310,6 +327,12 @@ export default function FlujoDeposito() {
                       )}
                       {f.notas_admin && (
                         <div style={{ fontSize: 11, color: '#7a9dff', marginTop: 4 }}>👨‍💼 Admin: {f.notas_admin}</div>
+                      )}
+                      {f.estado !== 'pendiente' && (f.aprobado_por_nombre || f.aprobado_at) && (
+                        <div style={{ fontSize: 11, fontWeight: 700, color: f.estado === 'aprobado' ? '#7dff7d' : '#ff8b8b', marginTop: 4 }}>
+                          {f.estado === 'aprobado' ? '✅ Confirmado' : '❌ Rechazado'} por {f.aprobado_por_nombre || '—'}
+                          {f.aprobado_at ? ` · ${fmtFechaHora(f.aprobado_at)}` : ''}
+                        </div>
                       )}
                     </div>
                     {f.estado === 'pendiente' && (
