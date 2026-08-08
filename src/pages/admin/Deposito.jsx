@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase, fetchAllRows } from '../../lib/supabase'
 import { fechaHoyARG, fechaRelativaARG, esFechaFutura } from '../../lib/fechas'
 import { lunesDeLaSemana, domingoDeLaSemana } from '../../lib/cierreAuto'
-import { resolverDescuentoStock } from '../../lib/stockHelpers'
+import { resolverDescuentoStock, bucketPiezaBovina } from '../../lib/stockHelpers'
 import { bucketDePiezaBovina, MERMA_PIEZA_DEFAULT, MERMA_PIEZA_GENERICA, MERMA_MEDIA_RES_DEFAULT } from '../../lib/modelosDesposte'
 import { cargarCajasDisponibles, crearCajasIngreso, venderCaja, revertirVentaCaja, CATEGORIA_A_TIPO_CAJA } from '../../lib/cajasStock'
 import { fmtPrecio, fmtKg, parseNumero } from '../../lib/formatos'
@@ -3275,6 +3275,15 @@ export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   const [mediaSeleccionada, setMediaSeleccionada] = useState(null)
   const [formManual, setFormManual] = useState({ descripcion: '', importe: '' })
   const [piezasDispVenta, setPiezasDispVenta] = useState([])
+  // 🧺 Combos de Caja (bolsones a precio fijo, tabla combos_venta): también se
+  // pueden despachar por remito — ej. cliente de cta cte que se lleva un combo.
+  // Mismo modelo que la Caja: cada producto entra como línea propia (descuenta
+  // su stock real) repartiendo el precio FIJO del combo entre las líneas.
+  const [combosVenta, setCombosVenta] = useState([])
+  useEffect(() => {
+    supabase.from('combos_venta').select('*').eq('disponible', true).order('orden').order('nombre')
+      .then(({ data }) => setCombosVenta(data || []))
+  }, [])
   const [piezaEnteraSeleccionada, setPiezaEnteraSeleccionada] = useState(null)
   // Cajas individuales disponibles (cajas_stock) — para Caja CB/PT
   const [cajasDispVenta, setCajasDispVenta] = useState([])
@@ -3373,6 +3382,7 @@ export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   ])
   const esUnidad = CATEGORIAS_POR_UNIDAD.has(form.categoria)
   const esCaja = form.categoria === 'bovino_caja_cb' || form.categoria === 'bovino_caja_pt'
+  const esCombos = form.categoria === 'combos'
 
 const CATEGORIAS = {
     // Catálogo dinámico primero (aporta labels de categorías personalizadas);
@@ -3392,6 +3402,7 @@ const CATEGORIAS = {
     rebozado: '🧊 Rebozado x Kg',
     rebozado_cajon: '🧊 Rebozado x Cajón',
     insumos: '🧰 Insumos',
+    combos: '🧺 Combos (bolsones)',
   }
   // CATEGORIA_A_STOCK se movió a nivel de módulo (arriba) para que RemitosTab
   // también pueda usarlo al revertir el stock de un remito anulado.
@@ -3406,6 +3417,9 @@ const CATEGORIAS = {
     const lista = categorias.filter(c => c !== 'bovino_pieza' && c !== 'pieza_entera')
     const insertAt = lista.indexOf('bovino_mr') >= 0 ? lista.indexOf('bovino_mr') + 1 : 0
     lista.splice(insertAt, 0, 'pieza_entera')
+    // 🧺 Combos: categoría virtual — al elegirla se muestra el panel de
+    // combos disponibles (solo si hay combos activos cargados en Precios).
+    if (combosVenta.length > 0) lista.push('combos')
     return lista
   })()
   // Para 'pieza_entera' el precio sale de la lista PIEZAS BOVINAS (categoría
@@ -3609,6 +3623,59 @@ const item = {
   }
  
   function quitarItem(idx) { setItems(prev => prev.filter((_, i) => i !== idx)) }
+
+  // 🧺 Agrega un combo al remito: CADA producto del combo entra como línea
+  // normal (así el stock se descuenta igual que un despacho común vía
+  // resolverDescuentoStock), repartiendo el precio FIJO del combo entre las
+  // líneas en proporción a su valor minorista — Σ importes = precio del combo.
+  // Mismo criterio que agregarCombo() de Caja.jsx; los buckets salen del
+  // catálogo real (stock_origen / bucketPiezaBovina), nunca se adivinan.
+  function agregarComboAlRemito(combo) {
+    const comboItems = Array.isArray(combo?.items) ? combo.items : []
+    if (!comboItems.length) { showAlert({ type: 'error', msg: '❌ El combo no tiene productos cargados' }); return }
+    const resueltos = comboItems.map(it => ({ it, prod: todosPrecios.find(p => p.id === it.producto_id) }))
+    const faltan = resueltos.filter(r => !r.prod)
+    if (faltan.length) {
+      const nombres = faltan.map(r => r.it.nombre || '¿?').join(', ')
+      showAlert({ type: 'error', msg: `❌ Combo ${combo.nombre}: faltan productos en el catálogo (${nombres}). Revisalo en Precios → Combos.` })
+      return
+    }
+    const comboPrecio = Number(combo.precio) || 0
+    const valores = resueltos.map(({ it, prod }) =>
+      (Number(it.kg) || 0) * Number(prod.precio_minorista || prod.precio_carniceria || 0))
+    const totalNormal = valores.reduce((a, b) => a + b, 0)
+    let acumulado = 0
+    const lineas = resueltos.map(({ it, prod }, idx) => {
+      const kg = Number(it.kg) || 0
+      // Reparto proporcional; la última línea se lleva el resto para que la
+      // suma dé EXACTO el precio del combo (sin centavos perdidos por redondeo).
+      let share
+      if (idx === resueltos.length - 1) {
+        share = comboPrecio - acumulado
+      } else {
+        share = totalNormal > 0
+          ? Math.round(comboPrecio * (valores[idx] / totalNormal))
+          : Math.round(comboPrecio / resueltos.length)
+        acumulado += share
+      }
+      return {
+        descripcion: `${prod.nombre} (Combo ${combo.nombre})`,
+        kg,
+        precio: kg > 0 ? share / kg : share,
+        importe: share,
+        tipo: prod.categoria,
+        unidad: CATEGORIAS_POR_UNIDAD.has(prod.categoria) ? 'u' : 'kg',
+        stock_origen: prod.stock_origen
+          || (prod.categoria === 'bovino_pieza' ? bucketPiezaBovina(prod.nombre) : null),
+        kg_por_unidad: prod.kg_por_unidad || null,
+        media_res_id: null, pieza_id: null, pieza_tipo: null, caja_id: null, caja_tipo: null,
+        combo_id: combo.id, combo_nombre: combo.nombre,
+      }
+    })
+    setItems(prev => [...prev, ...lineas])
+    setForm(f => ({ ...f, categoria: '', productoId: '', kg: '', precio: '' }))
+    showAlert({ type: 'success', msg: `🧺 Combo ${combo.nombre} agregado — ${lineas.length} productos por ${fmtPrecio(comboPrecio)}` })
+  }
 
   function agregarItemManual() {
     const desc = formManual.descripcion.trim()
@@ -4074,7 +4141,11 @@ for (const item of items) {
             </select>
           </div>
           <div className="form-group"><label>{form.categoria === 'pieza_entera' ? 'Tipo de pieza (precio)' : 'Producto'}</label>
-            {esCaja ? (
+            {esCombos ? (
+              <div style={{ padding: '8px 12px', background: 'var(--surface2)', border: '1px dashed var(--border)', borderRadius: 8, fontSize: 12, color: 'var(--muted)' }}>
+                ↓ Tocá un combo abajo — se agrega entero al remito
+              </div>
+            ) : esCaja ? (
               <div style={{ padding: '8px 12px', background: 'var(--surface2)', border: '1px dashed var(--border)', borderRadius: 8, fontSize: 12, color: 'var(--muted)' }}>
                 ↓ Elegí una caja del stock individual abajo
               </div>
@@ -4086,6 +4157,34 @@ for (const item of items) {
             )}
           </div>
         </div>
+
+        {/* 🧺 Panel de COMBOS: un toque agrega todos los productos del combo
+            al remito a su precio fijo (mismo modelo que el botón de Caja). */}
+        {esCombos && (
+          <div style={{ background: '#1f1a2a', border: '1px solid #4a3a6a', borderRadius: 10, padding: '14px 16px', marginBottom: 12 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--purple, #b89aff)', marginBottom: 10 }}>
+              🧺 Elegí el combo a despachar — un toque agrega todos sus productos al precio del combo
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
+              {combosVenta.map(cb => {
+                const cant = Array.isArray(cb.items) ? cb.items.length : 0
+                return (
+                  <div key={cb.id} onClick={() => agregarComboAlRemito(cb)}
+                    style={{ padding: '10px 12px', borderRadius: 8, cursor: 'pointer', border: '2px solid var(--border)', background: 'var(--surface2)' }}
+                    onMouseOver={e => { e.currentTarget.style.borderColor = 'var(--gold)'; e.currentTarget.style.background = 'rgba(201,168,76,0.08)' }}
+                    onMouseOut={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = 'var(--surface2)' }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>🧺 {cb.nombre}</div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>{cant} producto{cant === 1 ? '' : 's'}</div>
+                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{fmtPrecio(cb.precio)}</div>
+                  </div>
+                )
+              })}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>
+              Cada producto entra como línea propia y descuenta su stock real; la suma de las líneas da exacto el precio del combo.
+            </div>
+          </div>
+        )}
 
         {/* Selector de cajas individuales (CB / PT) — reemplaza el banner viejo.
             Cada caja tiene su peso propio cargado en el ingreso. Al seleccionar
