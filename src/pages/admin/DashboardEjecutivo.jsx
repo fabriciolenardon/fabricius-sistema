@@ -321,6 +321,13 @@ function useDashboardData(refreshMs = 120000) {
     // inflaba el facturado (y duplicaba al despacharse). Por eso NO van.
     const facturadoMes = totalCajaMes + totalSalidasMes
 
+    // ── MAYORISTA FACTURADO HOY (remitos/salidas de hoy, sin flujos internos) ──
+    // Mismo criterio que facturadoMes: el hero del día muestra minorista (caja)
+    // + mayorista despachado, así "hoy" y "mes" cierran con la misma regla.
+    const mayoristaHoy = salidasMesData
+      .filter(s => s.fecha === hoy)
+      .reduce((s, x) => s + (Number(x.total) || 0), 0)
+
     // ── 💥 RÉCORD: mejor día del mes (sin contar hoy) en la caja ──
     const porDiaMes = {}
     ;(ventasMes.data || []).forEach(v => {
@@ -515,7 +522,7 @@ function useDashboardData(refreshMs = 120000) {
     }
 
     setData({
-      totalHoy, cantHoy, ticketProm, totalSemana,
+      totalHoy, mayoristaHoy, cantHoy, ticketProm, totalSemana,
       mesCerrado,
       totalMes: totalCajaMes,
       mayoristaMes: totalSalidasMes,
@@ -912,8 +919,10 @@ function ResumenEjecutivo() {
     const fechaTxt = new Date().toLocaleDateString('es-AR', { timeZone: TZ_ARG, weekday: 'long', day: 'numeric', month: 'long' })
     let msg = `🥩 *Carnicerías Fabricius — Reporte del día*\n`
     msg += `📅 ${fechaTxt.charAt(0).toUpperCase() + fechaTxt.slice(1)}\n\n`
-    msg += `*💵 Facturado hoy:* ${fmtArs(data.totalHoy)}\n`
-    msg += `· ${data.cantHoy} venta${data.cantHoy === 1 ? '' : 's'}\n`
+    msg += `*💵 Facturado hoy:* ${fmtArs(data.totalHoy + data.mayoristaHoy)}\n`
+    msg += `· 🛒 Minorista: ${fmtArs(data.totalHoy)}\n`
+    msg += `· 🚚 Mayorista: ${fmtArs(data.mayoristaHoy)}\n`
+    msg += `· ${data.cantHoy} venta${data.cantHoy === 1 ? '' : 's'} en mostrador\n`
     msg += `· Ticket promedio: ${fmtArs(data.ticketProm)}\n\n`
     msg += `*📊 Semana:* ${fmtArs(data.totalSemana)}\n`
     msg += `*📅 Mes:* ${fmtArs(data.totalMes)}`
@@ -969,10 +978,21 @@ function ResumenEjecutivo() {
           <div style={{ position: 'absolute', top: -60, right: -60, width: 180, height: 180, borderRadius: '50%', background: 'radial-gradient(circle, rgba(0,212,255,0.16), transparent 70%)' }} />
           <Etiqueta texto="FACTURADO HOY" extra={<PuntoVivo />} />
           <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 52, color: NEON.cianHi, lineHeight: 1, animation: 'dejGlow 3s ease-in-out infinite' }}>
-            {fmtArs(data.totalHoy)}
+            {fmtArs(data.totalHoy + data.mayoristaHoy)}
+          </div>
+          {/* Desglose del día: mostrador vs remitos mayoristas */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 8, fontSize: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+              <span style={{ color: NEON.muted, fontWeight: 700, letterSpacing: 1 }}>🛒 MINORISTA</span>
+              <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 19, color: NEON.texto }}>{fmtArs(data.totalHoy)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+              <span style={{ color: NEON.muted, fontWeight: 700, letterSpacing: 1 }}>🚚 MAYORISTA</span>
+              <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 19, color: NEON.cian }}>{fmtArs(data.mayoristaHoy)}</span>
+            </div>
           </div>
           <div style={{ fontSize: 12, color: NEON.muted, marginTop: 6 }}>
-            {data.cantHoy} venta{data.cantHoy === 1 ? '' : 's'} · ticket {fmtArs(data.ticketProm)}
+            {data.cantHoy} venta{data.cantHoy === 1 ? '' : 's'} en mostrador · ticket {fmtArs(data.ticketProm)}
             {pc.variacionHoyVsAyer != null && (
               <span style={{ color: colorVar(pc.variacionHoyVsAyer), fontWeight: 700 }}>
                 {' '}· {flecha(pc.variacionHoyVsAyer)} {signo(pc.variacionHoyVsAyer)}{pc.variacionHoyVsAyer.toFixed(0)}% vs ayer
@@ -1673,16 +1693,16 @@ function ModoTV({ onSalir }) {
   // 🎬 Anuncios cinematográficos: récord / stock crítico / cheques por vencer
   const anuncio = useAnunciosTV(data)
 
-  // 🔔 Destello cuando entra una venta: si el facturado de hoy SUBE entre
-  // recargas, replay de la animación dejFlash (la key fuerza el remount).
+  // 🔔 Destello cuando entra una venta: si el facturado de hoy (caja +
+  // mayorista) SUBE entre recargas, replay de dejFlash (la key remonta).
   const [flashVenta, setFlashVenta] = useState(0)
   const prevTotalRef = useRef(null)
   useEffect(() => {
-    const t = data?.totalHoy
-    if (t == null) return
+    if (data?.totalHoy == null) return
+    const t = data.totalHoy + (data.mayoristaHoy || 0)
     if (prevTotalRef.current != null && t > prevTotalRef.current) setFlashVenta(f => f + 1)
     prevTotalRef.current = t
-  }, [data?.totalHoy])
+  }, [data?.totalHoy, data?.mayoristaHoy])
 
   // ESC sale del modo TV (además del exit nativo de fullscreen)
   useEffect(() => {
@@ -1754,9 +1774,11 @@ function ModoTV({ onSalir }) {
                 <div key={flashVenta}
                   style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '6vw', lineHeight: 1, color: NEON.cianHi,
                     animation: flashVenta > 0 ? 'dejFlash 2.2s ease, dejGlow 3s ease-in-out 2.2s infinite' : 'dejGlow 3s ease-in-out infinite' }}>
-                  {fmtArs(data.totalHoy)}
+                  {fmtArs(data.totalHoy + data.mayoristaHoy)}
                 </div>
                 <div style={{ display: 'flex', gap: '2.2vw', marginTop: '0.6vw', fontSize: '0.95vw' }}>
+                  <span>🛒 <span style={{ color: NEON.muted }}>minorista</span> <strong style={{ color: NEON.texto }}>{fmtArs(data.totalHoy)}</strong></span>
+                  <span>🚚 <span style={{ color: NEON.muted }}>mayorista</span> <strong style={{ color: NEON.cian }}>{fmtArs(data.mayoristaHoy)}</strong></span>
                   <span><strong style={{ color: NEON.texto }}>{data.cantHoy}</strong> <span style={{ color: NEON.muted }}>ventas</span></span>
                   <span><span style={{ color: NEON.muted }}>ticket</span> <strong style={{ color: NEON.texto }}>{fmtArs(data.ticketProm)}</strong></span>
                   {data.panelControl.variacionHoyVsAyer != null && (
@@ -1944,15 +1966,16 @@ function ModoTVMovil({ onSalir }) {
   const anuncio = useAnunciosTV(data)
   const { feed: feedWa } = useCentroActividad({ notificar: false })
 
-  // Destello cuando entra una venta nueva (mismo efecto que la TV)
+  // Destello cuando entra una venta nueva (mismo efecto que la TV):
+  // mira caja + mayorista porque el hero muestra el total del día
   const [flashVenta, setFlashVenta] = useState(0)
   const prevTotalRef = useRef(null)
   useEffect(() => {
-    const t = data?.totalHoy
-    if (t == null) return
+    if (data?.totalHoy == null) return
+    const t = data.totalHoy + (data.mayoristaHoy || 0)
     if (prevTotalRef.current != null && t > prevTotalRef.current) setFlashVenta(f => f + 1)
     prevTotalRef.current = t
-  }, [data?.totalHoy])
+  }, [data?.totalHoy, data?.mayoristaHoy])
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onSalir() }
@@ -2027,9 +2050,13 @@ function ModoTVMovil({ onSalir }) {
             <div style={{ ...mLbl, letterSpacing: 4 }}>FACTURADO HOY</div>
             <div key={flashVenta} style={{ ...mBig, fontSize: 'clamp(54px, 19vw, 96px)', color: NEON.cianHi,
               animation: flashVenta > 0 ? 'dejFlash 2.2s ease, dejGlow 3s ease-in-out 2.2s infinite' : 'dejGlow 3s ease-in-out infinite' }}>
-              {fmtArs(data.totalHoy)}
+              {fmtArs(data.totalHoy + data.mayoristaHoy)}
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', marginTop: 8, fontSize: 14 }}>
+              <span>🛒 <span style={{ color: NEON.muted }}>minorista</span> <strong style={{ color: NEON.texto }}>{fmtArs(data.totalHoy)}</strong></span>
+              <span>🚚 <span style={{ color: NEON.muted }}>mayorista</span> <strong style={{ color: NEON.cian }}>{fmtArs(data.mayoristaHoy)}</strong></span>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', marginTop: 6, fontSize: 14 }}>
               <span><strong style={{ color: NEON.texto }}>{data.cantHoy}</strong> <span style={{ color: NEON.muted }}>ventas</span></span>
               <span><span style={{ color: NEON.muted }}>ticket</span> <strong style={{ color: NEON.texto }}>{fmtArs(data.ticketProm)}</strong></span>
               {data.panelControl.variacionHoyVsAyer != null && (
