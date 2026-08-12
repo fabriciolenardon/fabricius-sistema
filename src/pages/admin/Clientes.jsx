@@ -53,6 +53,9 @@ export function Clientes() {
   // detector que alimenta el ANUNCIO de sugerencias — el sistema nunca
   // bloquea solo. Ver lib/moraClientes.js.
   const [vencidos, setVencidos] = useState({})
+  // Popup del desglose de una capa: 'pasada' (semana pasada) | 'mora' (anterior).
+  // Se abre clickeando el widget y lista quién debe y cuánto de ESA capa.
+  const [detalleCapa, setDetalleCapa] = useState(null)
   // Confirmación inline de bloqueo/desbloqueo: { cliente, bloquear, motivo }
   const [confirmBloq, setConfirmBloq] = useState(null)
   const [bloqLoading, setBloqLoading] = useState(false)
@@ -489,6 +492,17 @@ async function eliminarMovimiento(mov) {
   }
 
   const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
+  // Límites de las semanas comerciales (lun→dom) para titular el popup del desglose
+  const semanas = useMemo(() => {
+    const lunes = lunesDeLaSemana()
+    const d = new Date(lunes + 'T12:00')
+    d.setDate(d.getDate() - 7)
+    const lunesPasado = d.toISOString().slice(0, 10)
+    d.setDate(d.getDate() + 6)
+    const domingoPasado = d.toISOString().slice(0, 10)
+    return { lunes, lunesPasado, domingoPasado }
+  }, [])
+  const ddmm = f => `${f.slice(8, 10)}/${f.slice(5, 7)}`
   const esMovil = useEsMovil()
   const totalDeuda = clientes.filter(c => c.saldo > 0).reduce((s, c) => s + c.saldo, 0)
   const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }
@@ -650,17 +664,23 @@ async function eliminarMovimiento(mov) {
           const totalPasada = clientes.reduce((s, c) => s + semanaPasadaDe(c), 0)
           const totalMora = clientes.reduce((s, c) => s + moraDe(c), 0)
           const clientesConMora = clientes.filter(c => moraDe(c) > 0).length
+          const clientesPasada = clientes.filter(c => semanaPasadaDe(c) > 0).length
           return (<>
             <div className="stat"><div className="stat-label">🟢 Corriente (esta semana)</div><div className="stat-value" style={{ color: 'var(--green)' }}>{fmt(totalCorriente)}</div></div>
-            <div className="stat">
+            {/* Clickeables: abren el popup con QUIÉNES son y CUÁNTO debe cada uno */}
+            <div className="stat" onClick={() => setDetalleCapa('pasada')} title="Ver quiénes son" style={{ cursor: 'pointer' }}>
               <div className="stat-label">🔵 Por cobrar (semana pasada)</div>
               <div className="stat-value" style={{ color: '#7a9dff' }}>{fmt(totalPasada)}</div>
-              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>vence esta semana</div>
+              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
+                vence esta semana{clientesPasada > 0 ? ` · ${clientesPasada} cliente${clientesPasada === 1 ? '' : 's'}` : ''} · 👆 ver detalle
+              </div>
             </div>
-            <div className="stat">
+            <div className="stat" onClick={() => setDetalleCapa('mora')} title="Ver quiénes son" style={{ cursor: 'pointer' }}>
               <div className="stat-label">🔴 En mora real (anterior)</div>
               <div className="stat-value" style={{ color: 'var(--red-light)' }}>{fmt(totalMora)}</div>
-              {clientesConMora > 0 && <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>{clientesConMora} cliente{clientesConMora === 1 ? '' : 's'} · anterior a la semana pasada</div>}
+              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
+                {clientesConMora > 0 ? `${clientesConMora} cliente${clientesConMora === 1 ? '' : 's'} · anterior a la semana pasada · ` : ''}👆 ver detalle
+              </div>
             </div>
           </>)
         })()}
@@ -989,6 +1009,87 @@ async function eliminarMovimiento(mov) {
           </div>
         )}
       </div>
+
+      {/* POPUP: QUIÉN DEBE Y CUÁNTO de la capa clickeada (semana pasada / mora real).
+          Solo lectura sobre movimientos_ctacte — no toca nada. */}
+      {detalleCapa && (() => {
+        const esMora = detalleCapa === 'mora'
+        const montoDe = esMora ? moraDe : semanaPasadaDe
+        const color = esMora ? 'var(--red-light)' : '#7a9dff'
+        const filas = clientes
+          .map(c => ({ c, monto: montoDe(c) }))
+          .filter(f => f.monto > 0.5)
+          .sort((a, b) => b.monto - a.monto)
+        const total = filas.reduce((s, f) => s + f.monto, 0)
+        return (
+          <div onClick={() => setDetalleCapa(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: 'var(--surface)', border: `1px solid ${color}`, borderRadius: 16, padding: 20, maxWidth: 720, width: '100%', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+                <div>
+                  <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 24, color, letterSpacing: 1 }}>
+                    {esMora ? '🔴 En mora real — quién falta pagar' : '🔵 Por cobrar — semana pasada'}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, lineHeight: 1.5 }}>
+                    {esMora
+                      ? `Saldo anterior al lunes ${ddmm(semanas.lunesPasado)} — plata en la calle de verdad.`
+                      : `Compras del ${ddmm(semanas.lunesPasado)} al ${ddmm(semanas.domingoPasado)} todavía impagas. Vencen esta semana, no es mora.`}
+                  </div>
+                </div>
+                <button className="btn btn-ghost" onClick={() => setDetalleCapa(null)}>✕</button>
+              </div>
+
+              <div style={{ display: 'flex', gap: 10, margin: '14px 0', flexWrap: 'wrap' }}>
+                <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '8px 14px' }}>
+                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>TOTAL</div>
+                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color }}>{fmt(total)}</div>
+                </div>
+                <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '8px 14px' }}>
+                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>CLIENTES</div>
+                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: 'var(--gold)' }}>{filas.length}</div>
+                </div>
+              </div>
+
+              <div style={{ overflowY: 'auto', overflowX: 'auto', flex: 1 }}>
+                <table style={{ width: '100%', fontSize: 13, minWidth: 520 }}>
+                  <thead>
+                    <tr style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase' }}>
+                      <th style={{ textAlign: 'left', padding: '8px 6px' }}>Cliente</th>
+                      <th style={{ textAlign: 'right', padding: '8px 6px' }}>{esMora ? 'En mora' : 'Por cobrar'}</th>
+                      <th style={{ textAlign: 'right', padding: '8px 6px' }}>Saldo total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filas.map(({ c, monto }) => (
+                      <tr key={c.id} style={{ borderTop: '1px solid var(--border)', cursor: 'pointer' }}
+                        onClick={() => { setDetalleCapa(null); seleccionar(c) }}>
+                        <td style={{ padding: '8px 6px' }}>
+                          <div style={{ fontWeight: 600 }}>
+                            {c.nombre}
+                            {c.bloqueo_ctacte && <span style={{ fontSize: 10, color: 'var(--red-light)', marginLeft: 6 }}>🚫</span>}
+                          </div>
+                          <div style={{ fontSize: 10, color: 'var(--muted)' }}>
+                            {[c.nombre_fantasia, c.localidad, c.telefono].filter(Boolean).join(' · ')}
+                          </div>
+                        </td>
+                        <td style={{ textAlign: 'right', padding: '8px 6px', fontWeight: 700, color }}>{fmt(monto)}</td>
+                        <td style={{ textAlign: 'right', padding: '8px 6px', color: 'var(--muted)' }}>{fmt(c.saldo)}</td>
+                      </tr>
+                    ))}
+                    {filas.length === 0 && (
+                      <tr><td colSpan={3} style={{ textAlign: 'center', padding: 24, color: 'var(--muted)' }}>
+                        {esMora ? '✅ Nadie en mora real. Todo lo viejo está cobrado.' : '✅ No queda nada por cobrar de la semana pasada.'}
+                      </td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 10 }}>
+                Tocá un cliente para abrir su ficha y ver la cuenta corriente completa.
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* MODAL DE PORTAL DE CLIENTE */}
       {modalPortal && (
