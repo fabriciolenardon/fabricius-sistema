@@ -16,6 +16,7 @@ import { supabase, fetchAllRows } from '../../lib/supabase'
 import { enviarWhatsapp, fmtArs } from '../../lib/whatsapp'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
 import { fmtKg } from '../../lib/formatos'
+import { cargarCategoriasPrecios, labelsDeCategorias } from '../../lib/categoriasPrecios'
 import { useCentroActividad } from '../../lib/useCentroActividad'
 import { totalesConceptos } from '../../lib/cierreAuto'
 import {
@@ -38,6 +39,34 @@ const SUB_TABS = [
 
 const TOPE_K = 108357084.05 // tope monotributo cat K 2026
 const TZ_ARG = 'America/Argentina/Buenos_Aires'
+
+// Ubicación para el clima del header (Córdoba capital, donde está el local).
+const CLIMA_COORD = { lat: -31.42, lon: -64.18 }
+
+// Categorías que se venden por UNIDAD: su campo `kg` no es peso real, así que
+// quedan afuera del contador de kilos vendidos del día.
+const CATS_SIN_KG = new Set(['almacen', 'bebidas', 'insumos'])
+
+// Claves que salen de los items de remitos/caja y no son categorías del
+// catálogo de precios (se cargan aparte en el despacho).
+const ALIAS_CATEGORIA = {
+  pieza_entera: '🍖 Piezas Enteras',
+  combos: '🎁 Combos',
+  manual: '✍️ Carga manual',
+  otros: '📦 Otros',
+}
+
+// Nombre lindo para un bucket de stock_actual (cerdo_carre → 🐷 Carre).
+// Sin tabla de labels: el prefijo define el ícono y el resto se capitaliza,
+// así los buckets nuevos (emb_*, brosa_*, hamb_*) salen bien sin tocar nada.
+const ICONO_BUCKET = { cerdo: '🐷', emb: '🌭', brosa: '🫀', hamb: '🍔', pieza: '🍖', bovino: '🥩', pollo: '🍗', rebozado: '🧊' }
+function nombreBucket(tipo) {
+  const t = String(tipo || '')
+  const pref = t.split('_')[0]
+  const resto = t.includes('_') ? t.slice(pref.length + 1) : t
+  const texto = resto.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase())
+  return `${ICONO_BUCKET[pref] || '📦'} ${texto}`
+}
 
 // Helpers de fecha — siempre hora ARG, nunca UTC (ver lib/fechas.js)
 const hoyISO = () => fechaHoyARG()
@@ -143,6 +172,9 @@ const ESTILOS_GLOBALES = `
 @keyframes dejTicker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 .dej-ticker-pista { display: inline-flex; white-space: nowrap; animation: dejTicker 45s linear infinite; will-change: transform; }
 .dej-in { animation: dejIn .5s ease both; }
+/* Widget rotativo: "pestañea" y cambia de info sin ocupar más lugar */
+@keyframes dejRota { 0% { opacity: 0; transform: translateY(6px); } 100% { opacity: 1; transform: none; } }
+.dej-rota { animation: dejRota .45s ease both; }
 /* Esquinas holográficas: dos escuadras cian en TL y BR */
 .hud { position: relative; }
 .hud::before, .hud::after {
@@ -199,6 +231,13 @@ function useDashboardData(refreshMs = 120000) {
     const mesOpLabel = mesOpActual ? mesOpActual.etiqueta : null
     const mesAntIni = inicioMesAnterior()
     const mesAntMismoDia = mismoDiaMesAnterior() // período comparable: 01→mismo día
+    // Semana en curso y semana pasada (lun→dom) — las 3 capas FIFO de la mora
+    // de clientes (igual criterio que Clientes.jsx: lo de esta semana y lo de
+    // la semana pasada NO es mora; mora = lo anterior).
+    const lunesActual = inicioSemanaARG()
+    const dLunPas = new Date(lunesActual + 'T12:00')
+    dLunPas.setDate(dLunPas.getDate() - 7)
+    const lunesPasado = fechaHoyARG(dLunPas)
     const hoyDt = new Date(hoy + 'T12:00')
     const anioPasadoMesIni = `${hoyDt.getFullYear() - 1}-${String(hoyDt.getMonth() + 1).padStart(2, '0')}-01`
     const anioPasadoHoy    = `${hoyDt.getFullYear() - 1}-${String(hoyDt.getMonth() + 1).padStart(2, '0')}-${String(hoyDt.getDate()).padStart(2, '0')}`
@@ -206,7 +245,8 @@ function useDashboardData(refreshMs = 120000) {
            salidasMes, cuentas, facturas12m, stock, cheques, clientes,
            gastosMes, sueldosMes, pagosProvMes, movCtacteMes, todasCajas, todosDeudores, promoCfg,
            comprasMesQ, cierresQ, comprasSemQ, remitosHoyQ, cobranzaQ, arqueosSemQ,
-           cobranzaTotalQ, conceptosQ] = await Promise.all([
+           cobranzaTotalQ, conceptosQ,
+           piezasQ, mediasQ, movSemanasQ, catalogoCats] = await Promise.all([
       supabase.from('ventas_minoristas').select('total, efectivo, debito, transferencia, items, fecha, hora').eq('origen', 'caja').eq('fecha', hoy),
       // hora incluida: alimenta la curva "hoy vs ayer a esta hora"
       supabase.from('ventas_minoristas').select('total, hora').eq('origen', 'caja').eq('fecha', ayer),
@@ -231,7 +271,8 @@ function useDashboardData(refreshMs = 120000) {
       supabase.from('pagos_proveedores').select('importe, percepcion, fecha').gte('fecha', mesIni).lte('fecha', hoy),
       fetchAllRows(() => supabase.from('movimientos_ctacte').select('tipo, haber, fecha').gte('fecha', mesIni).lte('fecha', hoy)),
       supabase.from('cajas_stock').select('id, tipo_caja, kg, fecha_ingreso').eq('estado', 'disponible'),
-      supabase.from('clientes').select('saldo').gt('saldo', 0),
+      // id + nombre: además del total pendiente alimenta el rotativo "EN MORA"
+      supabase.from('clientes').select('id, nombre, saldo').gt('saldo', 0),
       supabase.from('config_sistema').select('valor').eq('clave', 'promo_mundial').maybeSingle(),
       // COMPRAS del mes: ingresos de mercadería al depósito con importe real
       // (las entradas generadas por desposte tienen importe 0 y quedan afuera)
@@ -242,7 +283,8 @@ function useDashboardData(refreshMs = 120000) {
       // Compras a proveedores de la SEMANA en curso (lunes → hoy)
       supabase.from('compras_proveedores').select('proveedor_nombre, importe').gte('fecha', inicioSemanaARG()).lte('fecha', hoy).not('anulado', 'is', true),
       // Remitos/despachos mayoristas de HOY (para el ticker, sin flujos internos)
-      supabase.from('remitos').select('numero, cliente_nombre, total, created_at, cobro').eq('fecha', hoy).eq('eliminado', false).neq('cobro', 'interno'),
+      // items: alimentan los kilos vendidos por categoría (mayorista del día)
+      supabase.from('remitos').select('numero, cliente_nombre, total, created_at, cobro, items').eq('fecha', hoy).eq('eliminado', false).neq('cobro', 'interno'),
       // Vendido / cobrado / por cobrar del mes (FIFO server-side: los pagos cancelan
       // primero la deuda vieja, así "por cobrar" es solo de ventas del período)
       supabase.rpc('ventas_cobranza_periodo', { p_desde: mesIni, p_hasta: hoy }),
@@ -254,6 +296,15 @@ function useDashboardData(refreshMs = 120000) {
       // Conceptos extra de sueldos (aguinaldo/vacaciones) — se imputan a la fecha
       // de cierre de su mes operativo (igual criterio que el Cierre).
       supabase.from('conceptos_sueldos').select('mes, tipo, monto'),
+      // Stock por UNIDADES (para el rotativo del footer): piezas bovinas y
+      // medias res disponibles, con su cantidad y el total de kilos.
+      supabase.from('piezas_stock').select('tipo_pieza, kg').eq('estado', 'disponible'),
+      supabase.from('medias_stock').select('kg').eq('estado', 'disponible'),
+      // Compras a cta cte de esta semana y la pasada (SOLO LECTURA) — separan
+      // la deuda corriente de la mora real por cliente.
+      fetchAllRows(() => supabase.from('movimientos_ctacte').select('cliente_id, debe, fecha').gte('fecha', lunesPasado).gt('debe', 0)),
+      // Catálogo de categorías: para mostrar "🥩 Bovino Cortes" y no "bovino_corte"
+      cargarCategoriasPrecios().catch(() => []),
     ])
 
     const totalHoy  = (ventasHoy.data || []).reduce((s, v) => s + (Number(v.total) || 0), 0)
@@ -501,6 +552,94 @@ function useDashboardData(refreshMs = 120000) {
       { tipo: 'embutido',     label: '🌭 Embutidos',     minimo: 30,  kg: stockMap.embutido || 0 },
     ].filter(s => s.kg < s.minimo)
 
+    // ── 🥩 KILOS VENDIDOS HOY POR CATEGORÍA ──
+    // Caja minorista (items.categoria) + remitos mayoristas (items.tipo). Las
+    // categorías por unidad (almacén/bebidas/insumos) quedan afuera: su "kg"
+    // no es peso. Alimenta el rotativo del footer del Modo TV.
+    const labelsCat = labelsDeCategorias(catalogoCats || [])
+    const accKgCat = {}
+    // Los items por unidad (cajones) guardan la CANTIDAD en `kg`: los kilos
+    // reales salen de multiplicar por kg_por_unidad. Si no hay equivalencia
+    // (almacén/bebidas) el item no suma kilos.
+    const sumarKg = (cat, item) => {
+      const c = cat || 'otros'
+      if (CATS_SIN_KG.has(c)) return
+      const n = Number(item.kg) || 0
+      if (n <= 0) return
+      const kpu = Number(item.kg_por_unidad) || 0
+      const kilos = item.unidad === 'u' ? (kpu > 0 ? n * kpu : 0) : n
+      if (kilos <= 0) return
+      accKgCat[c] = (accKgCat[c] || 0) + kilos
+    }
+    ;(ventasHoy.data || []).forEach(v => (v.items || []).forEach(i => sumarKg(i.categoria, i)))
+    ;(remitosHoyQ.data || []).forEach(r => (r.items || []).forEach(i => sumarKg(i.tipo || i.categoria, i)))
+    const kgCategoriasHoy = Object.entries(accKgCat)
+      .map(([clave, kg]) => ({ clave, label: ALIAS_CATEGORIA[clave] || labelsCat[clave] || nombreBucket(clave), kg }))
+      .filter(c => c.kg >= 0.05)
+      .sort((a, b) => b.kg - a.kg)
+    const kgTotalHoy = kgCategoriasHoy.reduce((s, c) => s + c.kg, 0)
+
+    // ── 📦 STOCK POR UNIDADES (cajas / medias / piezas) + kg por bucket ──
+    const accCajaTipo = {}
+    cajasDisp.forEach(c => {
+      const k = c.tipo_caja || '—'
+      if (!accCajaTipo[k]) accCajaTipo[k] = { n: 0, kg: 0 }
+      accCajaTipo[k].n++
+      accCajaTipo[k].kg += Number(c.kg) || 0
+    })
+    const accPieza = {}
+    ;(piezasQ.data || []).forEach(p => {
+      const k = (p.tipo_pieza || 'Pieza').trim()
+      if (!accPieza[k]) accPieza[k] = { n: 0, kg: 0 }
+      accPieza[k].n++
+      accPieza[k].kg += Number(p.kg) || 0
+    })
+    const mediasDisp = mediasQ.data || []
+    const stockDetalle = {
+      cajas: { n: cajasInfo.total, kg: cajasInfo.kg, viejas: cajasInfo.viejasCount },
+      cajasPorTipo: Object.entries(accCajaTipo).map(([tipo, v]) => ({ tipo, ...v })).sort((a, b) => b.n - a.n),
+      medias: { n: mediasDisp.length, kg: mediasDisp.reduce((s, m) => s + (Number(m.kg) || 0), 0) },
+      piezas: Object.entries(accPieza).map(([label, v]) => ({ label, ...v })).sort((a, b) => b.kg - a.kg),
+      // Buckets que NO se cuentan por unidad (cerdo, embutidos, brosas…): solo kg
+      buckets: Object.entries(stockMap)
+        .filter(([t, kg]) => kg > 0.05 && !t.startsWith('pieza_') && !['bovino_mr', 'almacen', 'bebidas', 'caja_cb', 'caja_pt'].includes(t))
+        .map(([tipo, kg]) => ({ tipo, label: nombreBucket(tipo), kg }))
+        .sort((a, b) => b.kg - a.kg)
+        .slice(0, 8),
+    }
+
+    // ── ⏰ CUENTAS CORRIENTES EN MORA (3 capas FIFO, solo lectura) ──
+    // mora = saldo − compras de esta semana − compras de la semana pasada.
+    // La semana pasada NO es mora: el mayorista la paga esta semana.
+    const debeSem = {}, debeSemPas = {}
+    ;(movSemanasQ.data || []).forEach(m => {
+      const dest = m.fecha >= lunesActual ? debeSem : debeSemPas
+      dest[m.cliente_id] = (dest[m.cliente_id] || 0) + (Number(m.debe) || 0)
+    })
+    const clientesEnMora = (todosDeudores.data || [])
+      .map(c => ({
+        nombre: (c.nombre || '—').trim(),
+        mora: Math.max(0, (Number(c.saldo) || 0) - (debeSem[c.id] || 0) - (debeSemPas[c.id] || 0)),
+      }))
+      .filter(c => c.mora > 1000) // residuos de redondeo del ledger no son mora
+      .sort((a, b) => b.mora - a.mora)
+    const totalMora = clientesEnMora.reduce((s, c) => s + c.mora, 0)
+
+    // ── 📄 CHEQUES PRÓXIMOS (15 días) ──
+    // Los recibidos se endosan a proveedores y los emitidos son propios: en
+    // ambos casos es plata comprometida a una fecha. Los emitidos ya imputados
+    // (levantados) no van. Ordenados por fecha de pago (el más próximo primero).
+    const chequesProx = (cheques.data || [])
+      .filter(c => !(c.origen === 'emitido' && c.estado === 'imputado'))
+      .map(c => ({
+        fecha: c.fecha_pago,
+        monto: Number(c.monto) || 0,
+        emitido: c.origen === 'emitido',
+        quien: (c.origen === 'emitido' ? c.proveedor_nombre : (c.proveedor_nombre || c.cliente_nombre)) || c.banco || 'cheque',
+      }))
+      .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)))
+    const chequesProxTotal = chequesProx.reduce((s, c) => s + c.monto, 0)
+
     // ── ÚLTIMO MES OPERATIVO CERRADO (para el gráfico de margen del mes) ──
     // Agrupa los cierres semanales por `mes` y toma el más reciente. Gastos del
     // donut engloba sueldos + retiros socios + gastos; ganancia = el margen.
@@ -542,7 +681,11 @@ function useDashboardData(refreshMs = 120000) {
       promoMundial: promoCfg?.data?.valor || { activa: false },
       // Solo recibidos: los emitidos propios son plata que SALE, no que entra
       cheques: (cheques.data || []).filter(c => c.origen !== 'emitido'),
+      chequesProx, chequesProxTotal,
       clientesDeudores: clientes.data || [],
+      kgCategoriasHoy, kgTotalHoy,
+      stockDetalle,
+      clientesEnMora, totalMora,
       panelControl: {
         totalAyer, variacionHoyVsAyer,
         facturadoMes,
@@ -600,6 +743,77 @@ function useRelojARG() {
     segundos: ahora.toLocaleTimeString('es-AR', { timeZone: TZ_ARG, second: '2-digit' }),
     fecha: ahora.toLocaleDateString('es-AR', { timeZone: TZ_ARG, weekday: 'long', day: 'numeric', month: 'long' }),
   }
+}
+
+// ════════════════════════════════════════════════════════════
+// 🔄 ROTADOR — un widget que "pestañea" y cambia de info
+// ────────────────────────────────────────────────────────────
+// En la tele el lugar es oro: en vez de poner 10 widgets al lado
+// del otro, uno solo va rotando entre N caras cada `ms`.
+// ════════════════════════════════════════════════════════════
+function useRotador(n, ms = 6000) {
+  const [i, setI] = useState(0)
+  useEffect(() => {
+    if (n <= 1) { setI(0); return }
+    const t = setInterval(() => setI(prev => (prev + 1) % n), ms)
+    return () => clearInterval(t)
+  }, [n, ms])
+  // Si la lista se achica entre recargas, no quedar apuntando afuera
+  return n > 0 ? i % n : 0
+}
+
+// ════════════════════════════════════════════════════════════
+// 🌤️ CLIMA — hoy y mañana (Open-Meteo, sin API key)
+// ────────────────────────────────────────────────────────────
+// Se refresca cada 30 min. Si la API falla (sin internet), el
+// widget simplemente no se muestra: nunca rompe la tele.
+// ════════════════════════════════════════════════════════════
+const CLIMA_WMO = [
+  { max: 0,  icono: '☀️', txt: 'Despejado' },
+  { max: 3,  icono: '⛅', txt: 'Nublado' },
+  { max: 48, icono: '🌫️', txt: 'Niebla' },
+  { max: 57, icono: '🌦️', txt: 'Llovizna' },
+  { max: 67, icono: '🌧️', txt: 'Lluvia' },
+  { max: 77, icono: '🌨️', txt: 'Nieve' },
+  { max: 82, icono: '🌧️', txt: 'Chaparrones' },
+  { max: 86, icono: '🌨️', txt: 'Nevadas' },
+  { max: 99, icono: '⛈️', txt: 'Tormenta' },
+]
+const climaWmo = (code) => CLIMA_WMO.find(c => Number(code) <= c.max) || { icono: '🌡️', txt: '—' }
+
+function useClima() {
+  const [clima, setClima] = useState(null)
+  useEffect(() => {
+    let vivo = true
+    const traer = async () => {
+      try {
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${CLIMA_COORD.lat}&longitude=${CLIMA_COORD.lon}`
+          + '&current=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min'
+          + `&timezone=${encodeURIComponent(TZ_ARG)}&forecast_days=2`
+        const r = await fetch(url)
+        if (!r.ok) return
+        const j = await r.json()
+        if (!vivo || !j?.daily) return
+        setClima({
+          hoy: {
+            temp: Math.round(Number(j.current?.temperature_2m)),
+            max: Math.round(Number(j.daily.temperature_2m_max?.[0])),
+            min: Math.round(Number(j.daily.temperature_2m_min?.[0])),
+            ...climaWmo(j.current?.weather_code ?? j.daily.weather_code?.[0]),
+          },
+          manana: {
+            max: Math.round(Number(j.daily.temperature_2m_max?.[1])),
+            min: Math.round(Number(j.daily.temperature_2m_min?.[1])),
+            ...climaWmo(j.daily.weather_code?.[1]),
+          },
+        })
+      } catch { /* sin internet: el widget no se muestra */ }
+    }
+    traer()
+    const t = setInterval(traer, 30 * 60 * 1000)
+    return () => { vivo = false; clearInterval(t) }
+  }, [])
+  return clima
 }
 
 // ¿Estamos en un celular? (ancho < 768px). El Modo TV tiene una versión
@@ -1688,7 +1902,7 @@ function AnuncioTV({ anuncio }) {
 // - ESC o botón para salir
 // ════════════════════════════════════════════════════════════
 function ModoTV({ onSalir }) {
-  const { data, loading, ultimaAct } = useDashboardData(60000)
+  const { data, loading } = useDashboardData(60000)
   const { hora, segundos, fecha } = useRelojARG()
   // 🎬 Anuncios cinematográficos: récord / stock crítico / cheques por vencer
   const anuncio = useAnunciosTV(data)
@@ -1745,7 +1959,9 @@ function ModoTV({ onSalir }) {
             ⚽ PROMO MUNDIAL −{data.promoMundial.descuento_pct || 10}%
           </span>
         )}
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'baseline', gap: '0.8vw' }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.8vw' }}>
+          {/* Clima: pestañea entre hoy y mañana */}
+          <ClimaTV />
           <span style={{ fontSize: '0.75vw', color: NEON.muted, textTransform: 'capitalize' }}>{fecha}</span>
           <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '1.7vw', lineHeight: 1, color: NEON.cianHi, textShadow: '0 0 14px rgba(0,212,255,0.5)' }}>
             {hora}<span style={{ fontSize: '0.95vw', color: NEON.muted }}>:{segundos}</span>
@@ -1889,21 +2105,18 @@ function ModoTV({ onSalir }) {
           {/* 🎬 Ticker de últimas ventas */}
           <TickerVentas ventas={data.ultimasVentas} />
 
-          {/* ── FOOTER ── */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '2.2vw', marginTop: '0.5vw', padding: '0.5vw 1.2vw', borderRadius: 6, background: 'rgba(0,212,255,0.035)', border: '1px solid rgba(0,212,255,0.15)' }}>
-            <TvMini label="CAJAS DISP." valor={`${data.panelControl.cajasInfo.total} · ${fmtKg(data.panelControl.cajasInfo.kg)}`}
-              color={data.panelControl.cajasInfo.viejasCount > 0 ? NEON.ambar : NEON.cian} chico />
-            <TvMini label="CHEQUES 15D" valor={`${data.cheques.length}`} color={NEON.cianHi} chico />
+          {/* ── FOOTER: widgets que PESTAÑEAN ──
+              Cada uno rota entre sus caras (kilos por categoría, stock por
+              unidades, cheques uno por uno, deudores en mora, monotributos)
+              para meter mucha info sin ocupar más lugar. */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1.6vw', marginTop: '0.5vw', padding: '0.5vw 1.2vw', borderRadius: 6, background: 'rgba(0,212,255,0.035)', border: '1px solid rgba(0,212,255,0.15)' }}>
+            <TvMiniRotativo caras={carasKilosHoy(data)} ms={5000} ancho="8vw" />
+            <TvMiniRotativo caras={carasStock(data)} ms={5500} ancho="10vw" />
+            <TvMiniRotativo caras={carasCheques(data)} ms={6000} ancho="12vw" />
             <TvMini label="PEND. COBRAR" valor={fmtArs(data.panelControl.saldoPendienteTotal)}
               color={data.panelControl.saldoPendienteTotal > 500000 ? NEON.ambar : NEON.cianHi} chico />
-            {data.cuentasConPct[0] && (
-              <TvMini label={`MONO MÁX: ${data.cuentasConPct[0].nombre.trim().split(' ')[0]}`}
-                valor={`${data.cuentasConPct[0].pctConsumo.toFixed(0)}% tope K`}
-                color={data.cuentasConPct[0].pctConsumo >= 95 ? NEON.rojo : data.cuentasConPct[0].pctConsumo >= 70 ? NEON.ambar : NEON.verde} chico />
-            )}
-            <span style={{ marginLeft: 'auto', fontSize: '0.75vw', color: NEON.muted }}>
-              {ultimaAct && `Actualizado ${ultimaAct.toLocaleTimeString('es-AR', { timeZone: TZ_ARG, hour: '2-digit', minute: '2-digit' })}`} · se refresca solo · ESC para salir
-            </span>
+            <TvMiniRotativo caras={carasMora(data)} ms={6500} ancho="11vw" />
+            <TvMiniRotativo caras={carasMono(data)} ms={7000} ancho="9vw" />
           </div>
         </>
       )}
@@ -1961,7 +2174,7 @@ function MTvKpi({ label, valor, sub, color }) {
 }
 
 function ModoTVMovil({ onSalir }) {
-  const { data, loading, ultimaAct } = useDashboardData(60000)
+  const { data, loading } = useDashboardData(60000)
   const { hora, segundos, fecha } = useRelojARG()
   const anuncio = useAnunciosTV(data)
   const { feed: feedWa } = useCentroActividad({ notificar: false })
@@ -2020,7 +2233,8 @@ function ModoTVMovil({ onSalir }) {
           F.A.B.R.I.
         </span>
         <PuntoVivo size={8} />
-        <div style={{ marginLeft: 'auto', textAlign: 'right', lineHeight: 1.1 }}>
+        <div style={{ marginLeft: 'auto' }}><ClimaTV movil /></div>
+        <div style={{ textAlign: 'right', lineHeight: 1.1 }}>
           <div style={{ ...mBig, fontSize: 22, color: NEON.cianHi, textShadow: '0 0 12px rgba(0,212,255,0.5)' }}>
             {hora}<span style={{ fontSize: 13, color: NEON.muted }}>:{segundos}</span>
           </div>
@@ -2216,22 +2430,15 @@ function ModoTVMovil({ onSalir }) {
             </div>
           )}
 
-          {/* ── FOOTER: stats rápidas ── */}
-          <div className="hud" style={{ ...mCard, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 16px', background: 'rgba(0,212,255,0.035)', border: '1px solid rgba(0,212,255,0.15)' }}>
-            <MtvLinea label="CAJAS DISP." valor={`${data.panelControl.cajasInfo.total} · ${fmtKg(data.panelControl.cajasInfo.kg)}`}
-              color={data.panelControl.cajasInfo.viejasCount > 0 ? NEON.ambar : NEON.cian} />
-            <MtvLinea label="CHEQUES 15D" valor={`${data.cheques.length}`} color={NEON.cianHi} />
+          {/* ── FOOTER: stats rápidas, cada una PESTAÑEA con más info ── */}
+          <div className="hud" style={{ ...mCard, display: 'flex', flexDirection: 'column', gap: 10, background: 'rgba(0,212,255,0.035)', border: '1px solid rgba(0,212,255,0.15)' }}>
+            <MtvRotativo caras={carasKilosHoy(data)} ms={5000} />
+            <MtvRotativo caras={carasStock(data)} ms={5500} />
+            <MtvRotativo caras={carasCheques(data)} ms={6000} />
             <MtvLinea label="PEND. COBRAR" valor={fmtArs(data.panelControl.saldoPendienteTotal)}
               color={data.panelControl.saldoPendienteTotal > 500000 ? NEON.ambar : NEON.cianHi} />
-            {data.cuentasConPct[0] && (
-              <MtvLinea label={`MONO: ${data.cuentasConPct[0].nombre.trim().split(' ')[0]}`}
-                valor={`${data.cuentasConPct[0].pctConsumo.toFixed(0)}% tope K`}
-                color={data.cuentasConPct[0].pctConsumo >= 95 ? NEON.rojo : data.cuentasConPct[0].pctConsumo >= 70 ? NEON.ambar : NEON.verde} />
-            )}
-          </div>
-
-          <div style={{ textAlign: 'center', fontSize: 11, color: NEON.muted, padding: '4px 0 8px' }}>
-            {ultimaAct && `Actualizado ${ultimaAct.toLocaleTimeString('es-AR', { timeZone: TZ_ARG, hour: '2-digit', minute: '2-digit' })}`} · se refresca solo
+            <MtvRotativo caras={carasMora(data)} ms={6500} />
+            <MtvRotativo caras={carasMono(data)} ms={7000} />
           </div>
         </div>
       )}
@@ -2245,6 +2452,18 @@ function MtvLinea({ label, valor, color }) {
     <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, minWidth: 0 }}>
       <span style={{ fontSize: 11, letterSpacing: 1, color: NEON.muted, fontWeight: 700, flexShrink: 0 }}>{label}</span>
       <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 19, lineHeight: 1, color: color || NEON.texto, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{valor}</span>
+    </div>
+  )
+}
+// Misma línea, pero rotando entre varias caras (versión celular del rotativo)
+function MtvRotativo({ caras, ms = 6000 }) {
+  const lista = (caras || []).filter(Boolean)
+  const i = useRotador(lista.length, ms)
+  if (lista.length === 0) return null
+  const c = lista[i]
+  return (
+    <div key={i} className="dej-rota">
+      <MtvLinea label={c.label} valor={c.valor} color={c.color} />
     </div>
   )
 }
@@ -2400,4 +2619,111 @@ function TvMini({ label, valor, color, chico }) {
       <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: chico ? '1.25vw' : '1.7vw', lineHeight: 1.1, color: color || NEON.texto }}>{valor}</div>
     </div>
   )
+}
+
+// Mini del footer que PESTAÑEA: rota entre varias caras (kilos por categoría,
+// piezas del stock, cheques, deudores en mora…) sin ocupar más lugar.
+// `caras` = [{ label, valor, color }]. Los puntitos de abajo marcan en cuál va.
+function TvMiniRotativo({ caras, ms = 6000, ancho }) {
+  const lista = (caras || []).filter(Boolean)
+  const i = useRotador(lista.length, ms)
+  if (lista.length === 0) return null
+  const c = lista[i]
+  return (
+    <div style={{ minWidth: ancho || '9vw' }}>
+      <div key={i} className="dej-rota">
+        <div style={{ fontSize: '0.65vw', letterSpacing: 2, color: NEON.muted, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.label}</div>
+        <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '1.25vw', lineHeight: 1.1, color: c.color || NEON.texto, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.valor}</div>
+      </div>
+      {lista.length > 1 && (
+        <div style={{ display: 'flex', gap: '0.2vw', marginTop: '0.2vw' }}>
+          {lista.slice(0, 12).map((_, k) => (
+            <span key={k} style={{ width: '0.25vw', height: '0.25vw', borderRadius: '50%', background: k === i ? NEON.cian : 'rgba(0,212,255,0.22)' }} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Clima de hoy / mañana — pestañea entre los dos. Va arriba, al lado del reloj.
+function ClimaTV({ movil }) {
+  const clima = useClima()
+  const caras = clima ? [
+    { titulo: 'HOY', icono: clima.hoy.icono, principal: `${clima.hoy.temp}°`, detalle: `${clima.hoy.txt} · ${clima.hoy.min}°/${clima.hoy.max}°` },
+    { titulo: 'MAÑANA', icono: clima.manana.icono, principal: `${clima.manana.max}°`, detalle: `${clima.manana.txt} · mín ${clima.manana.min}°` },
+  ] : []
+  const i = useRotador(caras.length, 8000)
+  if (!caras.length) return null
+  const c = caras[i]
+  const px = movil
+  return (
+    <div key={i} className="dej-rota" style={{
+      display: 'flex', alignItems: 'center', gap: px ? 6 : '0.4vw',
+      padding: px ? '4px 9px' : '0.2vw 0.6vw', borderRadius: 999,
+      background: 'rgba(0,212,255,0.06)', border: '1px solid rgba(0,212,255,0.18)',
+    }}>
+      <span style={{ fontSize: px ? 15 : '1vw', lineHeight: 1 }}>{c.icono}</span>
+      <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: px ? 18 : '1.3vw', lineHeight: 1, color: NEON.cianHi }}>{c.principal}</span>
+      <span style={{ fontSize: px ? 9 : '0.6vw', color: NEON.muted, lineHeight: 1.2, whiteSpace: 'nowrap' }}>
+        <strong style={{ color: NEON.cian, letterSpacing: 1 }}>{c.titulo}</strong><br />{c.detalle}
+      </span>
+    </div>
+  )
+}
+
+// ── Caras de los rotativos del footer (las comparten TV y celular) ──
+// Un decimal alcanza para leer de lejos: "39,2 kg" y no "39,20 kg".
+const kg1 = n => fmtKg(n, { decimales: 1 })
+// Kilos vendidos hoy: primero el total, después cada categoría.
+function carasKilosHoy(data) {
+  const cats = data.kgCategoriasHoy || []
+  return [
+    { label: '⚖️ KILOS HOY', valor: kg1(data.kgTotalHoy || 0), color: NEON.cianHi },
+    ...cats.map(c => ({ label: c.label.toUpperCase(), valor: kg1(c.kg), color: NEON.cian })),
+  ]
+}
+// Stock: cajas, medias res, cada pieza entera (unidades + kg) y los buckets por kg.
+function carasStock(data) {
+  const s = data.stockDetalle || {}
+  const caras = [{
+    label: 'CAJAS DISP.',
+    valor: `${s.cajas?.n || 0} · ${kg1(s.cajas?.kg || 0)}`,
+    color: s.cajas?.viejas > 0 ? NEON.ambar : NEON.cian,
+  }]
+  ;(s.cajasPorTipo || []).forEach(c => caras.push({ label: `CAJA ${c.tipo}`, valor: `${c.n} u · ${kg1(c.kg)}`, color: NEON.cian }))
+  if (s.medias?.n) caras.push({ label: '🐄 MEDIA RES', valor: `${s.medias.n} u · ${kg1(s.medias.kg)}`, color: NEON.cianHi })
+  ;(s.piezas || []).forEach(p => caras.push({ label: `🍖 ${p.label.toUpperCase()}`, valor: `${p.n} u · ${kg1(p.kg)}`, color: NEON.cian }))
+  ;(s.buckets || []).forEach(b => caras.push({ label: b.label.toUpperCase(), valor: kg1(b.kg), color: NEON.azul }))
+  return caras
+}
+// Cheques: cuántos vencen en 15 días y después uno por uno (fecha, quién, monto).
+function carasCheques(data) {
+  const chs = data.chequesProx || []
+  const ddmm = f => f ? `${String(f).slice(8, 10)}/${String(f).slice(5, 7)}` : '—'
+  return [
+    { label: 'CHEQUES 15D', valor: chs.length ? `${chs.length} · ${fmtArs(data.chequesProxTotal || 0)}` : '0', color: chs.length ? NEON.cianHi : NEON.muted },
+    ...chs.slice(0, 10).map(c => ({
+      label: `${c.emitido ? '📤' : '📥'} ${ddmm(c.fecha)} · ${String(c.quien).slice(0, 18)}`,
+      valor: fmtArs(c.monto),
+      color: c.emitido ? NEON.ambar : NEON.cianHi,
+    })),
+  ]
+}
+// Mora: total en mora y después cada cliente con lo que debe vencido.
+function carasMora(data) {
+  const ms = data.clientesEnMora || []
+  if (!ms.length) return [{ label: '⏰ EN MORA', valor: 'Nadie ✓', color: NEON.verde }]
+  return [
+    { label: `⏰ EN MORA · ${ms.length} clientes`, valor: fmtArs(data.totalMora || 0), color: NEON.rojo },
+    ...ms.slice(0, 12).map(c => ({ label: `⏰ ${c.nombre.slice(0, 20).toUpperCase()}`, valor: fmtArs(c.mora), color: NEON.rojo })),
+  ]
+}
+// Monotributo: cada cuenta con su % del tope K (la más cargada primero).
+function carasMono(data) {
+  return (data.cuentasConPct || []).slice(0, 8).map(c => ({
+    label: `MONO: ${c.nombre.trim().split(' ')[0].toUpperCase()}`,
+    valor: `${c.pctConsumo.toFixed(0)}% tope K`,
+    color: c.pctConsumo >= 95 ? NEON.rojo : c.pctConsumo >= 70 ? NEON.ambar : NEON.verde,
+  }))
 }
