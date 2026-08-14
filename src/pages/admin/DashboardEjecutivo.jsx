@@ -16,7 +16,6 @@ import { supabase, fetchAllRows } from '../../lib/supabase'
 import { enviarWhatsapp, fmtArs } from '../../lib/whatsapp'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
 import { fmtKg } from '../../lib/formatos'
-import { cargarCategoriasPrecios, labelsDeCategorias } from '../../lib/categoriasPrecios'
 import { useCentroActividad } from '../../lib/useCentroActividad'
 import { totalesConceptos } from '../../lib/cierreAuto'
 import {
@@ -43,30 +42,9 @@ const TZ_ARG = 'America/Argentina/Buenos_Aires'
 // Ubicación para el clima del header (Córdoba capital, donde está el local).
 const CLIMA_COORD = { lat: -31.42, lon: -64.18 }
 
-// Categorías que se venden por UNIDAD: su campo `kg` no es peso real, así que
-// quedan afuera del contador de kilos vendidos del día.
-const CATS_SIN_KG = new Set(['almacen', 'bebidas', 'insumos'])
-
-// Claves que salen de los items de remitos/caja y no son categorías del
-// catálogo de precios (se cargan aparte en el despacho).
-const ALIAS_CATEGORIA = {
-  pieza_entera: '🍖 Piezas Enteras',
-  combos: '🎁 Combos',
-  manual: '✍️ Carga manual',
-  otros: '📦 Otros',
-}
-
-// Nombre lindo para un bucket de stock_actual (cerdo_carre → 🐷 Carre).
-// Sin tabla de labels: el prefijo define el ícono y el resto se capitaliza,
-// así los buckets nuevos (emb_*, brosa_*, hamb_*) salen bien sin tocar nada.
-const ICONO_BUCKET = { cerdo: '🐷', emb: '🌭', brosa: '🫀', hamb: '🍔', pieza: '🍖', bovino: '🥩', pollo: '🍗', rebozado: '🧊' }
-function nombreBucket(tipo) {
-  const t = String(tipo || '')
-  const pref = t.split('_')[0]
-  const resto = t.includes('_') ? t.slice(pref.length + 1) : t
-  const texto = resto.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase())
-  return `${ICONO_BUCKET[pref] || '📦'} ${texto}`
-}
+// Destinos de entrada que NO son compra: mercadería ya comprada que se
+// transforma adentro (desposte de una media, elaboración de embutidos).
+const DESTINOS_INTERNOS = new Set(['desposte', 'elaboracion'])
 
 // Helpers de fecha — siempre hora ARG, nunca UTC (ver lib/fechas.js)
 const hoyISO = () => fechaHoyARG()
@@ -246,7 +224,7 @@ function useDashboardData(refreshMs = 120000) {
            gastosMes, sueldosMes, pagosProvMes, movCtacteMes, todasCajas, todosDeudores, promoCfg,
            comprasMesQ, cierresQ, comprasSemQ, remitosHoyQ, cobranzaQ, arqueosSemQ,
            cobranzaTotalQ, conceptosQ,
-           piezasQ, mediasQ, movSemanasQ, catalogoCats] = await Promise.all([
+           piezasQ, mediasQ, movSemanasQ, entradasHoyQ] = await Promise.all([
       supabase.from('ventas_minoristas').select('total, efectivo, debito, transferencia, items, fecha, hora').eq('origen', 'caja').eq('fecha', hoy),
       // hora incluida: alimenta la curva "hoy vs ayer a esta hora"
       supabase.from('ventas_minoristas').select('total, hora').eq('origen', 'caja').eq('fecha', ayer),
@@ -303,8 +281,9 @@ function useDashboardData(refreshMs = 120000) {
       // Compras a cta cte de esta semana y la pasada (SOLO LECTURA) — separan
       // la deuda corriente de la mora real por cliente.
       fetchAllRows(() => supabase.from('movimientos_ctacte').select('cliente_id, debe, fecha').gte('fecha', lunesPasado).gt('debe', 0)),
-      // Catálogo de categorías: para mostrar "🥩 Bovino Cortes" y no "bovino_corte"
-      cargarCategoriasPrecios().catch(() => []),
+      // Mercadería que INGRESÓ hoy al depósito (para el rotativo del footer)
+      supabase.from('entradas_deposito').select('proveedor_nombre, descripcion, kg, importe, destino, cantidad')
+        .eq('fecha', hoy).eq('eliminado', false),
     ])
 
     const totalHoy  = (ventasHoy.data || []).reduce((s, v) => s + (Number(v.total) || 0), 0)
@@ -552,61 +531,52 @@ function useDashboardData(refreshMs = 120000) {
       { tipo: 'embutido',     label: '🌭 Embutidos',     minimo: 30,  kg: stockMap.embutido || 0 },
     ].filter(s => s.kg < s.minimo)
 
-    // ── 🥩 KILOS VENDIDOS HOY POR CATEGORÍA ──
-    // Caja minorista (items.categoria) + remitos mayoristas (items.tipo). Las
-    // categorías por unidad (almacén/bebidas/insumos) quedan afuera: su "kg"
-    // no es peso. Alimenta el rotativo del footer del Modo TV.
-    const labelsCat = labelsDeCategorias(catalogoCats || [])
-    const accKgCat = {}
-    // Los items por unidad (cajones) guardan la CANTIDAD en `kg`: los kilos
-    // reales salen de multiplicar por kg_por_unidad. Si no hay equivalencia
-    // (almacén/bebidas) el item no suma kilos.
-    const sumarKg = (cat, item) => {
-      const c = cat || 'otros'
-      if (CATS_SIN_KG.has(c)) return
-      const n = Number(item.kg) || 0
-      if (n <= 0) return
-      const kpu = Number(item.kg_por_unidad) || 0
-      const kilos = item.unidad === 'u' ? (kpu > 0 ? n * kpu : 0) : n
-      if (kilos <= 0) return
-      accKgCat[c] = (accKgCat[c] || 0) + kilos
+    // ── 📥 MERCADERÍA QUE INGRESÓ / SE COMPRÓ HOY ──
+    // Entradas al depósito de hoy, agrupadas por proveedor + producto (7 medias
+    // de PRETTO son UNA cara, no siete). Las entradas internas (desposte /
+    // elaboración) NO son compras: es mercadería ya comprada que se transforma.
+    const entradasHoy = (entradasHoyQ.data || [])
+      .filter(e => !DESTINOS_INTERNOS.has(String(e.destino || '').toLowerCase()))
+    const accIngreso = {}
+    entradasHoy.forEach(e => {
+      const prov = (e.proveedor_nombre || '—').trim()
+      const desc = (e.descripcion || 'mercadería').trim()
+      const k = `${prov}|${desc}`
+      if (!accIngreso[k]) accIngreso[k] = { proveedor: prov, descripcion: desc, u: 0, kg: 0, importe: 0 }
+      accIngreso[k].u += Number(e.cantidad) || 1
+      accIngreso[k].kg += Number(e.kg) || 0
+      accIngreso[k].importe += Number(e.importe) || 0
+    })
+    const ingresosHoy = Object.values(accIngreso).sort((a, b) => b.importe - a.importe || b.kg - a.kg)
+    const ingresosHoyTotal = {
+      kg: ingresosHoy.reduce((s, i) => s + i.kg, 0),
+      importe: ingresosHoy.reduce((s, i) => s + i.importe, 0),
     }
-    ;(ventasHoy.data || []).forEach(v => (v.items || []).forEach(i => sumarKg(i.categoria, i)))
-    ;(remitosHoyQ.data || []).forEach(r => (r.items || []).forEach(i => sumarKg(i.tipo || i.categoria, i)))
-    const kgCategoriasHoy = Object.entries(accKgCat)
-      .map(([clave, kg]) => ({ clave, label: ALIAS_CATEGORIA[clave] || labelsCat[clave] || nombreBucket(clave), kg }))
-      .filter(c => c.kg >= 0.05)
-      .sort((a, b) => b.kg - a.kg)
-    const kgTotalHoy = kgCategoriasHoy.reduce((s, c) => s + c.kg, 0)
 
-    // ── 📦 STOCK POR UNIDADES (cajas / medias / piezas) + kg por bucket ──
-    const accCajaTipo = {}
-    cajasDisp.forEach(c => {
-      const k = c.tipo_caja || '—'
-      if (!accCajaTipo[k]) accCajaTipo[k] = { n: 0, kg: 0 }
-      accCajaTipo[k].n++
-      accCajaTipo[k].kg += Number(c.kg) || 0
-    })
-    const accPieza = {}
-    ;(piezasQ.data || []).forEach(p => {
-      const k = (p.tipo_pieza || 'Pieza').trim()
-      if (!accPieza[k]) accPieza[k] = { n: 0, kg: 0 }
-      accPieza[k].n++
-      accPieza[k].kg += Number(p.kg) || 0
-    })
+    // ── 📦 STOCK POR GRUPOS (kilos) ──
+    // Los grupos que pidió Fabricio para la tele. Almacén y bebidas quedan
+    // afuera a propósito (su kg_disponible son unidades, no kilos). Medias,
+    // piezas y cajas muestran además cuántas unidades hay.
     const mediasDisp = mediasQ.data || []
-    const stockDetalle = {
-      cajas: { n: cajasInfo.total, kg: cajasInfo.kg, viejas: cajasInfo.viejasCount },
-      cajasPorTipo: Object.entries(accCajaTipo).map(([tipo, v]) => ({ tipo, ...v })).sort((a, b) => b.n - a.n),
-      medias: { n: mediasDisp.length, kg: mediasDisp.reduce((s, m) => s + (Number(m.kg) || 0), 0) },
-      piezas: Object.entries(accPieza).map(([label, v]) => ({ label, ...v })).sort((a, b) => b.kg - a.kg),
-      // Buckets que NO se cuentan por unidad (cerdo, embutidos, brosas…): solo kg
-      buckets: Object.entries(stockMap)
-        .filter(([t, kg]) => kg > 0.05 && !t.startsWith('pieza_') && !['bovino_mr', 'almacen', 'bebidas', 'caja_cb', 'caja_pt'].includes(t))
-        .map(([tipo, kg]) => ({ tipo, label: nombreBucket(tipo), kg }))
-        .sort((a, b) => b.kg - a.kg)
-        .slice(0, 8),
-    }
+    const piezasDisp = piezasQ.data || []
+    const kgDe = (pred) => Object.entries(stockMap)
+      .filter(([t]) => pred(String(t)))
+      .reduce((s, [, kg]) => s + (Number(kg) || 0), 0)
+    const stockGrupos = [
+      { label: '🐄 MEDIA RES', kg: Number(stockMap.bovino_mr) || 0, u: mediasDisp.length },
+      { label: '🍖 PIEZAS BOVINAS', kg: kgDe(t => t.startsWith('pieza_') || t === 'bovino_pieza'), u: piezasDisp.length },
+      { label: '📦 CAJAS BOVINAS', kg: kgDe(t => t.startsWith('caja_')), u: cajasInfo.total },
+      { label: '🥩 CORTES BOVINOS', kg: Number(stockMap.bovino_corte) || 0 },
+      { label: '🫀 BROSAS', kg: kgDe(t => t.startsWith('brosa_') || t === 'bovino_brosa') },
+      { label: '🐷 CERDO PIEZAS', kg: kgDe(t => t.startsWith('cerdo_')) },
+      { label: '🐷 CERDO CAPONES', kg: Number(stockMap.cerdo) || 0 },
+      // stockMap ya plegó los emb_* dentro de 'embutido' (total de embutidos)
+      { label: '🌭 EMBUTIDOS', kg: Number(stockMap.embutido) || 0 },
+      { label: '🍔 HAMBURGUESAS', kg: kgDe(t => t.startsWith('hamb')) },
+      { label: '🍗 POLLO', kg: kgDe(t => t === 'pollo' || t.startsWith('pollo_')) },
+      { label: '🧊 REBOZADOS Y CONGELADOS', kg: kgDe(t => t.startsWith('rebozado') || t.startsWith('congelado')) },
+    ].filter(g => g.kg > 0.05 || g.u > 0)
+    const stockTotalKg = stockGrupos.reduce((s, g) => s + g.kg, 0)
 
     // ── ⏰ CUENTAS CORRIENTES EN MORA (3 capas FIFO, solo lectura) ──
     // mora = saldo − compras de esta semana − compras de la semana pasada.
@@ -683,8 +653,8 @@ function useDashboardData(refreshMs = 120000) {
       cheques: (cheques.data || []).filter(c => c.origen !== 'emitido'),
       chequesProx, chequesProxTotal,
       clientesDeudores: clientes.data || [],
-      kgCategoriasHoy, kgTotalHoy,
-      stockDetalle,
+      ingresosHoy, ingresosHoyTotal,
+      stockGrupos, stockTotalKg,
       clientesEnMora, totalMora,
       panelControl: {
         totalAyer, variacionHoyVsAyer,
@@ -1858,10 +1828,40 @@ function useAnunciosTV(data) {
   }, [data, procesar])
 
   useEffect(() => () => clearTimeout(timerRef.current), [])
-  return actual
+
+  // Callar la voz cuando se saltea (si no, sigue hablando el anuncio cerrado)
+  const callar = () => { try { window.speechSynthesis?.cancel() } catch { /* sin voces */ } }
+  // Saltear el anuncio en pantalla y pasar al siguiente de la cola
+  const saltear = useCallback(() => {
+    clearTimeout(timerRef.current)
+    timerRef.current = null
+    callar()
+    setActual(null)
+    setTimeout(procesar, 250)
+  }, [procesar])
+  // Saltear TODOS los que quedan (los que aparecen al entrar al Modo TV)
+  const saltearTodo = useCallback(() => {
+    clearTimeout(timerRef.current)
+    timerRef.current = null
+    callar()
+    colaRef.current = []
+    setActual(null)
+  }, [])
+
+  return { anuncio: actual, saltear, saltearTodo, pendientes: colaRef.current.length }
 }
 
-function AnuncioTV({ anuncio }) {
+// Anuncio a pantalla completa. Se puede saltear: clic (o barra espaciadora /
+// flecha) pasa al siguiente, y el botón saltea todos los que queden.
+function AnuncioTV({ anuncio, onSaltear, onSaltearTodo, pendientes = 0 }) {
+  useEffect(() => {
+    if (!anuncio) return
+    const onKey = (e) => {
+      if (e.key === ' ' || e.key === 'Enter' || e.key === 'ArrowRight') { e.preventDefault(); onSaltear?.() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [anuncio, onSaltear])
   if (!anuncio) return null
   const paleta = {
     celebracion: { c: NEON.cianHi, borde: 'rgba(0,212,255,0.75)',  glow: 'rgba(0,212,255,0.25)' },
@@ -1870,10 +1870,11 @@ function AnuncioTV({ anuncio }) {
   }
   const p = paleta[anuncio.tipo] || paleta.celebracion
   return (
-    <div style={{
-      position: 'absolute', inset: 0, zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'rgba(1,5,9,0.6)', backdropFilter: 'blur(5px)', animation: 'dejIn .35s ease both',
-    }}>
+    <div onClick={onSaltear} title="Tocá para saltear"
+      style={{
+        position: 'absolute', inset: 0, zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(1,5,9,0.6)', backdropFilter: 'blur(5px)', animation: 'dejIn .35s ease both', cursor: 'pointer',
+      }}>
       <div className="hud" style={{
         ...glass, border: `1px solid ${p.borde}`, padding: '2.2vw 4.5vw', textAlign: 'center',
         maxWidth: '62vw', animation: 'dejAnuncio .7s cubic-bezier(.2,1.4,.4,1) both',
@@ -1887,6 +1888,18 @@ function AnuncioTV({ anuncio }) {
         <div style={{ fontSize: '1.25vw', color: NEON.texto, marginTop: '0.6vw' }}>{anuncio.detalle}</div>
         <div style={{ height: 3, marginTop: '1.2vw', background: 'rgba(255,255,255,0.08)', borderRadius: 2, overflow: 'hidden' }}>
           <div style={{ height: '100%', background: p.c, boxShadow: `0 0 8px ${p.c}`, animation: 'dejCuenta 9s linear both' }} />
+        </div>
+        {/* Saltear: la tele avisa, pero cuando entrás querés ver los números ya */}
+        {/* clamp: la misma tarjeta se ve en la tele (vw) y en el celular (px) */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: '10px 1.2vw', marginTop: '1vw' }}>
+          <span style={{ fontSize: 'clamp(10px, 0.8vw, 18px)', color: NEON.muted }}>
+            Tocá la pantalla (o barra espaciadora) para saltear
+          </span>
+          <button onClick={(e) => { e.stopPropagation(); onSaltearTodo?.() }}
+            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.16)', color: NEON.texto,
+              borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 'clamp(11px, 0.85vw, 19px)', fontWeight: 700 }}>
+            ✕ Saltear todos{pendientes > 0 ? ` (${pendientes + 1})` : ''}
+          </button>
         </div>
       </div>
     </div>
@@ -1905,7 +1918,7 @@ function ModoTV({ onSalir }) {
   const { data, loading } = useDashboardData(60000)
   const { hora, segundos, fecha } = useRelojARG()
   // 🎬 Anuncios cinematográficos: récord / stock crítico / cheques por vencer
-  const anuncio = useAnunciosTV(data)
+  const { anuncio, saltear, saltearTodo, pendientes } = useAnunciosTV(data)
 
   // 🔔 Destello cuando entra una venta: si el facturado de hoy (caja +
   // mayorista) SUBE entre recargas, replay de dejFlash (la key remonta).
@@ -1943,7 +1956,7 @@ function ModoTV({ onSalir }) {
       <div className="hud-rejilla" />
       <div className="hud-scan" />
       {/* 🎬 Anuncio cinematográfico (récord / stock / cheques) */}
-      <AnuncioTV anuncio={anuncio} />
+      <AnuncioTV anuncio={anuncio} onSaltear={saltear} onSaltearTodo={saltearTodo} pendientes={pendientes} />
 
       {/* ── HEADER (compacto: la pantalla es para los números) ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '1.2vw' }}>
@@ -2110,13 +2123,13 @@ function ModoTV({ onSalir }) {
               unidades, cheques uno por uno, deudores en mora, monotributos)
               para meter mucha info sin ocupar más lugar. */}
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1.6vw', marginTop: '0.5vw', padding: '0.5vw 1.2vw', borderRadius: 6, background: 'rgba(0,212,255,0.035)', border: '1px solid rgba(0,212,255,0.15)' }}>
-            <TvMiniRotativo caras={carasKilosHoy(data)} ms={5000} ancho="8vw" />
-            <TvMiniRotativo caras={carasStock(data)} ms={5500} ancho="10vw" />
-            <TvMiniRotativo caras={carasCheques(data)} ms={6000} ancho="12vw" />
+            <TvMiniRotativo caras={carasIngresoHoy(data)} ms={12000} ancho="13vw" />
+            <TvMiniRotativo caras={carasStock(data)} ms={11000} ancho="12vw" />
+            <TvMiniRotativo caras={carasCheques(data)} ms={13000} ancho="12vw" />
             <TvMini label="PEND. COBRAR" valor={fmtArs(data.panelControl.saldoPendienteTotal)}
               color={data.panelControl.saldoPendienteTotal > 500000 ? NEON.ambar : NEON.cianHi} chico />
-            <TvMiniRotativo caras={carasMora(data)} ms={6500} ancho="11vw" />
-            <TvMiniRotativo caras={carasMono(data)} ms={7000} ancho="9vw" />
+            <TvMiniRotativo caras={carasMora(data)} ms={14000} ancho="11vw" />
+            <TvMiniRotativo caras={carasMono(data)} ms={15000} ancho="9vw" />
           </div>
         </>
       )}
@@ -2176,7 +2189,7 @@ function MTvKpi({ label, valor, sub, color }) {
 function ModoTVMovil({ onSalir }) {
   const { data, loading } = useDashboardData(60000)
   const { hora, segundos, fecha } = useRelojARG()
-  const anuncio = useAnunciosTV(data)
+  const { anuncio, saltear, saltearTodo, pendientes } = useAnunciosTV(data)
   const { feed: feedWa } = useCentroActividad({ notificar: false })
 
   // Destello cuando entra una venta nueva (mismo efecto que la TV):
@@ -2221,7 +2234,7 @@ function ModoTVMovil({ onSalir }) {
     }}>
       <style>{ESTILOS_GLOBALES}</style>
       <div className="hud-rejilla" style={{ position: 'fixed' }} />
-      <AnuncioTV anuncio={anuncio} />
+      <AnuncioTV anuncio={anuncio} onSaltear={saltear} onSaltearTodo={saltearTodo} pendientes={pendientes} />
 
       {/* ── HEADER fijo arriba ── */}
       <div style={{
@@ -2432,13 +2445,13 @@ function ModoTVMovil({ onSalir }) {
 
           {/* ── FOOTER: stats rápidas, cada una PESTAÑEA con más info ── */}
           <div className="hud" style={{ ...mCard, display: 'flex', flexDirection: 'column', gap: 10, background: 'rgba(0,212,255,0.035)', border: '1px solid rgba(0,212,255,0.15)' }}>
-            <MtvRotativo caras={carasKilosHoy(data)} ms={5000} />
-            <MtvRotativo caras={carasStock(data)} ms={5500} />
-            <MtvRotativo caras={carasCheques(data)} ms={6000} />
+            <MtvRotativo caras={carasIngresoHoy(data)} ms={12000} />
+            <MtvRotativo caras={carasStock(data)} ms={11000} />
+            <MtvRotativo caras={carasCheques(data)} ms={13000} />
             <MtvLinea label="PEND. COBRAR" valor={fmtArs(data.panelControl.saldoPendienteTotal)}
               color={data.panelControl.saldoPendienteTotal > 500000 ? NEON.ambar : NEON.cianHi} />
-            <MtvRotativo caras={carasMora(data)} ms={6500} />
-            <MtvRotativo caras={carasMono(data)} ms={7000} />
+            <MtvRotativo caras={carasMora(data)} ms={14000} />
+            <MtvRotativo caras={carasMono(data)} ms={15000} />
           </div>
         </div>
       )}
@@ -2675,27 +2688,41 @@ function ClimaTV({ movil }) {
 // ── Caras de los rotativos del footer (las comparten TV y celular) ──
 // Un decimal alcanza para leer de lejos: "39,2 kg" y no "39,20 kg".
 const kg1 = n => fmtKg(n, { decimales: 1 })
-// Kilos vendidos hoy: primero el total, después cada categoría.
-function carasKilosHoy(data) {
-  const cats = data.kgCategoriasHoy || []
+// Plata abreviada para que entre al lado de los kilos: $6,6M / $850k
+const plataCorta = (n) => {
+  const v = Number(n) || 0
+  if (v >= 1000000) return `$${(v / 1000000).toLocaleString('es-AR', { maximumFractionDigits: 1 })}M`
+  if (v >= 1000) return `$${Math.round(v / 1000)}k`
+  return fmtArs(v)
+}
+// Mercadería que ingresó hoy: primero el total, después cada compra
+// (proveedor + producto) con sus kilos y lo que salió.
+function carasIngresoHoy(data) {
+  const ing = data.ingresosHoy || []
+  const tot = data.ingresosHoyTotal || { kg: 0, importe: 0 }
+  if (!ing.length) return [{ label: '📥 INGRESÓ HOY', valor: 'Sin ingresos', color: NEON.muted }]
   return [
-    { label: '⚖️ KILOS HOY', valor: kg1(data.kgTotalHoy || 0), color: NEON.cianHi },
-    ...cats.map(c => ({ label: c.label.toUpperCase(), valor: kg1(c.kg), color: NEON.cian })),
+    { label: '📥 INGRESÓ HOY', valor: `${kg1(tot.kg)} · ${plataCorta(tot.importe)}`, color: NEON.cianHi },
+    ...ing.slice(0, 10).map(i => ({
+      label: `📥 ${i.proveedor} · ${i.descripcion}`.slice(0, 40),
+      valor: `${i.u > 1 ? `${i.u} u · ` : ''}${kg1(i.kg)}${i.importe > 0 ? ` · ${plataCorta(i.importe)}` : ''}`,
+      color: NEON.ambar,
+    })),
   ]
 }
-// Stock: cajas, medias res, cada pieza entera (unidades + kg) y los buckets por kg.
+// Stock en kilos por grupo (media res, piezas, cajas, cortes, cerdo,
+// embutidos, hamburguesas, rebozados…). Medias/piezas/cajas suman unidades.
 function carasStock(data) {
-  const s = data.stockDetalle || {}
-  const caras = [{
-    label: 'CAJAS DISP.',
-    valor: `${s.cajas?.n || 0} · ${kg1(s.cajas?.kg || 0)}`,
-    color: s.cajas?.viejas > 0 ? NEON.ambar : NEON.cian,
-  }]
-  ;(s.cajasPorTipo || []).forEach(c => caras.push({ label: `CAJA ${c.tipo}`, valor: `${c.n} u · ${kg1(c.kg)}`, color: NEON.cian }))
-  if (s.medias?.n) caras.push({ label: '🐄 MEDIA RES', valor: `${s.medias.n} u · ${kg1(s.medias.kg)}`, color: NEON.cianHi })
-  ;(s.piezas || []).forEach(p => caras.push({ label: `🍖 ${p.label.toUpperCase()}`, valor: `${p.n} u · ${kg1(p.kg)}`, color: NEON.cian }))
-  ;(s.buckets || []).forEach(b => caras.push({ label: b.label.toUpperCase(), valor: kg1(b.kg), color: NEON.azul }))
-  return caras
+  const grupos = data.stockGrupos || []
+  if (!grupos.length) return [{ label: '📦 STOCK', valor: 'Sin stock', color: NEON.muted }]
+  return [
+    { label: '📦 STOCK TOTAL', valor: kg1(data.stockTotalKg || 0), color: NEON.cianHi },
+    ...grupos.map(g => ({
+      label: g.label,
+      valor: g.u != null ? `${g.u} u · ${kg1(g.kg)}` : kg1(g.kg),
+      color: NEON.cian,
+    })),
+  ]
 }
 // Cheques: cuántos vencen en 15 días y después uno por uno (fecha, quién, monto).
 function carasCheques(data) {
