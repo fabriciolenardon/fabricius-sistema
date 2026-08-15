@@ -39,6 +39,13 @@ const SUB_TABS = [
 const TOPE_K = 108357084.05 // tope monotributo cat K 2026
 const TZ_ARG = 'America/Argentina/Buenos_Aires'
 
+// Ubicación para el clima del header (Córdoba capital, donde está el local).
+const CLIMA_COORD = { lat: -31.42, lon: -64.18 }
+
+// Destinos de entrada que NO son compra: mercadería ya comprada que se
+// transforma adentro (desposte de una media, elaboración de embutidos).
+const DESTINOS_INTERNOS = new Set(['desposte', 'elaboracion'])
+
 // Helpers de fecha — siempre hora ARG, nunca UTC (ver lib/fechas.js)
 const hoyISO = () => fechaHoyARG()
 const fechaHaceDias = (n) => fechaRelativaARG(-n)
@@ -143,6 +150,9 @@ const ESTILOS_GLOBALES = `
 @keyframes dejTicker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 .dej-ticker-pista { display: inline-flex; white-space: nowrap; animation: dejTicker 45s linear infinite; will-change: transform; }
 .dej-in { animation: dejIn .5s ease both; }
+/* Widget rotativo: "pestañea" y cambia de info sin ocupar más lugar */
+@keyframes dejRota { 0% { opacity: 0; transform: translateY(6px); } 100% { opacity: 1; transform: none; } }
+.dej-rota { animation: dejRota .45s ease both; }
 /* Esquinas holográficas: dos escuadras cian en TL y BR */
 .hud { position: relative; }
 .hud::before, .hud::after {
@@ -199,6 +209,13 @@ function useDashboardData(refreshMs = 120000) {
     const mesOpLabel = mesOpActual ? mesOpActual.etiqueta : null
     const mesAntIni = inicioMesAnterior()
     const mesAntMismoDia = mismoDiaMesAnterior() // período comparable: 01→mismo día
+    // Semana en curso y semana pasada (lun→dom) — las 3 capas FIFO de la mora
+    // de clientes (igual criterio que Clientes.jsx: lo de esta semana y lo de
+    // la semana pasada NO es mora; mora = lo anterior).
+    const lunesActual = inicioSemanaARG()
+    const dLunPas = new Date(lunesActual + 'T12:00')
+    dLunPas.setDate(dLunPas.getDate() - 7)
+    const lunesPasado = fechaHoyARG(dLunPas)
     const hoyDt = new Date(hoy + 'T12:00')
     const anioPasadoMesIni = `${hoyDt.getFullYear() - 1}-${String(hoyDt.getMonth() + 1).padStart(2, '0')}-01`
     const anioPasadoHoy    = `${hoyDt.getFullYear() - 1}-${String(hoyDt.getMonth() + 1).padStart(2, '0')}-${String(hoyDt.getDate()).padStart(2, '0')}`
@@ -206,7 +223,8 @@ function useDashboardData(refreshMs = 120000) {
            salidasMes, cuentas, facturas12m, stock, cheques, clientes,
            gastosMes, sueldosMes, pagosProvMes, movCtacteMes, todasCajas, todosDeudores, promoCfg,
            comprasMesQ, cierresQ, comprasSemQ, remitosHoyQ, cobranzaQ, arqueosSemQ,
-           cobranzaTotalQ, conceptosQ] = await Promise.all([
+           cobranzaTotalQ, conceptosQ,
+           piezasQ, mediasQ, movSemanasQ, entradasHoyQ] = await Promise.all([
       supabase.from('ventas_minoristas').select('total, efectivo, debito, transferencia, items, fecha, hora').eq('origen', 'caja').eq('fecha', hoy),
       // hora incluida: alimenta la curva "hoy vs ayer a esta hora"
       supabase.from('ventas_minoristas').select('total, hora').eq('origen', 'caja').eq('fecha', ayer),
@@ -231,7 +249,8 @@ function useDashboardData(refreshMs = 120000) {
       supabase.from('pagos_proveedores').select('importe, percepcion, fecha').gte('fecha', mesIni).lte('fecha', hoy),
       fetchAllRows(() => supabase.from('movimientos_ctacte').select('tipo, haber, fecha').gte('fecha', mesIni).lte('fecha', hoy)),
       supabase.from('cajas_stock').select('id, tipo_caja, kg, fecha_ingreso').eq('estado', 'disponible'),
-      supabase.from('clientes').select('saldo').gt('saldo', 0),
+      // id + nombre: además del total pendiente alimenta el rotativo "EN MORA"
+      supabase.from('clientes').select('id, nombre, saldo').gt('saldo', 0),
       supabase.from('config_sistema').select('valor').eq('clave', 'promo_mundial').maybeSingle(),
       // COMPRAS del mes: ingresos de mercadería al depósito con importe real
       // (las entradas generadas por desposte tienen importe 0 y quedan afuera)
@@ -242,7 +261,8 @@ function useDashboardData(refreshMs = 120000) {
       // Compras a proveedores de la SEMANA en curso (lunes → hoy)
       supabase.from('compras_proveedores').select('proveedor_nombre, importe').gte('fecha', inicioSemanaARG()).lte('fecha', hoy).not('anulado', 'is', true),
       // Remitos/despachos mayoristas de HOY (para el ticker, sin flujos internos)
-      supabase.from('remitos').select('numero, cliente_nombre, total, created_at, cobro').eq('fecha', hoy).eq('eliminado', false).neq('cobro', 'interno'),
+      // items: alimentan los kilos vendidos por categoría (mayorista del día)
+      supabase.from('remitos').select('numero, cliente_nombre, total, created_at, cobro, items').eq('fecha', hoy).eq('eliminado', false).neq('cobro', 'interno'),
       // Vendido / cobrado / por cobrar del mes (FIFO server-side: los pagos cancelan
       // primero la deuda vieja, así "por cobrar" es solo de ventas del período)
       supabase.rpc('ventas_cobranza_periodo', { p_desde: mesIni, p_hasta: hoy }),
@@ -254,6 +274,16 @@ function useDashboardData(refreshMs = 120000) {
       // Conceptos extra de sueldos (aguinaldo/vacaciones) — se imputan a la fecha
       // de cierre de su mes operativo (igual criterio que el Cierre).
       supabase.from('conceptos_sueldos').select('mes, tipo, monto'),
+      // Stock por UNIDADES (para el rotativo del footer): piezas bovinas y
+      // medias res disponibles, con su cantidad y el total de kilos.
+      supabase.from('piezas_stock').select('tipo_pieza, kg').eq('estado', 'disponible'),
+      supabase.from('medias_stock').select('kg').eq('estado', 'disponible'),
+      // Compras a cta cte de esta semana y la pasada (SOLO LECTURA) — separan
+      // la deuda corriente de la mora real por cliente.
+      fetchAllRows(() => supabase.from('movimientos_ctacte').select('cliente_id, debe, fecha').gte('fecha', lunesPasado).gt('debe', 0)),
+      // Mercadería que INGRESÓ hoy al depósito (para el rotativo del footer)
+      supabase.from('entradas_deposito').select('proveedor_nombre, descripcion, kg, importe, destino, cantidad')
+        .eq('fecha', hoy).eq('eliminado', false),
     ])
 
     const totalHoy  = (ventasHoy.data || []).reduce((s, v) => s + (Number(v.total) || 0), 0)
@@ -501,6 +531,85 @@ function useDashboardData(refreshMs = 120000) {
       { tipo: 'embutido',     label: '🌭 Embutidos',     minimo: 30,  kg: stockMap.embutido || 0 },
     ].filter(s => s.kg < s.minimo)
 
+    // ── 📥 MERCADERÍA QUE INGRESÓ / SE COMPRÓ HOY ──
+    // Entradas al depósito de hoy, agrupadas por proveedor + producto (7 medias
+    // de PRETTO son UNA cara, no siete). Las entradas internas (desposte /
+    // elaboración) NO son compras: es mercadería ya comprada que se transforma.
+    const entradasHoy = (entradasHoyQ.data || [])
+      .filter(e => !DESTINOS_INTERNOS.has(String(e.destino || '').toLowerCase()))
+    const accIngreso = {}
+    entradasHoy.forEach(e => {
+      const prov = (e.proveedor_nombre || '—').trim()
+      const desc = (e.descripcion || 'mercadería').trim()
+      const k = `${prov}|${desc}`
+      if (!accIngreso[k]) accIngreso[k] = { proveedor: prov, descripcion: desc, u: 0, kg: 0, importe: 0 }
+      accIngreso[k].u += Number(e.cantidad) || 1
+      accIngreso[k].kg += Number(e.kg) || 0
+      accIngreso[k].importe += Number(e.importe) || 0
+    })
+    const ingresosHoy = Object.values(accIngreso).sort((a, b) => b.importe - a.importe || b.kg - a.kg)
+    const ingresosHoyTotal = {
+      kg: ingresosHoy.reduce((s, i) => s + i.kg, 0),
+      importe: ingresosHoy.reduce((s, i) => s + i.importe, 0),
+    }
+
+    // ── 📦 STOCK POR GRUPOS (kilos) ──
+    // Los grupos que pidió Fabricio para la tele. Almacén y bebidas quedan
+    // afuera a propósito (su kg_disponible son unidades, no kilos). Medias,
+    // piezas y cajas muestran además cuántas unidades hay.
+    const mediasDisp = mediasQ.data || []
+    const piezasDisp = piezasQ.data || []
+    const kgDe = (pred) => Object.entries(stockMap)
+      .filter(([t]) => pred(String(t)))
+      .reduce((s, [, kg]) => s + (Number(kg) || 0), 0)
+    const stockGrupos = [
+      { label: '🐄 MEDIA RES', kg: Number(stockMap.bovino_mr) || 0, u: mediasDisp.length },
+      { label: '🍖 PIEZAS BOVINAS', kg: kgDe(t => t.startsWith('pieza_') || t === 'bovino_pieza'), u: piezasDisp.length },
+      { label: '📦 CAJAS BOVINAS', kg: kgDe(t => t.startsWith('caja_')), u: cajasInfo.total },
+      { label: '🥩 CORTES BOVINOS', kg: Number(stockMap.bovino_corte) || 0 },
+      { label: '🫀 BROSAS', kg: kgDe(t => t.startsWith('brosa_') || t === 'bovino_brosa') },
+      { label: '🐷 CERDO PIEZAS', kg: kgDe(t => t.startsWith('cerdo_')) },
+      { label: '🐷 CERDO CAPONES', kg: Number(stockMap.cerdo) || 0 },
+      // stockMap ya plegó los emb_* dentro de 'embutido' (total de embutidos)
+      { label: '🌭 EMBUTIDOS', kg: Number(stockMap.embutido) || 0 },
+      { label: '🍔 HAMBURGUESAS', kg: kgDe(t => t.startsWith('hamb')) },
+      { label: '🍗 POLLO', kg: kgDe(t => t === 'pollo' || t.startsWith('pollo_')) },
+      { label: '🧊 REBOZADOS Y CONGELADOS', kg: kgDe(t => t.startsWith('rebozado') || t.startsWith('congelado')) },
+    ].filter(g => g.kg > 0.05 || g.u > 0)
+    const stockTotalKg = stockGrupos.reduce((s, g) => s + g.kg, 0)
+
+    // ── ⏰ CUENTAS CORRIENTES EN MORA (3 capas FIFO, solo lectura) ──
+    // mora = saldo − compras de esta semana − compras de la semana pasada.
+    // La semana pasada NO es mora: el mayorista la paga esta semana.
+    const debeSem = {}, debeSemPas = {}
+    ;(movSemanasQ.data || []).forEach(m => {
+      const dest = m.fecha >= lunesActual ? debeSem : debeSemPas
+      dest[m.cliente_id] = (dest[m.cliente_id] || 0) + (Number(m.debe) || 0)
+    })
+    const clientesEnMora = (todosDeudores.data || [])
+      .map(c => ({
+        nombre: (c.nombre || '—').trim(),
+        mora: Math.max(0, (Number(c.saldo) || 0) - (debeSem[c.id] || 0) - (debeSemPas[c.id] || 0)),
+      }))
+      .filter(c => c.mora > 1000) // residuos de redondeo del ledger no son mora
+      .sort((a, b) => b.mora - a.mora)
+    const totalMora = clientesEnMora.reduce((s, c) => s + c.mora, 0)
+
+    // ── 📄 CHEQUES PRÓXIMOS (15 días) ──
+    // Los recibidos se endosan a proveedores y los emitidos son propios: en
+    // ambos casos es plata comprometida a una fecha. Los emitidos ya imputados
+    // (levantados) no van. Ordenados por fecha de pago (el más próximo primero).
+    const chequesProx = (cheques.data || [])
+      .filter(c => !(c.origen === 'emitido' && c.estado === 'imputado'))
+      .map(c => ({
+        fecha: c.fecha_pago,
+        monto: Number(c.monto) || 0,
+        emitido: c.origen === 'emitido',
+        quien: (c.origen === 'emitido' ? c.proveedor_nombre : (c.proveedor_nombre || c.cliente_nombre)) || c.banco || 'cheque',
+      }))
+      .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)))
+    const chequesProxTotal = chequesProx.reduce((s, c) => s + c.monto, 0)
+
     // ── ÚLTIMO MES OPERATIVO CERRADO (para el gráfico de margen del mes) ──
     // Agrupa los cierres semanales por `mes` y toma el más reciente. Gastos del
     // donut engloba sueldos + retiros socios + gastos; ganancia = el margen.
@@ -542,7 +651,11 @@ function useDashboardData(refreshMs = 120000) {
       promoMundial: promoCfg?.data?.valor || { activa: false },
       // Solo recibidos: los emitidos propios son plata que SALE, no que entra
       cheques: (cheques.data || []).filter(c => c.origen !== 'emitido'),
+      chequesProx, chequesProxTotal,
       clientesDeudores: clientes.data || [],
+      ingresosHoy, ingresosHoyTotal,
+      stockGrupos, stockTotalKg,
+      clientesEnMora, totalMora,
       panelControl: {
         totalAyer, variacionHoyVsAyer,
         facturadoMes,
@@ -600,6 +713,77 @@ function useRelojARG() {
     segundos: ahora.toLocaleTimeString('es-AR', { timeZone: TZ_ARG, second: '2-digit' }),
     fecha: ahora.toLocaleDateString('es-AR', { timeZone: TZ_ARG, weekday: 'long', day: 'numeric', month: 'long' }),
   }
+}
+
+// ════════════════════════════════════════════════════════════
+// 🔄 ROTADOR — un widget que "pestañea" y cambia de info
+// ────────────────────────────────────────────────────────────
+// En la tele el lugar es oro: en vez de poner 10 widgets al lado
+// del otro, uno solo va rotando entre N caras cada `ms`.
+// ════════════════════════════════════════════════════════════
+function useRotador(n, ms = 6000) {
+  const [i, setI] = useState(0)
+  useEffect(() => {
+    if (n <= 1) { setI(0); return }
+    const t = setInterval(() => setI(prev => (prev + 1) % n), ms)
+    return () => clearInterval(t)
+  }, [n, ms])
+  // Si la lista se achica entre recargas, no quedar apuntando afuera
+  return n > 0 ? i % n : 0
+}
+
+// ════════════════════════════════════════════════════════════
+// 🌤️ CLIMA — hoy y mañana (Open-Meteo, sin API key)
+// ────────────────────────────────────────────────────────────
+// Se refresca cada 30 min. Si la API falla (sin internet), el
+// widget simplemente no se muestra: nunca rompe la tele.
+// ════════════════════════════════════════════════════════════
+const CLIMA_WMO = [
+  { max: 0,  icono: '☀️', txt: 'Despejado' },
+  { max: 3,  icono: '⛅', txt: 'Nublado' },
+  { max: 48, icono: '🌫️', txt: 'Niebla' },
+  { max: 57, icono: '🌦️', txt: 'Llovizna' },
+  { max: 67, icono: '🌧️', txt: 'Lluvia' },
+  { max: 77, icono: '🌨️', txt: 'Nieve' },
+  { max: 82, icono: '🌧️', txt: 'Chaparrones' },
+  { max: 86, icono: '🌨️', txt: 'Nevadas' },
+  { max: 99, icono: '⛈️', txt: 'Tormenta' },
+]
+const climaWmo = (code) => CLIMA_WMO.find(c => Number(code) <= c.max) || { icono: '🌡️', txt: '—' }
+
+function useClima() {
+  const [clima, setClima] = useState(null)
+  useEffect(() => {
+    let vivo = true
+    const traer = async () => {
+      try {
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${CLIMA_COORD.lat}&longitude=${CLIMA_COORD.lon}`
+          + '&current=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min'
+          + `&timezone=${encodeURIComponent(TZ_ARG)}&forecast_days=2`
+        const r = await fetch(url)
+        if (!r.ok) return
+        const j = await r.json()
+        if (!vivo || !j?.daily) return
+        setClima({
+          hoy: {
+            temp: Math.round(Number(j.current?.temperature_2m)),
+            max: Math.round(Number(j.daily.temperature_2m_max?.[0])),
+            min: Math.round(Number(j.daily.temperature_2m_min?.[0])),
+            ...climaWmo(j.current?.weather_code ?? j.daily.weather_code?.[0]),
+          },
+          manana: {
+            max: Math.round(Number(j.daily.temperature_2m_max?.[1])),
+            min: Math.round(Number(j.daily.temperature_2m_min?.[1])),
+            ...climaWmo(j.daily.weather_code?.[1]),
+          },
+        })
+      } catch { /* sin internet: el widget no se muestra */ }
+    }
+    traer()
+    const t = setInterval(traer, 30 * 60 * 1000)
+    return () => { vivo = false; clearInterval(t) }
+  }, [])
+  return clima
 }
 
 // ¿Estamos en un celular? (ancho < 768px). El Modo TV tiene una versión
@@ -1644,10 +1828,40 @@ function useAnunciosTV(data) {
   }, [data, procesar])
 
   useEffect(() => () => clearTimeout(timerRef.current), [])
-  return actual
+
+  // Callar la voz cuando se saltea (si no, sigue hablando el anuncio cerrado)
+  const callar = () => { try { window.speechSynthesis?.cancel() } catch { /* sin voces */ } }
+  // Saltear el anuncio en pantalla y pasar al siguiente de la cola
+  const saltear = useCallback(() => {
+    clearTimeout(timerRef.current)
+    timerRef.current = null
+    callar()
+    setActual(null)
+    setTimeout(procesar, 250)
+  }, [procesar])
+  // Saltear TODOS los que quedan (los que aparecen al entrar al Modo TV)
+  const saltearTodo = useCallback(() => {
+    clearTimeout(timerRef.current)
+    timerRef.current = null
+    callar()
+    colaRef.current = []
+    setActual(null)
+  }, [])
+
+  return { anuncio: actual, saltear, saltearTodo, pendientes: colaRef.current.length }
 }
 
-function AnuncioTV({ anuncio }) {
+// Anuncio a pantalla completa. Se puede saltear: clic (o barra espaciadora /
+// flecha) pasa al siguiente, y el botón saltea todos los que queden.
+function AnuncioTV({ anuncio, onSaltear, onSaltearTodo, pendientes = 0 }) {
+  useEffect(() => {
+    if (!anuncio) return
+    const onKey = (e) => {
+      if (e.key === ' ' || e.key === 'Enter' || e.key === 'ArrowRight') { e.preventDefault(); onSaltear?.() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [anuncio, onSaltear])
   if (!anuncio) return null
   const paleta = {
     celebracion: { c: NEON.cianHi, borde: 'rgba(0,212,255,0.75)',  glow: 'rgba(0,212,255,0.25)' },
@@ -1656,10 +1870,11 @@ function AnuncioTV({ anuncio }) {
   }
   const p = paleta[anuncio.tipo] || paleta.celebracion
   return (
-    <div style={{
-      position: 'absolute', inset: 0, zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'rgba(1,5,9,0.6)', backdropFilter: 'blur(5px)', animation: 'dejIn .35s ease both',
-    }}>
+    <div onClick={onSaltear} title="Tocá para saltear"
+      style={{
+        position: 'absolute', inset: 0, zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(1,5,9,0.6)', backdropFilter: 'blur(5px)', animation: 'dejIn .35s ease both', cursor: 'pointer',
+      }}>
       <div className="hud" style={{
         ...glass, border: `1px solid ${p.borde}`, padding: '2.2vw 4.5vw', textAlign: 'center',
         maxWidth: '62vw', animation: 'dejAnuncio .7s cubic-bezier(.2,1.4,.4,1) both',
@@ -1673,6 +1888,18 @@ function AnuncioTV({ anuncio }) {
         <div style={{ fontSize: '1.25vw', color: NEON.texto, marginTop: '0.6vw' }}>{anuncio.detalle}</div>
         <div style={{ height: 3, marginTop: '1.2vw', background: 'rgba(255,255,255,0.08)', borderRadius: 2, overflow: 'hidden' }}>
           <div style={{ height: '100%', background: p.c, boxShadow: `0 0 8px ${p.c}`, animation: 'dejCuenta 9s linear both' }} />
+        </div>
+        {/* Saltear: la tele avisa, pero cuando entrás querés ver los números ya */}
+        {/* clamp: la misma tarjeta se ve en la tele (vw) y en el celular (px) */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: '10px 1.2vw', marginTop: '1vw' }}>
+          <span style={{ fontSize: 'clamp(10px, 0.8vw, 18px)', color: NEON.muted }}>
+            Tocá la pantalla (o barra espaciadora) para saltear
+          </span>
+          <button onClick={(e) => { e.stopPropagation(); onSaltearTodo?.() }}
+            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.16)', color: NEON.texto,
+              borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 'clamp(11px, 0.85vw, 19px)', fontWeight: 700 }}>
+            ✕ Saltear todos{pendientes > 0 ? ` (${pendientes + 1})` : ''}
+          </button>
         </div>
       </div>
     </div>
@@ -1688,10 +1915,10 @@ function AnuncioTV({ anuncio }) {
 // - ESC o botón para salir
 // ════════════════════════════════════════════════════════════
 function ModoTV({ onSalir }) {
-  const { data, loading, ultimaAct } = useDashboardData(60000)
+  const { data, loading } = useDashboardData(60000)
   const { hora, segundos, fecha } = useRelojARG()
   // 🎬 Anuncios cinematográficos: récord / stock crítico / cheques por vencer
-  const anuncio = useAnunciosTV(data)
+  const { anuncio, saltear, saltearTodo, pendientes } = useAnunciosTV(data)
 
   // 🔔 Destello cuando entra una venta: si el facturado de hoy (caja +
   // mayorista) SUBE entre recargas, replay de dejFlash (la key remonta).
@@ -1729,7 +1956,7 @@ function ModoTV({ onSalir }) {
       <div className="hud-rejilla" />
       <div className="hud-scan" />
       {/* 🎬 Anuncio cinematográfico (récord / stock / cheques) */}
-      <AnuncioTV anuncio={anuncio} />
+      <AnuncioTV anuncio={anuncio} onSaltear={saltear} onSaltearTodo={saltearTodo} pendientes={pendientes} />
 
       {/* ── HEADER (compacto: la pantalla es para los números) ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '1.2vw' }}>
@@ -1745,7 +1972,9 @@ function ModoTV({ onSalir }) {
             ⚽ PROMO MUNDIAL −{data.promoMundial.descuento_pct || 10}%
           </span>
         )}
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'baseline', gap: '0.8vw' }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.8vw' }}>
+          {/* Clima: pestañea entre hoy y mañana */}
+          <ClimaTV />
           <span style={{ fontSize: '0.75vw', color: NEON.muted, textTransform: 'capitalize' }}>{fecha}</span>
           <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '1.7vw', lineHeight: 1, color: NEON.cianHi, textShadow: '0 0 14px rgba(0,212,255,0.5)' }}>
             {hora}<span style={{ fontSize: '0.95vw', color: NEON.muted }}>:{segundos}</span>
@@ -1889,21 +2118,18 @@ function ModoTV({ onSalir }) {
           {/* 🎬 Ticker de últimas ventas */}
           <TickerVentas ventas={data.ultimasVentas} />
 
-          {/* ── FOOTER ── */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '2.2vw', marginTop: '0.5vw', padding: '0.5vw 1.2vw', borderRadius: 6, background: 'rgba(0,212,255,0.035)', border: '1px solid rgba(0,212,255,0.15)' }}>
-            <TvMini label="CAJAS DISP." valor={`${data.panelControl.cajasInfo.total} · ${fmtKg(data.panelControl.cajasInfo.kg)}`}
-              color={data.panelControl.cajasInfo.viejasCount > 0 ? NEON.ambar : NEON.cian} chico />
-            <TvMini label="CHEQUES 15D" valor={`${data.cheques.length}`} color={NEON.cianHi} chico />
+          {/* ── FOOTER: widgets que PESTAÑEAN ──
+              Cada uno rota entre sus caras (kilos por categoría, stock por
+              unidades, cheques uno por uno, deudores en mora, monotributos)
+              para meter mucha info sin ocupar más lugar. */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1.6vw', marginTop: '0.5vw', padding: '0.5vw 1.2vw', borderRadius: 6, background: 'rgba(0,212,255,0.035)', border: '1px solid rgba(0,212,255,0.15)' }}>
+            <TvMiniRotativo caras={carasIngresoHoy(data)} ms={12000} ancho="13vw" />
+            <TvMiniRotativo caras={carasStock(data)} ms={11000} ancho="12vw" />
+            <TvMiniRotativo caras={carasCheques(data)} ms={13000} ancho="12vw" />
             <TvMini label="PEND. COBRAR" valor={fmtArs(data.panelControl.saldoPendienteTotal)}
               color={data.panelControl.saldoPendienteTotal > 500000 ? NEON.ambar : NEON.cianHi} chico />
-            {data.cuentasConPct[0] && (
-              <TvMini label={`MONO MÁX: ${data.cuentasConPct[0].nombre.trim().split(' ')[0]}`}
-                valor={`${data.cuentasConPct[0].pctConsumo.toFixed(0)}% tope K`}
-                color={data.cuentasConPct[0].pctConsumo >= 95 ? NEON.rojo : data.cuentasConPct[0].pctConsumo >= 70 ? NEON.ambar : NEON.verde} chico />
-            )}
-            <span style={{ marginLeft: 'auto', fontSize: '0.75vw', color: NEON.muted }}>
-              {ultimaAct && `Actualizado ${ultimaAct.toLocaleTimeString('es-AR', { timeZone: TZ_ARG, hour: '2-digit', minute: '2-digit' })}`} · se refresca solo · ESC para salir
-            </span>
+            <TvMiniRotativo caras={carasMora(data)} ms={14000} ancho="11vw" />
+            <TvMiniRotativo caras={carasMono(data)} ms={15000} ancho="9vw" />
           </div>
         </>
       )}
@@ -1961,9 +2187,9 @@ function MTvKpi({ label, valor, sub, color }) {
 }
 
 function ModoTVMovil({ onSalir }) {
-  const { data, loading, ultimaAct } = useDashboardData(60000)
+  const { data, loading } = useDashboardData(60000)
   const { hora, segundos, fecha } = useRelojARG()
-  const anuncio = useAnunciosTV(data)
+  const { anuncio, saltear, saltearTodo, pendientes } = useAnunciosTV(data)
   const { feed: feedWa } = useCentroActividad({ notificar: false })
 
   // Destello cuando entra una venta nueva (mismo efecto que la TV):
@@ -2008,7 +2234,7 @@ function ModoTVMovil({ onSalir }) {
     }}>
       <style>{ESTILOS_GLOBALES}</style>
       <div className="hud-rejilla" style={{ position: 'fixed' }} />
-      <AnuncioTV anuncio={anuncio} />
+      <AnuncioTV anuncio={anuncio} onSaltear={saltear} onSaltearTodo={saltearTodo} pendientes={pendientes} />
 
       {/* ── HEADER fijo arriba ── */}
       <div style={{
@@ -2020,7 +2246,8 @@ function ModoTVMovil({ onSalir }) {
           F.A.B.R.I.
         </span>
         <PuntoVivo size={8} />
-        <div style={{ marginLeft: 'auto', textAlign: 'right', lineHeight: 1.1 }}>
+        <div style={{ marginLeft: 'auto' }}><ClimaTV movil /></div>
+        <div style={{ textAlign: 'right', lineHeight: 1.1 }}>
           <div style={{ ...mBig, fontSize: 22, color: NEON.cianHi, textShadow: '0 0 12px rgba(0,212,255,0.5)' }}>
             {hora}<span style={{ fontSize: 13, color: NEON.muted }}>:{segundos}</span>
           </div>
@@ -2216,22 +2443,15 @@ function ModoTVMovil({ onSalir }) {
             </div>
           )}
 
-          {/* ── FOOTER: stats rápidas ── */}
-          <div className="hud" style={{ ...mCard, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 16px', background: 'rgba(0,212,255,0.035)', border: '1px solid rgba(0,212,255,0.15)' }}>
-            <MtvLinea label="CAJAS DISP." valor={`${data.panelControl.cajasInfo.total} · ${fmtKg(data.panelControl.cajasInfo.kg)}`}
-              color={data.panelControl.cajasInfo.viejasCount > 0 ? NEON.ambar : NEON.cian} />
-            <MtvLinea label="CHEQUES 15D" valor={`${data.cheques.length}`} color={NEON.cianHi} />
+          {/* ── FOOTER: stats rápidas, cada una PESTAÑEA con más info ── */}
+          <div className="hud" style={{ ...mCard, display: 'flex', flexDirection: 'column', gap: 10, background: 'rgba(0,212,255,0.035)', border: '1px solid rgba(0,212,255,0.15)' }}>
+            <MtvRotativo caras={carasIngresoHoy(data)} ms={12000} />
+            <MtvRotativo caras={carasStock(data)} ms={11000} />
+            <MtvRotativo caras={carasCheques(data)} ms={13000} />
             <MtvLinea label="PEND. COBRAR" valor={fmtArs(data.panelControl.saldoPendienteTotal)}
               color={data.panelControl.saldoPendienteTotal > 500000 ? NEON.ambar : NEON.cianHi} />
-            {data.cuentasConPct[0] && (
-              <MtvLinea label={`MONO: ${data.cuentasConPct[0].nombre.trim().split(' ')[0]}`}
-                valor={`${data.cuentasConPct[0].pctConsumo.toFixed(0)}% tope K`}
-                color={data.cuentasConPct[0].pctConsumo >= 95 ? NEON.rojo : data.cuentasConPct[0].pctConsumo >= 70 ? NEON.ambar : NEON.verde} />
-            )}
-          </div>
-
-          <div style={{ textAlign: 'center', fontSize: 11, color: NEON.muted, padding: '4px 0 8px' }}>
-            {ultimaAct && `Actualizado ${ultimaAct.toLocaleTimeString('es-AR', { timeZone: TZ_ARG, hour: '2-digit', minute: '2-digit' })}`} · se refresca solo
+            <MtvRotativo caras={carasMora(data)} ms={14000} />
+            <MtvRotativo caras={carasMono(data)} ms={15000} />
           </div>
         </div>
       )}
@@ -2245,6 +2465,18 @@ function MtvLinea({ label, valor, color }) {
     <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, minWidth: 0 }}>
       <span style={{ fontSize: 11, letterSpacing: 1, color: NEON.muted, fontWeight: 700, flexShrink: 0 }}>{label}</span>
       <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 19, lineHeight: 1, color: color || NEON.texto, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{valor}</span>
+    </div>
+  )
+}
+// Misma línea, pero rotando entre varias caras (versión celular del rotativo)
+function MtvRotativo({ caras, ms = 6000 }) {
+  const lista = (caras || []).filter(Boolean)
+  const i = useRotador(lista.length, ms)
+  if (lista.length === 0) return null
+  const c = lista[i]
+  return (
+    <div key={i} className="dej-rota">
+      <MtvLinea label={c.label} valor={c.valor} color={c.color} />
     </div>
   )
 }
@@ -2400,4 +2632,125 @@ function TvMini({ label, valor, color, chico }) {
       <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: chico ? '1.25vw' : '1.7vw', lineHeight: 1.1, color: color || NEON.texto }}>{valor}</div>
     </div>
   )
+}
+
+// Mini del footer que PESTAÑEA: rota entre varias caras (kilos por categoría,
+// piezas del stock, cheques, deudores en mora…) sin ocupar más lugar.
+// `caras` = [{ label, valor, color }]. Los puntitos de abajo marcan en cuál va.
+function TvMiniRotativo({ caras, ms = 6000, ancho }) {
+  const lista = (caras || []).filter(Boolean)
+  const i = useRotador(lista.length, ms)
+  if (lista.length === 0) return null
+  const c = lista[i]
+  return (
+    <div style={{ minWidth: ancho || '9vw' }}>
+      <div key={i} className="dej-rota">
+        <div style={{ fontSize: '0.65vw', letterSpacing: 2, color: NEON.muted, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.label}</div>
+        <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '1.25vw', lineHeight: 1.1, color: c.color || NEON.texto, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.valor}</div>
+      </div>
+      {lista.length > 1 && (
+        <div style={{ display: 'flex', gap: '0.2vw', marginTop: '0.2vw' }}>
+          {lista.slice(0, 12).map((_, k) => (
+            <span key={k} style={{ width: '0.25vw', height: '0.25vw', borderRadius: '50%', background: k === i ? NEON.cian : 'rgba(0,212,255,0.22)' }} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Clima de hoy / mañana — pestañea entre los dos. Va arriba, al lado del reloj.
+function ClimaTV({ movil }) {
+  const clima = useClima()
+  const caras = clima ? [
+    { titulo: 'HOY', icono: clima.hoy.icono, principal: `${clima.hoy.temp}°`, detalle: `${clima.hoy.txt} · ${clima.hoy.min}°/${clima.hoy.max}°` },
+    { titulo: 'MAÑANA', icono: clima.manana.icono, principal: `${clima.manana.max}°`, detalle: `${clima.manana.txt} · mín ${clima.manana.min}°` },
+  ] : []
+  const i = useRotador(caras.length, 8000)
+  if (!caras.length) return null
+  const c = caras[i]
+  const px = movil
+  return (
+    <div key={i} className="dej-rota" style={{
+      display: 'flex', alignItems: 'center', gap: px ? 6 : '0.4vw',
+      padding: px ? '4px 9px' : '0.2vw 0.6vw', borderRadius: 999,
+      background: 'rgba(0,212,255,0.06)', border: '1px solid rgba(0,212,255,0.18)',
+    }}>
+      <span style={{ fontSize: px ? 15 : '1vw', lineHeight: 1 }}>{c.icono}</span>
+      <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: px ? 18 : '1.3vw', lineHeight: 1, color: NEON.cianHi }}>{c.principal}</span>
+      <span style={{ fontSize: px ? 9 : '0.6vw', color: NEON.muted, lineHeight: 1.2, whiteSpace: 'nowrap' }}>
+        <strong style={{ color: NEON.cian, letterSpacing: 1 }}>{c.titulo}</strong><br />{c.detalle}
+      </span>
+    </div>
+  )
+}
+
+// ── Caras de los rotativos del footer (las comparten TV y celular) ──
+// Un decimal alcanza para leer de lejos: "39,2 kg" y no "39,20 kg".
+const kg1 = n => fmtKg(n, { decimales: 1 })
+// Plata abreviada para que entre al lado de los kilos: $6,6M / $850k
+const plataCorta = (n) => {
+  const v = Number(n) || 0
+  if (v >= 1000000) return `$${(v / 1000000).toLocaleString('es-AR', { maximumFractionDigits: 1 })}M`
+  if (v >= 1000) return `$${Math.round(v / 1000)}k`
+  return fmtArs(v)
+}
+// Mercadería que ingresó hoy: primero el total, después cada compra
+// (proveedor + producto) con sus kilos y lo que salió.
+function carasIngresoHoy(data) {
+  const ing = data.ingresosHoy || []
+  const tot = data.ingresosHoyTotal || { kg: 0, importe: 0 }
+  if (!ing.length) return [{ label: '📥 INGRESÓ HOY', valor: 'Sin ingresos', color: NEON.muted }]
+  return [
+    { label: '📥 INGRESÓ HOY', valor: `${kg1(tot.kg)} · ${plataCorta(tot.importe)}`, color: NEON.cianHi },
+    ...ing.slice(0, 10).map(i => ({
+      label: `📥 ${i.proveedor} · ${i.descripcion}`.slice(0, 40),
+      valor: `${i.u > 1 ? `${i.u} u · ` : ''}${kg1(i.kg)}${i.importe > 0 ? ` · ${plataCorta(i.importe)}` : ''}`,
+      color: NEON.ambar,
+    })),
+  ]
+}
+// Stock en kilos por grupo (media res, piezas, cajas, cortes, cerdo,
+// embutidos, hamburguesas, rebozados…). Medias/piezas/cajas suman unidades.
+function carasStock(data) {
+  const grupos = data.stockGrupos || []
+  if (!grupos.length) return [{ label: '📦 STOCK', valor: 'Sin stock', color: NEON.muted }]
+  return [
+    { label: '📦 STOCK TOTAL', valor: kg1(data.stockTotalKg || 0), color: NEON.cianHi },
+    ...grupos.map(g => ({
+      label: g.label,
+      valor: g.u != null ? `${g.u} u · ${kg1(g.kg)}` : kg1(g.kg),
+      color: NEON.cian,
+    })),
+  ]
+}
+// Cheques: cuántos vencen en 15 días y después uno por uno (fecha, quién, monto).
+function carasCheques(data) {
+  const chs = data.chequesProx || []
+  const ddmm = f => f ? `${String(f).slice(8, 10)}/${String(f).slice(5, 7)}` : '—'
+  return [
+    { label: 'CHEQUES 15D', valor: chs.length ? `${chs.length} · ${fmtArs(data.chequesProxTotal || 0)}` : '0', color: chs.length ? NEON.cianHi : NEON.muted },
+    ...chs.slice(0, 10).map(c => ({
+      label: `${c.emitido ? '📤' : '📥'} ${ddmm(c.fecha)} · ${String(c.quien).slice(0, 18)}`,
+      valor: fmtArs(c.monto),
+      color: c.emitido ? NEON.ambar : NEON.cianHi,
+    })),
+  ]
+}
+// Mora: total en mora y después cada cliente con lo que debe vencido.
+function carasMora(data) {
+  const ms = data.clientesEnMora || []
+  if (!ms.length) return [{ label: '⏰ EN MORA', valor: 'Nadie ✓', color: NEON.verde }]
+  return [
+    { label: `⏰ EN MORA · ${ms.length} clientes`, valor: fmtArs(data.totalMora || 0), color: NEON.rojo },
+    ...ms.slice(0, 12).map(c => ({ label: `⏰ ${c.nombre.slice(0, 20).toUpperCase()}`, valor: fmtArs(c.mora), color: NEON.rojo })),
+  ]
+}
+// Monotributo: cada cuenta con su % del tope K (la más cargada primero).
+function carasMono(data) {
+  return (data.cuentasConPct || []).slice(0, 8).map(c => ({
+    label: `MONO: ${c.nombre.trim().split(' ')[0].toUpperCase()}`,
+    valor: `${c.pctConsumo.toFixed(0)}% tope K`,
+    color: c.pctConsumo >= 95 ? NEON.rojo : c.pctConsumo >= 70 ? NEON.ambar : NEON.verde,
+  }))
 }

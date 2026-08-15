@@ -13,9 +13,6 @@ import { fechaHoyARG, horaHoyARG } from '../../lib/fechas'
 import { parseNumero, fmtPrecio } from '../../lib/formatos'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
-// Solo el CEO puede modificar / eliminar arqueos ya guardados
-const CEO_EMAIL = 'fabriciolenardon@gmail.com'
-
 const fmt$ = n => fmtPrecio(Math.abs(Number(n) || 0))
 
 // Denominaciones argentinas en orden descendente
@@ -65,8 +62,12 @@ export default function ArqueoCaja() {
   // suprime silenciosamente en la app instalada (PWA) y el guardado
   // quedaba bloqueado sin ningun mensaje.
   const [confirmandoGuardar, setConfirmandoGuardar] = useState(false)
-  const { user } = useAuth()
-  const esCEO = user?.email === CEO_EMAIL
+  // Confirmacion inline del BORRADO (mismo motivo que arriba: nada de
+  // window.confirm). Guarda el arqueo pendiente de eliminar.
+  const [confirmandoBorrar, setConfirmandoBorrar] = useState(null)
+  // Permiso de dueño centralizado en lib/permisos.js (antes se comparaba
+  // el email a mano acá).
+  const { isCEO: esCEO } = useAuth()
 
   // Recargar ventas cuando cambia la fecha seleccionada (y cerrar la
   // confirmacion pendiente para no guardar contra datos de otro dia)
@@ -93,13 +94,23 @@ export default function ArqueoCaja() {
     setLoading(false)
   }
 
-  // Eliminar arqueo viejo (solo CEO — protegido en UI y en runtime)
+  // Eliminar arqueo viejo (solo CEO — protegido en UI y en runtime).
+  // Pide confirmacion inline: setea confirmandoBorrar y la fila del
+  // historial muestra los botones "Sí" / "No".
+  function pedirEliminarArqueo(arqueo) {
+    if (!esCEO) {
+      showMsg('❌ Solo el CEO puede eliminar arqueos', 'error')
+      return
+    }
+    setConfirmandoBorrar(arqueo)
+  }
+
   async function eliminarArqueo(arqueo) {
     if (!esCEO) {
       showMsg('❌ Solo el CEO puede eliminar arqueos', 'error')
       return
     }
-    if (!confirm(`¿Eliminar arqueo del ${arqueo.fecha} (${arqueo.hora || 'sin hora'})?\n\nEsta acción no se puede deshacer.`)) return
+    setConfirmandoBorrar(null)
     const { error } = await supabase.from('arqueos_caja').delete().eq('id', arqueo.id)
     if (error) {
       showMsg('❌ Error al eliminar: ' + error.message, 'error')
@@ -176,9 +187,72 @@ export default function ArqueoCaja() {
   const debitoDif = debitoRealNum - debitoEsperado
   const transferenciaDif = transferenciaRealNum - transferenciaEsperada
 
+  // ============================================================
+  // AVISOS ANTES DE CONFIRMAR — "esto no parece un arqueo bueno"
+  // ============================================================
+  // El arqueo se guarda igual (a veces la realidad es rara: un día
+  // con diferencia grande de verdad existe), pero el que guarda tiene
+  // que VERLO antes de apretar. Nació del 14/08/2026: se guardó un
+  // arqueo vacío arriba del bueno y quedó un faltante falso de $428.393
+  // que disparó alertas en el Dashboard durante días.
+  const totalEsperadoDia = efectivoEsperado + debitoEsperado + transferenciaEsperada
+  const difTotal = diferencia + debitoDif + transferenciaDif
+
+  // ¿Ya hay un arqueo guardado para esta fecha? (si estoy editando ESE,
+  // no cuenta — es el que estoy corrigiendo)
+  const arqueoDuplicado = useMemo(
+    () => (historial || []).find(a => a.fecha === fechaArqueo && a.id !== editandoId),
+    [historial, fechaArqueo, editandoId],
+  )
+
+  const avisos = useMemo(() => {
+    const out = []
+    const push = (nivel, texto) => out.push({ nivel, texto })
+
+    if (arqueoDuplicado) {
+      const d = Number(arqueoDuplicado.diferencia) || 0
+      push('alto', `Ya hay un arqueo del ${fechaArqueo}${arqueoDuplicado.hora ? ` a las ${String(arqueoDuplicado.hora).slice(0, 5)}` : ''} (${d >= 0 ? '+' : '−'}${fmt$(d)}). Si guardás este, quedan los DOS y el día va a mostrar un sobrante y un faltante a la vez. Para corregir el que ya está, cancelá y usá ✏️ en el historial.`)
+    }
+    if (totalContado === 0 && efectivoEsperado > 0) {
+      push('alto', `Estás guardando $0 de efectivo contado, pero el día tiene ${fmt$(efectivoEsperado)} de ventas en efectivo. Va a quedar como un faltante de todo el día.`)
+    }
+    if (debitoRealNum === 0 && debitoEsperado > 0) {
+      push('alto', `Débito/QR en $0 con ${fmt$(debitoEsperado)} esperados. ¿Te falta cargar el cierre del posnet?`)
+    }
+    if (transferenciaRealNum === 0 && transferenciaEsperada > 0) {
+      push('alto', `Transferencias en $0 con ${fmt$(transferenciaEsperada)} esperadas. ¿Te falta cargar el resumen del banco?`)
+    }
+    if (totalEsperadoDia === 0 && (totalContado > 0 || debitoRealNum > 0 || transferenciaRealNum > 0)) {
+      push('alto', `El ${fechaArqueo} no tiene NINGUNA venta cargada en el sistema y estás arqueando plata. Fijate que la fecha sea la correcta.`)
+    }
+    // Diferencia grande: relativa al día y con piso en pesos, para no
+    // avisar por monedas en un día flojo ni callarse en uno grande.
+    if (totalEsperadoDia > 0 && Math.abs(difTotal) > 20000 && Math.abs(difTotal) > totalEsperadoDia * 0.1) {
+      push('medio', `La diferencia total (${difTotal >= 0 ? '+' : '−'}${fmt$(difTotal)}) es más del 10% de lo esperado del día. Vale la pena recontar antes de dejarlo asentado.`)
+    }
+    if (!cajero.trim()) {
+      push('medio', 'No pusiste el nombre del cajero. Sin eso después no se sabe quién contó.')
+    }
+    return out
+  }, [arqueoDuplicado, fechaArqueo, totalContado, efectivoEsperado, debitoRealNum, debitoEsperado,
+      transferenciaRealNum, transferenciaEsperada, totalEsperadoDia, difTotal, cajero])
+
+  const hayAvisosAltos = avisos.some(a => a.nivel === 'alto')
+
   function guardarArqueo() {
-    if (totalContado === 0 && efectivoEsperado === 0 && debitoRealNum === 0 && transferenciaRealNum === 0) {
-      showMsg('Cargá al menos un valor para arquear', 'error')
+    // Los tres valores REALES en 0 = no se cargó nada. Antes esto se
+    // guardaba igual si el día tenía ventas (porque el esperado no era 0)
+    // y el arqueo quedaba con un "faltante" del total esperado — un
+    // fantasma. Pasó el 14/08/2026: un arqueo vacío guardado 14 segundos
+    // después del bueno inventó un faltante de $428.393 y disparó las
+    // alertas del Dashboard. Un día sin efectivo es posible (todo débito
+    // o transferencia), pero entonces alguno de los otros dos viene con
+    // valor: que los TRES estén en 0 con ventas cargadas no existe.
+    if (totalContado === 0 && debitoRealNum === 0 && transferenciaRealNum === 0) {
+      const hayVentas = efectivoEsperado > 0 || debitoEsperado > 0 || transferenciaEsperada > 0
+      showMsg(hayVentas
+        ? '⚠️ Está todo en 0 y el día tiene ventas. Cargá lo contado antes de guardar (si no, queda un faltante falso).'
+        : 'Cargá al menos un valor para arquear', 'error')
       return
     }
     setConfirmandoGuardar(true)
@@ -291,6 +365,16 @@ export default function ArqueoCaja() {
               <div style={{ fontSize: 10, color: '#ffd17a', marginTop: 4 }}>⚠️ Cargando arqueo de día pasado</div>
             )}
           </div>
+
+          {/* Aviso temprano de duplicado: mejor enterarse ANTES de contar
+              todo de nuevo que en la confirmación. */}
+          {arqueoDuplicado && !editandoId && (
+            <div style={{ flex: '1 1 320px', minWidth: 260, padding: '8px 12px', borderRadius: 8, background: 'rgba(255,107,107,0.10)', border: '1px solid var(--red-light)', color: '#ff8b8b', fontSize: 12, lineHeight: 1.5 }}>
+              🚨 <b>Ya hay un arqueo del {fechaArqueo}</b>
+              {arqueoDuplicado.hora ? ` (${String(arqueoDuplicado.hora).slice(0, 5)})` : ''}. Si querés corregirlo,
+              usá el ✏️ del historial — si guardás otro quedan los dos y el día muestra sobrante y faltante a la vez.
+            </div>
+          )}
 
           <div>
             <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>MODO DE CARGA</label>
@@ -552,14 +636,32 @@ export default function ArqueoCaja() {
                   <div>💵 Efectivo — esperado {fmt$(efectivoEsperado)} · contado <b>{fmt$(totalContado)}</b> · dif {diferencia >= 0 ? '+' : ''}{fmt$(diferencia)}</div>
                   <div>💳 Débito/QR — esperado {fmt$(debitoEsperado)} · real <b>{fmt$(debitoRealNum)}</b> · dif {debitoDif >= 0 ? '+' : ''}{fmt$(debitoDif)}</div>
                   <div>🔄 Transfer. — esperada {fmt$(transferenciaEsperada)} · real <b>{fmt$(transferenciaRealNum)}</b> · dif {transferenciaDif >= 0 ? '+' : ''}{fmt$(transferenciaDif)}</div>
-                  <div style={{ marginTop: 6, fontWeight: 800, color: (diferencia + debitoDif + transferenciaDif) === 0 ? '#7dff7d' : '#ffd17a' }}>
-                    DIFERENCIA TOTAL: {(diferencia + debitoDif + transferenciaDif) >= 0 ? '+' : ''}{fmt$(diferencia + debitoDif + transferenciaDif)}
+                  <div style={{ marginTop: 6, fontWeight: 800, color: difTotal === 0 ? '#7dff7d' : '#ffd17a' }}>
+                    DIFERENCIA TOTAL: {difTotal >= 0 ? '+' : ''}{fmt$(difTotal)}
                   </div>
                 </div>
+
+                {/* Avisos: lo que hace pensar que este arqueo no es bueno.
+                    No bloquean (la realidad a veces es rara), pero hay que verlos. */}
+                {avisos.length > 0 && (
+                  <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {avisos.map((a, i) => (
+                      <div key={i} style={{
+                        padding: '8px 10px', borderRadius: 6, fontSize: 12, lineHeight: 1.5,
+                        background: a.nivel === 'alto' ? 'rgba(255,107,107,0.10)' : 'rgba(255,209,122,0.08)',
+                        border: `1px solid ${a.nivel === 'alto' ? 'var(--red-light)' : '#6a5a2a'}`,
+                        color: a.nivel === 'alto' ? '#ff8b8b' : '#ffd17a',
+                      }}>
+                        <b>{a.nivel === 'alto' ? '🚨' : '⚠️'}</b> {a.texto}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
                   <button onClick={confirmarGuardarArqueo} disabled={guardando}
-                    style={{ flex: 1, padding: '12px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: 14 }}>
-                    ✅ Sí, guardar
+                    style={{ flex: 1, padding: '12px', background: hayAvisosAltos ? '#5a1a1a' : 'var(--gold)', color: hayAvisosAltos ? '#ff8b8b' : '#000', border: hayAvisosAltos ? '1px solid var(--red-light)' : 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: 14 }}>
+                    {hayAvisosAltos ? '⚠️ Guardar igual' : '✅ Sí, guardar'}
                   </button>
                   <button onClick={() => setConfirmandoGuardar(false)}
                     style={{ flex: 1, padding: '12px', background: 'transparent', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 8, cursor: 'pointer', fontWeight: 600, fontSize: 14 }}>
@@ -583,6 +685,9 @@ export default function ArqueoCaja() {
           <HistorialArqueosPaginado
             historial={historial}
             onEliminar={eliminarArqueo}
+            onPedirEliminar={pedirEliminarArqueo}
+            onCancelarBorrar={() => setConfirmandoBorrar(null)}
+            confirmandoBorrar={confirmandoBorrar}
             onEditar={iniciarEdicion}
             editandoId={editandoId}
             esCEO={esCEO}
@@ -600,7 +705,7 @@ export default function ArqueoCaja() {
 
 // Sub-componente: pagina la lista de arqueos para evitar tabla interminable.
 // Las acciones (✏️ editar y 🗑️ eliminar) solo aparecen para el CEO.
-function HistorialArqueosPaginado({ historial, onEliminar, onEditar, editandoId, esCEO }) {
+function HistorialArqueosPaginado({ historial, onEliminar, onPedirEliminar, onCancelarBorrar, confirmandoBorrar, onEditar, editandoId, esCEO }) {
   const pag = usePaginacion(historial, 20)
   return (
     <>
@@ -688,11 +793,25 @@ function HistorialArqueosPaginado({ historial, onEliminar, onEditar, editandoId,
                         }}>
                         {enEdicion ? '✏️ en edición' : '✏️'}
                       </button>
-                      <button onClick={() => onEliminar(a)}
-                        title="Eliminar este arqueo"
-                        style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: 'var(--red-light)' }}>
-                        🗑️
-                      </button>
+                      {confirmandoBorrar?.id === a.id ? (
+                        <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                          <span style={{ fontSize: 10, fontWeight: 700 }}>¿Eliminar?</span>
+                          <button onClick={() => onEliminar(a)}
+                            style={{ background: '#5a1a1a', border: '1px solid var(--red-light)', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 800, color: '#ff8b8b' }}>
+                            Sí
+                          </button>
+                          <button onClick={onCancelarBorrar}
+                            style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', fontSize: 11, color: 'var(--muted)' }}>
+                            No
+                          </button>
+                        </span>
+                      ) : (
+                        <button onClick={() => onPedirEliminar(a)}
+                          title="Eliminar este arqueo"
+                          style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: 'var(--red-light)' }}>
+                          🗑️
+                        </button>
+                      )}
                     </td>
                   )}
                 </tr>

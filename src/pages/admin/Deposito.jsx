@@ -20,6 +20,7 @@ import PolloCajonesTab from './PolloCajonesTab'
 import { cargarCategoriasPrecios, labelsDeCategorias } from '../../lib/categoriasPrecios'
 import { estadoBloqueoCliente } from '../../lib/moraClientes'
 import { logAuditoria } from '../../lib/auditoria'
+import { useAuth } from '../../context/AuthContext'
 
 // Nombre legible de cada tipo de embutido/salame (para descripciones de
 // historial y entradas registradas). El <select> usa estas mismas claves.
@@ -328,6 +329,9 @@ const CATEGORIA_A_STOCK = {
 }
 
 export function Deposito() {
+  // El ajuste de stock es exclusivo del dueño: al resto de los admin ni
+  // siquiera les aparece la pestaña (ver lib/permisos.js).
+  const { isCEO } = useAuth()
   const [tab, setTab] = useState('entradas')
   const [alert, setAlert] = useState(null)
   const [remitoActual, setRemitoActual] = useState(null)
@@ -354,7 +358,7 @@ export function Deposito() {
           { id: 'pollo_cajones', label: '🍗 Pollo Cajones' },
           { id: 'flujo', label: '📥 Flujo Depósito' },
           { id: 'remitos', label: '🧾 Remitos' },
-          { id: 'ajuste', label: '🔧 Ajuste Stock' },
+          ...(isCEO ? [{ id: 'ajuste', label: '🔧 Ajuste Stock' }] : []),
         ].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
             style={{ padding: '8px 16px', borderRadius: 8, border: `1px solid ${tab === t.id ? 'var(--amber)' : 'var(--border)'}`, background: tab === t.id ? 'var(--amber)' : 'transparent', color: tab === t.id ? '#fff' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
@@ -369,7 +373,7 @@ export function Deposito() {
 {tab === 'pollo_cajones' && <PolloCajonesTab key={tab} />}
 {tab === 'remitos' && <RemitosTab remitoActual={remitoActual} />}
       {tab === 'flujo' && <FlujoDeposito />}
-      {tab === 'ajuste' && <AjusteStock />}
+      {tab === 'ajuste' && isCEO && <AjusteStock />}
     </div>
   )
 }
