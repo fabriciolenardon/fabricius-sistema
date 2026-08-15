@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { esCEO } from '../lib/permisos'
 
 const AuthContext = createContext({})
 
@@ -65,9 +66,12 @@ export function AuthProvider({ children }) {
   const isFranquicia = profile?.rol === 'franquicia'
   const isClienteMayorista = profile?.rol === 'cliente_mayorista'
   const isCajero = profile?.rol === 'cajero'
+  // Dueño de la empresa: los tres admin no son equivalentes — hay acciones
+  // (hoy el ajuste de stock) reservadas a Fabricio. Ver lib/permisos.js.
+  const isCEO = isAdmin && esCEO(profile, user)
 
   return (
-    <AuthContext.Provider value={{ user, profile, profileMissing, loading, isAdmin, isFranquicia, isClienteMayorista, isCajero, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, profile, profileMissing, loading, isAdmin, isCEO, isFranquicia, isClienteMayorista, isCajero, signIn, signOut }}>
       {children}
     </AuthContext.Provider>
   )
