@@ -88,7 +88,9 @@ const fFecha = s => s ? new Date(s).toLocaleString('es-AR', {
 }) : '—'
 
 export default function AjusteStock() {
-  const { isAdmin } = useAuth()
+  // Solo el DUEÑO ajusta stock (pedido de Fabricio 14/08/2026): ser admin no
+  // alcanza — Ariel y Giuliana también lo son. Ver lib/permisos.js.
+  const { isCEO } = useAuth()
   const [stocks, setStocks] = useState([])
   const [historial, setHistorial] = useState([])  // ajustes registrados (auditoría) = desfasajes
   const [loading, setLoading] = useState(true)
@@ -190,8 +192,8 @@ export default function AjusteStock() {
   }
 
   async function guardarAjustes() {
-    if (!isAdmin) {
-      showMsg('Solo el admin puede ajustar stock', 'error')
+    if (!isCEO) {
+      showMsg('Solo el dueño puede ajustar stock', 'error')
       return
     }
     const cambios = filas.filter(f => f.modificado)
@@ -243,10 +245,14 @@ export default function AjusteStock() {
     await cargar()
   }
 
-  if (!isAdmin) {
+  if (!isCEO) {
     return (
       <div style={{ padding: 20, background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 8, color: '#ff6b6b' }}>
-        🔒 Solo el administrador puede acceder al ajuste de stock.
+        🔒 El ajuste de stock es exclusivo del dueño de la empresa.
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
+          Si contaste stock y no coincide con el sistema, avisale a Fabricio con el detalle
+          (producto, kg contados y por qué) para que lo corrija él.
+        </div>
       </div>
     )
   }
