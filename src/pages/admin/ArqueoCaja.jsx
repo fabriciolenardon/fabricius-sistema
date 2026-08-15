@@ -13,9 +13,6 @@ import { fechaHoyARG, horaHoyARG } from '../../lib/fechas'
 import { parseNumero, fmtPrecio } from '../../lib/formatos'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
-// Solo el CEO puede modificar / eliminar arqueos ya guardados
-const CEO_EMAIL = 'fabriciolenardon@gmail.com'
-
 const fmt$ = n => fmtPrecio(Math.abs(Number(n) || 0))
 
 // Denominaciones argentinas en orden descendente
@@ -65,8 +62,12 @@ export default function ArqueoCaja() {
   // suprime silenciosamente en la app instalada (PWA) y el guardado
   // quedaba bloqueado sin ningun mensaje.
   const [confirmandoGuardar, setConfirmandoGuardar] = useState(false)
-  const { user } = useAuth()
-  const esCEO = user?.email === CEO_EMAIL
+  // Confirmacion inline del BORRADO (mismo motivo que arriba: nada de
+  // window.confirm). Guarda el arqueo pendiente de eliminar.
+  const [confirmandoBorrar, setConfirmandoBorrar] = useState(null)
+  // Permiso de dueño centralizado en lib/permisos.js (antes se comparaba
+  // el email a mano acá).
+  const { isCEO: esCEO } = useAuth()
 
   // Recargar ventas cuando cambia la fecha seleccionada (y cerrar la
   // confirmacion pendiente para no guardar contra datos de otro dia)
@@ -93,13 +94,23 @@ export default function ArqueoCaja() {
     setLoading(false)
   }
 
-  // Eliminar arqueo viejo (solo CEO — protegido en UI y en runtime)
+  // Eliminar arqueo viejo (solo CEO — protegido en UI y en runtime).
+  // Pide confirmacion inline: setea confirmandoBorrar y la fila del
+  // historial muestra los botones "Sí" / "No".
+  function pedirEliminarArqueo(arqueo) {
+    if (!esCEO) {
+      showMsg('❌ Solo el CEO puede eliminar arqueos', 'error')
+      return
+    }
+    setConfirmandoBorrar(arqueo)
+  }
+
   async function eliminarArqueo(arqueo) {
     if (!esCEO) {
       showMsg('❌ Solo el CEO puede eliminar arqueos', 'error')
       return
     }
-    if (!confirm(`¿Eliminar arqueo del ${arqueo.fecha} (${arqueo.hora || 'sin hora'})?\n\nEsta acción no se puede deshacer.`)) return
+    setConfirmandoBorrar(null)
     const { error } = await supabase.from('arqueos_caja').delete().eq('id', arqueo.id)
     if (error) {
       showMsg('❌ Error al eliminar: ' + error.message, 'error')
@@ -177,8 +188,19 @@ export default function ArqueoCaja() {
   const transferenciaDif = transferenciaRealNum - transferenciaEsperada
 
   function guardarArqueo() {
-    if (totalContado === 0 && efectivoEsperado === 0 && debitoRealNum === 0 && transferenciaRealNum === 0) {
-      showMsg('Cargá al menos un valor para arquear', 'error')
+    // Los tres valores REALES en 0 = no se cargó nada. Antes esto se
+    // guardaba igual si el día tenía ventas (porque el esperado no era 0)
+    // y el arqueo quedaba con un "faltante" del total esperado — un
+    // fantasma. Pasó el 14/08/2026: un arqueo vacío guardado 14 segundos
+    // después del bueno inventó un faltante de $428.393 y disparó las
+    // alertas del Dashboard. Un día sin efectivo es posible (todo débito
+    // o transferencia), pero entonces alguno de los otros dos viene con
+    // valor: que los TRES estén en 0 con ventas cargadas no existe.
+    if (totalContado === 0 && debitoRealNum === 0 && transferenciaRealNum === 0) {
+      const hayVentas = efectivoEsperado > 0 || debitoEsperado > 0 || transferenciaEsperada > 0
+      showMsg(hayVentas
+        ? '⚠️ Está todo en 0 y el día tiene ventas. Cargá lo contado antes de guardar (si no, queda un faltante falso).'
+        : 'Cargá al menos un valor para arquear', 'error')
       return
     }
     setConfirmandoGuardar(true)
@@ -583,6 +605,9 @@ export default function ArqueoCaja() {
           <HistorialArqueosPaginado
             historial={historial}
             onEliminar={eliminarArqueo}
+            onPedirEliminar={pedirEliminarArqueo}
+            onCancelarBorrar={() => setConfirmandoBorrar(null)}
+            confirmandoBorrar={confirmandoBorrar}
             onEditar={iniciarEdicion}
             editandoId={editandoId}
             esCEO={esCEO}
@@ -600,7 +625,7 @@ export default function ArqueoCaja() {
 
 // Sub-componente: pagina la lista de arqueos para evitar tabla interminable.
 // Las acciones (✏️ editar y 🗑️ eliminar) solo aparecen para el CEO.
-function HistorialArqueosPaginado({ historial, onEliminar, onEditar, editandoId, esCEO }) {
+function HistorialArqueosPaginado({ historial, onEliminar, onPedirEliminar, onCancelarBorrar, confirmandoBorrar, onEditar, editandoId, esCEO }) {
   const pag = usePaginacion(historial, 20)
   return (
     <>
@@ -688,11 +713,25 @@ function HistorialArqueosPaginado({ historial, onEliminar, onEditar, editandoId,
                         }}>
                         {enEdicion ? '✏️ en edición' : '✏️'}
                       </button>
-                      <button onClick={() => onEliminar(a)}
-                        title="Eliminar este arqueo"
-                        style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: 'var(--red-light)' }}>
-                        🗑️
-                      </button>
+                      {confirmandoBorrar?.id === a.id ? (
+                        <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                          <span style={{ fontSize: 10, fontWeight: 700 }}>¿Eliminar?</span>
+                          <button onClick={() => onEliminar(a)}
+                            style={{ background: '#5a1a1a', border: '1px solid var(--red-light)', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 800, color: '#ff8b8b' }}>
+                            Sí
+                          </button>
+                          <button onClick={onCancelarBorrar}
+                            style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', fontSize: 11, color: 'var(--muted)' }}>
+                            No
+                          </button>
+                        </span>
+                      ) : (
+                        <button onClick={() => onPedirEliminar(a)}
+                          title="Eliminar este arqueo"
+                          style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: 'var(--red-light)' }}>
+                          🗑️
+                        </button>
+                      )}
                     </td>
                   )}
                 </tr>
