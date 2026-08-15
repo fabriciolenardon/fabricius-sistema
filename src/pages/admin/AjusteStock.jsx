@@ -97,6 +97,10 @@ export default function AjusteStock() {
   const [guardando, setGuardando] = useState(false)
   const [msg, setMsg] = useState(null)
   const [filtro, setFiltro] = useState('todos') // 'todos' | 'negativos' | 'modificados'
+  // Confirmaciones INLINE (nada de window.confirm: en iPhone/PWA lo suprimen sin
+  // error y la acción se pierde en silencio — regla de oro N°4).
+  const [confirmLimpiar, setConfirmLimpiar] = useState(false)
+  const [confirmGuardar, setConfirmGuardar] = useState(null) // { cambios, motivo }
 
   useEffect(() => { cargar() }, [])
 
@@ -179,17 +183,26 @@ export default function AjusteStock() {
   const cantModificados = filas.filter(f => f.modificado).length
 
   function setContado(tipo, val) {
+    // Si estaba abierta una confirmación, la invalidamos: lo que se muestra en
+    // el panel tiene que ser siempre lo que se va a guardar.
+    setConfirmGuardar(null)
     setContados(c => ({ ...c, [tipo]: val }))
   }
 
   function limpiar() {
     if (cantModificados === 0) return
-    if (!confirm('¿Descartar todos los valores cargados?')) return
-    setContados({})
-    setMotivo('')
+    setConfirmGuardar(null)
+    setConfirmLimpiar(true)
   }
 
-  async function guardarAjustes() {
+  function ejecutarLimpiar() {
+    setContados({})
+    setMotivo('')
+    setConfirmLimpiar(false)
+  }
+
+  // Paso 1: validar y abrir el panel de confirmación inline con el resumen.
+  function pedirGuardar() {
     if (!isAdmin) {
       showMsg('Solo el admin puede ajustar stock', 'error')
       return
@@ -203,11 +216,14 @@ export default function AjusteStock() {
       showMsg('Cargá un motivo del ajuste (ej: "Conteo físico fin de semana")', 'error')
       return
     }
-    const resumen = cambios.map(c => {
-      const signo = c.diferencia > 0 ? '+' : ''
-      return `${c.label}: ${c.actual} → ${c.contado} (${signo}${fmt(c.diferencia)} ${c.unidad})`
-    }).join('\n')
-    if (!confirm(`📋 GUARDAR AJUSTES (${cambios.length})\n\n${resumen}\n\nMotivo: ${motivo}\n\n¿Confirmar?`)) return
+    setConfirmLimpiar(false)
+    setConfirmGuardar({ cambios, motivo: motivo.trim() })
+  }
+
+  // Paso 2: escribir en stock_actual lo que se mostró en el panel.
+  async function guardarAjustes() {
+    if (!confirmGuardar) return
+    const { cambios, motivo: motivoTxt } = confirmGuardar
 
     setGuardando(true)
     const errores = []
@@ -226,12 +242,13 @@ export default function AjusteStock() {
         modulo: 'deposito',
         entidad: 'stock_actual',
         entidad_id: c.tipo,
-        descripcion: `Ajuste de stock "${c.label}": ${c.actual} → ${c.contado} (${signo}${fmt(c.diferencia)} ${c.unidad}). Motivo: ${motivo}`,
+        descripcion: `Ajuste de stock "${c.label}": ${c.actual} → ${c.contado} (${signo}${fmt(c.diferencia)} ${c.unidad}). Motivo: ${motivoTxt}`,
         valoresAntes: { tipo: c.tipo, kg_disponible: c.actual },
-        valoresDespues: { tipo: c.tipo, kg_disponible: c.contado, motivo },
+        valoresDespues: { tipo: c.tipo, kg_disponible: c.contado, motivo: motivoTxt },
       })
     }
     setGuardando(false)
+    setConfirmGuardar(null)
 
     if (errores.length > 0) {
       showMsg(`Se guardaron ${cambios.length - errores.length} de ${cambios.length}. Errores: ${errores.join('; ')}`, 'error', 8000)
@@ -368,34 +385,104 @@ export default function AjusteStock() {
         </div>
       )}
 
-      {/* Footer con motivo + guardar */}
+      {/* Footer con motivo + guardar.
+          La confirmación es INLINE (window.confirm no se muestra en iOS/PWA y el
+          ajuste se perdía en silencio). Mientras está abierto el panel se oculta
+          el form para que lo que se ve sea exactamente lo que se va a escribir. */}
       <div className="card" style={{ marginTop: 16, padding: 16 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, alignItems: 'end' }}>
+        {confirmGuardar ? (
           <div>
-            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-              Motivo del ajuste (obligatorio)
-            </label>
-            <input
-              value={motivo}
-              onChange={e => setMotivo(e.target.value)}
-              placeholder="Ej: Conteo físico fin de semana · Carga inicial almacén · Corrección venta mal cargada"
-              style={{ ...inp, textAlign: 'left' }}
-            />
-            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-              Queda guardado en el log de auditoría para poder rastrear el cambio después.
+            <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 4 }}>
+              📋 Confirmar {confirmGuardar.cambios.length} ajuste{confirmGuardar.cambios.length === 1 ? '' : 's'} de stock
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12, lineHeight: 1.5 }}>
+              Revisá los cambios antes de escribirlos en el stock. Esto edita el stock directamente
+              y queda registrado en auditoría con tu nombre.
+            </div>
+
+            <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', marginBottom: 12 }}>
+              <div style={{ maxHeight: 300, overflowY: 'auto', overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 420 }}>
+                  <thead><tr style={{ background: 'var(--surface2)', position: 'sticky', top: 0 }}>
+                    <th style={thL}>Producto</th>
+                    <th style={thR}>Sistema → Contado</th>
+                    <th style={thR}>Diferencia</th>
+                  </tr></thead>
+                  <tbody>
+                    {confirmGuardar.cambios.map(c => (
+                      <tr key={c.tipo} style={{ borderTop: '1px solid var(--border)' }}>
+                        <td style={{ padding: '7px 10px', fontWeight: 600 }}>{c.label}</td>
+                        <td style={{ ...tdR, whiteSpace: 'nowrap', color: 'var(--muted)' }}>
+                          {fmt(c.actual)} → <b style={{ color: 'var(--text)' }}>{fmt(c.contado)}</b> {c.unidad}
+                        </td>
+                        <td style={{ ...tdR, color: colorDif(c.diferencia), fontWeight: 700, whiteSpace: 'nowrap' }}>
+                          {c.diferencia > 0 ? '+' : ''}{fmt(c.diferencia)} {c.unidad}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', marginBottom: 12 }}>
+              <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Motivo</div>
+              <div style={{ fontSize: 13, fontWeight: 700, wordBreak: 'break-word' }}>{confirmGuardar.motivo}</div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button onClick={guardarAjustes} disabled={guardando}
+                style={{ padding: '12px 20px', background: guardando ? 'var(--surface2)' : 'var(--gold)', color: guardando ? 'var(--muted)' : '#000', border: 'none', borderRadius: 8, cursor: guardando ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 800 }}>
+                {guardando ? '⏳ Guardando…' : '✅ Sí, guardar'}
+              </button>
+              <button onClick={() => setConfirmGuardar(null)} disabled={guardando}
+                style={{ padding: '12px 20px', background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 8, cursor: guardando ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 600 }}>
+                Cancelar
+              </button>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={limpiar} disabled={cantModificados === 0}
-              style={{ padding: '10px 16px', background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 8, cursor: cantModificados === 0 ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600, opacity: cantModificados === 0 ? 0.4 : 1 }}>
-              ✕ Limpiar
-            </button>
-            <button onClick={guardarAjustes} disabled={guardando || cantModificados === 0}
-              style={{ padding: '10px 20px', background: cantModificados > 0 && !guardando ? 'var(--gold)' : 'var(--surface2)', color: cantModificados > 0 && !guardando ? '#000' : 'var(--muted)', border: 'none', borderRadius: 8, cursor: (guardando || cantModificados === 0) ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 800 }}>
-              {guardando ? '⏳ Guardando…' : `💾 Guardar ${cantModificados} ajuste${cantModificados === 1 ? '' : 's'}`}
-            </button>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, alignItems: 'end' }}>
+            <div>
+              <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                Motivo del ajuste (obligatorio)
+              </label>
+              <input
+                value={motivo}
+                onChange={e => { setConfirmGuardar(null); setMotivo(e.target.value) }}
+                placeholder="Ej: Conteo físico fin de semana · Carga inicial almacén · Corrección venta mal cargada"
+                style={{ ...inp, textAlign: 'left' }}
+              />
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                Queda guardado en el log de auditoría para poder rastrear el cambio después.
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {confirmLimpiar ? (
+                <span style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 12, fontWeight: 700 }}>¿Descartar todo?</span>
+                  <button onClick={ejecutarLimpiar}
+                    style={{ padding: '10px 14px', background: '#3a1a1a', border: '1px solid #5a2a2a', color: '#ff8b8b', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 800 }}>
+                    Sí, descartar
+                  </button>
+                  <button onClick={() => setConfirmLimpiar(false)}
+                    style={{ padding: '10px 14px', background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+                    Cancelar
+                  </button>
+                </span>
+              ) : (
+                <button onClick={limpiar} disabled={cantModificados === 0}
+                  style={{ padding: '10px 16px', background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 8, cursor: cantModificados === 0 ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600, opacity: cantModificados === 0 ? 0.4 : 1 }}>
+                  ✕ Limpiar
+                </button>
+              )}
+              <button onClick={pedirGuardar} disabled={guardando || cantModificados === 0}
+                style={{ padding: '10px 20px', background: cantModificados > 0 && !guardando ? 'var(--gold)' : 'var(--surface2)', color: cantModificados > 0 && !guardando ? '#000' : 'var(--muted)', border: 'none', borderRadius: 8, cursor: (guardando || cantModificados === 0) ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 800 }}>
+                {guardando ? '⏳ Guardando…' : `💾 Guardar ${cantModificados} ajuste${cantModificados === 1 ? '' : 's'}`}
+              </button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* HISTORIAL DE DESFASAJES — de los ajustes registrados */}
