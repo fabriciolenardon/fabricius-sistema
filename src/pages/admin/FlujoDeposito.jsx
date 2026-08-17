@@ -17,6 +17,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import { MODELOS_DESPOSTE } from '../../lib/modelosDesposte'
+import { redondearStock } from '../../lib/stockHelpers'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
 import { fmtPrecio, fmtKg } from '../../lib/formatos'
@@ -196,10 +197,10 @@ export default function FlujoDeposito() {
       const { data: stockRow } = await supabase.from('stock_actual').select('*').eq('tipo', p.tipo_stock).maybeSingle()
       if (stockRow) {
         await supabase.from('stock_actual').update({
-          kg_disponible: (Number(stockRow.kg_disponible) || 0) + Number(p.kg)
+          kg_disponible: redondearStock((Number(stockRow.kg_disponible) || 0) + Number(p.kg))
         }).eq('tipo', p.tipo_stock)
       } else {
-        await supabase.from('stock_actual').insert({ tipo: p.tipo_stock, kg_disponible: Number(p.kg) })
+        await supabase.from('stock_actual').insert({ tipo: p.tipo_stock, kg_disponible: redondearStock(p.kg) })
       }
     }
 

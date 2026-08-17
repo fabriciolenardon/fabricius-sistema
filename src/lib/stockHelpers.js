@@ -54,6 +54,39 @@ export function stockNormalizado(valor) {
   return Math.abs(n) < EPSILON_STOCK ? 0 : n
 }
 
+// ───────────────────────────────────────────────────────────
+// PRECISIÓN AL GUARDAR — 5 enteros + 3 decimales
+// ───────────────────────────────────────────────────────────
+// El stock se guarda con precisión de 1 GRAMO y tope de 99.999,999 kg
+// (345,340 = 345 kg con 340 gramos). Así el residuo de float no se acumula
+// escritura tras escritura en vez de tener que limpiarlo después.
+//
+// La garantía de verdad está en la base: `stock_actual.kg_disponible` es
+// numeric(8,3) (migración 91), así que Postgres redondea igual venga de donde
+// venga la escritura. redondearStock() es la primera línea de defensa: deja
+// el número lindo antes de mandarlo y hace que la UI muestre lo mismo que
+// quedó guardado.
+export const DECIMALES_STOCK = 3      // gramos
+export const TOPE_STOCK = 99999.999   // 5 dígitos para el entero
+
+export function redondearStock(valor) {
+  const n = Number(valor)
+  if (!Number.isFinite(n)) return 0
+  const r = Math.round(n * 1000) / 1000
+  // Sin el clamp, un valor de 100.000+ lo rechaza la base con "numeric field
+  // overflow" y se pierde el movimiento entero.
+  if (r > TOPE_STOCK) return TOPE_STOCK
+  if (r < -TOPE_STOCK) return -TOPE_STOCK
+  return r
+}
+
+// ¿Este valor se pasa del tope? Para avisar ANTES de intentar guardarlo
+// (el clamp de redondearStock es la red, no el mensaje al usuario).
+export function excedeTopeStock(valor) {
+  const n = Number(valor)
+  return Number.isFinite(n) && Math.abs(n) > TOPE_STOCK
+}
+
 // Extrae el peso en kg de un cajón leyéndolo del nombre del producto.
 // Reconoce patrones tipo "X20KG", "X 14 KG", "cajón 20kg", etc.
 // Si no encuentra nada, devuelve 0 (no se aplica conversión).

@@ -13,15 +13,16 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { PIEZAS_CERDO } from '../../lib/modelosDesposte'
+import { redondearStock } from '../../lib/stockHelpers'
 import { fechaHoyARG } from '../../lib/fechas'
 import { parseNumero } from '../../lib/formatos'
 
 async function sumarStock(tipo, kg) {
   const { data } = await supabase.from('stock_actual').select('*').eq('tipo', tipo).maybeSingle()
   if (data) {
-    await supabase.from('stock_actual').update({ kg_disponible: (data.kg_disponible || 0) + kg }).eq('tipo', tipo)
+    await supabase.from('stock_actual').update({ kg_disponible: redondearStock((data.kg_disponible || 0) + kg) }).eq('tipo', tipo)
   } else {
-    await supabase.from('stock_actual').insert({ tipo, kg_disponible: kg })
+    await supabase.from('stock_actual').insert({ tipo, kg_disponible: redondearStock(kg) })
   }
 }
 

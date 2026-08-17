@@ -13,6 +13,7 @@
 // ============================================================
 import { supabase } from './supabase'
 import { fechaHoyARG } from './fechas'
+import { redondearStock } from './stockHelpers'
 
 const n = v => Number(v) || 0
 
@@ -72,11 +73,11 @@ async function actualizarStock(tipo, kg) {
   if (errSel) return { error: errSel }
   if (data) {
     const { error } = await supabase.from('stock_actual')
-      .update({ kg_disponible: (data.kg_disponible || 0) + kg })
+      .update({ kg_disponible: redondearStock((data.kg_disponible || 0) + kg) })
       .eq('tipo', tipo)
     return { error: error || null }
   }
-  const { error } = await supabase.from('stock_actual').insert({ tipo, kg_disponible: kg })
+  const { error } = await supabase.from('stock_actual').insert({ tipo, kg_disponible: redondearStock(kg) })
   return { error: error || null }
 }
 

@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase, fetchAllRows } from '../../lib/supabase'
 import { fechaHoyARG, fechaRelativaARG, esFechaFutura } from '../../lib/fechas'
 import { lunesDeLaSemana, domingoDeLaSemana } from '../../lib/cierreAuto'
-import { resolverDescuentoStock, bucketPiezaBovina } from '../../lib/stockHelpers'
+import { resolverDescuentoStock, bucketPiezaBovina, redondearStock } from '../../lib/stockHelpers'
 import { bucketDePiezaBovina, MERMA_PIEZA_DEFAULT, MERMA_PIEZA_GENERICA, MERMA_MEDIA_RES_DEFAULT } from '../../lib/modelosDesposte'
 import { cargarCajasDisponibles, crearCajasIngreso, venderCaja, revertirVentaCaja, CATEGORIA_A_TIPO_CAJA } from '../../lib/cajasStock'
 import { fmtPrecio, fmtKg, parseNumero } from '../../lib/formatos'
@@ -195,11 +195,11 @@ async function actualizarStock(tipo, kg) {
   if (errSel) return { error: errSel }
   if (data) {
     const { error } = await supabase.from('stock_actual')
-      .update({ kg_disponible: (data.kg_disponible || 0) + kg })
+      .update({ kg_disponible: redondearStock((data.kg_disponible || 0) + kg) })
       .eq('tipo', tipo)
     return { error: error || null }
   }
-  const { error } = await supabase.from('stock_actual').insert({ tipo, kg_disponible: kg })
+  const { error } = await supabase.from('stock_actual').insert({ tipo, kg_disponible: redondearStock(kg) })
   return { error: error || null }
 }
 

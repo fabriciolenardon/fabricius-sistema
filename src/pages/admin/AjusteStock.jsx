@@ -17,7 +17,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import { logAuditoria } from '../../lib/auditoria'
-import { EPSILON_STOCK, stockNormalizado } from '../../lib/stockHelpers'
+import { EPSILON_STOCK, stockNormalizado, redondearStock, excedeTopeStock, TOPE_STOCK } from '../../lib/stockHelpers'
 
 // Etiquetas legibles para cada tipo. Si llega un tipo desconocido se muestra
 // el `tipo` crudo como fallback.
@@ -226,6 +226,14 @@ export default function AjusteStock() {
       showMsg('Cargá un motivo del ajuste (ej: "Conteo físico fin de semana")', 'error')
       return
     }
+    // El stock se guarda con 4 enteros + 3 decimales: más de 9.999,999 lo
+    // rechaza la base. Avisamos acá para que se vea el typo (96000 en vez de
+    // 960) en vez de que falle el guardado.
+    const pasados = cambios.filter(c => excedeTopeStock(c.contado))
+    if (pasados.length > 0) {
+      showMsg(`El tope por producto es ${TOPE_STOCK} — revisá: ${pasados.map(c => c.label).join(', ')}`, 'error', 8000)
+      return
+    }
     setConfirmLimpiar(false)
     setConfirmGuardar({ cambios, motivo: motivo.trim() })
   }
@@ -238,10 +246,14 @@ export default function AjusteStock() {
     setGuardando(true)
     const errores = []
     for (const c of cambios) {
+      // El stock se guarda al gramo — la auditoría tiene que registrar el
+      // valor que realmente quedó, no el que se tipeó.
+      const guardado = redondearStock(c.contado)
+
       // 1) Actualizar el stock
       const { error } = await supabase
         .from('stock_actual')
-        .update({ kg_disponible: c.contado })
+        .update({ kg_disponible: guardado })
         .eq('tipo', c.tipo)
       if (error) { errores.push(`${c.label}: ${error.message}`); continue }
 
@@ -252,9 +264,9 @@ export default function AjusteStock() {
         modulo: 'deposito',
         entidad: 'stock_actual',
         entidad_id: c.tipo,
-        descripcion: `Ajuste de stock "${c.label}": ${c.actual} → ${c.contado} (${signo}${fmt(c.diferencia)} ${c.unidad}). Motivo: ${motivoTxt}`,
+        descripcion: `Ajuste de stock "${c.label}": ${c.actual} → ${guardado} (${signo}${fmt(c.diferencia)} ${c.unidad}). Motivo: ${motivoTxt}`,
         valoresAntes: { tipo: c.tipo, kg_disponible: c.actual },
-        valoresDespues: { tipo: c.tipo, kg_disponible: c.contado, motivo: motivoTxt },
+        valoresDespues: { tipo: c.tipo, kg_disponible: guardado, motivo: motivoTxt },
       })
     }
     setGuardando(false)
