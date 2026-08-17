@@ -170,7 +170,7 @@ function planillaHTML(filas, { conSistema = false } = {}) {
       .escribir { width: 92px; background: #fafafa; }
       .obs { width: 150px; }
       tbody.grupo { page-break-inside: avoid; }
-      .firmas { display: flex; gap: 34px; margin-top: 26px; page-break-inside: avoid; }
+      .firmas { display: flex; gap: 24px; margin-top: 30px; page-break-inside: avoid; }
       .firma { flex: 1; border-top: 1px solid #000; padding-top: 3px; font-size: 9px; text-align: center; }
       @media print { body { padding: 8px; } }
     </style></head>
@@ -213,6 +213,7 @@ function planillaHTML(filas, { conSistema = false } = {}) {
 
       <div class="firmas">
         <div class="firma">FIRMA DE QUIEN CONTÓ</div>
+        <div class="firma">ACLARACIÓN</div>
         <div class="firma">FIRMA DE CONTROL</div>
       </div>
     </body></html>`
