@@ -214,7 +214,6 @@ function planillaHTML(filas, { conSistema = false } = {}) {
       <div class="firmas">
         <div class="firma">FIRMA DE QUIEN CONTÓ</div>
         <div class="firma">ACLARACIÓN</div>
-        <div class="firma">FIRMA DE CONTROL</div>
       </div>
     </body></html>`
 }
