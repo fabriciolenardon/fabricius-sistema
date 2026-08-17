@@ -122,30 +122,59 @@ function agruparParaPlanilla(filas) {
   return grupos
 }
 
-// Planilla en papel para el conteo físico diario. Por defecto va CIEGA (sin la
+// Reparte los grupos en 2 columnas para que todo entre en UNA hoja. No parte
+// un grupo al medio: se llena la primera columna hasta pasar la mitad del
+// total y el resto va a la segunda (hoy da bovino+piezas+brosas | cerdo+
+// embutidos+hamburguesas+pollo, que además queda partido por sector).
+function repartirEnDosColumnas(grupos) {
+  const peso = g => g.items.length + 1  // +1 por el título del grupo
+  const mitad = grupos.reduce((s, g) => s + peso(g), 0) / 2
+  const a = []; const b = []
+  let usado = 0
+  for (const g of grupos) {
+    if (b.length === 0 && usado + peso(g) <= mitad) { a.push(g); usado += peso(g) }
+    else b.push(g)
+  }
+  // Si todo entrara en la primera (pocos productos), partir por la mitad igual.
+  return b.length === 0 ? [a, []] : [a, b]
+}
+
+// Planilla en papel para el conteo físico diario. Entra en UNA hoja A4: dos
+// columnas y sin columna de observaciones. Por defecto va CIEGA (sin la
 // cantidad del sistema): si el papel ya trae el número, el que cuenta lo copia
 // y el control no sirve para nada. `conSistema` lo agrega para cuando se quiere
 // usar como chequeo rápido en vez de conteo a ciegas.
 function planillaHTML(filas, { conSistema = false } = {}) {
   const grupos = agruparParaPlanilla(filas)
+  const [colA, colB] = repartirEnDosColumnas(grupos)
   const hoy = new Date().toLocaleDateString('es-AR', {
     day: '2-digit', month: '2-digit', year: 'numeric',
     timeZone: 'America/Argentina/Buenos_Aires',
   })
-  const colSistema = conSistema ? '<th style="width:70px">SISTEMA</th>' : ''
+  const nCols = conSistema ? 4 : 3
 
-  const secciones = grupos.map(g => `
-    <tbody class="grupo">
-      <tr><td class="grupo-tit" colspan="${conSistema ? 5 : 4}">${esc(g.titulo)}</td></tr>
-      ${g.items.map(f => `
-        <tr>
-          <td class="prod">${esc(f.label)}</td>
-          <td class="uni">${esc(f.unidad)}</td>
-          ${conSistema ? `<td class="sis">${fmt(f.actual)}</td>` : ''}
-          <td class="escribir"></td>
-          <td class="obs"></td>
-        </tr>`).join('')}
-    </tbody>`).join('')
+  const tabla = grupos => grupos.length === 0 ? '' : `
+    <table>
+      <thead><tr>
+        <th style="text-align:left; padding-left:5px">PRODUCTO</th>
+        <th class="th-uni">UNID.</th>
+        ${conSistema ? '<th class="th-sis">SIST.</th>' : ''}
+        <th class="th-cont">CONTADO</th>
+      </tr></thead>
+      ${grupos.map(g => `
+        <tbody class="grupo">
+          <tr><td class="grupo-tit" colspan="${nCols}">${esc(g.titulo)}</td></tr>
+          ${g.items.map(f => `
+            <tr>
+              <td class="prod">${esc(f.label)}</td>
+              <td class="uni">${esc(f.unidad)}</td>
+              ${conSistema ? `<td class="sis">${fmt(f.actual)}</td>` : ''}
+              <td class="escribir"></td>
+            </tr>`).join('')}
+        </tbody>`).join('')}
+    </table>`
+
+  const secciones = `<div class="cols"><div class="col">${tabla(colA)}</div><div class="col">${tabla(colB)}</div></div>`
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Planilla de conteo</title>
     <style>
@@ -160,19 +189,24 @@ function planillaHTML(filas, { conSistema = false } = {}) {
       .campo { flex: 1; font-size: 10px; font-weight: 700; }
       .campo .linea { border-bottom: 1px solid #000; height: 20px; margin-top: 2px; }
       .instrucciones { border: 1px solid #000; padding: 5px 8px; font-size: 9.5px; line-height: 1.45; margin-bottom: 8px; }
+      .cols { display: flex; gap: 14px; align-items: flex-start; }
+      .col { flex: 1; min-width: 0; }
       table { width: 100%; border-collapse: collapse; }
-      th { border: 1px solid #000; background: #e8e8e8; font-size: 8.5px; padding: 3px; letter-spacing: .5px; }
-      td { border: 1px solid #000; font-size: 10.5px; padding: 0 5px; height: 25px; }
-      .grupo-tit { background: #000; color: #fff; font-size: 10px; font-weight: 900; letter-spacing: 1.5px; height: 19px; padding: 0 6px; }
+      th { border: 1px solid #000; background: #e8e8e8; font-size: 7.5px; padding: 3px 2px; letter-spacing: .4px; }
+      .th-uni { width: 26px; } .th-sis { width: 44px; } .th-cont { width: 62px; }
+      td { border: 1px solid #000; font-size: 9.5px; padding: 0 4px; height: 21px; }
+      .grupo-tit { background: #000; color: #fff; font-size: 8.5px; font-weight: 900; letter-spacing: 1.2px; height: 17px; padding: 0 5px; }
       .prod { font-weight: 600; }
-      .uni { text-align: center; font-size: 9px; color: #555; width: 34px; }
-      .sis { text-align: right; font-family: monospace; font-size: 10px; color: #333; }
-      .escribir { width: 92px; background: #fafafa; }
-      .obs { width: 150px; }
+      .uni { text-align: center; font-size: 8px; color: #555; }
+      .sis { text-align: right; font-family: monospace; font-size: 9px; color: #333; }
+      .escribir { background: #fafafa; }
       tbody.grupo { page-break-inside: avoid; }
-      .firmas { display: flex; gap: 24px; margin-top: 30px; page-break-inside: avoid; }
-      .firma { flex: 1; border-top: 1px solid #000; padding-top: 3px; font-size: 9px; text-align: center; }
-      @media print { body { padding: 8px; } }
+      .firmas { display: flex; gap: 40px; margin-top: 30px; page-break-inside: avoid; }
+      .firma { flex: 1; border-top: 1px solid #000; padding-top: 3px; font-size: 8.5px; text-align: center; letter-spacing: .04em; }
+      @media print {
+        body { padding: 0; }
+        @page { size: A4 portrait; margin: 10mm; }
+      }
     </style></head>
     <body>
       <div class="header">
@@ -196,20 +230,10 @@ function planillaHTML(filas, { conSistema = false } = {}) {
       <div class="instrucciones">
         <b>Anotá lo que HAY, no lo que debería haber.</b> Si un producto está en cero, escribí <b>0</b> —
         no lo dejes vacío. Una línea vacía se lee como "no se contó" y queda sin cargar.
-        Ojo con la columna UNIDAD: <b>kg</b> es kilos y <b>u</b> es unidades (pollo, rebozados, sesos, cajas).
-        Lo que no cuadre o esté fallado, anotalo en OBSERVACIONES.
+        Ojo con la columna UNID.: <b>kg</b> es kilos y <b>u</b> es unidades (pollo, rebozados, sesos, cajas).
       </div>
 
-      <table>
-        <thead><tr>
-          <th style="text-align:left; padding-left:6px">PRODUCTO</th>
-          <th style="width:34px">UNID.</th>
-          ${colSistema}
-          <th style="width:92px">CONTADO</th>
-          <th style="width:150px">OBSERVACIONES</th>
-        </tr></thead>
-        ${secciones}
-      </table>
+      ${secciones}
 
       <div class="firmas">
         <div class="firma">FIRMA DE QUIEN CONTÓ</div>
