@@ -197,8 +197,10 @@ function planillaHTML(filas, { conSistema = false } = {}) {
       table { width: 100%; border-collapse: collapse; }
       th { border: 1px solid #000; background: #e8e8e8; font-size: 7.5px; padding: 3px 2px; letter-spacing: .4px; }
       .th-uni { width: 26px; } .th-sis { width: 44px; } .th-cont { width: 62px; }
-      td { border: 1px solid #000; font-size: 9.5px; padding: 0 4px; height: 21px; }
-      .grupo-tit { background: #000; color: #fff; font-size: 8.5px; font-weight: 900; letter-spacing: 1.2px; height: 17px; padding: 0 5px; }
+      /* Renglon alto: entra igual en una A4 vertical y queda comodo para
+         escribir a lapicera. */
+      td { border: 1px solid #000; font-size: 10px; padding: 0 4px; height: 28px; }
+      .grupo-tit { background: #000; color: #fff; font-size: 8.5px; font-weight: 900; letter-spacing: 1.2px; height: 20px; padding: 0 5px; }
       .prod { font-weight: 600; }
       .uni { text-align: center; font-size: 8px; color: #555; }
       .sis { text-align: right; font-family: monospace; font-size: 9px; color: #333; }
