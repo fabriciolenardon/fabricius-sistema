@@ -95,14 +95,19 @@ const TIPOS_FUERA_PLANILLA = new Set([
 // Agrupado por sector, para que se pueda recorrer la cámara de una sin ir y
 // volver. El `test` es por prefijo a propósito: si mañana se agrega un
 // brosa_* o un emb_* nuevo, cae solo en su grupo sin tocar esto.
+//
+// `col` es en qué columna de la hoja va cada grupo ('a' izquierda, 'b'
+// derecha). Está puesto a mano y no calculado: así queda parejo (26 y 26
+// líneas) y sobre todo estable — que un grupo no salte de columna solo porque
+// se cargó un producto nuevo.
 const GRUPOS_PLANILLA = [
-  { titulo: '🐄 BOVINO',             test: t => t === 'bovino_mr' || t === 'bovino_corte' },
-  { titulo: '🍖 PIEZAS BOVINAS',     test: t => t.startsWith('pieza_') },
-  { titulo: '🫀 BROSAS / ACHURAS',   test: t => t.startsWith('brosa_') },
-  { titulo: '🐷 CERDO',              test: t => t === 'cerdo' || t.startsWith('cerdo_') },
-  { titulo: '🌭 EMBUTIDOS',          test: t => t.startsWith('emb_') },
-  { titulo: '🍔 HAMBURGUESAS',       test: t => t.startsWith('hamb_') },
-  { titulo: '🍗 POLLO Y REBOZADOS',  test: t => t === 'pollo' || t === 'rebozado' || t.startsWith('caja_') },
+  { titulo: '🐄 BOVINO',             col: 'a', test: t => t === 'bovino_mr' || t === 'bovino_corte' },
+  { titulo: '🍖 PIEZAS BOVINAS',     col: 'a', test: t => t.startsWith('pieza_') },
+  { titulo: '🫀 BROSAS / ACHURAS',   col: 'a', test: t => t.startsWith('brosa_') },
+  { titulo: '🍗 POLLO Y REBOZADOS',  col: 'a', test: t => t === 'pollo' || t === 'rebozado' || t.startsWith('caja_') },
+  { titulo: '🐷 CERDO',              col: 'b', test: t => t === 'cerdo' || t.startsWith('cerdo_') },
+  { titulo: '🌭 EMBUTIDOS',          col: 'b', test: t => t.startsWith('emb_') },
+  { titulo: '🍔 HAMBURGUESAS',       col: 'b', test: t => t.startsWith('hamb_') },
 ]
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
@@ -115,28 +120,26 @@ function agruparParaPlanilla(filas) {
   const grupos = GRUPOS_PLANILLA.map(g => {
     const items = resto.filter(f => g.test(f.tipo))
     items.forEach(f => usados.add(f.tipo))
-    return { titulo: g.titulo, items }
+    return { titulo: g.titulo, col: g.col, items }
   }).filter(g => g.items.length > 0)
   const otros = resto.filter(f => !usados.has(f.tipo))
   if (otros.length > 0) grupos.push({ titulo: '📦 OTROS', items: otros })
   return grupos
 }
 
-// Reparte los grupos en 2 columnas para que todo entre en UNA hoja. No parte
-// un grupo al medio: se llena la primera columna hasta pasar la mitad del
-// total y el resto va a la segunda (hoy da bovino+piezas+brosas | cerdo+
-// embutidos+hamburguesas+pollo, que además queda partido por sector).
+// Reparte los grupos en 2 columnas para que todo entre en UNA hoja. La columna
+// de cada grupo viene fija de GRUPOS_PLANILLA; solo los grupos sin columna
+// asignada (OTROS: productos nuevos que todavía no están mapeados) se acomodan
+// en la que tenga menos líneas, para no desbalancear la hoja.
 function repartirEnDosColumnas(grupos) {
   const peso = g => g.items.length + 1  // +1 por el título del grupo
-  const mitad = grupos.reduce((s, g) => s + peso(g), 0) / 2
-  const a = []; const b = []
-  let usado = 0
-  for (const g of grupos) {
-    if (b.length === 0 && usado + peso(g) <= mitad) { a.push(g); usado += peso(g) }
-    else b.push(g)
+  const a = grupos.filter(g => g.col === 'a')
+  const b = grupos.filter(g => g.col === 'b')
+  const suma = col => col.reduce((s, g) => s + peso(g), 0)
+  for (const g of grupos.filter(g => !g.col)) {
+    (suma(a) <= suma(b) ? a : b).push(g)
   }
-  // Si todo entrara en la primera (pocos productos), partir por la mitad igual.
-  return b.length === 0 ? [a, []] : [a, b]
+  return [a, b]
 }
 
 // Planilla en papel para el conteo físico diario. Entra en UNA hoja A4: dos
