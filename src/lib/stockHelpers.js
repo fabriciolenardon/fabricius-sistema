@@ -21,6 +21,39 @@
 //      Ej: 3 cajones de "Suprema B X20KG" → 3 × 20 = 60 kg de pollo
 // ============================================================
 
+// ───────────────────────────────────────────────────────────
+// TOLERANCIA DE REDONDEO — un 0 es 0, no un negativo
+// ───────────────────────────────────────────────────────────
+// El stock se calcula sumando y restando floats (venta por venta, desposte
+// por desposte), así que un bucket que llegó a cero REAL queda con residuo:
+// pieza_costillar y pieza_costeletal terminaron en -0,0000000000000036 kg y
+// pieza_pierna en -0,000000000000021.
+//
+// En pantalla eso se muestra como "0" (todo se formatea con 2 decimales),
+// pero para el código `valor < 0` daba true: el 0 se pintaba en rojo, entraba
+// al filtro 🚨 Negativos y disparaba la alerta "Stock NEGATIVO" del dashboard
+// como si se hubiera vendido mercadería sin ingresar.
+//
+// Criterio: si en pantalla dice 0, es 0 — stock neutro, ni negativo ni
+// positivo. Como todo se muestra con 2 decimales, cualquier |valor| menor a
+// 0,005 redondea a cero. Son 5 gramos: por debajo de eso no hay faltante real
+// que avisar.
+export const EPSILON_STOCK = 0.005
+
+// ¿El bucket está REALMENTE en negativo? Usar siempre esto en vez de
+// `valor < 0` para alertas, filtros y colores de stock.
+export function esStockNegativo(valor) {
+  return (Number(valor) || 0) < -EPSILON_STOCK
+}
+
+// Colapsa el residuo a cero: -0,0000000000000036 → 0. Para mostrar y para
+// calcular diferencias contra el conteo físico (si no, "0 → 0" daba un ajuste
+// fantasma de +0).
+export function stockNormalizado(valor) {
+  const n = Number(valor) || 0
+  return Math.abs(n) < EPSILON_STOCK ? 0 : n
+}
+
 // Extrae el peso en kg de un cajón leyéndolo del nombre del producto.
 // Reconoce patrones tipo "X20KG", "X 14 KG", "cajón 20kg", etc.
 // Si no encuentra nada, devuelve 0 (no se aplica conversión).

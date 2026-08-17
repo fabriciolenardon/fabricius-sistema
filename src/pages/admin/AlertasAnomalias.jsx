@@ -22,6 +22,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
 import { fmtKg } from '../../lib/formatos'
+import { esStockNegativo } from '../../lib/stockHelpers'
 
 const fmt$ = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
 
@@ -92,7 +93,9 @@ export default function AlertasAnomalias() {
     ])
     setArqueosSemana(arq || [])
     setVentasHoy(ventas || [])
-    setStockNegativo((stock || []).filter(s => Number(s.kg_disponible) < 0))
+    // esStockNegativo (no `< 0`): un bucket vaciado queda con residuo de float
+    // (-0,0000000000000036) que se muestra como 0 y no es un faltante real.
+    setStockNegativo((stock || []).filter(s => esStockNegativo(s.kg_disponible)))
     setOrfanos((prods || []).filter(p => !p.stock_origen && !p.stock_no_aplica))
     setLoading(false)
   }

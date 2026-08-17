@@ -17,6 +17,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import { logAuditoria } from '../../lib/auditoria'
+import { EPSILON_STOCK, stockNormalizado } from '../../lib/stockHelpers'
 
 // Etiquetas legibles para cada tipo. Si llega un tipo desconocido se muestra
 // el `tipo` crudo como fallback.
@@ -131,7 +132,10 @@ export default function AjusteStock() {
 
   // Lista de filas con la diferencia ya calculada (memo para no recalcular en cada tecla)
   const filas = useMemo(() => stocks.map(s => {
-    const actual = Number(s.kg_disponible) || 0
+    // stockNormalizado: un bucket vaciado queda con residuo de float
+    // (-0,0000000000000036) que se muestra como 0 pero es < 0 — se pintaba en
+    // rojo, contaba como negativo y "0 → 0" daba un ajuste fantasma de +0.
+    const actual = stockNormalizado(s.kg_disponible)
     const contadoStr = contados[s.tipo]
     const tieneInput = contadoStr !== undefined && contadoStr !== ''
     const contado = tieneInput ? Number(contadoStr) : null
@@ -143,7 +147,9 @@ export default function AjusteStock() {
       actual,
       contado,
       diferencia,
-      modificado: tieneInput && diferencia !== 0 && !Number.isNaN(contado),
+      // Una diferencia que se muestra como 0 no es un ajuste: no tiene sentido
+      // escribir en stock_actual (ni loguear en auditoría) un cambio de 0.
+      modificado: tieneInput && !Number.isNaN(contado) && Math.abs(diferencia) >= EPSILON_STOCK,
     }
   }), [stocks, contados])
 
@@ -157,13 +163,15 @@ export default function AjusteStock() {
   // ── Historial de desfasajes: cada ajuste registrado = un desfasaje (físico − sistema) ──
   const desfasajes = useMemo(() => (historial || []).map(r => {
     const tipo = r.entidad_id
-    const antes = Number(r.valores_antes?.kg_disponible) || 0
-    const despues = Number(r.valores_despues?.kg_disponible) || 0
+    // Normalizado también acá: hay ajustes viejos cuyo "antes" es el residuo
+    // de float (-0,0000000000000036) y se listaban como un desfasaje de +0.
+    const antes = stockNormalizado(r.valores_antes?.kg_disponible)
+    const despues = stockNormalizado(r.valores_despues?.kg_disponible)
     return {
       id: r.id, tipo,
       label: LABELS[tipo] || tipo,
       unidad: TIPOS_POR_UNIDAD.has(tipo) ? 'u' : 'kg',
-      antes, despues, dif: despues - antes,
+      antes, despues, dif: stockNormalizado(despues - antes),
       motivo: r.valores_despues?.motivo || '—',
       fecha: r.fecha, usuario: r.usuario_nombre || '—',
     }
@@ -351,8 +359,9 @@ export default function AjusteStock() {
                 )}
                 {filasVisibles.map(f => {
                   const colorActual = f.actual < 0 ? '#ff6b6b' : f.actual === 0 ? 'var(--muted)' : 'var(--text)'
-                  const colorDif = f.diferencia == null ? 'var(--muted)'
-                    : f.diferencia === 0 ? 'var(--muted)'
+                  // f.modificado ya trae la tolerancia: una diferencia que
+                  // redondea a 0 se muestra neutra, no como "+0" en verde.
+                  const colorDif = !f.modificado ? 'var(--muted)'
                     : f.diferencia > 0 ? '#7dff7d'
                     : '#ff8b8b'
                   return (
@@ -375,10 +384,10 @@ export default function AjusteStock() {
                       </td>
                       <td style={{ textAlign: 'right', padding: '8px 12px', fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: colorDif }}>
                         {f.diferencia == null ? '—'
-                          : f.diferencia === 0 ? '0'
+                          : !f.modificado ? '0'
                           : (f.diferencia > 0 ? '+' : '') + fmt(f.diferencia)
                         }
-                        {f.diferencia != null && f.diferencia !== 0 && (
+                        {f.diferencia != null && f.modificado && (
                           <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 4 }}>{f.unidad}</span>
                         )}
                       </td>
