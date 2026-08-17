@@ -8,6 +8,7 @@
 //   - sumar/restar el agregado en stock_actual para compatibilidad
 // ============================================================
 import { supabase } from './supabase'
+import { redondearStock } from './stockHelpers'
 
 // Mapeo categoria del producto → tipo_caja en la tabla cajas_stock
 export const CATEGORIA_A_TIPO_CAJA = {
@@ -50,10 +51,10 @@ async function sumarStockActualCaja(tipoCaja, deltaKg) {
   const { data } = await supabase.from('stock_actual').select('*').eq('tipo', tipo).maybeSingle()
   if (data) {
     await supabase.from('stock_actual')
-      .update({ kg_disponible: (Number(data.kg_disponible) || 0) + deltaKg })
+      .update({ kg_disponible: redondearStock((Number(data.kg_disponible) || 0) + deltaKg) })
       .eq('tipo', tipo)
   } else {
-    await supabase.from('stock_actual').insert({ tipo, kg_disponible: deltaKg })
+    await supabase.from('stock_actual').insert({ tipo, kg_disponible: redondearStock(deltaKg) })
   }
 }
 

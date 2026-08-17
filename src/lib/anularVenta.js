@@ -9,7 +9,7 @@
 // recargar su vista.
 // ============================================================
 import { supabase } from './supabase'
-import { kgPorUnidadDeProducto } from './stockHelpers'
+import { kgPorUnidadDeProducto, redondearStock } from './stockHelpers'
 import { revertirVentaCaja } from './cajasStock'
 import { fmtPrecio } from './formatos'
 
@@ -107,7 +107,7 @@ export async function anularVenta(venta, { isAdmin = false, yaConfirmado = false
       const { data: stkPz } = await supabase.from('stock_actual').select('*').eq('tipo', bucketPz).maybeSingle()
       if (stkPz) {
         await supabase.from('stock_actual')
-          .update({ kg_disponible: (Number(stkPz.kg_disponible) || 0) + (Number(item.kg) || 0) })
+          .update({ kg_disponible: redondearStock((Number(stkPz.kg_disponible) || 0) + (Number(item.kg) || 0)) })
           .eq('tipo', bucketPz)
       }
       continue
@@ -122,7 +122,7 @@ export async function anularVenta(venta, { isAdmin = false, yaConfirmado = false
       const { data: stock } = await supabase.from('stock_actual').select('*').eq('tipo', tipoStock).maybeSingle()
       if (stock) {
         await supabase.from('stock_actual')
-          .update({ kg_disponible: (Number(stock.kg_disponible) || 0) + cantidad })
+          .update({ kg_disponible: redondearStock((Number(stock.kg_disponible) || 0) + cantidad) })
           .eq('tipo', tipoStock)
       }
     } catch (e) {

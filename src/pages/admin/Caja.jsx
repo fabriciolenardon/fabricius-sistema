@@ -12,7 +12,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { decodificarEANBalanza, esCodigoBalanza } from '../../lib/balanzaEAN'
 import { fechaHoyARG, horaHoyARG, horaNumARG } from '../../lib/fechas'
-import { kgPorUnidadDeProducto, bucketPiezaBovina } from '../../lib/stockHelpers'
+import { kgPorUnidadDeProducto, bucketPiezaBovina, redondearStock } from '../../lib/stockHelpers'
 import { cargarCajasDisponibles, venderCaja, CATEGORIA_A_TIPO_CAJA } from '../../lib/cajasStock'
 import { fmtPrecio, fmtKg, parseNumero } from '../../lib/formatos'
 import HistorialCaja from './HistorialCaja'
@@ -698,7 +698,7 @@ export default function Caja() {
         const { data: stkPz } = await supabase.from('stock_actual').select('*').eq('tipo', bucketPz).maybeSingle()
         if (stkPz) {
           await supabase.from('stock_actual')
-            .update({ kg_disponible: (stkPz.kg_disponible || 0) - (item.kg || 0) })
+            .update({ kg_disponible: redondearStock((stkPz.kg_disponible || 0) - (item.kg || 0)) })
             .eq('tipo', bucketPz)
         }
         continue
@@ -715,12 +715,12 @@ export default function Caja() {
       const { data: stock } = await supabase.from('stock_actual').select('*').eq('tipo', tipoStock).maybeSingle()
       if (stock) {
         await supabase.from('stock_actual')
-          .update({ kg_disponible: (stock.kg_disponible || 0) - cantidad })
+          .update({ kg_disponible: redondearStock((stock.kg_disponible || 0) - cantidad) })
           .eq('tipo', tipoStock)
       } else {
         // Si el tipo no existe todavía (ej. primera venta de cerdo_pieza),
         // crear la fila con valor negativo — actualizarStock-style behavior.
-        await supabase.from('stock_actual').insert({ tipo: tipoStock, kg_disponible: -cantidad })
+        await supabase.from('stock_actual').insert({ tipo: tipoStock, kg_disponible: redondearStock(-cantidad) })
       }
     }
 
@@ -1727,10 +1727,10 @@ function TicketManualCaja({ onGuardado }) {
       const { data: stock } = await supabase.from('stock_actual').select('*').eq('tipo', tipoStock).maybeSingle()
       if (stock) {
         await supabase.from('stock_actual')
-          .update({ kg_disponible: (stock.kg_disponible || 0) - cantidad })
+          .update({ kg_disponible: redondearStock((stock.kg_disponible || 0) - cantidad) })
           .eq('tipo', tipoStock)
       } else {
-        await supabase.from('stock_actual').insert({ tipo: tipoStock, kg_disponible: -cantidad })
+        await supabase.from('stock_actual').insert({ tipo: tipoStock, kg_disponible: redondearStock(-cantidad) })
       }
     }
     setGuardando(false)
