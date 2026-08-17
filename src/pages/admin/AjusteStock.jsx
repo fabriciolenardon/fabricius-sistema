@@ -84,9 +84,13 @@ const LABELS = {
 const TIPOS_POR_UNIDAD = new Set(['almacen', 'bebidas', 'pollo', 'caja_cb', 'caja_pt', 'rebozado', 'brosa_sesos'])
 
 // ── PLANILLA DE CONTEO ────────────────────────────────────────────────
-// Buckets que ya no se usan: siguen en la tabla (en 0) pero no tiene sentido
-// mandar a nadie a contarlos. Van al final de la planilla, aparte.
-const TIPOS_LEGACY = new Set(['bovino_pieza', 'bovino_brosa', 'embutido', 'caja_cb'])
+// Lo que NO va a la planilla de papel (sí sigue en la pantalla de ajuste):
+//   - almacen / bebidas: no se cuentan en este conteo diario
+//   - buckets viejos que ya no se usan y quedaron en 0
+const TIPOS_FUERA_PLANILLA = new Set([
+  'almacen', 'bebidas',
+  'bovino_pieza', 'bovino_brosa', 'embutido', 'caja_cb',
+])
 
 // Agrupado por sector, para que se pueda recorrer la cámara de una sin ir y
 // volver. El `test` es por prefijo a propósito: si mañana se agrega un
@@ -99,7 +103,6 @@ const GRUPOS_PLANILLA = [
   { titulo: '🌭 EMBUTIDOS',          test: t => t.startsWith('emb_') },
   { titulo: '🍔 HAMBURGUESAS',       test: t => t.startsWith('hamb_') },
   { titulo: '🍗 POLLO Y REBOZADOS',  test: t => t === 'pollo' || t === 'rebozado' || t.startsWith('caja_') },
-  { titulo: '🛒 ALMACÉN Y BEBIDAS',  test: t => t === 'almacen' || t === 'bebidas' },
 ]
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
@@ -107,8 +110,7 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '
 // Reparte las filas en los grupos. Lo que no matchea ningún grupo cae en
 // "OTROS" — nunca se pierde una fila de la planilla por no estar mapeada.
 function agruparParaPlanilla(filas) {
-  const legacy = filas.filter(f => TIPOS_LEGACY.has(f.tipo))
-  const resto = filas.filter(f => !TIPOS_LEGACY.has(f.tipo))
+  const resto = filas.filter(f => !TIPOS_FUERA_PLANILLA.has(f.tipo))
   const usados = new Set()
   const grupos = GRUPOS_PLANILLA.map(g => {
     const items = resto.filter(f => g.test(f.tipo))
@@ -117,7 +119,6 @@ function agruparParaPlanilla(filas) {
   }).filter(g => g.items.length > 0)
   const otros = resto.filter(f => !usados.has(f.tipo))
   if (otros.length > 0) grupos.push({ titulo: '📦 OTROS', items: otros })
-  if (legacy.length > 0) grupos.push({ titulo: '⚠️ NO SE USAN (deberían quedar en 0)', items: legacy, legacy: true })
   return grupos
 }
 
@@ -137,7 +138,7 @@ function planillaHTML(filas, { conSistema = false } = {}) {
     <tbody class="grupo">
       <tr><td class="grupo-tit" colspan="${conSistema ? 5 : 4}">${esc(g.titulo)}</td></tr>
       ${g.items.map(f => `
-        <tr${g.legacy ? ' class="legacy"' : ''}>
+        <tr>
           <td class="prod">${esc(f.label)}</td>
           <td class="uni">${esc(f.unidad)}</td>
           ${conSistema ? `<td class="sis">${fmt(f.actual)}</td>` : ''}
@@ -168,7 +169,6 @@ function planillaHTML(filas, { conSistema = false } = {}) {
       .sis { text-align: right; font-family: monospace; font-size: 10px; color: #333; }
       .escribir { width: 92px; background: #fafafa; }
       .obs { width: 150px; }
-      .legacy .prod { color: #666; font-weight: 400; font-style: italic; }
       tbody.grupo { page-break-inside: avoid; }
       .firmas { display: flex; gap: 34px; margin-top: 26px; page-break-inside: avoid; }
       .firma { flex: 1; border-top: 1px solid #000; padding-top: 3px; font-size: 9px; text-align: center; }
@@ -196,7 +196,7 @@ function planillaHTML(filas, { conSistema = false } = {}) {
       <div class="instrucciones">
         <b>Anotá lo que HAY, no lo que debería haber.</b> Si un producto está en cero, escribí <b>0</b> —
         no lo dejes vacío. Una línea vacía se lee como "no se contó" y queda sin cargar.
-        Ojo con la columna UNIDAD: <b>kg</b> es kilos y <b>u</b> es unidades (almacén, bebidas, pollo, sesos).
+        Ojo con la columna UNIDAD: <b>kg</b> es kilos y <b>u</b> es unidades (pollo, rebozados, sesos, cajas).
         Lo que no cuadre o esté fallado, anotalo en OBSERVACIONES.
       </div>
 
