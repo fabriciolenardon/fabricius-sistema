@@ -18,6 +18,7 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import { logAuditoria } from '../../lib/auditoria'
 import { EPSILON_STOCK, stockNormalizado, redondearStock, excedeTopeStock, TOPE_STOCK } from '../../lib/stockHelpers'
+import { imprimirHTML } from '../../lib/imprimir'
 
 // Etiquetas legibles para cada tipo. Si llega un tipo desconocido se muestra
 // el `tipo` crudo como fallback.
@@ -82,6 +83,141 @@ const LABELS = {
 // pesable), así que su bucket también cuenta unidades.
 const TIPOS_POR_UNIDAD = new Set(['almacen', 'bebidas', 'pollo', 'caja_cb', 'caja_pt', 'rebozado', 'brosa_sesos'])
 
+// ── PLANILLA DE CONTEO ────────────────────────────────────────────────
+// Buckets que ya no se usan: siguen en la tabla (en 0) pero no tiene sentido
+// mandar a nadie a contarlos. Van al final de la planilla, aparte.
+const TIPOS_LEGACY = new Set(['bovino_pieza', 'bovino_brosa', 'embutido', 'caja_cb'])
+
+// Agrupado por sector, para que se pueda recorrer la cámara de una sin ir y
+// volver. El `test` es por prefijo a propósito: si mañana se agrega un
+// brosa_* o un emb_* nuevo, cae solo en su grupo sin tocar esto.
+const GRUPOS_PLANILLA = [
+  { titulo: '🐄 BOVINO',             test: t => t === 'bovino_mr' || t === 'bovino_corte' },
+  { titulo: '🍖 PIEZAS BOVINAS',     test: t => t.startsWith('pieza_') },
+  { titulo: '🫀 BROSAS / ACHURAS',   test: t => t.startsWith('brosa_') },
+  { titulo: '🐷 CERDO',              test: t => t === 'cerdo' || t.startsWith('cerdo_') },
+  { titulo: '🌭 EMBUTIDOS',          test: t => t.startsWith('emb_') },
+  { titulo: '🍔 HAMBURGUESAS',       test: t => t.startsWith('hamb_') },
+  { titulo: '🍗 POLLO Y REBOZADOS',  test: t => t === 'pollo' || t === 'rebozado' || t.startsWith('caja_') },
+  { titulo: '🛒 ALMACÉN Y BEBIDAS',  test: t => t === 'almacen' || t === 'bebidas' },
+]
+
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+
+// Reparte las filas en los grupos. Lo que no matchea ningún grupo cae en
+// "OTROS" — nunca se pierde una fila de la planilla por no estar mapeada.
+function agruparParaPlanilla(filas) {
+  const legacy = filas.filter(f => TIPOS_LEGACY.has(f.tipo))
+  const resto = filas.filter(f => !TIPOS_LEGACY.has(f.tipo))
+  const usados = new Set()
+  const grupos = GRUPOS_PLANILLA.map(g => {
+    const items = resto.filter(f => g.test(f.tipo))
+    items.forEach(f => usados.add(f.tipo))
+    return { titulo: g.titulo, items }
+  }).filter(g => g.items.length > 0)
+  const otros = resto.filter(f => !usados.has(f.tipo))
+  if (otros.length > 0) grupos.push({ titulo: '📦 OTROS', items: otros })
+  if (legacy.length > 0) grupos.push({ titulo: '⚠️ NO SE USAN (deberían quedar en 0)', items: legacy, legacy: true })
+  return grupos
+}
+
+// Planilla en papel para el conteo físico diario. Por defecto va CIEGA (sin la
+// cantidad del sistema): si el papel ya trae el número, el que cuenta lo copia
+// y el control no sirve para nada. `conSistema` lo agrega para cuando se quiere
+// usar como chequeo rápido en vez de conteo a ciegas.
+function planillaHTML(filas, { conSistema = false } = {}) {
+  const grupos = agruparParaPlanilla(filas)
+  const hoy = new Date().toLocaleDateString('es-AR', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    timeZone: 'America/Argentina/Buenos_Aires',
+  })
+  const colSistema = conSistema ? '<th style="width:70px">SISTEMA</th>' : ''
+
+  const secciones = grupos.map(g => `
+    <tbody class="grupo">
+      <tr><td class="grupo-tit" colspan="${conSistema ? 5 : 4}">${esc(g.titulo)}</td></tr>
+      ${g.items.map(f => `
+        <tr${g.legacy ? ' class="legacy"' : ''}>
+          <td class="prod">${esc(f.label)}</td>
+          <td class="uni">${esc(f.unidad)}</td>
+          ${conSistema ? `<td class="sis">${fmt(f.actual)}</td>` : ''}
+          <td class="escribir"></td>
+          <td class="obs"></td>
+        </tr>`).join('')}
+    </tbody>`).join('')
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Planilla de conteo</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { font-family: Arial, Helvetica, sans-serif; color: #000; background: #fff; padding: 16px; }
+      .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 10px; }
+      .logo-title { font-size: 20px; font-weight: 900; letter-spacing: 2px; }
+      .logo-sub { font-size: 8px; color: #555; letter-spacing: 1px; }
+      .doc-title { font-size: 17px; font-weight: 900; font-style: italic; text-align: right; }
+      .doc-sub { font-size: 9px; color: #444; text-align: right; }
+      .datos { display: flex; gap: 14px; margin-bottom: 8px; }
+      .campo { flex: 1; font-size: 10px; font-weight: 700; }
+      .campo .linea { border-bottom: 1px solid #000; height: 20px; margin-top: 2px; }
+      .instrucciones { border: 1px solid #000; padding: 5px 8px; font-size: 9.5px; line-height: 1.45; margin-bottom: 8px; }
+      table { width: 100%; border-collapse: collapse; }
+      th { border: 1px solid #000; background: #e8e8e8; font-size: 8.5px; padding: 3px; letter-spacing: .5px; }
+      td { border: 1px solid #000; font-size: 10.5px; padding: 0 5px; height: 25px; }
+      .grupo-tit { background: #000; color: #fff; font-size: 10px; font-weight: 900; letter-spacing: 1.5px; height: 19px; padding: 0 6px; }
+      .prod { font-weight: 600; }
+      .uni { text-align: center; font-size: 9px; color: #555; width: 34px; }
+      .sis { text-align: right; font-family: monospace; font-size: 10px; color: #333; }
+      .escribir { width: 92px; background: #fafafa; }
+      .obs { width: 150px; }
+      .legacy .prod { color: #666; font-weight: 400; font-style: italic; }
+      tbody.grupo { page-break-inside: avoid; }
+      .firmas { display: flex; gap: 34px; margin-top: 26px; page-break-inside: avoid; }
+      .firma { flex: 1; border-top: 1px solid #000; padding-top: 3px; font-size: 9px; text-align: center; }
+      @media print { body { padding: 8px; } }
+    </style></head>
+    <body>
+      <div class="header">
+        <div>
+          <div class="logo-title">FABRICIUS</div>
+          <div class="logo-sub">CARNICERÍAS · PREMIUM QUALITY</div>
+        </div>
+        <div>
+          <div class="doc-title">PLANILLA DE CONTEO FÍSICO</div>
+          <div class="doc-sub">Uso interno · ${esc(hoy)}</div>
+        </div>
+      </div>
+
+      <div class="datos">
+        <div class="campo">FECHA DEL CONTEO<div class="linea"></div></div>
+        <div class="campo">QUIÉN CONTÓ<div class="linea"></div></div>
+        <div class="campo">HORA INICIO<div class="linea"></div></div>
+        <div class="campo">HORA FIN<div class="linea"></div></div>
+      </div>
+
+      <div class="instrucciones">
+        <b>Anotá lo que HAY, no lo que debería haber.</b> Si un producto está en cero, escribí <b>0</b> —
+        no lo dejes vacío. Una línea vacía se lee como "no se contó" y queda sin cargar.
+        Ojo con la columna UNIDAD: <b>kg</b> es kilos y <b>u</b> es unidades (almacén, bebidas, pollo, sesos).
+        Lo que no cuadre o esté fallado, anotalo en OBSERVACIONES.
+      </div>
+
+      <table>
+        <thead><tr>
+          <th style="text-align:left; padding-left:6px">PRODUCTO</th>
+          <th style="width:34px">UNID.</th>
+          ${colSistema}
+          <th style="width:92px">CONTADO</th>
+          <th style="width:150px">OBSERVACIONES</th>
+        </tr></thead>
+        ${secciones}
+      </table>
+
+      <div class="firmas">
+        <div class="firma">FIRMA DE QUIEN CONTÓ</div>
+        <div class="firma">FIRMA DE CONTROL</div>
+      </div>
+    </body></html>`
+}
+
 const fmt = n => Math.round((Number(n) || 0) * 100) / 100
 const fFecha = s => s ? new Date(s).toLocaleString('es-AR', {
   day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit',
@@ -104,6 +240,7 @@ export default function AjusteStock() {
   // error y la acción se pierde en silencio — regla de oro N°4).
   const [confirmLimpiar, setConfirmLimpiar] = useState(false)
   const [confirmGuardar, setConfirmGuardar] = useState(null) // { cambios, motivo }
+  const [planillaConSistema, setPlanillaConSistema] = useState(false) // planilla ciega por defecto
 
   useEffect(() => { cargar() }, [])
 
@@ -346,7 +483,17 @@ export default function AjusteStock() {
             {b.label}
           </button>
         ))}
-        <button onClick={cargar} style={{ padding: '6px 12px', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, cursor: 'pointer', fontSize: 12, marginLeft: 'auto' }}>
+        <button onClick={() => imprimirHTML(planillaHTML(filas, { conSistema: planillaConSistema }))}
+          title="Imprime la lista de todos los productos para contar a mano"
+          style={{ padding: '6px 14px', background: 'transparent', border: '1px solid var(--gold)', color: 'var(--gold)', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700, marginLeft: 'auto' }}>
+          🖨️ Planilla de conteo
+        </button>
+        <label title="Por defecto va en blanco: si el papel trae el número del sistema, el que cuenta lo copia y el control no sirve"
+          style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--muted)', cursor: 'pointer' }}>
+          <input type="checkbox" checked={planillaConSistema} onChange={e => setPlanillaConSistema(e.target.checked)} />
+          con cantidades del sistema
+        </label>
+        <button onClick={cargar} style={{ padding: '6px 12px', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>
           🔄 Recargar
         </button>
       </div>
