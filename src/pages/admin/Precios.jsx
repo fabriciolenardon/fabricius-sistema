@@ -5,6 +5,7 @@ import { fechaHoyARG } from '../../lib/fechas'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 import LimpiezaDuplicados from './LimpiezaDuplicados'
 import ImportarPLUQendra from './ImportarPLUQendra'
+import SucursalesPrecios from './SucursalesPrecios'
 import CombosEditor from './CombosEditor'
 import { abrirVentanaImprimible } from '../../lib/pdfPrintable'
 import { compartirListaPrecios } from '../../lib/listasPreciosPdf'
@@ -556,6 +557,9 @@ export default function Precios() {
 {tabBtn('plu', '🏷️ PLU / Balanza')}
 {tabBtn('limpieza', '🧹 Limpieza duplicados')}
 {tabBtn('importar_plu', '📥 Importar PLUs CSV')}
+{/* Comparativo contra las sucursales: solo lo ve la central, que es quien
+    define la lista. Una sucursal ya ve sus propios precios en "Ver Precios". */}
+{!esSucursal && tabBtn('sucursales', '🏪 Sucursales')}
       </div>
       {msg && <div style={{ background: msg.includes('❌') ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${msg.includes('❌') ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: msg.includes('❌') ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>{msg}</div>}
 
@@ -1336,6 +1340,7 @@ export default function Precios() {
       {tab === 'combos' && <CombosEditor precios={precios} />}
       {tab === 'limpieza' && <LimpiezaDuplicados />}
       {tab === 'importar_plu' && <ImportarPLUQendra />}
+      {tab === 'sucursales' && !esSucursal && <SucursalesPrecios productos={precios} />}
     </div>
   )
 }

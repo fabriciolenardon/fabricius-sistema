@@ -79,6 +79,48 @@ export function preciosPropiosFaltantes(productos, overlay) {
   return productos.filter(p => !overlay[p.id]).length
 }
 
+// ============================================================
+// DESVÍOS CONTRA LA LISTA DE LA CENTRAL
+// ============================================================
+// Las sucursales respetan la lista POR CONTRATO, no por candado: el sistema no
+// les impide cambiar un precio. Lo que sí puede hacer es mostrarle a la
+// central dónde se despegaron, para que sea una conversación y no una
+// sorpresa. Avisa, no bloquea.
+//
+// Un desvío no siempre es un incumplimiento: lo más común es que la central
+// haya actualizado su lista y la sucursal todavía no. Por eso se informa el
+// sentido (más caro / más barato) y no se lo trata como una infracción.
+//
+// Devuelve una fila por producto que difiere, ya ordenada por el desvío más
+// grande en pesos.
+export async function desviosDeSucursal(sucursalId, productosCentral) {
+  const overlay = await overlayDeSucursal(sucursalId)
+  if (!overlay || !Array.isArray(productosCentral)) return []
+
+  const desvios = []
+  for (const p of productosCentral) {
+    const propio = overlay[p.id]
+    if (!propio) continue   // sin precio propio: no es un desvío, es un faltante
+    for (const [campo, etiqueta] of [['precio_minorista', 'Minorista'], ['precio_mayorista', 'Mayorista']]) {
+      const central = Number(p[campo]) || 0
+      const sucursal = Number(propio[campo]) || 0
+      // Un producto sin precio en la central no tiene contra qué compararse.
+      if (central === 0) continue
+      if (Math.abs(central - sucursal) < 0.01) continue
+      desvios.push({
+        id: p.id,
+        nombre: p.nombre,
+        lista: etiqueta,
+        central,
+        sucursal,
+        diferencia: sucursal - central,
+        pct: ((sucursal - central) / central) * 100,
+      })
+    }
+  }
+  return desvios.sort((a, b) => Math.abs(b.diferencia) - Math.abs(a.diferencia))
+}
+
 // Guarda el precio de un producto para una sucursal. La central NO pasa por
 // acá: sigue escribiendo en `precios` como siempre.
 export async function guardarPrecioDeSucursal(sucursalId, precioId, { precio_minorista, precio_mayorista }) {
