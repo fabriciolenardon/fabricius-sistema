@@ -542,10 +542,10 @@ export default function Sueldos() {
     const vd = parseInt(e.vacDias) || null
     const ops = []
     ops.push(ag > 0
-      ? supabase.from('conceptos_sueldos').upsert({ mes: mesKey, empleado_id: emp.id, empleado_nombre: nombre, tipo: 'aguinaldo', monto: ag, detalle: '50% del bruto del mes', updated_at: new Date().toISOString() }, { onConflict: 'mes,empleado_id,tipo' })
+      ? supabase.from('conceptos_sueldos').upsert({ mes: mesKey, empleado_id: emp.id, empleado_nombre: nombre, tipo: 'aguinaldo', monto: ag, detalle: '50% del bruto del mes', updated_at: new Date().toISOString() }, { onConflict: 'sucursal_id,mes,empleado_id,tipo' })
       : supabase.from('conceptos_sueldos').delete().eq('mes', mesKey).eq('empleado_id', emp.id).eq('tipo', 'aguinaldo'))
     ops.push(vm > 0
-      ? supabase.from('conceptos_sueldos').upsert({ mes: mesKey, empleado_id: emp.id, empleado_nombre: nombre, tipo: 'vacaciones', monto: vm, dias: vd, detalle: vd ? `${vd} días corridos · sueldo/25 (Comercio)` : 'Vacaciones', updated_at: new Date().toISOString() }, { onConflict: 'mes,empleado_id,tipo' })
+      ? supabase.from('conceptos_sueldos').upsert({ mes: mesKey, empleado_id: emp.id, empleado_nombre: nombre, tipo: 'vacaciones', monto: vm, dias: vd, detalle: vd ? `${vd} días corridos · sueldo/25 (Comercio)` : 'Vacaciones', updated_at: new Date().toISOString() }, { onConflict: 'sucursal_id,mes,empleado_id,tipo' })
       : supabase.from('conceptos_sueldos').delete().eq('mes', mesKey).eq('empleado_id', emp.id).eq('tipo', 'vacaciones'))
     const results = await Promise.all(ops)
     setGuardandoExtra(null)

@@ -119,5 +119,10 @@ export async function calcularControlSemanal(desde, hasta) {
 export async function guardarSnapshotStock(fecha, creadoPor) {
   const { data: stk } = await supabase.from('stock_actual').select('tipo, kg_disponible')
   const stock = (stk || []).map(r => ({ tipo: r.tipo, kg: Number(r.kg_disponible) || 0 }))
-  return supabase.from('stock_snapshots').upsert({ fecha, stock, creado_por: creadoPor || null }, { onConflict: 'fecha' })
+  // El conflicto se resuelve por (sucursal_id, fecha): cada negocio pisa solo
+  // su propia foto. No mandamos sucursal_id — lo pone el trigger de la base
+  // (supabase/94), que corre antes de que Postgres evalúe el ON CONFLICT.
+  // Con el único viejo por `fecha` sola, el cierre de una sucursal borraba el
+  // de la central del mismo domingo. Ver supabase/95.
+  return supabase.from('stock_snapshots').upsert({ fecha, stock, creado_por: creadoPor || null }, { onConflict: 'sucursal_id,fecha' })
 }
