@@ -5,6 +5,9 @@ import { fechaHoyARG } from '../../lib/fechas'
 import { parseNumero } from '../../lib/formatos'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 import { useEsMovil } from '../../lib/useEsMovil'
+import { useAuth } from '../../context/AuthContext'
+import { cargarSocios, cargarTopeNegocio, guardarTopeNegocio } from '../../lib/socios'
+import SociosEditor from '../../components/SociosEditor'
 
 // Display de precio con formato AR (incluye centavos si tiene)
 import { fmtPrecio } from '../../lib/formatos'
@@ -87,6 +90,7 @@ function cargarPdfLib() {
 }
 
 export default function Gastos() {
+  const { sucursalId, isSucursal: esSucursal } = useAuth()
   const esMovil = useEsMovil()
   const [gastos, setGastos] = useState([])
   const [tipo, setTipo] = useState('variable')
@@ -109,14 +113,17 @@ export default function Gastos() {
   // (Cierre → Por Mes; fallback al mes calendario). Al llegar al 80% y al
   // 100% de cada tope Iris avisa por WhatsApp (/api/aviso-tope-gastos,
   // una vez por nivel por tope por mes).
-  const [topeCfg, setTopeCfg] = useState({ activo: false, tope: 0, topes: { fabricio: 0, ariel: 0 } })
+  // El tope TOTAL y el interruptor viven en la fila de la sucursal; el tope de
+  // cada dueño, en su propia ficha de `socios` (migración 98). Antes era todo
+  // una clave de config_sistema con los nombres fabricio/ariel escritos a mano.
+  const [topeNegocio, setTopeNegocio] = useState({ total: null, activo: false })
+  const [socios, setSocios] = useState([])
   const [topeInput, setTopeInput] = useState('')
-  const [topeFabriInput, setTopeFabriInput] = useState('')
-  const [topeArielInput, setTopeArielInput] = useState('')
   const [topeGuardando, setTopeGuardando] = useState(false)
   const [mesOpTope, setMesOpTope] = useState(null) // mes operativo vigente (etiqueta, fecha_inicio, fecha_cierre)
 
-  useEffect(() => { fetchGastos(); fetchTope() }, [])
+  async function refrescarSocios() { setSocios(await cargarSocios()) }
+  useEffect(() => { fetchGastos(); fetchTope(); refrescarSocios() }, [sucursalId])
 
   async function fetchGastos() {
     // Sin .limit — paginamos en cliente para mostrar TODOS los gastos
@@ -131,50 +138,40 @@ export default function Gastos() {
 
   async function fetchTope() {
     const hoyTope = fechaHoyARG()
-    const [{ data }, { data: mesesOp }] = await Promise.all([
-      supabase.from('config_sistema').select('valor').eq('clave', 'tope_gastos_socios').maybeSingle(),
+    const [cfgTope, { data: mesesOp }] = await Promise.all([
+      cargarTopeNegocio(sucursalId),
       supabase.from('meses_operativos').select('etiqueta,fecha_inicio,fecha_cierre').order('fecha_inicio', { ascending: false }),
     ])
-    if (data?.valor) {
-      const v = data.valor
-      setTopeCfg({
-        activo: !!v.activo,
-        tope: Number(v.tope) || 0,
-        topes: { fabricio: Number(v.topes?.fabricio) || 0, ariel: Number(v.topes?.ariel) || 0 },
-      })
-      setTopeInput(Number(v.tope) > 0 ? String(v.tope) : '')
-      setTopeFabriInput(Number(v.topes?.fabricio) > 0 ? String(v.topes.fabricio) : '')
-      setTopeArielInput(Number(v.topes?.ariel) > 0 ? String(v.topes.ariel) : '')
-    }
+    setTopeNegocio(cfgTope)
+    setTopeInput(Number(cfgTope.total) > 0 ? String(cfgTope.total) : '')
     setMesOpTope((mesesOp || []).find(m => hoyTope >= m.fecha_inicio && hoyTope <= m.fecha_cierre) || null)
   }
 
   async function guardarTope(activo) {
     const tot = parseNumero(topeInput)
-    const fab = parseNumero(topeFabriInput)
-    const ari = parseNumero(topeArielInput)
-    if (activo && !(tot > 0) && !(fab > 0) && !(ari > 0)) {
-      showAlert('Cargá al menos un tope (total o por socio)', 'error')
+    const algunTopePropio = socios.some(s => Number(s.tope_mensual) > 0)
+    if (activo && !(tot > 0) && !algunTopePropio) {
+      showAlert('Cargá el tope total, o el tope de algún dueño en su ficha', 'error')
       return
     }
     setTopeGuardando(true)
-    const nuevo = { activo, tope: tot > 0 ? tot : 0, topes: { fabricio: fab > 0 ? fab : 0, ariel: ari > 0 ? ari : 0 } }
-    const { error } = await supabase.from('config_sistema').upsert({
-      clave: 'tope_gastos_socios',
-      valor: nuevo,
-      descripcion: 'Tope de gastos de socios por mes operativo (total y/o por socio). Iris avisa por WhatsApp al 80% y al 100% de cada tope.',
-      updated_at: new Date().toISOString(),
-    })
+    const { error } = await guardarTopeNegocio(sucursalId, { total: tot > 0 ? tot : null, activo })
     setTopeGuardando(false)
     if (error) { showAlert('❌ Error al guardar el tope: ' + error.message, 'error'); return }
-    setTopeCfg(nuevo)
+    setTopeNegocio({ total: tot > 0 ? tot : null, activo })
     showAlert(activo ? '🎯 Topes de socios guardados' : '🎯 Topes de socios desactivados')
   }
 
   // Verificación server-side del tope (fire-and-forget): el endpoint suma
   // los gastos de socios del mes y, si cruzó un nivel, Iris manda el
   // WhatsApp. Acá solo reflejamos si efectivamente avisó.
+  //
+  // SOLO LA CENTRAL. El WhatsApp y Iris son módulos de la central, y el
+  // endpoint mide los topes de la sucursal 1: si lo llamara una sucursal al
+  // cargar un gasto suyo, le mandaría a Fabricio un aviso sobre los gastos
+  // de OTRO negocio. Las sucursales ven sus topes en pantalla y nada más.
   async function verificarTopeSocios() {
+    if (esSucursal) return
     try {
       const { data: { session } } = await supabase.auth.getSession()
       const token = session?.access_token
@@ -431,20 +428,28 @@ export default function Gastos() {
   const acum = (gastos || []).filter(g => !g.solo_balance && g.fecha >= mesIniGastos && g.fecha <= hoyGastos)
   const acumVar   = acum.filter(g => g.tipo === 'variable').reduce((s, g) => s + (Number(g.monto) || 0), 0)
   const acumFijo  = acum.filter(g => g.tipo === 'fijo').reduce((s, g) => s + (Number(g.monto) || 0), 0)
-  const acumFabri = acum.filter(g => g.tipo === 'socio' && g.socio === 'fabricio').reduce((s, g) => s + (Number(g.monto) || 0), 0)
-  const acumAriel = acum.filter(g => g.tipo === 'socio' && g.socio === 'ariel').reduce((s, g) => s + (Number(g.monto) || 0), 0)
+  // Gastos de socios del mes, por dueño. Antes eran dos variables fijas
+  // (fabricio/ariel); ahora se arma sobre la lista de socios del negocio.
+  const acumPorSocio = Object.fromEntries(socios.map(s =>
+    [s.clave, acum.filter(g => g.tipo === 'socio' && g.socio === s.clave).reduce((t, g) => t + (Number(g.monto) || 0), 0)]
+  ))
   // Estado de los topes contra lo gastado en el MES OPERATIVO (fallback:
   // mes calendario si no hay uno vigente). El panel "Gastos del mes" de
   // arriba sigue siendo calendario; el tope se mide como el Ejecutivo.
   const topeIni = mesOpTope ? mesOpTope.fecha_inicio : mesIniGastos
   const gastosTope = (gastos || []).filter(g => !g.solo_balance && g.tipo === 'socio' && g.fecha >= topeIni && g.fecha <= hoyGastos)
-  const topeUsadoFabri = gastosTope.filter(g => g.socio === 'fabricio').reduce((s, g) => s + (Number(g.monto) || 0), 0)
-  const topeUsadoAriel = gastosTope.filter(g => g.socio === 'ariel').reduce((s, g) => s + (Number(g.monto) || 0), 0)
+  const usadoPorSocio = Object.fromEntries(socios.map(s =>
+    [s.clave, gastosTope.filter(g => g.socio === s.clave).reduce((t, g) => t + (Number(g.monto) || 0), 0)]
+  ))
+  const usadoTotalSocios = Object.values(usadoPorSocio).reduce((s, n) => s + n, 0)
   const topesBar = [
-    { l: 'Total socios', usado: topeUsadoFabri + topeUsadoAriel, tope: topeCfg.tope },
-    { l: '👤 Fabri', usado: topeUsadoFabri, tope: topeCfg.topes?.fabricio || 0 },
-    { l: '👤 Ariel', usado: topeUsadoAriel, tope: topeCfg.topes?.ariel || 0 },
-  ].filter(b => topeCfg.activo && b.tope > 0).map(b => {
+    { l: 'Total socios', usado: usadoTotalSocios, tope: Number(topeNegocio.total) || 0 },
+    ...socios.map(s => ({
+      l: '👤 ' + (s.apodo || s.nombre.split(' ')[0]),
+      usado: usadoPorSocio[s.clave] || 0,
+      tope: Number(s.tope_mensual) || 0,
+    })),
+  ].filter(b => topeNegocio.activo && b.tope > 0).map(b => {
     const pct = Math.round((b.usado / b.tope) * 100)
     return { ...b, pct, color: pct >= 100 ? 'var(--red-light)' : pct >= 80 ? 'var(--gold)' : 'var(--green)' }
   })
@@ -608,9 +613,11 @@ export default function Gastos() {
             </div>
             {tipo === 'socio' && (
               <div className="form-group"><label>Socio</label>
+                {/* Los dueños salen de la tabla `socios` (por sucursal), ya no
+                    escritos a mano. Ver lib/socios.js */}
                 <select value={form.socio} onChange={e => setForm(f => ({ ...f, socio: e.target.value }))} style={inp}>
-                  <option value="fabricio">Fabricio Lenardon</option>
-                  <option value="ariel">Ariel Garrone</option>
+                  {socios.length === 0 && <option value="">— Cargá los dueños primero —</option>}
+                  {socios.map(s => <option key={s.id} value={s.clave}>{s.nombre}</option>)}
                 </select>
               </div>
             )}
@@ -738,8 +745,12 @@ export default function Gastos() {
             {[
               { l: '💸 Gastos variables',     v: acumVar,   c: 'var(--red-light)' },
               { l: '📌 Gastos fijos',         v: acumFijo,  c: 'var(--blue)' },
-              { l: '👤 Gasto socio Fabri',    v: acumFabri, c: 'var(--gold)' },
-              { l: '👤 Gasto socio Ariel',    v: acumAriel, c: 'var(--gold)' },
+              // Una línea por dueño del negocio, salga de donde salga la lista.
+              ...socios.map(s => ({
+                l: '👤 Gasto socio ' + (s.apodo || s.nombre.split(' ')[0]),
+                v: acumPorSocio[s.clave] || 0,
+                c: 'var(--gold)',
+              })),
             ].map(x => (
               <div key={x.l} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '9px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                 <span style={{ fontSize: 13, color: 'var(--text2)' }}>{x.l}</span>
@@ -748,7 +759,7 @@ export default function Gastos() {
             ))}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', paddingTop: 11, marginTop: 4, borderTop: '1px solid var(--border)' }}>
               <span style={{ fontSize: 12, letterSpacing: 1, color: 'var(--muted)', fontWeight: 700 }}>TOTAL EGRESOS</span>
-              <span style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 23, color: 'var(--red-light)' }}>{fmt(acumVar + acumFijo + acumFabri + acumAriel)}</span>
+              <span style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 23, color: 'var(--red-light)' }}>{fmt(acumVar + acumFijo + Object.values(acumPorSocio).reduce((s, n) => s + n, 0))}</span>
             </div>
           </div>
 
@@ -771,33 +782,41 @@ export default function Gastos() {
                 )}
               </div>
             ))}
-            <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : '1fr 1fr 1fr', gap: 8, marginTop: topesBar.length ? 6 : 0 }}>
-              <div className="form-group" style={{ margin: 0 }}><label>Total socios $</label>
+            {/* El tope TOTAL es del negocio; el de cada dueño se carga en su
+                ficha, abajo en "Dueños del negocio". */}
+            <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : '1fr', gap: 8, marginTop: topesBar.length ? 6 : 0 }}>
+              <div className="form-group" style={{ margin: 0 }}><label>Tope total de socios $</label>
                 <input value={topeInput} onChange={e => setTopeInput(e.target.value)}
-                  placeholder="Sin tope" inputMode="decimal" style={inp} />
-              </div>
-              <div className="form-group" style={{ margin: 0 }}><label>Fabri $</label>
-                <input value={topeFabriInput} onChange={e => setTopeFabriInput(e.target.value)}
-                  placeholder="Sin tope" inputMode="decimal" style={inp} />
-              </div>
-              <div className="form-group" style={{ margin: 0 }}><label>Ariel $</label>
-                <input value={topeArielInput} onChange={e => setTopeArielInput(e.target.value)}
                   placeholder="Sin tope" inputMode="decimal" style={inp} />
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
               <button className="btn btn-gold" onClick={() => guardarTope(true)} disabled={topeGuardando}
                 style={{ flex: 1, opacity: topeGuardando ? 0.6 : 1 }}>
-                {topeGuardando ? '⏳ Guardando…' : topeCfg.activo ? '💾 Actualizar topes' : '✅ Activar topes'}
+                {topeGuardando ? '⏳ Guardando…' : topeNegocio.activo ? '💾 Actualizar topes' : '✅ Activar topes'}
               </button>
-              {topeCfg.activo && (
+              {topeNegocio.activo && (
                 <button className="btn btn-ghost" onClick={() => guardarTope(false)} disabled={topeGuardando}>
                   Desactivar
                 </button>
               )}
             </div>
+            {/* ── Dueños del negocio ──
+                Acá se agregan o se sacan socios, y se les pone el % de la
+                ganancia y su tope propio. Es por sucursal: cada negocio
+                tiene los suyos. */}
+            <div style={{ marginTop: 22, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+              <div style={{ fontSize: 11, letterSpacing: 1.5, color: 'var(--muted)', fontWeight: 700, marginBottom: 12 }}>
+                👥 DUEÑOS DEL NEGOCIO
+              </div>
+              <SociosEditor socios={socios} onCambio={refrescarSocios} compacto={esMovil} />
+            </div>
+
             <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>
-              Podés dejar topes vacíos: solo se controlan los cargados. Iris avisa por WhatsApp al 80% y al 100% de cada tope (una vez por mes operativo).
+              Podés dejar topes vacíos: solo se controlan los cargados.
+              {esSucursal
+                ? ' El control se ve acá en pantalla, a medida que cargás los gastos.'
+                : ' Iris avisa por WhatsApp al 80% y al 100% de cada tope (una vez por mes operativo).'}
             </div>
           </div>
         </div>
