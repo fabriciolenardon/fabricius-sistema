@@ -355,6 +355,12 @@ const CATEGORIA_A_STOCK = {
   embutido: null,
   pollo: 'pollo',
   rebozado: 'rebozado',
+  // insumos: se venden por unidad y NO tienen stock trackeado — solo se
+  // facturan. El mapeo explícito en null evita que resolverDescuentoStock
+  // caiga al nombre crudo y cree un bucket 'insumos' en stock_actual (era
+  // lo que pasaba al anular un remito con insumos). Los loops igual lo
+  // saltean por tipo; esto es la red por si aparece otro caller.
+  insumos: null,
 }
 
 export function Deposito() {
@@ -4617,12 +4623,16 @@ export function RemitosTab({ remitoActual }) {
     if (error) console.warn('No se pudo revertir pieza vendida:', error.message)
   }
 
-  // Devolver el stock descontado. Mismo criterio que guardar(): se saltean
-  // los items manuales (no descontaron stock) y las cajas individuales (ya se
-  // revirtieron arriba con revertirVentaCaja, que ajusta stock_actual).
+  // Devolver el stock descontado. Los skips tienen que ser IDÉNTICOS a los de
+  // guardar(): manual e insumos nunca descontaron nada, y las cajas ya se
+  // revirtieron arriba con revertirVentaCaja (que ajusta stock_actual).
+  // Faltaba el de insumos: resolverDescuentoStock caía al nombre crudo de la
+  // categoría y actualizarStock('insumos', kg) creaba un bucket fantasma en
+  // stock_actual que nunca debió existir (2.000 acumulados al 18/08/2026).
   const kgPorTipoDevolver = {}
   for (const it of (remito.items || [])) {
     if (it.manual) continue
+    if (it.tipo === 'insumos') continue
     if (it.caja_id) continue
     const { tipoStock, cantidad } = resolverDescuentoStock(it, CATEGORIA_A_STOCK)
     if (!tipoStock || !cantidad) continue
