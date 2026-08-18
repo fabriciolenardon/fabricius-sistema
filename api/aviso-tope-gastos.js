@@ -48,13 +48,30 @@ export default async function handler(req, res) {
     const prof = await (await fetch(`${SB_URL}/rest/v1/profiles?id=eq.${user.id}&select=rol`, { headers: svc })).json()
     if (prof?.[0]?.rol !== 'admin') return res.status(403).json({ error: 'solo admin' })
 
-    // ── Topes configurados (total y/o individuales por socio) ──
-    const cfgTope = await (await fetch(`${SB_URL}/rest/v1/config_sistema?clave=eq.tope_gastos_socios&select=valor`, { headers: svc })).json()
-    const v = cfgTope?.[0]?.valor || {}
-    const topeTotal = Number(v.tope) || 0
-    const topeFabri = Number(v.topes?.fabricio) || 0
-    const topeAriel = Number(v.topes?.ariel) || 0
-    if (!v.activo || (topeTotal <= 0 && topeFabri <= 0 && topeAriel <= 0)) {
+    // ── Topes configurados ──
+    // El tope TOTAL vive en la fila de la sucursal y el de cada dueño en su
+    // ficha de `socios` (migración 98). Antes estaban en config_sistema con
+    // los nombres fabricio/ariel escritos a mano acá adentro.
+    //
+    // Este aviso es SOLO de la central (sucursal 1): es el WhatsApp de
+    // Fabricio el que recibe. Una sucursal ve sus topes en pantalla pero no
+    // tiene WhatsApp propio configurado — el módulo es de la central.
+    const SUC = 1
+    const suc = await (await fetch(`${SB_URL}/rest/v1/sucursales?id=eq.${SUC}&select=tope_gastos_total,tope_gastos_activo`, { headers: svc })).json()
+    const topeTotal = Number(suc?.[0]?.tope_gastos_total) || 0
+    const activo = !!suc?.[0]?.tope_gastos_activo
+
+    const socios = await (await fetch(
+      `${SB_URL}/rest/v1/socios?sucursal_id=eq.${SUC}&activo=eq.true&select=clave,nombre,apodo,tope_mensual&order=orden`,
+      { headers: svc },
+    )).json().catch(() => [])
+    const listaSocios = (Array.isArray(socios) ? socios : []).map(s => ({
+      clave: s.clave,
+      label: s.apodo || String(s.nombre || '').split(' ')[0],
+      tope: Number(s.tope_mensual) || 0,
+    }))
+
+    if (!activo || (topeTotal <= 0 && !listaSocios.some(s => s.tope > 0))) {
       return res.status(200).json({ ok: true, enviado: false, motivo: 'tope inactivo' })
     }
 
@@ -78,18 +95,18 @@ export default async function handler(req, res) {
     )).json()
     const lista = (Array.isArray(gastos) ? gastos : []).filter(g => !g.solo_balance)
     const total = lista.reduce((s, g) => s + (Number(g.monto) || 0), 0)
-    const fabri = lista.filter(g => g.socio === 'fabricio').reduce((s, g) => s + (Number(g.monto) || 0), 0)
-    const ariel = lista.filter(g => g.socio === 'ariel').reduce((s, g) => s + (Number(g.monto) || 0), 0)
+    const gastadoPor = Object.fromEntries(listaSocios.map(s =>
+      [s.clave, lista.filter(g => g.socio === s.clave).reduce((t, g) => t + (Number(g.monto) || 0), 0)]
+    ))
 
     const scopes = [
       { key: 'total', label: 'Total socios', gastado: total, tope: topeTotal },
-      { key: 'fabricio', label: 'Fabri', gastado: fabri, tope: topeFabri },
-      { key: 'ariel', label: 'Ariel', gastado: ariel, tope: topeAriel },
+      ...listaSocios.map(s => ({ key: s.clave, label: s.label, gastado: gastadoPor[s.clave] || 0, tope: s.tope })),
     ].filter(s => s.tope > 0)
 
     // ── Dedupe: un aviso por nivel por tope por mes; si cambia algún
     //    tope (firma) o el mes, se rearma todo ──
-    const firma = `${topeTotal}|${topeFabri}|${topeAriel}`
+    const firma = [topeTotal, ...listaSocios.map(s => `${s.clave}:${s.tope}`)].join('|')
     const cfgAviso = await (await fetch(`${SB_URL}/rest/v1/config_sistema?clave=eq.tope_gastos_socios_aviso&select=valor`, { headers: svc })).json()
     const prev = cfgAviso?.[0]?.valor || {}
     const niveles = (prev.mes === mes && prev.firma === firma && prev.niveles && !Array.isArray(prev.niveles)) ? prev.niveles : {}
@@ -109,7 +126,10 @@ export default async function handler(req, res) {
     if (!avisos.length) return res.status(200).json({ ok: true, enviado: false, total })
 
     const grave = avisos.some(l => l.startsWith('🚨'))
-    const cuerpo = `${grave ? '🚨' : '⚠️'} *Gastos de socios — aviso de tope*\n\nJefe, en ${nombrePeriodo} se cruzó un límite:\n\n${avisos.join('\n')}\n\n👤 Fabri: ${fmtP(fabri)} · 👤 Ariel: ${fmtP(ariel)} · Total: ${fmtP(total)}${grave ? '\n\nTodo gasto que se cargue de acá en adelante queda por encima del tope. 🧐' : ''}`
+    // El detalle se arma con los dueños que tenga cargados el negocio, no con
+    // dos nombres fijos: si mañana entra un socio nuevo, aparece solo.
+    const detalleSocios = listaSocios.map(s => `👤 ${s.label}: ${fmtP(gastadoPor[s.clave] || 0)}`).join(' · ')
+    const cuerpo = `${grave ? '🚨' : '⚠️'} *Gastos de socios — aviso de tope*\n\nJefe, en ${nombrePeriodo} se cruzó un límite:\n\n${avisos.join('\n')}\n\n${detalleSocios}${detalleSocios ? ' · ' : ''}Total: ${fmtP(total)}${grave ? '\n\nTodo gasto que se cargue de acá en adelante queda por encima del tope. 🧐' : ''}`
 
     // phone_id del negocio (lo guarda el webhook en wa_config)
     let phoneId = PHONE_FALLBACK
