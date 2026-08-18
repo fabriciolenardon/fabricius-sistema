@@ -294,6 +294,35 @@ function nombreCanonicoMediaRes(txtLibre) {
 // ingreso al depósito los elige de acá — no más texto libre.
 const MEDIA_RES_TIPOS = ['MEDIA RES NT-VQ PREMIUM', 'MEDIA RES OVERO CHICO']
 
+// Qué ítems cambiaron entre la versión vieja de un remito y la editada.
+// Compara como MULTISET (no por `includes`): un remito puede llevar dos medias
+// res del mismo peso y precio, y si se saca una sola hay que devolver una sola.
+// La clave incluye los ids de media/pieza/caja para no confundir dos unidades
+// distintas del mismo producto.
+export function diffItemsRemito(itemsAntes, itemsDespues) {
+  const clave = it => [
+    it.descripcion || '', it.tipo || '',
+    Number(it.kg) || 0, Number(it.precio) || 0,
+    it.media_res_id || '', it.pieza_id || '', it.caja_id || '',
+  ].join('~')
+  // Pool de los que estaban: cada ítem de la versión nueva que matchea
+  // consume uno del pool (o sea "no cambió"); lo que sobra en el pool se quitó.
+  const pool = new Map()
+  for (const it of (itemsAntes || [])) {
+    const k = clave(it)
+    if (!pool.has(k)) pool.set(k, [])
+    pool.get(k).push(it)
+  }
+  const agregados = []
+  for (const it of (itemsDespues || [])) {
+    const bucket = pool.get(clave(it))
+    if (bucket && bucket.length > 0) bucket.shift()
+    else agregados.push(it)
+  }
+  const quitados = [...pool.values()].flat()
+  return { quitados, agregados }
+}
+
 const CATEGORIA_A_STOCK = {
   bovino_mr: 'bovino_mr',
   bovino_corte: 'bovino_corte',
@@ -4653,6 +4682,86 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
     const fechaCambio = fechaEdit !== fechaAnterior
 
     await supabase.from('remitos').update({ items: itemsEdit, total: nuevoTotal, fecha: fechaEdit }).eq('id', editando.id)
+
+    // ── RECONCILIAR EL DEPÓSITO CON LA EDICIÓN ─────────────────────────────
+    // Editar un remito tocaba items/total/fecha y la cuenta corriente, pero
+    // NO el depósito: quedaba la foto de la versión vieja. Bug real del
+    // 18/08/2026 (remito 01743, MONTE CRISTO): sacaron una media res de 126 kg
+    // y la media quedó 'vendida' — no volvió al stock, había que borrar el
+    // remito y rehacerlo — mientras una paleta agregada en la misma edición
+    // nunca se descontó de bovino_corte.
+    // Ahora se calcula el DELTA (qué ítems se fueron y cuáles entraron) y se
+    // aplica el mismo criterio que la anulación: medias/piezas/cajas vuelven a
+    // 'disponible' y el stock se devuelve o se descuenta según corresponda.
+    const { quitados, agregados } = diffItemsRemito(editando.items || [], itemsEdit)
+
+    if (quitados.length > 0) {
+      // Medias res → vuelven a 'disponible'. Se libera despostada Y reservada:
+      // la lista de medias para despachar/despostar filtra por las dos.
+      const mediasQuitadas = quitados.map(it => it.media_res_id).filter(Boolean)
+      if (mediasQuitadas.length > 0) {
+        await supabase.from('entradas_deposito').update({ despostada: false, reservada: false }).in('id', mediasQuitadas)
+        await supabase.from('medias_stock').update({
+          estado: 'disponible',
+          cliente_nombre: null, cliente_id: null, fecha_salida: null, destino: null,
+        }).in('entrada_id', mediasQuitadas)
+      }
+      // Piezas enteras → vuelven a 'disponible' limpiando los datos de venta
+      for (const it of quitados.filter(i => i.tipo === 'pieza_entera' && i.pieza_id)) {
+        const { error } = await supabase.from('piezas_stock').update({
+          estado: 'disponible',
+          destino: null, cliente_id: null, cliente_nombre: null,
+          precio_venta_kg: null, total_venta: null, fecha_salida: null, notas_salida: null,
+        }).eq('id', it.pieza_id)
+        if (error) console.warn('No se pudo revertir pieza vendida al editar:', error.message)
+      }
+      // Cajas individuales → revertirVentaCaja ya reajusta stock_actual
+      for (const it of quitados.filter(i => i.caja_id)) {
+        const { error } = await revertirVentaCaja(it.caja_id)
+        if (error) console.warn('No se pudo revertir caja vendida al editar:', error)
+      }
+    }
+
+    // Stock por bucket: + lo que se quitó, − lo que se agregó. Los skips son
+    // los MISMOS que al crear el remito (manual/insumos no descuentan, y las
+    // cajas ya se ajustaron arriba) — si no, se devuelve algo que nunca salió.
+    const deltaStock = {}
+    const acumular = (lista, signo) => {
+      for (const it of lista) {
+        if (it.manual) continue
+        if (it.tipo === 'insumos') continue
+        if (it.caja_id) continue
+        const { tipoStock, cantidad } = resolverDescuentoStock(it, CATEGORIA_A_STOCK)
+        if (!tipoStock || !cantidad) continue
+        deltaStock[tipoStock] = (deltaStock[tipoStock] || 0) + signo * cantidad
+      }
+    }
+    acumular(quitados, +1)
+    acumular(agregados, -1)
+    for (const [tipo, kg] of Object.entries(deltaStock)) {
+      if (Math.abs(kg) < 0.001) continue   // se quitó y se volvió a agregar igual
+      await actualizarStock(tipo, kg)
+    }
+
+    // Salidas de depósito: se rehacen desde los items finales para que el
+    // remito y el depósito cuenten lo mismo (alimentan Dashboard, Cierre y
+    // reportes). Solo si este remito tiene salidas vinculadas por remito_id:
+    // en los remitos viejos sin vínculo no hay forma seguísima de saber cuáles
+    // son las suyas, y duplicarlas sería peor que dejarlas como están.
+    const { data: salsPrevias } = await supabase.from('salidas_deposito')
+      .select('id, lista, cobro, notas').eq('remito_id', editando.id)
+    if (salsPrevias && salsPrevias.length > 0) {
+      const { lista, cobro, notas } = salsPrevias[0]
+      await supabase.from('salidas_deposito').delete().eq('remito_id', editando.id)
+      for (const it of itemsEdit) {
+        await supabase.from('salidas_deposito').insert({
+          fecha: fechaEdit, cliente_nombre: editando.cliente_nombre,
+          tipo: it.tipo, descripcion: it.descripcion,
+          kg: it.kg, precio_kg: it.precio, total: it.importe,
+          lista, cobro, notas, remito_id: editando.id,
+        })
+      }
+    }
 
     // Si cambió la fecha de emisión, mover también las salidas_deposito que se
     // crearon JUNTO con este remito (no hay FK: las emparejamos por cliente +
