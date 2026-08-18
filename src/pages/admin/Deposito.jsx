@@ -22,6 +22,7 @@ import { estadoBloqueoCliente } from '../../lib/moraClientes'
 import { logAuditoria } from '../../lib/auditoria'
 import { useAuth } from '../../context/AuthContext'
 import { puedeAjustarStock } from '../../lib/permisos'
+import { overlayDeSucursal, conPreciosDeSucursal } from '../../lib/preciosSucursal'
 
 // Nombre legible de cada tipo de embutido/salame (para descripciones de
 // historial y entradas registradas). El <select> usa estas mismas claves.
@@ -3297,6 +3298,7 @@ async function eliminar(entrada) {
 }
 
 export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
+  const { sucursalId } = useAuth()
   const [form, setForm] = useState({ destino: '', clienteId: '', clienteNombre: '', domicilio: '', fecha: fechaHoyARG(), categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
   // Pago dividido (cobro='mixto'): hasta 3 líneas { metodo, monto }. Solo se usa
   // cuando la venta se cobra en 2-3 formas distintas (ej. parte efectivo + parte
@@ -3365,7 +3367,12 @@ export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
     setStockMap(m)
   }
   useEffect(() => {
-    supabase.from('precios').select('*').order('nombre').then(({ data }) => setTodosPrecios(data || []))
+    // Los precios que se ofrecen al remitar salen del catálogo, pisados por
+    // los de la sucursal si el que remita es de una (ver lib/preciosSucursal).
+    supabase.from('precios').select('*').order('nombre').then(async ({ data }) => {
+      const overlay = await overlayDeSucursal(sucursalId)
+      setTodosPrecios(conPreciosDeSucursal(data || [], overlay))
+    })
     supabase.from('clientes').select('*').order('nombre').then(({ data }) => setClientes(data || []))
     // Ofertas vigentes (activas y dentro del rango de fechas) para aplicar
     // el precio de oferta en los despachos, igual que en Caja Rápida.
@@ -4471,6 +4478,7 @@ for (const item of items) {
 }
 
 export function RemitosTab({ remitoActual }) {
+  const { sucursalId } = useAuth()
   const [remitos, setRemitos] = useState([])
   const [seleccionado, setSeleccionado] = useState(remitoActual)
   const [anulando, setAnulando] = useState(false)
@@ -4538,7 +4546,12 @@ export function RemitosTab({ remitoActual }) {
   }
   useEffect(() => {
     cargarRemitos()
-    supabase.from('precios').select('*').order('nombre').then(({ data }) => setTodosPrecios(data || []))
+    // Los precios que se ofrecen al remitar salen del catálogo, pisados por
+    // los de la sucursal si el que remita es de una (ver lib/preciosSucursal).
+    supabase.from('precios').select('*').order('nombre').then(async ({ data }) => {
+      const overlay = await overlayDeSucursal(sucursalId)
+      setTodosPrecios(conPreciosDeSucursal(data || [], overlay))
+    })
     cargarCategoriasPrecios().then(l => setLabelsCatalogo(labelsDeCategorias(l)))
   }, [])
 
