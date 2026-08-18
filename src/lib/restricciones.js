@@ -26,3 +26,37 @@ export function rutaRestringida(email, ruta) {
 export function rutaInicio(email) {
   return rutaRestringida(email, '/admin/dashboard') ? '/admin/productividad' : '/admin/dashboard'
 }
+
+// ============================================================
+// MÓDULOS DE UNA SUCURSAL
+// ============================================================
+// Una franquicia maneja su propio negocio con las mismas pantallas, pero no
+// necesita todo: la facturación, el WhatsApp y los tableros de dirección son
+// de la central. Lista definida por Fabricio (18/08/2026).
+//
+// Se aplica en las mismas dos capas que las restricciones por email:
+//   1. Menú (AdminLayout, escritorio y celular)
+//   2. Ruta (App.jsx) para el que entra tipeando la URL
+//
+// Ojo: esto es la PANTALLA. Que no puedan ver los datos de la central lo
+// garantiza la base con RLS (supabase/93 y 94), no esta lista.
+export const MODULOS_SUCURSAL = [
+  '/admin/caja',          // vender al público
+  '/admin/ventas',        // Ventas Cta/Cte — remitos a clientes con cuenta
+  '/admin/deposito',      // ingresos, desposte, piezas, remitos, ajuste
+  '/admin/precios',       // su lista (la carga a mano, respeta la del contrato)
+  '/admin/presupuestos',
+  '/admin/clientes',      // su propia cartera
+  '/admin/proveedores',   // los suyos, con la central como uno más
+  '/admin/sueldos',
+  '/admin/gastos',
+  '/admin/dashboard',
+  '/admin/cierre',
+]
+
+// Fuera para la sucursal: Pedidos Mayoristas, WhatsApp, Etiquetas, Cheques,
+// Facturación, Ejecutivo, Modo TV, Productividad y Auditoría.
+export function moduloDeSucursal(ruta) {
+  if (!ruta) return false
+  return MODULOS_SUCURSAL.some(r => ruta.startsWith(r))
+}

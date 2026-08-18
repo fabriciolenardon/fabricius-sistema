@@ -21,6 +21,7 @@ import { cargarCategoriasPrecios, labelsDeCategorias } from '../../lib/categoria
 import { estadoBloqueoCliente } from '../../lib/moraClientes'
 import { logAuditoria } from '../../lib/auditoria'
 import { useAuth } from '../../context/AuthContext'
+import { puedeAjustarStock } from '../../lib/permisos'
 
 // Nombre legible de cada tipo de embutido/salame (para descripciones de
 // historial y entradas registradas). El <select> usa estas mismas claves.
@@ -364,9 +365,13 @@ const CATEGORIA_A_STOCK = {
 }
 
 export function Deposito() {
-  // El ajuste de stock es exclusivo del dueño: al resto de los admin ni
-  // siquiera les aparece la pestaña (ver lib/permisos.js).
-  const { isCEO } = useAuth()
+  // El ajuste de stock es del DUEÑO del depósito: en la central, solo
+  // Fabricio; en una sucursal, su encargado sobre el suyo (ver lib/permisos.js).
+  // Una sucursal además no ve el Flujo Depósito: los pedidos internos son de
+  // la central. Las Cajas Bovinas quedan afuera hasta que Fabricio defina si
+  // les despacha cajas armadas.
+  const { isCEO, isSucursal, profile, user } = useAuth()
+  const puedeAjustar = puedeAjustarStock(profile, user)
   const [tab, setTab] = useState('entradas')
   const [alert, setAlert] = useState(null)
   const [remitoActual, setRemitoActual] = useState(null)
@@ -389,11 +394,11 @@ export function Deposito() {
           { id: 'entradas', label: '📥 Ingresos' },
           { id: 'desposte', label: '🔪 Desposte' },
           { id: 'piezas', label: '🥩 Piezas' },
-          { id: 'cajas', label: '📦 Cajas Bovinas' },
+          ...(isSucursal ? [] : [{ id: 'cajas', label: '📦 Cajas Bovinas' }]),
           { id: 'pollo_cajones', label: '🍗 Pollo Cajones' },
-          { id: 'flujo', label: '📥 Flujo Depósito' },
+          ...(isSucursal ? [] : [{ id: 'flujo', label: '📥 Flujo Depósito' }]),
           { id: 'remitos', label: '🧾 Remitos' },
-          ...(isCEO ? [{ id: 'ajuste', label: '🔧 Ajuste Stock' }] : []),
+          ...(puedeAjustar ? [{ id: 'ajuste', label: '🔧 Ajuste Stock' }] : []),
         ].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
             style={{ padding: '8px 16px', borderRadius: 8, border: `1px solid ${tab === t.id ? 'var(--amber)' : 'var(--border)'}`, background: tab === t.id ? 'var(--amber)' : 'transparent', color: tab === t.id ? '#fff' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
@@ -404,11 +409,11 @@ export function Deposito() {
       {tab === 'entradas' && <EntradaForm onSaved={() => {}} showAlert={showAlert} proveedores={proveedores} />}
         {tab === 'desposte' && <DesposteTab key={tab} onSaved={() => {}} />}
 {tab === 'piezas' && <PiezasTab key={tab} />}
-{tab === 'cajas' && <CajasTab key={tab} />}
+{tab === 'cajas' && !isSucursal && <CajasTab key={tab} />}
 {tab === 'pollo_cajones' && <PolloCajonesTab key={tab} />}
 {tab === 'remitos' && <RemitosTab remitoActual={remitoActual} />}
-      {tab === 'flujo' && <FlujoDeposito />}
-      {tab === 'ajuste' && isCEO && <AjusteStock />}
+      {tab === 'flujo' && !isSucursal && <FlujoDeposito />}
+      {tab === 'ajuste' && puedeAjustar && <AjusteStock />}
     </div>
   )
 }
@@ -418,6 +423,7 @@ export default Deposito
 // MÓDULO DE DESPOSTE BOVINO
 // =============================================
 function DesposteTab({ onSaved }) {
+  const { isSucursal: esSucursal } = useAuth()
   const [subtab, setSubtab] = useState('piezas')
   const [mediasRes, setMediasRes] = useState([])
   const [piezasStock, setPiezasStock] = useState({})
@@ -447,7 +453,8 @@ const [piezasCerdo, setPiezasCerdo] = useState({
   pierna: '', carre: '', pechito: '', matambre: '',
   paleta: '', parrillero: '', bondiola: '', huesos: '', tocino: '', cuero: '', cabeza: ''
 })
-const [tipoElaboracion, setTipoElaboracion] = useState('embutido')
+// La sucursal solo elabora hamburguesas, así que arranca ya parada ahí.
+const [tipoElaboracion, setTipoElaboracion] = useState(esSucursal ? 'hamburguesa' : 'embutido')
 const [tipoEmbutido, setTipoEmbutido] = useState('chorizo_parrillero')
 // Hamburguesas: tipo elegido, kg de materia prima (carne/pollo — el cerdo usa
 // la grilla de piezas) y kg FINALES de hamburguesas producidas (puede haber
@@ -1226,8 +1233,13 @@ async function confirmarDesposteCerdo() {
     <div>
       {alert && <div style={{ background: alert.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${alert.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: alert.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>{alert.msg}</div>}
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
-        {[{ id: 'piezas', label: '🍖 Desposte en Piezas' }, { id: 'kilo', label: '⚖️ Desposte para venta por Kilo' }, { id: 'pieza_kilo', label: '🔄 Convertir Pieza a Cortes' }, { id: 'cerdo', label: '🐷 Desposte Cerdo' },
-{ id: 'embutidos', label: '🌭 Elaborar Embutidos' }, { id: 'medias_hist', label: '🐄 Historial Medias' }, { id: 'historial', label: '📋 Historial Desposte' }].map(t => (
+        {/* Una sucursal no desposta cerdo: recibe las piezas ya despostadas de
+            la central, nunca capones enteros. Y de elaboración solo hace
+            hamburguesas — los embutidos frescos y los salames los elabora la
+            central y se los distribuye. La solapa se llama distinto por eso. */}
+        {[{ id: 'piezas', label: '🍖 Desposte en Piezas' }, { id: 'kilo', label: '⚖️ Desposte para venta por Kilo' }, { id: 'pieza_kilo', label: '🔄 Convertir Pieza a Cortes' },
+...(esSucursal ? [] : [{ id: 'cerdo', label: '🐷 Desposte Cerdo' }]),
+{ id: 'embutidos', label: esSucursal ? '🍔 Elaborar Hamburguesas' : '🌭 Elaborar Embutidos' }, { id: 'medias_hist', label: '🐄 Historial Medias' }, { id: 'historial', label: '📋 Historial Desposte' }].map(t => (
           <button key={t.id} onClick={() => { setSubtab(t.id); setSeleccionada(null); setPiezas([]); cargarDatos() }}
             style={{ padding: '8px 16px', borderRadius: 8, border: `1px solid ${subtab === t.id ? 'var(--gold)' : 'var(--border)'}`, background: subtab === t.id ? 'var(--gold)' : 'transparent', color: subtab === t.id ? '#000' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
             {t.label}
@@ -1637,7 +1649,10 @@ async function confirmarDesposteCerdo() {
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="card-title">🌭 Tipo de elaboración</div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-          {[{ id: 'embutido', label: '🌭 Embutidos frescos' }, { id: 'salame', label: '🥩 Salames' }, { id: 'hamburguesa', label: '🍔 Hamburguesas' }].map(t => (
+          {(esSucursal
+            ? [{ id: 'hamburguesa', label: '🍔 Hamburguesas' }]
+            : [{ id: 'embutido', label: '🌭 Embutidos frescos' }, { id: 'salame', label: '🥩 Salames' }, { id: 'hamburguesa', label: '🍔 Hamburguesas' }]
+          ).map(t => (
             <button key={t.id} onClick={() => setTipoElaboracion(t.id)}
               style={{ flex: 1, padding: '10px', borderRadius: 8, border: `2px solid ${tipoElaboracion === t.id ? 'var(--gold)' : 'var(--border)'}`, background: tipoElaboracion === t.id ? 'rgba(201,168,76,0.1)' : 'var(--surface2)', color: tipoElaboracion === t.id ? 'var(--gold)' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
               {t.label}
