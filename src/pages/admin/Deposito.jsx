@@ -368,9 +368,10 @@ const CATEGORIA_A_STOCK = {
 export function Deposito() {
   // El ajuste de stock es del DUEÑO del depósito: en la central, solo
   // Fabricio; en una sucursal, su encargado sobre el suyo (ver lib/permisos.js).
-  // Una sucursal además no ve el Flujo Depósito: los pedidos internos son de
-  // la central. Las Cajas Bovinas quedan afuera hasta que Fabricio defina si
-  // les despacha cajas armadas.
+  // Lo único que una sucursal no ve es el Flujo Depósito: los pedidos internos
+  // son de la central. Las Cajas Bovinas SÍ, porque se les despachan armadas
+  // (confirmado por Fabricio 18/08/2026) y cada una entra como una unidad con
+  // su peso propio, igual que en Río Primero.
   const { isCEO, isSucursal, profile, user } = useAuth()
   const puedeAjustar = puedeAjustarStock(profile, user)
   const [tab, setTab] = useState('entradas')
@@ -395,7 +396,7 @@ export function Deposito() {
           { id: 'entradas', label: '📥 Ingresos' },
           { id: 'desposte', label: '🔪 Desposte' },
           { id: 'piezas', label: '🥩 Piezas' },
-          ...(isSucursal ? [] : [{ id: 'cajas', label: '📦 Cajas Bovinas' }]),
+          { id: 'cajas', label: '📦 Cajas Bovinas' },
           { id: 'pollo_cajones', label: '🍗 Pollo Cajones' },
           ...(isSucursal ? [] : [{ id: 'flujo', label: '📥 Flujo Depósito' }]),
           { id: 'remitos', label: '🧾 Remitos' },
@@ -410,7 +411,7 @@ export function Deposito() {
       {tab === 'entradas' && <EntradaForm onSaved={() => {}} showAlert={showAlert} proveedores={proveedores} />}
         {tab === 'desposte' && <DesposteTab key={tab} onSaved={() => {}} />}
 {tab === 'piezas' && <PiezasTab key={tab} />}
-{tab === 'cajas' && !isSucursal && <CajasTab key={tab} />}
+{tab === 'cajas' && <CajasTab key={tab} />}
 {tab === 'pollo_cajones' && <PolloCajonesTab key={tab} />}
 {tab === 'remitos' && <RemitosTab remitoActual={remitoActual} />}
       {tab === 'flujo' && !isSucursal && <FlujoDeposito />}
