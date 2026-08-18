@@ -99,7 +99,7 @@ export default function BuscadorGlobal() {
       const navegacion = [
         { kw: ['dashboard', 'panel'],            ruta: '/admin/dashboard',   nombre: 'Dashboard',   icono: '📊' },
         { kw: ['caja', 'vender', 'venta'],       ruta: '/admin/caja',        nombre: 'Caja Rápida', icono: '💵' },
-        { kw: ['mayorista', 'ventas'],           ruta: '/admin/ventas',      nombre: 'Mayorista',   icono: '📋' },
+        { kw: ['mayorista', 'ventas', 'cuenta corriente', 'ctacte', 'remito'], ruta: '/admin/ventas', nombre: 'Ventas Cta/Cte', icono: '📋' },
         { kw: ['deposito', 'desposte', 'stock'], ruta: '/admin/deposito',    nombre: 'Depósito',    icono: '🏭' },
         { kw: ['precios', 'oferta'],             ruta: '/admin/precios',     nombre: 'Precios',     icono: '💲' },
         { kw: ['etiquetas'],                     ruta: '/admin/etiquetas',   nombre: 'Etiquetas',   icono: '🏷️' },

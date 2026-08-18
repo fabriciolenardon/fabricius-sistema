@@ -48,7 +48,7 @@ const navItems = [
   { to: '/admin/dashboard',   icon: '📊', label: 'Dashboard' },
   { to: '/admin/ejecutivo',   icon: '⚡', label: 'Ejecutivo' },
   { to: '/admin/caja',        icon: '💵', label: 'Caja' },
-  { to: '/admin/ventas', icon: '📋', label: 'Mayorista' },
+  { to: '/admin/ventas', icon: '📋', label: 'Ventas Cta/Cte' },
   { to: '/admin/deposito',    icon: '🏭', label: 'Depósito' },
   { to: '/admin/precios',     icon: '💲', label: 'Precios' },
   { to: '/admin/presupuestos', icon: '📋', label: 'Presupuestos' },
@@ -71,7 +71,7 @@ const navItems = [
 const NAV_GRUPOS = [
   { label: 'Operación', icon: '🛒', items: [
     { to: '/admin/caja',      icon: '💵', label: 'Caja' },
-    { to: '/admin/ventas',    icon: '📋', label: 'Mayorista' },
+    { to: '/admin/ventas',    icon: '📋', label: 'Ventas Cta/Cte' },
     { to: '/admin/deposito',  icon: '🏭', label: 'Depósito' },
     { to: '/admin/pedidos',   icon: '📥', label: 'Pedidos Mayoristas' },
     { to: '/admin/whatsapp',  icon: '💬', label: 'WhatsApp' },
