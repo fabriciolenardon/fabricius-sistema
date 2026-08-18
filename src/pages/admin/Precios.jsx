@@ -8,6 +8,8 @@ import ImportarPLUQendra from './ImportarPLUQendra'
 import CombosEditor from './CombosEditor'
 import { abrirVentanaImprimible } from '../../lib/pdfPrintable'
 import { compartirListaPrecios } from '../../lib/listasPreciosPdf'
+import { overlayDeSucursal, conPreciosDeSucursal, preciosPropiosFaltantes, guardarPrecioDeSucursal } from '../../lib/preciosSucursal'
+import { useAuth } from '../../context/AuthContext'
 // Las categorías ya no son un objeto hardcodeado: viven en config_sistema
 // ('categorias_precios') y se administran desde la solapa 🗂️ Categorías.
 // Ver src/lib/categoriasPrecios.js (las de sistema no se pueden eliminar).
@@ -53,6 +55,8 @@ const inp = { background: 'var(--surface)', border: '1px solid var(--border)', c
 
 export default function Precios() {
   const [tab, setTab] = useState('ver')
+  const { sucursalId, isSucursal: esSucursal } = useAuth()
+  const [overlay, setOverlay] = useState(null)
   const [precios, setPrecios] = useState([])
   const [stockBuckets, setStockBuckets] = useState([])  // tipos de stock_actual (cerdo_*, emb_*) para enlazar
   const [filtro, setFiltro] = useState('bovino_corte')
@@ -96,7 +100,9 @@ export default function Precios() {
   const [promoPctInput, setPromoPctInput] = useState('10')
   const [promoLoading, setPromoLoading] = useState(false)
 
-  useEffect(() => { cargar(); cargarOfertas(); cargarPromoMundial(); cargarCategoriasPrecios().then(setCategorias) }, [])
+  // sucursalId en las dependencias: el perfil llega un instante después del
+  // primer render y sin esto la sucursal vería la lista de la central.
+  useEffect(() => { cargar(); cargarOfertas(); cargarPromoMundial(); cargarCategoriasPrecios().then(setCategorias) }, [sucursalId])
 
   async function cargarPromoMundial() {
     const { data } = await supabase.from('config_sistema').select('*').eq('clave', 'promo_mundial').maybeSingle()
@@ -137,7 +143,12 @@ export default function Precios() {
       supabase.from('precios').select('*').order('nombre'),
       supabase.from('stock_actual').select('tipo'),
     ])
-    setPrecios(data || [])
+    // La sucursal ve el catálogo de la central con SUS precios encima. Los
+    // productos que todavía no cargó muestran el precio de la central: sirve
+    // para arrancar, pero son de otro negocio (ver lib/preciosSucursal.js).
+    const ov = await overlayDeSucursal(sucursalId)
+    setOverlay(ov)
+    setPrecios(conPreciosDeSucursal(data || [], ov))
     // Buckets enlazables: cerdo_* (piezas), emb_* (embutidos) y brosa_*
     // (brosas por producto, mig 89). Excluye el 'cerdo' genérico (capón
     // entero), que no es a donde van los cortes. 'bovino_corte' entra para
@@ -239,7 +250,19 @@ export default function Precios() {
     }
 
     let error
-    if (editando) {
+    if (esSucursal) {
+      // Una sucursal edita SU precio, no el catálogo: el producto, su
+      // `stock_origen` y su PLU son de la central. Guarda en precios_sucursal.
+      if (!editando) {
+        mostrarMsg('❌ Los productos los da de alta la central. Acá se cargan los precios.')
+        setLoading(false); return
+      }
+      const r = await guardarPrecioDeSucursal(sucursalId, editando, {
+        precio_minorista: datos.precio_minorista,
+        precio_mayorista: datos.precio_mayorista,
+      })
+      error = r.error
+    } else if (editando) {
       const r = await supabase.from('precios').update(datos).eq('id', editando)
       error = r.error
     } else {
@@ -257,6 +280,8 @@ export default function Precios() {
   }
 
   async function eliminar(id) {
+    // El catálogo es de la central: una sucursal no da de baja productos.
+    if (esSucursal) { mostrarMsg('❌ Los productos los administra la central.'); return }
     if (!confirm('¿Seguro que querés eliminar este producto? También se borrarán sus ofertas.')) return
     // Antes el error se tragaba: si el borrado fallaba (p. ej. el producto estaba
     // en una oferta) parecía que "no pasaba nada". Ahora se muestra el motivo.
@@ -506,7 +531,20 @@ export default function Precios() {
   return (
     <div>
       <div className="page-title">PRECIOS</div>
-      <div className="page-sub">Consultá, administrá y usá la IA para gestionar tus precios</div>
+      <div className="page-sub">
+        {esSucursal
+          ? 'Cargá tus precios de venta. Los productos y sus datos los administra la central.'
+          : 'Consultá, administrá y usá la IA para gestionar tus precios'}
+      </div>
+      {/* Los productos sin precio propio muestran el de la central para que el
+          sistema arranque usable. Pero son de OTRO negocio, así que conviene
+          avisar cuántos faltan en vez de dejarlo pasar en silencio. */}
+      {esSucursal && preciosPropiosFaltantes(precios, overlay) > 0 && (
+        <div className="alert alert-error" style={{ marginBottom: 16 }}>
+          ⚠️ Te faltan cargar {preciosPropiosFaltantes(precios, overlay)} de {precios.length} precios.
+          Mientras tanto esos productos se venden al precio de la central, que puede no ser el tuyo.
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap' }}>
         {tabBtn('ver', '📋 Ver Precios')}
         {tabBtn('admin', '✏️ Administrar')}

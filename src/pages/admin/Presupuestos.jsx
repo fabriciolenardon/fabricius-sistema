@@ -9,6 +9,8 @@ import { fmtPrecio, fmtKg, fmtUnidades } from '../../lib/formatos'
 import { LISTAS, getLista, getCampoPrecio } from '../../lib/listasPrecios'
 import { abrirVentanaImprimible } from '../../lib/pdfPrintable'
 import { useEsMovil } from '../../lib/useEsMovil'
+import { overlayDeSucursal, conPreciosDeSucursal } from '../../lib/preciosSucursal'
+import { useAuth } from '../../context/AuthContext'
 
 // Etiquetas de categoría (mismo set que Precios.jsx) — solo para mostrar de
 // qué categoría es cada producto en el buscador.
@@ -50,6 +52,7 @@ function validoPorDefecto() {
 const FORM_VACIO = () => ({ editandoId: null, clienteNombre: '', lista: 'may', items: [], notas: '', validoHasta: validoPorDefecto() })
 
 export default function Presupuestos() {
+  const { sucursalId } = useAuth()
   const esMovil = useEsMovil()
   const [tab, setTab] = useState('nuevo')
   const [precios, setPrecios] = useState([])
@@ -76,7 +79,9 @@ export default function Presupuestos() {
       supabase.from('precios').select('id, nombre, categoria, precio_carniceria, precio_mayorista, precio_minorista').order('nombre'),
       supabase.from('presupuestos').select('*').order('created_at', { ascending: false }),
     ])
-    setPrecios(precs || [])
+    // Una sucursal cotiza con SUS precios, no con los de la central.
+    const overlay = await overlayDeSucursal(sucursalId)
+    setPrecios(conPreciosDeSucursal(precs || [], overlay))
     setPresupuestos(presu || [])
     setLoading(false)
   }
