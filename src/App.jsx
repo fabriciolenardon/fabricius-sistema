@@ -17,9 +17,9 @@
 //   * Pantallas pesadas (DashboardEjecutivo, Reportes, Facturacion,
 //     Auditoria) → solo se cargan cuando se abren.
 // ============================================================
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
-import { rutaRestringida, rutaInicio } from './lib/restricciones'
+import { rutaRestringida, rutaInicio, moduloDeSucursal } from './lib/restricciones'
 import { lazy, Suspense } from 'react'
 import LoginPage from './pages/LoginPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
@@ -83,6 +83,17 @@ function SinRestriccion({ ruta, children }) {
   return children
 }
 
+// Cierra por URL los módulos que la sucursal no tiene en el menú (facturación,
+// WhatsApp, dirección). El menú ya no se los muestra; esto cubre el link tipeado.
+function SinModulosDeCentral({ children }) {
+  const { profile } = useAuth()
+  const location = useLocation()
+  if (profile?.rol === 'sucursal' && !moduloDeSucursal(location.pathname)) {
+    return <Navigate to="/admin/caja" replace />
+  }
+  return children
+}
+
 function SoloCEO({ children }) {
   const { user, profile, profileMissing, loading } = useAuth()
   if (loading) return <LoadingScreen />
@@ -98,7 +109,11 @@ function ProtectedRoute({ children, requiredRole }) {
   if (loading) return <LoadingScreen />
   if (!user) return <Navigate to="/login" replace />
   if (profileMissing) return <PerfilPendiente />
-  if (requiredRole && profile?.rol !== requiredRole) return <Navigate to="/" replace />
+  // El rol `sucursal` usa las mismas pantallas que el admin: son la misma
+  // carnicería, otro dueño. Lo que ve de cada tabla lo decide la base
+  // (supabase/93), y qué módulos aparecen en el menú lo decide AdminLayout.
+  const rolesOk = requiredRole === 'admin' ? ['admin', 'sucursal'] : [requiredRole]
+  if (requiredRole && !rolesOk.includes(profile?.rol)) return <Navigate to="/" replace />
   return children
 }
 
@@ -126,6 +141,8 @@ function RootRedirect() {
   if (profileMissing) return <Navigate to="/perfil-pendiente" replace />
   if (!profile) return <Navigate to="/login" replace />
   if (profile.rol === 'admin') return <Navigate to={rutaInicio(user?.email)} replace />
+  // La sucursal arranca en Caja: es lo que abren apenas levantan la persiana.
+  if (profile.rol === 'sucursal') return <Navigate to="/admin/caja" replace />
   if (profile.rol === 'cliente_mayorista') return <Navigate to="/cliente/dashboard" replace />
   if (profile.rol === 'cajero') return <Navigate to="/cajero/caja" replace />
   if (profile.rol === 'desposte') return <Navigate to="/desposte/pedidos" replace />
@@ -144,7 +161,7 @@ export default function App() {
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/perfil-pendiente" element={<PerfilPendienteRoute />} />
         <Route path="/" element={<RootRedirect />} />
-        <Route path="/admin" element={<ProtectedRoute requiredRole="admin"><AdminLayout /></ProtectedRoute>}>
+        <Route path="/admin" element={<ProtectedRoute requiredRole="admin"><SinModulosDeCentral><AdminLayout /></SinModulosDeCentral></ProtectedRoute>}>
           <Route path="dashboard" element={<SinRestriccion ruta="/admin/dashboard"><Dashboard /></SinRestriccion>} />
           <Route path="deposito" element={<Deposito />} />
           <Route path="precios" element={<Precios />} />

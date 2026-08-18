@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { esCEO } from '../lib/permisos'
+import { esCEO, esSucursal } from '../lib/permisos'
 
 const AuthContext = createContext({})
 
@@ -62,16 +62,23 @@ export function AuthProvider({ children }) {
     setProfileMissing(false)
   }
 
-  const isAdmin = profile?.rol === 'admin'
+  // El personal de sucursal es admin DE LO SUYO: usa las mismas pantallas y
+  // necesita los mismos permisos de app (anular una venta, borrar historial).
+  // Quien lo encierra en su sucursal es la base, no esta bandera —
+  // ver supabase/93 y supabase/94.
+  const isSucursal = esSucursal(profile)
+  const isAdmin = profile?.rol === 'admin' || isSucursal
   const isFranquicia = profile?.rol === 'franquicia'
   const isClienteMayorista = profile?.rol === 'cliente_mayorista'
   const isCajero = profile?.rol === 'cajero'
-  // Dueño de la empresa: los tres admin no son equivalentes — hay acciones
-  // (hoy el ajuste de stock) reservadas a Fabricio. Ver lib/permisos.js.
+  // Dueño de la empresa: los tres admin de la central no son equivalentes —
+  // hay acciones reservadas a Fabricio. Ver lib/permisos.js.
   const isCEO = isAdmin && esCEO(profile, user)
+  // Sucursal a la que pertenece (1 = central). Ver supabase/92.
+  const sucursalId = profile?.sucursal_id ?? null
 
   return (
-    <AuthContext.Provider value={{ user, profile, profileMissing, loading, isAdmin, isCEO, isFranquicia, isClienteMayorista, isCajero, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, profile, profileMissing, loading, isAdmin, isCEO, isSucursal, sucursalId, isFranquicia, isClienteMayorista, isCajero, signIn, signOut }}>
       {children}
     </AuthContext.Provider>
   )
