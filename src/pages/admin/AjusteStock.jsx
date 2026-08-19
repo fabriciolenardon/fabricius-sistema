@@ -19,6 +19,7 @@ import { useAuth } from '../../context/AuthContext'
 import { puedeAjustarStock } from '../../lib/permisos'
 import { logAuditoria } from '../../lib/auditoria'
 import { EPSILON_STOCK, stockNormalizado, redondearStock, excedeTopeStock, TOPE_STOCK } from '../../lib/stockHelpers'
+import { imprimirHTML } from '../../lib/imprimir'
 
 // Etiquetas legibles para cada tipo. Si llega un tipo desconocido se muestra
 // el `tipo` crudo como fallback.
@@ -83,6 +84,170 @@ const LABELS = {
 // pesable), así que su bucket también cuenta unidades.
 const TIPOS_POR_UNIDAD = new Set(['almacen', 'bebidas', 'pollo', 'caja_cb', 'caja_pt', 'rebozado', 'brosa_sesos'])
 
+// ── PLANILLA DE CONTEO ────────────────────────────────────────────────
+// Lo que NO va a la planilla de papel (sí sigue en la pantalla de ajuste):
+//   - almacen / bebidas: no se cuentan en este conteo diario
+//   - buckets viejos que ya no se usan y quedaron en 0
+const TIPOS_FUERA_PLANILLA = new Set([
+  'almacen', 'bebidas',
+  'bovino_pieza', 'bovino_brosa', 'embutido', 'caja_cb',
+])
+
+// Agrupado por sector, para que se pueda recorrer la cámara de una sin ir y
+// volver. El `test` es por prefijo a propósito: si mañana se agrega un
+// brosa_* o un emb_* nuevo, cae solo en su grupo sin tocar esto.
+//
+// `col` es en qué columna de la hoja va cada grupo ('a' izquierda, 'b'
+// derecha). Está puesto a mano y no calculado: así queda parejo (26 y 26
+// líneas) y sobre todo estable — que un grupo no salte de columna solo porque
+// se cargó un producto nuevo.
+const GRUPOS_PLANILLA = [
+  { titulo: '🐄 BOVINO',             col: 'a', test: t => t === 'bovino_mr' || t === 'bovino_corte' },
+  { titulo: '🍖 PIEZAS BOVINAS',     col: 'a', test: t => t.startsWith('pieza_') },
+  { titulo: '🫀 BROSAS / ACHURAS',   col: 'a', test: t => t.startsWith('brosa_') },
+  { titulo: '🍗 POLLO Y REBOZADOS',  col: 'a', test: t => t === 'pollo' || t === 'rebozado' || t.startsWith('caja_') },
+  { titulo: '🐷 CERDO',              col: 'b', test: t => t === 'cerdo' || t.startsWith('cerdo_') },
+  { titulo: '🌭 EMBUTIDOS',          col: 'b', test: t => t.startsWith('emb_') },
+  { titulo: '🍔 HAMBURGUESAS',       col: 'b', test: t => t.startsWith('hamb_') },
+]
+
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+
+// Reparte las filas en los grupos. Lo que no matchea ningún grupo cae en
+// "OTROS" — nunca se pierde una fila de la planilla por no estar mapeada.
+function agruparParaPlanilla(filas) {
+  const resto = filas.filter(f => !TIPOS_FUERA_PLANILLA.has(f.tipo))
+  const usados = new Set()
+  const grupos = GRUPOS_PLANILLA.map(g => {
+    const items = resto.filter(f => g.test(f.tipo))
+    items.forEach(f => usados.add(f.tipo))
+    return { titulo: g.titulo, col: g.col, items }
+  }).filter(g => g.items.length > 0)
+  const otros = resto.filter(f => !usados.has(f.tipo))
+  if (otros.length > 0) grupos.push({ titulo: '📦 OTROS', items: otros })
+  return grupos
+}
+
+// Reparte los grupos en 2 columnas para que todo entre en UNA hoja. La columna
+// de cada grupo viene fija de GRUPOS_PLANILLA; solo los grupos sin columna
+// asignada (OTROS: productos nuevos que todavía no están mapeados) se acomodan
+// en la que tenga menos líneas, para no desbalancear la hoja.
+function repartirEnDosColumnas(grupos) {
+  const peso = g => g.items.length + 1  // +1 por el título del grupo
+  const a = grupos.filter(g => g.col === 'a')
+  const b = grupos.filter(g => g.col === 'b')
+  const suma = col => col.reduce((s, g) => s + peso(g), 0)
+  for (const g of grupos.filter(g => !g.col)) {
+    (suma(a) <= suma(b) ? a : b).push(g)
+  }
+  return [a, b]
+}
+
+// Planilla en papel para el conteo físico diario. Entra en UNA hoja A4: dos
+// columnas y sin columna de observaciones. Por defecto va CIEGA (sin la
+// cantidad del sistema): si el papel ya trae el número, el que cuenta lo copia
+// y el control no sirve para nada. `conSistema` lo agrega para cuando se quiere
+// usar como chequeo rápido en vez de conteo a ciegas.
+function planillaHTML(filas, { conSistema = false } = {}) {
+  const grupos = agruparParaPlanilla(filas)
+  const [colA, colB] = repartirEnDosColumnas(grupos)
+  const hoy = new Date().toLocaleDateString('es-AR', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    timeZone: 'America/Argentina/Buenos_Aires',
+  })
+  const nCols = conSistema ? 4 : 3
+
+  const tabla = grupos => grupos.length === 0 ? '' : `
+    <table>
+      <thead><tr>
+        <th style="text-align:left; padding-left:5px">PRODUCTO</th>
+        <th class="th-uni">UNID.</th>
+        ${conSistema ? '<th class="th-sis">SIST.</th>' : ''}
+        <th class="th-cont">CONTADO</th>
+      </tr></thead>
+      ${grupos.map(g => `
+        <tbody class="grupo">
+          <tr><td class="grupo-tit" colspan="${nCols}">${esc(g.titulo)}</td></tr>
+          ${g.items.map(f => `
+            <tr>
+              <td class="prod">${esc(f.label)}</td>
+              <td class="uni">${esc(f.unidad)}</td>
+              ${conSistema ? `<td class="sis">${fmt(f.actual)}</td>` : ''}
+              <td class="escribir"></td>
+            </tr>`).join('')}
+        </tbody>`).join('')}
+    </table>`
+
+  const secciones = `<div class="cols"><div class="col">${tabla(colA)}</div><div class="col">${tabla(colB)}</div></div>`
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Planilla de conteo</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { font-family: Arial, Helvetica, sans-serif; color: #000; background: #fff; padding: 16px; }
+      .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 10px; }
+      .logo-title { font-size: 20px; font-weight: 900; letter-spacing: 2px; }
+      .logo-sub { font-size: 8px; color: #555; letter-spacing: 1px; }
+      .doc-title { font-size: 17px; font-weight: 900; font-style: italic; text-align: right; }
+      .doc-sub { font-size: 9px; color: #444; text-align: right; }
+      .datos { display: flex; gap: 14px; margin-bottom: 8px; }
+      .campo { flex: 1; font-size: 10px; font-weight: 700; }
+      .campo .linea { border-bottom: 1px solid #000; height: 20px; margin-top: 2px; }
+      .instrucciones { border: 1px solid #000; padding: 5px 8px; font-size: 9.5px; line-height: 1.45; margin-bottom: 8px; }
+      .cols { display: flex; gap: 14px; align-items: flex-start; }
+      .col { flex: 1; min-width: 0; }
+      table { width: 100%; border-collapse: collapse; }
+      th { border: 1px solid #000; background: #e8e8e8; font-size: 7.5px; padding: 3px 2px; letter-spacing: .4px; }
+      .th-uni { width: 26px; } .th-sis { width: 44px; } .th-cont { width: 62px; }
+      /* Renglon alto: entra igual en una A4 vertical y queda comodo para
+         escribir a lapicera. */
+      td { border: 1px solid #000; font-size: 10px; padding: 0 4px; height: 28px; }
+      .grupo-tit { background: #000; color: #fff; font-size: 8.5px; font-weight: 900; letter-spacing: 1.2px; height: 20px; padding: 0 5px; }
+      .prod { font-weight: 600; }
+      .uni { text-align: center; font-size: 8px; color: #555; }
+      .sis { text-align: right; font-family: monospace; font-size: 9px; color: #333; }
+      .escribir { background: #fafafa; }
+      tbody.grupo { page-break-inside: avoid; }
+      .firmas { display: flex; gap: 40px; margin-top: 30px; page-break-inside: avoid; }
+      .firma { flex: 1; border-top: 1px solid #000; padding-top: 3px; font-size: 8.5px; text-align: center; letter-spacing: .04em; }
+      @media print {
+        body { padding: 0; }
+        @page { size: A4 portrait; margin: 10mm; }
+      }
+    </style></head>
+    <body>
+      <div class="header">
+        <div>
+          <div class="logo-title">FABRICIUS</div>
+          <div class="logo-sub">CARNICERÍAS · PREMIUM QUALITY</div>
+        </div>
+        <div>
+          <div class="doc-title">PLANILLA DE CONTEO FÍSICO</div>
+          <div class="doc-sub">Uso interno · ${esc(hoy)}</div>
+        </div>
+      </div>
+
+      <div class="datos">
+        <div class="campo">FECHA DEL CONTEO<div class="linea"></div></div>
+        <div class="campo">QUIÉN CONTÓ<div class="linea"></div></div>
+        <div class="campo">HORA INICIO<div class="linea"></div></div>
+        <div class="campo">HORA FIN<div class="linea"></div></div>
+      </div>
+
+      <div class="instrucciones">
+        <b>Anotá lo que HAY, no lo que debería haber.</b> Si un producto está en cero, escribí <b>0</b> —
+        no lo dejes vacío. Una línea vacía se lee como "no se contó" y queda sin cargar.
+        Ojo con la columna UNID.: <b>kg</b> es kilos y <b>u</b> es unidades (pollo, rebozados, sesos, cajas).
+      </div>
+
+      ${secciones}
+
+      <div class="firmas">
+        <div class="firma">FIRMA DE QUIEN CONTÓ</div>
+        <div class="firma">ACLARACIÓN</div>
+      </div>
+    </body></html>`
+}
+
 const fmt = n => Math.round((Number(n) || 0) * 100) / 100
 const fFecha = s => s ? new Date(s).toLocaleString('es-AR', {
   day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit',
@@ -110,6 +275,7 @@ export default function AjusteStock() {
   // error y la acción se pierde en silencio — regla de oro N°4).
   const [confirmLimpiar, setConfirmLimpiar] = useState(false)
   const [confirmGuardar, setConfirmGuardar] = useState(null) // { cambios, motivo }
+  const [planillaConSistema, setPlanillaConSistema] = useState(false) // planilla ciega por defecto
 
   useEffect(() => { cargar() }, [])
 
@@ -352,7 +518,17 @@ export default function AjusteStock() {
             {b.label}
           </button>
         ))}
-        <button onClick={cargar} style={{ padding: '6px 12px', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, cursor: 'pointer', fontSize: 12, marginLeft: 'auto' }}>
+        <button onClick={() => imprimirHTML(planillaHTML(filas, { conSistema: planillaConSistema }))}
+          title="Imprime la lista de todos los productos para contar a mano"
+          style={{ padding: '6px 14px', background: 'transparent', border: '1px solid var(--gold)', color: 'var(--gold)', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700, marginLeft: 'auto' }}>
+          🖨️ Planilla de conteo
+        </button>
+        <label title="Por defecto va en blanco: si el papel trae el número del sistema, el que cuenta lo copia y el control no sirve"
+          style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--muted)', cursor: 'pointer' }}>
+          <input type="checkbox" checked={planillaConSistema} onChange={e => setPlanillaConSistema(e.target.checked)} />
+          con cantidades del sistema
+        </label>
+        <button onClick={cargar} style={{ padding: '6px 12px', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>
           🔄 Recargar
         </button>
       </div>
