@@ -2734,6 +2734,40 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
   const TIPOS_SOLO_UNIDADES = ['almacen', 'bebidas']
   const esSoloUnidades = TIPOS_SOLO_UNIDADES.includes(form.tipo)
 
+  // ── CUADRE: kg × precio/kg tiene que dar el importe ────────────────────
+  // El importe total se carga a mano, así que es fácil que no coincida con lo
+  // que dicen los kg y el precio (caso real: 2 cajones × 5 kg a $7.210 =
+  // $72.100, pero se tipeó $77.210 — que a ese precio serían 10,7 kg). Antes
+  // la entrada se registraba igual y el error aparecía recién al cuadrar la
+  // cuenta del proveedor, con el stock ya movido.
+  //
+  // No aplica a los tipos que se compran POR KG (ahí el importe lo calcula el
+  // sistema, no se puede desalinear) ni a las cajas individuales (no tienen
+  // precio/kg: se deriva del peso de cada caja).
+  const cuadre = useMemo(() => {
+    if (TIPOS_COMPRA_POR_KG.has(form.tipo) || esCajaIndividual) return null
+    const cantidad = TIPOS_EN_UNIDADES.includes(form.tipo) ? Math.max(1, parseInt(form.cantidad) || 1) : 1
+    const kgUnidad = esSoloUnidades ? 1 : parseNumero(form.kg)
+    const kgTotal = kgUnidad * cantidad
+    const precio = parseNumero(form.precioKg)
+    const importe = parseNumero(form.importe)
+    // Con algún campo vacío no hay nada que comparar todavía.
+    if (!(kgTotal > 0) || !(precio > 0) || !(importe > 0)) return null
+    const esperado = Math.round(kgTotal * precio * 100) / 100
+    const dif = Math.round((importe - esperado) * 100) / 100
+    // Tolerancia 1% (mínimo $1): aguanta el redondeo de la factura pero no
+    // deja pasar un dígito de más.
+    const cuadra = Math.abs(dif) <= Math.max(1, esperado * 0.01)
+    return {
+      cantidad, kgTotal, precio, importe, esperado, dif, cuadra,
+      unidad: esSoloUnidades ? 'u' : 'kg',
+      porUnidad: esSoloUnidades,
+      // Las dos salidas posibles: o está mal el importe, o está mal el precio.
+      precioImplicito: Math.round((importe / kgTotal) * 100) / 100,
+      kgImplicito: Math.round((importe / precio) * 1000) / 1000,
+    }
+  }, [form.tipo, form.cantidad, form.kg, form.precioKg, form.importe, esCajaIndividual, esSoloUnidades])
+
   async function guardar() {
     if (guardandoRef.current) return       // bloqueo síncrono contra doble click
     guardandoRef.current = true
@@ -2900,6 +2934,13 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
       showAlert({ type: 'error', msg: esPorKg
         ? '⛔ Cargá el precio por kg — no se puede ingresar sin precio.'
         : '⛔ Cargá el importe (precio total) — no se puede ingresar al depósito sin precio.' })
+      return
+    }
+    // BLOQUEO: los kg, el precio y el importe tienen que cerrar entre sí.
+    // El panel del formulario ya lo muestra y ofrece corregirlo con un click;
+    // esto es la red por si se llega igual al botón.
+    if (cuadre && !cuadre.cuadra) {
+      showAlert({ type: 'error', msg: `⛔ Los números no cuadran: ${fmtKg(cuadre.kgTotal)} × ${fmtPrecio(cuadre.precio)} = ${fmtPrecio(cuadre.esperado)}, pero el importe dice ${fmtPrecio(cuadre.importe)}. Corregí el importe o el precio antes de registrar.` })
       return
     }
     // Media res: exigir el tipo (Premium NT-VQ u Overo Chico) — no texto libre.
@@ -3464,10 +3505,51 @@ async function eliminar(entrada) {
             </select>
           </div>
         </div>
+        {/* Cuadre kg × precio = importe. Verde cuando cierra, rojo cuando no,
+            con las dos correcciones posibles a un click. */}
+        {cuadre && (
+          cuadre.cuadra ? (
+            <div style={{ fontSize: 12, color: 'var(--green)', marginBottom: 8, fontWeight: 600 }}>
+              ✅ Cuadra: {cuadre.cantidad > 1 ? `${cuadre.cantidad} × ${fmtKg(cuadre.kgTotal / cuadre.cantidad)} = ` : ''}
+              {cuadre.porUnidad ? `${cuadre.kgTotal} u` : fmtKg(cuadre.kgTotal)} × {fmtPrecio(cuadre.precio)} = {fmtPrecio(cuadre.esperado)}
+            </div>
+          ) : (
+            <div style={{ background: '#3a1a1a', border: '1px solid var(--red-light, #ff6b6b)', borderRadius: 8, padding: '10px 14px', marginBottom: 12 }}>
+              <div style={{ color: '#ff8b8b', fontWeight: 800, fontSize: 13, marginBottom: 5 }}>
+                ⛔ Los números no cuadran — revisá antes de registrar
+              </div>
+              <div style={{ fontSize: 12.5, color: 'var(--text)', lineHeight: 1.6 }}>
+                {cuadre.cantidad > 1 && <>{cuadre.cantidad} × {fmtKg(cuadre.kgTotal / cuadre.cantidad)} = </>}
+                <b>{cuadre.porUnidad ? `${cuadre.kgTotal} u` : fmtKg(cuadre.kgTotal)}</b> × <b>{fmtPrecio(cuadre.precio)}</b> = <b>{fmtPrecio(cuadre.esperado)}</b>,
+                {' '}pero cargaste <b style={{ color: '#ff8b8b' }}>{fmtPrecio(cuadre.importe)}</b>
+                {' '}({cuadre.dif > 0 ? '+' : ''}{fmtPrecio(cuadre.dif)}).
+                <div style={{ color: 'var(--muted)', marginTop: 3 }}>
+                  A {fmtPrecio(cuadre.precio)} el {cuadre.porUnidad ? 'unidad' : 'kg'}, {fmtPrecio(cuadre.importe)} serían{' '}
+                  <b style={{ color: 'var(--text)' }}>{cuadre.porUnidad ? `${cuadre.kgImplicito} u` : fmtKg(cuadre.kgImplicito)}</b>.
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 9, flexWrap: 'wrap' }}>
+                <button onClick={() => setForm(f => ({ ...f, importe: String(cuadre.esperado) }))}
+                  style={{ background: 'transparent', border: '1px solid var(--gold)', color: 'var(--gold)', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+                  Corregir importe → {fmtPrecio(cuadre.esperado)}
+                </button>
+                <button onClick={() => setForm(f => ({ ...f, precioKg: String(cuadre.precioImplicito) }))}
+                  style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+                  Corregir precio → {fmtPrecio(cuadre.precioImplicito)}/{cuadre.porUnidad ? 'u' : 'kg'}
+                </button>
+              </div>
+            </div>
+          )
+        )}
+
         <div style={{ fontSize: 12, color: 'var(--green)', marginBottom: 12 }}>
           ✅ La entrada actualizará el stock y se registrará en Cuenta Proveedores
         </div>
-        <button className="btn btn-gold" onClick={guardar} disabled={guardandoEntrada} style={{ opacity: guardandoEntrada ? 0.5 : 1, cursor: guardandoEntrada ? 'not-allowed' : 'pointer' }}>{guardandoEntrada ? '⏳ Registrando…' : '✅ Registrar entrada'}</button>
+        <button className="btn btn-gold" onClick={guardar} disabled={guardandoEntrada || (cuadre && !cuadre.cuadra)}
+          title={cuadre && !cuadre.cuadra ? 'Los kg, el precio y el importe no coinciden' : ''}
+          style={{ opacity: (guardandoEntrada || (cuadre && !cuadre.cuadra)) ? 0.5 : 1, cursor: (guardandoEntrada || (cuadre && !cuadre.cuadra)) ? 'not-allowed' : 'pointer' }}>
+          {guardandoEntrada ? '⏳ Registrando…' : (cuadre && !cuadre.cuadra) ? '⛔ Revisá los números' : '✅ Registrar entrada'}
+        </button>
       </div>
 
       <div className="card">
