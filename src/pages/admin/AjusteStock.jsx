@@ -248,6 +248,98 @@ function planillaHTML(filas, { conSistema = false } = {}) {
     </body></html>`
 }
 
+// ── COMPROBANTE DE AJUSTE ─────────────────────────────────────────────
+// Se imprime apenas se guarda un ajuste: qué había en el sistema, en cuánto
+// quedó y la diferencia. Queda el papel del movimiento, que si no solo vive
+// en el log de auditoría.
+function comprobanteHTML({ cambios, motivo, usuario, fechaHora }) {
+  const conSigno = n => (n > 0 ? '+' : '') + fmt(n)
+  // Los kg y las unidades no se pueden sumar juntos: se totaliza por separado.
+  const totalPor = unidad => cambios
+    .filter(c => c.unidad === unidad)
+    .reduce((s, c) => s + c.diferencia, 0)
+  const totKg = totalPor('kg')
+  const totU = totalPor('u')
+  const sobrantes = cambios.filter(c => c.diferencia > 0).length
+  const faltantes = cambios.filter(c => c.diferencia < 0).length
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Comprobante de ajuste de stock</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { font-family: Arial, Helvetica, sans-serif; color: #000; background: #fff; padding: 0; }
+      .encabezado { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 11px; }
+      .marca { font-size: 21px; font-weight: 900; letter-spacing: 2.5px; line-height: 1; }
+      .marca-sub { font-size: 7.5px; color: #555; letter-spacing: 1.4px; margin-top: 3px; }
+      .doc-tit { font-size: 16px; font-weight: 900; font-style: italic; text-align: right; line-height: 1.15; }
+      .doc-sub { font-size: 8.5px; color: #444; text-align: right; margin-top: 2px; }
+      .datos { display: flex; gap: 12px; margin-bottom: 11px; }
+      .campo { flex: 1; }
+      .campo .et { font-size: 8px; font-weight: 800; letter-spacing: .1em; color: #555; text-transform: uppercase; }
+      .campo .vl { font-size: 11.5px; font-weight: 700; border-bottom: 1px solid #000; padding: 2px 0 3px; word-break: break-word; }
+      table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+      th { border: 1px solid #000; background: #e8e8e8; font-size: 8px; padding: 4px 3px; letter-spacing: .5px; }
+      td { border: 1px solid #000; font-size: 10.5px; padding: 5px 6px; }
+      .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+      .prod { font-weight: 600; }
+      .dif { font-weight: 800; }
+      .resumen { border: 1px solid #000; padding: 8px 11px; font-size: 10.5px; line-height: 1.6; }
+      .resumen b { font-weight: 800; }
+      .firmas { display: flex; gap: 40px; margin-top: 34px; }
+      .firma { flex: 1; border-top: 1px solid #000; padding-top: 3px; font-size: 8.5px; text-align: center; letter-spacing: .04em; }
+      @media print { @page { size: A4 portrait; margin: 12mm; } }
+    </style></head>
+    <body>
+      <div class="encabezado">
+        <div>
+          <div class="marca">FABRICIUS</div>
+          <div class="marca-sub">CARNICERÍAS · PREMIUM QUALITY</div>
+        </div>
+        <div>
+          <div class="doc-tit">COMPROBANTE DE AJUSTE DE STOCK</div>
+          <div class="doc-sub">Uso interno · ${esc(fechaHora)}</div>
+        </div>
+      </div>
+
+      <div class="datos">
+        <div class="campo"><div class="et">Fecha y hora</div><div class="vl">${esc(fechaHora)}</div></div>
+        <div class="campo"><div class="et">Ajustó</div><div class="vl">${esc(usuario)}</div></div>
+        <div class="campo" style="flex:2"><div class="et">Motivo</div><div class="vl">${esc(motivo)}</div></div>
+      </div>
+
+      <table>
+        <thead><tr>
+          <th style="text-align:left; padding-left:6px">PRODUCTO</th>
+          <th style="width:78px">HABÍA</th>
+          <th style="width:78px">QUEDÓ</th>
+          <th style="width:88px">DIFERENCIA</th>
+        </tr></thead>
+        <tbody>
+          ${cambios.map(c => `
+            <tr>
+              <td class="prod">${esc(c.label)}</td>
+              <td class="num">${fmt(c.actual)} ${esc(c.unidad)}</td>
+              <td class="num">${fmt(c.contado)} ${esc(c.unidad)}</td>
+              <td class="num dif">${conSigno(c.diferencia)} ${esc(c.unidad)}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+
+      <div class="resumen">
+        <b>${cambios.length}</b> producto${cambios.length === 1 ? '' : 's'} ajustado${cambios.length === 1 ? '' : 's'} ·
+        <b>${sobrantes}</b> con sobrante · <b>${faltantes}</b> con faltante<br>
+        Diferencia neta: <b>${conSigno(totKg)} kg</b>${totU !== 0 ? ` · <b>${conSigno(totU)} u</b>` : ''}
+        <div style="color:#555; margin-top:3px">
+          Diferencia = lo contado − lo que decía el sistema. Positivo = sobró mercadería · Negativo = faltó.
+        </div>
+      </div>
+
+      <div class="firmas">
+        <div class="firma">FIRMA DE QUIEN AJUSTÓ</div>
+        <div class="firma">ACLARACIÓN</div>
+      </div>
+    </body></html>`
+}
+
 const fmt = n => Math.round((Number(n) || 0) * 100) / 100
 const fFecha = s => s ? new Date(s).toLocaleString('es-AR', {
   day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit',
@@ -276,6 +368,7 @@ export default function AjusteStock() {
   const [confirmLimpiar, setConfirmLimpiar] = useState(false)
   const [confirmGuardar, setConfirmGuardar] = useState(null) // { cambios, motivo }
   const [planillaConSistema, setPlanillaConSistema] = useState(false) // planilla ciega por defecto
+  const [ultimoComprobante, setUltimoComprobante] = useState(null)    // para reimprimir el último ajuste
 
   useEffect(() => { cargar() }, [])
 
@@ -417,6 +510,7 @@ export default function AjusteStock() {
 
     setGuardando(true)
     const errores = []
+    const guardados = []   // solo los que realmente se escribieron → van al comprobante
     for (const c of cambios) {
       // El stock se guarda al gramo — la auditoría tiene que registrar el
       // valor que realmente quedó, no el que se tipeó.
@@ -428,6 +522,7 @@ export default function AjusteStock() {
         .update({ kg_disponible: guardado })
         .eq('tipo', c.tipo)
       if (error) { errores.push(`${c.label}: ${error.message}`); continue }
+      guardados.push({ ...c, contado: guardado })
 
       // 2) Loguear el ajuste en auditoría — no bloquea si falla
       const signo = c.diferencia > 0 ? '+' : ''
@@ -443,6 +538,23 @@ export default function AjusteStock() {
     }
     setGuardando(false)
     setConfirmGuardar(null)
+
+    // Comprobante del ajuste: se imprime solo apenas se guarda, y queda el
+    // botón para reimprimirlo por si se cerró el diálogo de impresión.
+    if (guardados.length > 0) {
+      const comprobante = {
+        cambios: guardados,
+        motivo: motivoTxt,
+        usuario: profile?.nombre || user?.email || '—',
+        fechaHora: new Date().toLocaleString('es-AR', {
+          day: '2-digit', month: '2-digit', year: 'numeric',
+          hour: '2-digit', minute: '2-digit',
+          timeZone: 'America/Argentina/Buenos_Aires',
+        }),
+      }
+      setUltimoComprobante(comprobante)
+      imprimirHTML(comprobanteHTML(comprobante))
+    }
 
     if (errores.length > 0) {
       showMsg(`Se guardaron ${cambios.length - errores.length} de ${cambios.length}. Errores: ${errores.join('; ')}`, 'error', 8000)
@@ -486,6 +598,28 @@ export default function AjusteStock() {
           borderRadius: 8, padding: '10px 16px', marginBottom: 16,
           color: msg.tipo === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600,
         }}>{msg.texto}</div>
+      )}
+
+      {/* El comprobante del último ajuste se imprime solo al guardar; esto es
+          por si se cerró el diálogo de impresión sin querer. */}
+      {ultimoComprobante && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+          background: 'var(--surface2)', border: '1px solid var(--border)',
+          borderRadius: 8, padding: '10px 14px', marginBottom: 16,
+        }}>
+          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+            🧾 Último ajuste: <b style={{ color: 'var(--text)' }}>{ultimoComprobante.cambios.length} producto{ultimoComprobante.cambios.length === 1 ? '' : 's'}</b> · {ultimoComprobante.fechaHora}
+          </span>
+          <button onClick={() => imprimirHTML(comprobanteHTML(ultimoComprobante))}
+            style={{ padding: '5px 12px', background: 'transparent', border: '1px solid var(--gold)', color: 'var(--gold)', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+            🖨️ Reimprimir comprobante
+          </button>
+          <button onClick={() => setUltimoComprobante(null)}
+            style={{ padding: '5px 10px', background: 'transparent', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 12, marginLeft: 'auto' }}>
+            ✕
+          </button>
+        </div>
       )}
 
       <div className="card" style={{ marginBottom: 16 }}>
