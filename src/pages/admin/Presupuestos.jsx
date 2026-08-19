@@ -11,6 +11,7 @@ import { abrirVentanaImprimible } from '../../lib/pdfPrintable'
 import { useEsMovil } from '../../lib/useEsMovil'
 import { overlayDeSucursal, conPreciosDeSucursal } from '../../lib/preciosSucursal'
 import { useAuth } from '../../context/AuthContext'
+import { productosQueVende } from '../../lib/categoriasPrecios'
 
 // Etiquetas de categoría (mismo set que Precios.jsx) — solo para mostrar de
 // qué categoría es cada producto en el buscador.
@@ -79,9 +80,10 @@ export default function Presupuestos() {
       supabase.from('precios').select('id, nombre, categoria, precio_carniceria, precio_mayorista, precio_minorista').order('nombre'),
       supabase.from('presupuestos').select('*').order('created_at', { ascending: false }),
     ])
-    // Una sucursal cotiza con SUS precios, no con los de la central.
+    // Una sucursal cotiza con SUS precios, no con los de la central. Y no
+    // cotiza insumos: se los compra a la central, no los revende.
     const overlay = await overlayDeSucursal(sucursalId)
-    setPrecios(conPreciosDeSucursal(precs || [], overlay))
+    setPrecios(productosQueVende(conPreciosDeSucursal(precs || [], overlay), esSucursal))
     setPresupuestos(presu || [])
     setLoading(false)
   }
