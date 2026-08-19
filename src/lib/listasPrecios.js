@@ -43,6 +43,25 @@ export function getLista(codigo) {
   return LISTAS[codigo] || LISTAS.carn
 }
 
+// ============================================================
+// CON QUÉ LISTAS VENDE CADA NEGOCIO
+// ============================================================
+// La central vende con las tres. Una SUCURSAL es una franquicia y vende con
+// dos: Mayorista (rotiserías, restaurantes) y Minorista (el mostrador).
+//
+// "Carnicería" NO es una lista con la que ellos vendan: es la lista con la
+// que la CENTRAL les vende A ELLOS. Mostrársela es confuso y peligroso — un
+// empleado podría facturarle a un cliente al precio con el que la sucursal
+// compra. Lo mismo con la lista "Franquicia": ellos SON la franquicia.
+export function listasDeVenta(esSucursal) {
+  return esSucursal ? [LISTAS.may, LISTAS.min] : [LISTAS.may, LISTAS.carn, LISTAS.min]
+}
+
+// Lista por defecto al dar de alta un cliente nuevo.
+export function listaPorDefecto(esSucursal) {
+  return esSucursal ? 'min' : 'carn'
+}
+
 // Devuelve el campo de la tabla precios que corresponde a la lista del cliente
 // Ej: getCampoPrecio('min') === 'precio_minorista'
 export function getCampoPrecio(codigo) {
