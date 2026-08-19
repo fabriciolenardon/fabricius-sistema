@@ -79,6 +79,32 @@ export async function guardarCategoriasPrecios(lista) {
   }, { onConflict: 'clave' })
 }
 
+// ============================================================
+// CATEGORÍAS QUE SOLO VENDE LA CENTRAL
+// ============================================================
+// Los INSUMOS (bolsas, bandejas, etiquetas) son un producto que la central le
+// vende a sus carnicerías y a las franquicias. Una sucursal NO los revende:
+// se los compra a la central igual que la carne. Que le aparezcan en su lista
+// de precios, en un remito o en un presupuesto solo confunde.
+//
+// Si mañana hay otra categoría con la misma forma, se agrega acá y queda
+// aplicada en todos lados.
+export const CATEGORIAS_SOLO_CENTRAL = new Set(['insumos'])
+
+// Filtra el catálogo de categorías: saca las ocultas y, si es una sucursal,
+// también las que solo vende la central.
+export function categoriasParaVender(lista, esSucursal) {
+  const visibles = (lista || []).filter(c => c.activa !== false)
+  return esSucursal ? visibles.filter(c => !CATEGORIAS_SOLO_CENTRAL.has(c.clave)) : visibles
+}
+
+// Ídem para una lista de PRODUCTOS: así no aparecen en el buscador de un
+// remito ni en el de un presupuesto.
+export function productosQueVende(productos, esSucursal) {
+  if (!esSucursal) return productos
+  return (productos || []).filter(p => !CATEGORIAS_SOLO_CENTRAL.has(p.categoria))
+}
+
 // { clave: label } de TODA la lista (ocultas incluidas — sirve para mostrar
 // la etiqueta de un producto aunque su categoría esté oculta).
 export const labelsDeCategorias = lista =>
