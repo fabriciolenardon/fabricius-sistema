@@ -17,6 +17,7 @@ import FlujoDeposito from './FlujoDeposito'
 import AjusteStock from './AjusteStock'
 import CajasTab from './CajasTab'
 import PolloCajonesTab from './PolloCajonesTab'
+import StockPiezasTab from './StockPiezasTab'
 import { cargarCategoriasPrecios, labelsDeCategorias } from '../../lib/categoriasPrecios'
 import { estadoBloqueoCliente } from '../../lib/moraClientes'
 import { logAuditoria } from '../../lib/auditoria'
@@ -396,6 +397,11 @@ export function Deposito() {
           { id: 'entradas', label: '📥 Ingresos' },
           { id: 'desposte', label: '🔪 Desposte' },
           { id: 'piezas', label: '🥩 Piezas' },
+          // Los kilos de cada pieza de cerdo con su historial. A la central le
+          // sirve igual, pero para una sucursal es la única forma de saber
+          // cuánto le queda: no recibe capones para despostar, recibe las
+          // piezas ya hechas.
+          { id: 'cerdo', label: '🐷 Cerdo y Embutidos' },
           { id: 'cajas', label: '📦 Cajas Bovinas' },
           { id: 'pollo_cajones', label: '🍗 Pollo Cajones' },
           ...(isSucursal ? [] : [{ id: 'flujo', label: '📥 Flujo Depósito' }]),
@@ -411,6 +417,7 @@ export function Deposito() {
       {tab === 'entradas' && <EntradaForm onSaved={() => {}} showAlert={showAlert} proveedores={proveedores} />}
         {tab === 'desposte' && <DesposteTab key={tab} onSaved={() => {}} />}
 {tab === 'piezas' && <PiezasTab key={tab} />}
+{tab === 'cerdo' && <StockPiezasTab key={tab} />}
 {tab === 'cajas' && <CajasTab key={tab} />}
 {tab === 'pollo_cajones' && <PolloCajonesTab key={tab} />}
 {tab === 'remitos' && <RemitosTab remitoActual={remitoActual} />}
