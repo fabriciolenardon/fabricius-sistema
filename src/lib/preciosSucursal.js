@@ -42,7 +42,7 @@ export async function overlayDeSucursal(sucursalId) {
   if (!sucursalId || Number(sucursalId) === SUCURSAL_CENTRAL) return null
   const { data, error } = await supabase
     .from('precios_sucursal')
-    .select('precio_id, precio_minorista, precio_mayorista')
+    .select('precio_id, precio_minorista, precio_mayorista, stock_origen')
     .eq('sucursal_id', sucursalId)
   if (error) {
     console.warn('No se pudieron leer los precios de la sucursal:', error.message)
@@ -69,6 +69,12 @@ export function conPreciosDeSucursal(productos, overlay) {
       ...p,
       precio_minorista: propio.precio_minorista ?? p.precio_minorista,
       precio_mayorista: propio.precio_mayorista ?? p.precio_mayorista,
+      // De qué bucket descuenta este producto EN ESTA SUCURSAL (mig 99).
+      // Sirve cuando la trazabilidad difiere: la central vende una milanesa
+      // descontando `bovino_corte` directo, y la sucursal la elabora primero,
+      // así que descuenta de su propio `mila_carne`. Lo define la central; la
+      // sucursal nunca toca `stock_origen`.
+      stock_origen: propio.stock_origen ?? p.stock_origen,
     }
   })
 }
@@ -127,12 +133,24 @@ export async function guardarPrecioDeSucursal(sucursalId, precioId, { precio_min
   if (!sucursalId || Number(sucursalId) === SUCURSAL_CENTRAL) {
     return { error: new Error('La central guarda sus precios en el catálogo, no acá.') }
   }
-  const { error } = await supabase.from('precios_sucursal').upsert({
+  // OJO: no se manda `stock_origen`. Es el override que define la central
+  // (mig 99) y un upsert que lo omitiera lo pisaría con NULL, devolviendo el
+  // producto al bucket del catálogo sin que nadie se entere.
+  const { error } = await supabase.from('precios_sucursal').update({
+    precio_minorista: precio_minorista ?? null,
+    precio_mayorista: precio_mayorista ?? null,
+    updated_at: new Date().toISOString(),
+  }).eq('sucursal_id', sucursalId).eq('precio_id', precioId)
+  if (error) return { error }
+  // Si el producto todavía no tenía fila propia, crearla.
+  const { data: existe } = await supabase.from('precios_sucursal')
+    .select('id').eq('sucursal_id', sucursalId).eq('precio_id', precioId).maybeSingle()
+  if (existe) return { error: null }
+  const { error: errIns } = await supabase.from('precios_sucursal').insert({
     sucursal_id: sucursalId,
     precio_id: precioId,
     precio_minorista: precio_minorista ?? null,
     precio_mayorista: precio_mayorista ?? null,
-    updated_at: new Date().toISOString(),
-  }, { onConflict: 'sucursal_id,precio_id' })
-  return { error: error || null }
+  })
+  return { error: errIns || null }
 }
