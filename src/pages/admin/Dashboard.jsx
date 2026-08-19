@@ -77,7 +77,13 @@ export default function Dashboard() {
     setCierres(c.data || [])
     setClientes(cl.data || [])
     const s = {}
-    ;(st.data || []).forEach(r => s[r.tipo] = r.kg_disponible)
+    // Number() acá y no en cada cuenta: los `numeric` de Supabase llegan como
+    // STRING, así que las sumas de varios buckets (piezas, cajas, cerdo
+    // piezas, embutidos, hamburguesas, milanesas) CONCATENABAN en vez de
+    // sumar — "0.000" + "30.900" da "0.00030.900", y Math.max de eso es NaN.
+    // Normalizando en el origen quedan bien todas de una, y la próxima que se
+    // agregue nace sana. Regla 1 del proyecto.
+    ;(st.data || []).forEach(r => s[r.tipo] = Number(r.kg_disponible) || 0)
     setStock(s)
     setRemitos(r.data || [])
     setGastos(g.data || [])
@@ -541,7 +547,7 @@ export default function Dashboard() {
             // Una franquicia no recibe capones (le llegan las piezas ya
             // despostadas), así que ese widget le quedaba siempre en cero. En
             // su lugar ve sus MILANESAS, que sí elabora y vende (mig 99).
-            esSucursal
+            isSucursal
               ? { label: '🍗 Milanesas', valor: fmtKg(stockMilanesas), color: 'var(--amber)', aprox: 'al peso', bajo: stockMilanesas < 10, stockKg: stockMilanesas, tiposEntradas: ['mila_carne', 'mila_cerdo', 'mila_pollo'], tiposSalidas: ['mila_carne', 'mila_cerdo', 'mila_pollo'], elaboraciones: true }
               : { label: '🐷 Cerdo Capones', valor: fmtKg(stockCerdo), color: 'var(--amber)', aprox: Math.round(stockCerdo / 107) + ' capones', bajo: stockCerdo < 50, stockKg: stockCerdo, tiposEntradas: ['cerdo'], tiposSalidas: ['cerdo'], despostesCerdo: true },
             { label: '🐷 Cerdo Piezas', valor: fmtKg(stockCerdoPiezas), color: 'var(--amber)', aprox: 'al peso', bajo: stockCerdoPiezas < 20, stockKg: stockCerdoPiezas, tiposEntradas: ['cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza','cerdo_huesos'], tiposSalidas: ['cerdo_pieza','cerdo_corte','cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza','cerdo_huesos'], elaboraciones: true },
