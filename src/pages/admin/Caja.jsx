@@ -17,6 +17,7 @@ import { kgPorUnidadDeProducto, bucketPiezaBovina, redondearStock } from '../../
 import { cargarCajasDisponibles, venderCaja, CATEGORIA_A_TIPO_CAJA } from '../../lib/cajasStock'
 import { fmtPrecio, fmtKg, parseNumero } from '../../lib/formatos'
 import { overlayDeSucursal, conPreciosDeSucursal } from '../../lib/preciosSucursal'
+import { productosQueVende } from '../../lib/categoriasPrecios'
 import { useAuth } from '../../context/AuthContext'
 import HistorialCaja from './HistorialCaja'
 import HistorialDiaCaja from './HistorialDiaCaja'
@@ -53,7 +54,7 @@ const CATEGORIAS = {
 }
 
 export default function Caja() {
-  const { sucursalId } = useAuth()
+  const { sucursalId, isSucursal: esSucursal } = useAuth()
   const [precios, setPrecios] = useState([])
   const [ofertas, setOfertas] = useState([])
   // Promo Mundial: -X% en compras pagadas 100% con efectivo y/o transferencia.
@@ -166,8 +167,9 @@ export default function Caja() {
     ])
     // Si quien está en la caja es de una sucursal, sus precios pisan a los del
     // catálogo. Para la central esto no hace nada (ver lib/preciosSucursal.js).
+    // Y los insumos no van: se los compra a la central, no los revende.
     const overlay = await overlayDeSucursal(sucursalId)
-    setPrecios(conPreciosDeSucursal(pre || [], overlay))
+    setPrecios(productosQueVende(conPreciosDeSucursal(pre || [], overlay), esSucursal))
     // El formato puede diferir por boca: cada balanza se reconfigura en un
     // momento distinto, así que se resuelve con el override de ESTA sucursal
     // (ver lib/balanzaFormato.js). Sin override cae al global de siempre.
@@ -1633,7 +1635,7 @@ const LISTAS_TICKET_MANUAL = {
 }
 
 function TicketManualCaja({ onGuardado }) {
-  const { sucursalId } = useAuth()
+  const { sucursalId, isSucursal: esSucursal } = useAuth()
   const [form, setForm] = useState({ fecha: fechaHoyARG(), hora: '12:00', medio: 'efectivo', lista: 'minorista' })
   const [items, setItems] = useState([])
   const [precios, setPrecios] = useState([])
@@ -1650,7 +1652,7 @@ function TicketManualCaja({ onGuardado }) {
         .select('id, nombre, categoria, precio_minorista, precio_mayorista, precio_carniceria, stock_origen, kg_por_unidad')
         .order('nombre')
       const overlay = await overlayDeSucursal(sucursalId)
-      const lista = conPreciosDeSucursal(data || [], overlay)
+      const lista = productosQueVende(conPreciosDeSucursal(data || [], overlay), esSucursal)
       setPrecios(lista.filter(p => !p.nombre?.startsWith('ZZ_')))
     }
     cargar()

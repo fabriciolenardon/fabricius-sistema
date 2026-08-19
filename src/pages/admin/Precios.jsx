@@ -20,7 +20,7 @@ import {
 // Ver src/lib/categoriasPrecios.js (las de sistema no se pueden eliminar).
 import {
   cargarCategoriasPrecios, guardarCategoriasPrecios, categoriasDefault,
-  labelsDeCategorias, claveDesdeNombre,
+  labelsDeCategorias, claveDesdeNombre, categoriasParaVender, productosQueVende,
 } from '../../lib/categoriasPrecios'
 
 // Subgrupos dentro de Insumos (como en el PDF original)
@@ -70,7 +70,9 @@ export default function Precios() {
   // ocultas para poder etiquetar productos de una categoría escondida.
   const [categorias, setCategorias] = useState(categoriasDefault())
   const CATEGORIAS = useMemo(() => labelsDeCategorias(categorias), [categorias])
-  const categoriasVisibles = useMemo(() => categorias.filter(c => c.activa !== false), [categorias])
+  // Saca las ocultas y, para una sucursal, las que solo vende la central
+  // (hoy: Insumos — se los compra a la central, no los revende).
+  const categoriasVisibles = useMemo(() => categoriasParaVender(categorias, esSucursal), [categorias, esSucursal])
   // Editor de categorías (solapa 🗂️): copia local + form de alta
   const [catEdit, setCatEdit] = useState(null)         // null = sin cambios sin guardar
   const [catNueva, setCatNueva] = useState('')
@@ -153,7 +155,8 @@ export default function Precios() {
     // para arrancar, pero son de otro negocio (ver lib/preciosSucursal.js).
     const ov = await overlayDeSucursal(sucursalId)
     setOverlay(ov)
-    setPrecios(conPreciosDeSucursal(data || [], ov))
+    // Los insumos se los vende la central: no van en la lista de la sucursal.
+    setPrecios(productosQueVende(conPreciosDeSucursal(data || [], ov), esSucursal))
     // Buckets enlazables: cerdo_* (piezas), emb_* (embutidos) y brosa_*
     // (brosas por producto, mig 89). Excluye el 'cerdo' genérico (capón
     // entero), que no es a donde van los cortes. 'bovino_corte' entra para
