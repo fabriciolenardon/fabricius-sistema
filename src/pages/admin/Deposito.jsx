@@ -423,6 +423,11 @@ export function Deposito() {
         {[
           { id: 'entradas', label: '📥 Ingresos' },
           { id: 'desposte', label: '🔪 Desposte' },
+          // Para una sucursal la elaboración sale de adentro del Desposte y
+          // sube acá: casi no desposta (recibe las piezas ya hechas), así que
+          // elaborar es una tarea propia y no un paso del desposte. En la
+          // central queda donde estaba, que es su flujo real.
+          ...(isSucursal ? [{ id: 'elaborar', label: '🍔 Elab. Hamburguesas y Milanesas' }] : []),
           { id: 'piezas', label: '🥩 Piezas' },
           // Los kilos de cada pieza de cerdo con su historial. A la central le
           // sirve igual, pero para una sucursal es la única forma de saber
@@ -443,6 +448,9 @@ export function Deposito() {
       </div>
       {tab === 'entradas' && <EntradaForm onSaved={() => {}} showAlert={showAlert} proveedores={proveedores} />}
         {tab === 'desposte' && <DesposteTab key={tab} onSaved={() => {}} />}
+{/* Misma pantalla, pero abierta directo en Elaborar y sin la fila de
+    sub-solapas del desposte. */}
+{tab === 'elaborar' && <DesposteTab key={tab} onSaved={() => {}} soloElaborar />}
 {tab === 'piezas' && <PiezasTab key={tab} />}
 {tab === 'cerdo' && <StockPiezasTab key={tab} />}
 {tab === 'cajas' && <CajasTab key={tab} />}
@@ -458,9 +466,12 @@ export default Deposito
 // =============================================
 // MÓDULO DE DESPOSTE BOVINO
 // =============================================
-function DesposteTab({ onSaved }) {
+// `soloElaborar`: la pantalla se abre directo en Elaborar y sin la fila de
+// sub-solapas. La usa la sucursal, que tiene Elaborar como solapa propia
+// arriba en vez de escondida adentro del Desposte.
+function DesposteTab({ onSaved, soloElaborar = false }) {
   const { isSucursal: esSucursal } = useAuth()
-  const [subtab, setSubtab] = useState('piezas')
+  const [subtab, setSubtab] = useState(soloElaborar ? 'embutidos' : 'piezas')
   const [mediasRes, setMediasRes] = useState([])
   const [piezasStock, setPiezasStock] = useState({})
   const [despostes, setDespostes] = useState([])
@@ -1328,6 +1339,9 @@ async function confirmarDesposteCerdo() {
   return (
     <div>
       {alert && <div style={{ background: alert.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${alert.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: alert.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>{alert.msg}</div>}
+      {/* Abierta como "Elaborar" desde el menú de arriba, esta fila no va: ya
+          se eligió qué hacer. */}
+      {!soloElaborar && (
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
         {/* Una sucursal no desposta cerdo: recibe las piezas ya despostadas de
             la central, nunca capones enteros. Y de elaboración solo hace
@@ -1335,13 +1349,17 @@ async function confirmarDesposteCerdo() {
             central y se los distribuye. La solapa se llama distinto por eso. */}
         {[{ id: 'piezas', label: '🍖 Desposte en Piezas' }, { id: 'kilo', label: '⚖️ Desposte para venta por Kilo' }, { id: 'pieza_kilo', label: '🔄 Convertir Pieza a Cortes' },
 ...(esSucursal ? [] : [{ id: 'cerdo', label: '🐷 Desposte Cerdo' }]),
-{ id: 'embutidos', label: esSucursal ? '🍔 Elab. Hamburguesas y Milanesas' : '🌭 Elaborar Embutidos' }, { id: 'medias_hist', label: '🐄 Historial Medias' }, { id: 'historial', label: '📋 Historial Desposte' }].map(t => (
+// En la sucursal, Elaborar ya es una solapa propia arriba: si además la
+// dejáramos acá, el mismo tablero estaría en dos lugares.
+...(esSucursal ? [] : [{ id: 'embutidos', label: '🌭 Elaborar Embutidos' }]),
+{ id: 'medias_hist', label: '🐄 Historial Medias' }, { id: 'historial', label: '📋 Historial Desposte' }].map(t => (
           <button key={t.id} onClick={() => { setSubtab(t.id); setSeleccionada(null); setPiezas([]); cargarDatos() }}
             style={{ padding: '8px 16px', borderRadius: 8, border: `1px solid ${subtab === t.id ? 'var(--gold)' : 'var(--border)'}`, background: subtab === t.id ? 'var(--gold)' : 'transparent', color: subtab === t.id ? '#000' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
             {t.label}
           </button>
         ))}
       </div>
+      )}
 
       {subtab === 'piezas' && (
         <div style={{ display: 'grid', gridTemplateColumns: seleccionada ? '1fr 1.5fr' : '1fr', gap: 16 }}>
