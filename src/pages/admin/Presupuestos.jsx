@@ -6,7 +6,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
 import { fmtPrecio, fmtKg, fmtUnidades } from '../../lib/formatos'
-import { LISTAS, getLista, getCampoPrecio } from '../../lib/listasPrecios'
+import { LISTAS, getLista, getCampoPrecio, listasDeVenta } from '../../lib/listasPrecios'
 import { abrirVentanaImprimible } from '../../lib/pdfPrintable'
 import { useEsMovil } from '../../lib/useEsMovil'
 import { overlayDeSucursal, conPreciosDeSucursal } from '../../lib/preciosSucursal'
@@ -52,7 +52,7 @@ function validoPorDefecto() {
 const FORM_VACIO = () => ({ editandoId: null, clienteNombre: '', lista: 'may', items: [], notas: '', validoHasta: validoPorDefecto() })
 
 export default function Presupuestos() {
-  const { sucursalId } = useAuth()
+  const { sucursalId, isSucursal: esSucursal } = useAuth()
   const esMovil = useEsMovil()
   const [tab, setTab] = useState('nuevo')
   const [precios, setPrecios] = useState([])
@@ -71,7 +71,7 @@ export default function Presupuestos() {
   const [unidad, setUnidad] = useState('kg')
   const [precioInput, setPrecioInput] = useState('')
 
-  useEffect(() => { cargar() }, [])
+  useEffect(() => { cargar() }, [sucursalId])
 
   async function cargar() {
     setLoading(true)
@@ -254,7 +254,9 @@ export default function Presupuestos() {
               <div>
                 <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Lista de precios</label>
                 <select value={form.lista} onChange={e => setForm(f => ({ ...f, lista: e.target.value }))} style={inp}>
-                  {Object.values(LISTAS).map(l => <option key={l.codigo} value={l.codigo}>{l.labelEmoji}</option>)}
+                  {/* Una sucursal cotiza con sus dos listas de venta; la de
+                      Carnicería es con la que la central le vende a ella. */}
+                  {listasDeVenta(esSucursal).map(l => <option key={l.codigo} value={l.codigo}>{l.labelEmoji}</option>)}
                 </select>
               </div>
               <div>

@@ -330,6 +330,17 @@ export default function Precios() {
     if (!confirm(`¿Confirmar actualización de ${masivoPreview.length} productos con ${masivoPct}%?`)) return
     setMasivoLoading(true)
     for (const p of masivoPreview) {
+      if (esSucursal) {
+        // La sucursal actualiza SU lista, no el catálogo de la central.
+        // Sin esto, un aumento masivo desde Monte Cristo reescribía los
+        // precios de Río Primero para todos los productos de una.
+        const r = await guardarPrecioDeSucursal(sucursalId, p.id, {
+          precio_minorista: masivoLista === 'todas' || masivoLista === 'minorista' ? p.nuevo_minorista : p.precio_minorista,
+          precio_mayorista: masivoLista === 'todas' || masivoLista === 'mayorista' ? p.nuevo_mayorista : p.precio_mayorista,
+        })
+        if (r.error) { mostrarMsg('❌ ' + r.error.message); break }
+        continue
+      }
       const update = {}
       if (masivoLista === 'todas' || masivoLista === 'carniceria') update.precio_carniceria = p.nuevo_carniceria
       if (masivoLista === 'todas' || masivoLista === 'mayorista') update.precio_mayorista = p.nuevo_mayorista
@@ -573,14 +584,20 @@ export default function Precios() {
             style={{ padding: '8px 14px', background: '#25D366', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
             📄 PDF May/Min → WhatsApp
           </button>
-          <button onClick={() => pdfLista('carniceria')}
-            style={{ padding: '8px 14px', background: '#25D366', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
-            📄 PDF Carnicerías → WhatsApp
-          </button>
-          <button onClick={() => pdfLista('franquicia')} title="Lista de carnicerías + insumos (la central les vende insumos solo a las franquicias)"
-            style={{ padding: '8px 14px', background: '#25D366', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
-            🏪 PDF Franquicias (c/insumos) → WhatsApp
-          </button>
+          {/* Las listas de Carnicerías y Franquicias son las que usa la CENTRAL
+              para venderles a sus clientes mayoristas y a las propias
+              franquicias. Una sucursal no le vende a ninguno de los dos: ella
+              ES la franquicia. */}
+          {!esSucursal && (<>
+            <button onClick={() => pdfLista('carniceria')}
+              style={{ padding: '8px 14px', background: '#25D366', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+              📄 PDF Carnicerías → WhatsApp
+            </button>
+            <button onClick={() => pdfLista('franquicia')} title="Lista de carnicerías + insumos (la central les vende insumos solo a las franquicias)"
+              style={{ padding: '8px 14px', background: '#25D366', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+              🏪 PDF Franquicias (c/insumos) → WhatsApp
+            </button>
+          </>)}
         </div>
       )}
       {tab === 'ver' && (
@@ -616,7 +633,9 @@ export default function Precios() {
                   {filtro === 'insumos' ? (
                     <th style={{ color: 'var(--gold)' }}>🧰 Precio Franquicia</th>
                   ) : (<>
-                    <th style={{ color: 'var(--red-light)' }}>🔴 Carnicería</th>
+                    {/* La columna Carnicería es el precio con el que la CENTRAL
+                        le vende a la sucursal, no uno con el que ella venda. */}
+                    {!esSucursal && <th style={{ color: 'var(--red-light)' }}>🔴 Carnicería</th>}
                     <th style={{ color: 'var(--amber)' }}>🟡 Mayorista</th>
                     <th style={{ color: 'var(--green)' }}>🟢 Minorista</th>
                   </>)}
@@ -646,7 +665,7 @@ export default function Precios() {
                           {filtro === 'insumos' ? (
                             <td style={{ color: 'var(--gold)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_carniceria)}</td>
                           ) : (<>
-                            <td style={{ color: p.enOferta ? '#7dff7d' : 'var(--red-light)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_carniceria)}</td>
+                            {!esSucursal && <td style={{ color: p.enOferta ? '#7dff7d' : 'var(--red-light)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_carniceria)}</td>}
                             <td style={{ color: p.enOferta ? '#7dff7d' : 'var(--amber)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_mayorista)}</td>
                             <td style={{ color: p.enOferta ? '#7dff7d' : 'var(--green)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_minorista)}</td>
                           </>)}
@@ -715,7 +734,12 @@ export default function Precios() {
                     placeholder="Ej: 5500" style={inp} />
                 </div>
               ) : (
-                [['precio_carniceria', '🔴 Precio Carnicería'], ['precio_mayorista', '🟡 Precio Mayorista'], ['precio_minorista', '🟢 Precio Minorista']].map(([campo, label]) => (
+                // Una sucursal solo carga sus dos listas de venta: la de
+                // Carnicería es con la que la central le vende a ella.
+                (esSucursal
+                  ? [['precio_mayorista', '🟡 Precio Mayorista'], ['precio_minorista', '🟢 Precio Minorista']]
+                  : [['precio_carniceria', '🔴 Precio Carnicería'], ['precio_mayorista', '🟡 Precio Mayorista'], ['precio_minorista', '🟢 Precio Minorista']]
+                ).map(([campo, label]) => (
                   <div key={campo}>
                     <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>{label}</label>
                     <input type="number" value={form[campo]} onChange={e => setForm({ ...form, [campo]: e.target.value })} placeholder="Vacío = —" style={inp} />
@@ -867,7 +891,7 @@ export default function Precios() {
                 <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Lista de precios</label>
                 <select value={masivoLista} onChange={e => { setMasivoLista(e.target.value); setMasivoPreview([]) }} style={inp}>
                   <option value="todas">💰 Todas las listas</option>
-                  <option value="carniceria">🔴 Solo Carnicería</option>
+                  {!esSucursal && <option value="carniceria">🔴 Solo Carnicería</option>}
                   <option value="mayorista">🟡 Solo Mayorista</option>
                   <option value="minorista">🟢 Solo Minorista</option>
                 </select>
@@ -895,7 +919,7 @@ export default function Precios() {
                 <thead><tr>
                   <th>Producto</th>
                   <th>Categoría</th>
-                  {(masivoLista === 'todas' || masivoLista === 'carniceria') && <th style={{ color: 'var(--red-light)' }}>🔴 Carn. → nuevo</th>}
+                  {!esSucursal && (masivoLista === 'todas' || masivoLista === 'carniceria') && <th style={{ color: 'var(--red-light)' }}>🔴 Carn. → nuevo</th>}
                   {(masivoLista === 'todas' || masivoLista === 'mayorista') && <th style={{ color: 'var(--amber)' }}>🟡 May. → nuevo</th>}
                   {(masivoLista === 'todas' || masivoLista === 'minorista') && <th style={{ color: 'var(--green)' }}>🟢 Min. → nuevo</th>}
                 </tr></thead>
@@ -904,7 +928,7 @@ export default function Precios() {
                     <tr key={p.id}>
                       <td style={{ fontWeight: 500 }}>{p.nombre}</td>
                       <td style={{ fontSize: 11, color: 'var(--muted)' }}>{CATEGORIAS[p.categoria]}</td>
-                      {(masivoLista === 'todas' || masivoLista === 'carniceria') && <td>{fmt(p.precio_carniceria)} → <strong style={{ color: 'var(--gold)' }}>{fmt(p.nuevo_carniceria)}</strong></td>}
+                      {!esSucursal && (masivoLista === 'todas' || masivoLista === 'carniceria') && <td>{fmt(p.precio_carniceria)} → <strong style={{ color: 'var(--gold)' }}>{fmt(p.nuevo_carniceria)}</strong></td>}
                       {(masivoLista === 'todas' || masivoLista === 'mayorista') && <td>{fmt(p.precio_mayorista)} → <strong style={{ color: 'var(--gold)' }}>{fmt(p.nuevo_mayorista)}</strong></td>}
                       {(masivoLista === 'todas' || masivoLista === 'minorista') && <td>{fmt(p.precio_minorista)} → <strong style={{ color: 'var(--gold)' }}>{fmt(p.nuevo_minorista)}</strong></td>}
                     </tr>
@@ -1051,7 +1075,7 @@ export default function Precios() {
               <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 8 }}>📋 Aplicar esta oferta a las listas:</label>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 {[
-                  { key: 'aplica_carniceria', label: '🔴 Carnicería', color: '#ff6b6b' },
+                  ...(esSucursal ? [] : [{ key: 'aplica_carniceria', label: '🔴 Carnicería', color: '#ff6b6b' }]),
                   { key: 'aplica_mayorista',  label: '🟡 Mayorista',  color: 'var(--amber)' },
                   { key: 'aplica_minorista',  label: '🟢 Minorista',  color: 'var(--green)' },
                 ].map(opt => {
@@ -1086,7 +1110,7 @@ export default function Precios() {
                 return null
               }
               const filas = [
-                { key: 'aplica_carniceria', label: '🔴 Carnicería', base: productoSeleccionado.precio_carniceria },
+                ...(esSucursal ? [] : [{ key: 'aplica_carniceria', label: '🔴 Carnicería', base: productoSeleccionado.precio_carniceria }]),
                 { key: 'aplica_mayorista',  label: '🟡 Mayorista',  base: productoSeleccionado.precio_mayorista },
                 { key: 'aplica_minorista',  label: '🟢 Minorista',  base: productoSeleccionado.precio_minorista },
               ].filter(f => ofertaForm[f.key])
