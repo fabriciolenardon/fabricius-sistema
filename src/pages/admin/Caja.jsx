@@ -11,6 +11,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { decodificarEANBalanza, esCodigoBalanza } from '../../lib/balanzaEAN'
+import { resolverFormatoEAN } from '../../lib/balanzaFormato'
 import { fechaHoyARG, horaHoyARG, horaNumARG } from '../../lib/fechas'
 import { kgPorUnidadDeProducto, bucketPiezaBovina, redondearStock } from '../../lib/stockHelpers'
 import { cargarCajasDisponibles, venderCaja, CATEGORIA_A_TIPO_CAJA } from '../../lib/cajasStock'
@@ -169,7 +170,10 @@ export default function Caja() {
     // Y los insumos no van: se los compra a la central, no los revende.
     const overlay = await overlayDeSucursal(sucursalId)
     setPrecios(productosQueVende(conPreciosDeSucursal(pre || [], overlay), esSucursal))
-    if (cfg?.valor) setConfigEAN(cfg.valor)
+    // El formato puede diferir por boca: cada balanza se reconfigura en un
+    // momento distinto, así que se resuelve con el override de ESTA sucursal
+    // (ver lib/balanzaFormato.js). Sin override cae al global de siempre.
+    if (cfg?.valor) setConfigEAN(resolverFormatoEAN(cfg.valor, sucursalId))
     setVentasHoy(ventas || [])
     setOfertas(ofs || [])
     setCajasDisp(cajas || [])

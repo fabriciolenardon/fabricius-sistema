@@ -11,6 +11,10 @@ import { abrirVentanaImprimible } from '../../lib/pdfPrintable'
 import { compartirListaPrecios } from '../../lib/listasPreciosPdf'
 import { overlayDeSucursal, conPreciosDeSucursal, preciosPropiosFaltantes, guardarPrecioDeSucursal } from '../../lib/preciosSucursal'
 import { useAuth } from '../../context/AuthContext'
+import { decodificarEANBalanza } from '../../lib/balanzaEAN'
+import {
+  resolverFormatoEAN, conModoDeSucursal, patronLegible, MODOS_BALANZA, FORMATO_DEFAULT,
+} from '../../lib/balanzaFormato'
 // Las categorías ya no son un objeto hardcodeado: viven en config_sistema
 // ('categorias_precios') y se administran desde la solapa 🗂️ Categorías.
 // Ver src/lib/categoriasPrecios.js (las de sistema no se pueden eliminar).
@@ -1379,6 +1383,175 @@ const ORDEN_RENUM_PLU = ['bovino_corte', 'bovino_pieza', 'bovino_brosa', 'cerdo_
 const CAT_CAJAS_PLU = 'bovino_caja_pt'
 const PLU_INICIO_CAJAS = 120
 
+// ============================================================
+// FORMATO DEL CÓDIGO DE BARRAS — cambiar el modo de la balanza
+// ============================================================
+// Sirve para pasar la balanza de "importe" a "peso" (ver lib/balanzaFormato.js)
+// SIN depender de nadie: se elige el modo, se prueba con una etiqueta real y
+// recién ahí se guarda. El probador decodifica con el modo ELEGIDO (todavía sin
+// guardar), así se verifica que la balanza escriba los gramos donde el sistema
+// los espera antes de tocar nada en producción.
+// El cambio es por SUCURSAL: cada boca tiene su balanza y se reconfiguran en
+// momentos distintos, así que la central puede quedar en importe mientras
+// Monte Cristo ya está en peso.
+function FormatoBalanzaCard({ precios }) {
+  const { isCEO, sucursalId } = useAuth()
+  const [valor, setValor] = useState(null)        // config_sistema.valor crudo
+  const [sucursales, setSucursales] = useState([])
+  const [sucSel, setSucSel] = useState(sucursalId || 1)
+  const [modoSel, setModoSel] = useState(null)    // modo elegido, aún sin guardar
+  const [test, setTest] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [msg, setMsg] = useState(null)
+
+  useEffect(() => {
+    (async () => {
+      const [{ data: cfg }, { data: sucs }] = await Promise.all([
+        supabase.from('config_sistema').select('valor').eq('clave', 'ean13_formato').maybeSingle(),
+        supabase.from('sucursales').select('id, nombre').order('id'),
+      ])
+      setValor(cfg?.valor || FORMATO_DEFAULT)
+      setSucursales(sucs || [])
+    })()
+  }, [])
+
+  useEffect(() => { setModoSel(null); setTest('') }, [sucSel])
+
+  if (!valor) return null
+
+  const guardado = resolverFormatoEAN(valor, sucSel)
+  const modo = modoSel || guardado.tipo
+  const formatoPreview = { ...guardado, tipo: modo }
+  const hayCambio = modo !== guardado.tipo
+
+  // Decodificación de prueba con el modo ELEGIDO (no el guardado)
+  const clean = String(test).replace(/\D/g, '')
+  const decoded = clean.length === 13 ? decodificarEANBalanza(clean, formatoPreview) : null
+  const prodTest = decoded && !decoded.error ? (precios || []).find(p => p.codigo_balanza === decoded.plu) : null
+
+  async function guardar() {
+    setGuardando(true)
+    const nuevo = conModoDeSucursal(valor, sucSel, modo)
+    const { error } = await supabase.from('config_sistema')
+      .update({ valor: nuevo }).eq('clave', 'ean13_formato')
+    setGuardando(false)
+    if (error) { setMsg({ tipo: 'error', texto: '❌ No se pudo guardar: ' + error.message }); return }
+    setValor(nuevo)
+    setModoSel(null)
+    setMsg({ tipo: 'ok', texto: '✅ Formato guardado. La Caja de esa boca ya lee con el modo nuevo.' })
+    setTimeout(() => setMsg(null), 6000)
+  }
+
+  const nombreSuc = s => (sucursales.find(x => x.id === s)?.nombre) || `Sucursal ${s}`
+
+  return (
+    <div className="card" style={{ marginBottom: 16, borderColor: hayCambio ? 'var(--amber)' : 'var(--border)' }}>
+      <div className="card-title">⚖️ Formato del código de barras</div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12, lineHeight: 1.6 }}>
+        Define qué lee la Caja de la etiqueta de la balanza. Cambiarlo acá <b>y en la balanza</b> tiene
+        que hacerse junto: mientras uno diga una cosa y el otro otra, todos los escaneos salen mal.
+        Probá con una etiqueta real antes de guardar.
+      </div>
+
+      {sucursales.length > 1 && (
+        <div style={{ marginBottom: 12 }}>
+          <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>BOCA</label>
+          <select value={sucSel} onChange={e => setSucSel(Number(e.target.value))}
+            disabled={!isCEO}
+            style={{ background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '8px 12px', fontSize: 13 }}>
+            {sucursales.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+          </select>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+        {Object.entries(MODOS_BALANZA).map(([clave, info]) => (
+          <label key={clave} style={{
+            display: 'flex', gap: 10, alignItems: 'flex-start', padding: '10px 12px', borderRadius: 8,
+            cursor: isCEO ? 'pointer' : 'not-allowed', opacity: isCEO ? 1 : 0.6,
+            background: modo === clave ? 'rgba(255,209,122,0.07)' : 'var(--surface2)',
+            border: `1px solid ${modo === clave ? 'var(--gold)' : 'var(--border)'}`,
+          }}>
+            <input type="radio" name="modo-balanza" checked={modo === clave} disabled={!isCEO}
+              onChange={() => setModoSel(clave)} style={{ marginTop: 3, accentColor: 'var(--gold)' }} />
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>
+                {info.label}
+                {guardado.tipo === clave && <span style={{ fontSize: 10, color: 'var(--green)', marginLeft: 8 }}>● en uso</span>}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, lineHeight: 1.5 }}>{info.resumen}</div>
+              <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 3 }}>
+                En Qendra → Códigos de barras, campo <b>{info.campoQendra}</b>
+              </div>
+            </div>
+          </label>
+        ))}
+      </div>
+
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 12 }}>
+        Patrón esperado: <code style={{ color: 'var(--gold)' }}>{patronLegible(formatoPreview)}</code>
+      </div>
+
+      {/* PROBADOR — escanear una etiqueta de prueba antes de guardar */}
+      <div style={{ padding: 12, background: 'var(--surface2)', borderRadius: 8, marginBottom: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>🔍 Probar una etiqueta</div>
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8, lineHeight: 1.5 }}>
+          Pesá algo que conozcas (por ejemplo 1 kg), imprimí la etiqueta y escaneala acá.
+          Se decodifica con el modo elegido arriba, <b>sin guardar nada</b>.
+        </div>
+        <input value={test} onChange={e => setTest(e.target.value)} placeholder="Escaneá o pegá el código de 13 dígitos"
+          style={{ width: '100%', boxSizing: 'border-box', background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '9px 12px', fontSize: 14, fontFamily: 'monospace' }} />
+        {clean.length > 0 && clean.length !== 13 && (
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>{clean.length} de 13 dígitos…</div>
+        )}
+        {decoded?.error && (
+          <div style={{ fontSize: 12, color: '#ff8b8b', marginTop: 8 }}>❌ {decoded.error === 'prefijo_invalido' ? 'El código no arranca con el prefijo esperado' : 'El verificador del código no cierra'}</div>
+        )}
+        {decoded && !decoded.error && (
+          <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.7 }}>
+            <div>PLU <b>{decoded.plu}</b> → {prodTest ? <b>{prodTest.nombre}</b> : <span style={{ color: '#ff8b8b' }}>sin producto con ese PLU</span>}</div>
+            {modo === 'peso'
+              ? <div>Peso leído: <b style={{ color: 'var(--gold)', fontSize: 16 }}>{decoded.peso_kg?.toFixed(3)} kg</b></div>
+              : <div>Importe leído: <b style={{ color: 'var(--gold)', fontSize: 16 }}>${decoded.precio?.toLocaleString('es-AR')}</b></div>}
+            {modo === 'peso' && prodTest && (
+              <div style={{ color: 'var(--muted)' }}>
+                Cobraría: {decoded.peso_kg?.toFixed(3)} kg × ${Number(prodTest.precio_minorista || 0).toLocaleString('es-AR')} =
+                <b style={{ color: 'var(--text)' }}> ${Math.round((decoded.peso_kg || 0) * Number(prodTest.precio_minorista || 0)).toLocaleString('es-AR')}</b>
+              </div>
+            )}
+            {modo === 'peso' && (
+              <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 4 }}>
+                ⚠️ Si pesaste 1 kg y acá no dice <b>1,000 kg</b>, la balanza no está escribiendo gramos: no guardes y avisá.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {msg && (
+        <div style={{ fontSize: 12, marginBottom: 10, color: msg.tipo === 'error' ? '#ff8b8b' : 'var(--green)' }}>{msg.texto}</div>
+      )}
+
+      {!isCEO && <div style={{ fontSize: 11, color: 'var(--muted)' }}>🔒 Solo el dueño puede cambiar el formato.</div>}
+
+      {isCEO && hayCambio && (
+        <div style={{ padding: 12, background: 'rgba(255,209,122,0.06)', border: '1px solid var(--gold)', borderRadius: 8 }}>
+          <div style={{ fontSize: 12, marginBottom: 10, lineHeight: 1.6 }}>
+            Vas a pasar <b>{nombreSuc(sucSel)}</b> a <b>{MODOS_BALANZA[modo]?.label}</b>.
+            Antes de guardar, la balanza de esa boca ya tiene que estar emitiendo con este formato.
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={guardar} disabled={guardando} className="btn btn-gold">
+              {guardando ? 'Guardando…' : '✅ Guardar formato'}
+            </button>
+            <button onClick={() => setModoSel(null)} className="btn btn-ghost">Cancelar</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function PLUTab({ precios, ofertas = [], onRecargar, categoriasOrden = [] }) {
   const [msg, setMsg] = useState('')
   const [confirmandoRenum, setConfirmandoRenum] = useState(false)
@@ -1593,6 +1766,7 @@ function PLUTab({ precios, ofertas = [], onRecargar, categoriasOrden = [] }) {
   }
   return (
     <div>
+      <FormatoBalanzaCard precios={precios} />
       <div className="card" style={{ marginBottom: 16, borderColor: 'var(--gold)' }}>
         <div className="card-title">🏷️ PLU para Balanza Cuora Max</div>
         <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
