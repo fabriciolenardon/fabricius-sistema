@@ -5,7 +5,7 @@ import { supabase } from '../../lib/supabase'
 import { useFlujoNotificaciones, usePedidosListosNotif } from '../../lib/useFlujoNotificaciones'
 import { fechaHoyARG, horaHoyARG, diaSemanaARG } from '../../lib/fechas'
 import { fmtPrecio, fmtKg } from '../../lib/formatos'
-import { rutaRestringida } from '../../lib/restricciones'
+import { rutaRestringida, moduloDeSucursal } from '../../lib/restricciones'
 import BuscadorGlobal from '../../components/BuscadorGlobal'
 import CentroActividad from '../../components/CentroActividad'
 import LogoFabricius from '../../components/LogoFabricius'
@@ -48,7 +48,7 @@ const navItems = [
   { to: '/admin/dashboard',   icon: '📊', label: 'Dashboard' },
   { to: '/admin/ejecutivo',   icon: '⚡', label: 'Ejecutivo' },
   { to: '/admin/caja',        icon: '💵', label: 'Caja' },
-  { to: '/admin/ventas', icon: '📋', label: 'Mayorista' },
+  { to: '/admin/ventas', icon: '📋', label: 'Ventas Cta/Cte' },
   { to: '/admin/deposito',    icon: '🏭', label: 'Depósito' },
   { to: '/admin/precios',     icon: '💲', label: 'Precios' },
   { to: '/admin/presupuestos', icon: '📋', label: 'Presupuestos' },
@@ -71,7 +71,7 @@ const navItems = [
 const NAV_GRUPOS = [
   { label: 'Operación', icon: '🛒', items: [
     { to: '/admin/caja',      icon: '💵', label: 'Caja' },
-    { to: '/admin/ventas',    icon: '📋', label: 'Mayorista' },
+    { to: '/admin/ventas',    icon: '📋', label: 'Ventas Cta/Cte' },
     { to: '/admin/deposito',  icon: '🏭', label: 'Depósito' },
     { to: '/admin/pedidos',   icon: '📥', label: 'Pedidos Mayoristas' },
     { to: '/admin/whatsapp',  icon: '💬', label: 'WhatsApp' },
@@ -97,6 +97,16 @@ const NAV_GRUPOS = [
     { to: '/admin/auditoria', icon: '🔍', label: 'Auditoría' },
   ] },
 ]
+
+// ¿Este item del menú lo ve este usuario? Junta las dos reglas que existen:
+// los módulos vedados por email (restricciones.js) y, si es personal de una
+// sucursal, la lista acotada de módulos que le corresponde.
+function itemVisible(item, { email, esSucursal, esCeo }) {
+  if (rutaRestringida(email, item.to)) return false
+  if (esSucursal) return moduloDeSucursal(item.to)
+  if (item.ceoOnly && !esCeo) return false
+  return true
+}
 
 function useNotificaciones() {
   const [notifs, setNotifs] = useState([])
@@ -319,7 +329,7 @@ function CampanaNotificaciones({ notifs }) {
 function MenuMobile({ onClose }) {
   const location = useLocation()
   const navigate = useNavigate()
-  const { profile, signOut, user } = useAuth()
+  const { profile, signOut, user, isSucursal } = useAuth()
   const [modalPwd, setModalPwd] = useState(false)
 
   async function handleLogout() {
@@ -357,7 +367,8 @@ function MenuMobile({ onClose }) {
         <nav style={{ flex: 1, overflowY: 'auto', padding: '10px 12px' }}>
           {(user?.email === 'fabriciolenardon@gmail.com'
             ? [...navItems, NAV_MOVIL_TV]
-            : navItems.filter(it => it.to !== '/admin/ejecutivo' && !rutaRestringida(user?.email, it.to))
+            : navItems.filter(it => it.to !== '/admin/ejecutivo'
+                && itemVisible(it, { email: user?.email, esSucursal: isSucursal, esCeo: false }))
           ).map(item => {
             const isActive = location.pathname === item.to
             return (
@@ -397,7 +408,7 @@ function MenuMobile({ onClose }) {
 // NAV DESKTOP — 4 menús desplegables por categoría. Se abren/cierran con CLICK
 // (el hover daba problemas: al cruzar el huequito hacia el menú se cerraba, y el
 //  click lo volvía a minimizar). Se cierra al clickear afuera o al cambiar de ruta.
-function NavDesktop({ userEmail, badges }) {
+function NavDesktop({ userEmail, esSucursal, badges }) {
   const location = useLocation()
   const [openGroup, setOpenGroup] = useState(null)
   const navRef = useRef(null)
@@ -418,10 +429,11 @@ function NavDesktop({ userEmail, badges }) {
     return 0
   }
   const esCeo = userEmail === 'fabriciolenardon@gmail.com'
-  const grupos = NAV_GRUPOS.map(g => ({
-    ...g,
-    items: g.items.filter(it => (!it.ceoOnly || esCeo) && !rutaRestringida(userEmail, it.to)),
-  }))
+  // Los grupos que quedan vacíos para este usuario no se dibujan (una sucursal
+  // no tiene nada en Finanzas fuera de sus propios gastos, por ejemplo).
+  const grupos = NAV_GRUPOS
+    .map(g => ({ ...g, items: g.items.filter(it => itemVisible(it, { email: userEmail, esSucursal, esCeo })) }))
+    .filter(g => g.items.length > 0)
 
   return (
     <nav ref={navRef} style={{ display: 'flex', gap: 4, flex: 1, alignItems: 'center' }}>
@@ -481,7 +493,7 @@ function NavDesktop({ userEmail, badges }) {
 }
 
 export default function AdminLayout() {
-  const { user } = useAuth()
+  const { user, isSucursal } = useAuth()
   const notifs = useNotificaciones()
   const pedidosPendientes = usePedidosPendientes()
   const pedidosWaNuevos = usePedidosWaNuevos()
@@ -550,7 +562,7 @@ export default function AdminLayout() {
   // Módulos que se pueden abrir en el panel (mismos filtros que el menú).
   const itemsPanel = navItems.filter(it =>
     (it.to !== '/admin/ejecutivo' || user?.email === 'fabriciolenardon@gmail.com')
-    && !rutaRestringida(user?.email, it.to)
+    && itemVisible(it, { email: user?.email, esSucursal: isSucursal, esCeo: true })
   )
 
   return (
@@ -583,6 +595,7 @@ export default function AdminLayout() {
             <div style={{ width: 1, height: 24, background: 'var(--border)' }} />
             <NavDesktop
               userEmail={user?.email}
+              esSucursal={isSucursal}
               badges={{ pedidos: pedidosPendientes + pedidosListos, whatsapp: pedidosWaNuevos + waNoLeidos, deposito: flujosPendientes }}
             />
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>

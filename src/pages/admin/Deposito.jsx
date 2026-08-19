@@ -17,10 +17,14 @@ import FlujoDeposito from './FlujoDeposito'
 import AjusteStock from './AjusteStock'
 import CajasTab from './CajasTab'
 import PolloCajonesTab from './PolloCajonesTab'
+import StockPiezasTab from './StockPiezasTab'
 import { cargarCategoriasPrecios, labelsDeCategorias } from '../../lib/categoriasPrecios'
 import { estadoBloqueoCliente } from '../../lib/moraClientes'
 import { logAuditoria } from '../../lib/auditoria'
 import { useAuth } from '../../context/AuthContext'
+import { puedeAjustarStock } from '../../lib/permisos'
+import { overlayDeSucursal, conPreciosDeSucursal } from '../../lib/preciosSucursal'
+import { productosQueVende } from '../../lib/categoriasPrecios'
 
 // Nombre legible de cada tipo de embutido/salame (para descripciones de
 // historial y entradas registradas). El <select> usa estas mismas claves.
@@ -52,6 +56,32 @@ const LABEL_BUCKET_HAMB = {
   hamb_pollo: '🐔 Hamburguesas de Pollo',
   hamb_cerdo: '🐷 Hamburguesas de Cerdo',
 }
+
+// ── MILANESAS (mig 99) ──────────────────────────────────────
+// Mismo modelo que hamburguesas: se elaboran, suman a su bucket propio y la
+// venta descuenta de ahí. Se pesan los kg de materia prima usados y se cargan
+// los kg que salieron — con el rebozado normalmente salen MÁS kilos.
+const BUCKET_MILANESA = {
+  milanesa_carne: 'mila_carne',
+  milanesa_cerdo: 'mila_cerdo',
+  milanesa_pollo: 'mila_pollo',
+}
+const LABEL_BUCKET_MILA = {
+  mila_carne: '🐄 Milanesas de Carne',
+  mila_cerdo: '🐷 Milanesas de Cerdo',
+  mila_pollo: '🐔 Milanesas de Pollo',
+}
+// De dónde sale la materia prima de cada una.
+const ORIGEN_MILANESA = {
+  milanesa_carne: { bucket: 'bovino_corte', label: '🥩 Bifes de carne (kg) — descuenta de Bovino Cortes' },
+  milanesa_pollo: { bucket: 'pollo',        label: '🐔 Pechuga / suprema (kg) — descuenta del stock de Pollo' },
+}
+// La milanesa de cerdo sale SOLO de pierna o carré: el resto de las piezas no
+// se usan para milanesa, así que no se ofrecen y no hay forma de equivocarse.
+const PIEZAS_MILANESA_CERDO = [
+  { tipo: 'cerdo_pierna', label: '🦵 Pierna de cerdo' },
+  { tipo: 'cerdo_carre',  label: '🥩 Carré de cerdo' },
+]
 // Bucket del que sale la materia prima de carne/pollo (cerdo usa las piezas)
 const ORIGEN_HAMBURGUESA = {
   hamburguesa_carne: { bucket: 'bovino_corte', label: '🥩 Carne bovina (kg) — descuenta de Bovino Cortes' },
@@ -294,6 +324,35 @@ function nombreCanonicoMediaRes(txtLibre) {
 // ingreso al depósito los elige de acá — no más texto libre.
 const MEDIA_RES_TIPOS = ['MEDIA RES NT-VQ PREMIUM', 'MEDIA RES OVERO CHICO']
 
+// Qué ítems cambiaron entre la versión vieja de un remito y la editada.
+// Compara como MULTISET (no por `includes`): un remito puede llevar dos medias
+// res del mismo peso y precio, y si se saca una sola hay que devolver una sola.
+// La clave incluye los ids de media/pieza/caja para no confundir dos unidades
+// distintas del mismo producto.
+export function diffItemsRemito(itemsAntes, itemsDespues) {
+  const clave = it => [
+    it.descripcion || '', it.tipo || '',
+    Number(it.kg) || 0, Number(it.precio) || 0,
+    it.media_res_id || '', it.pieza_id || '', it.caja_id || '',
+  ].join('~')
+  // Pool de los que estaban: cada ítem de la versión nueva que matchea
+  // consume uno del pool (o sea "no cambió"); lo que sobra en el pool se quitó.
+  const pool = new Map()
+  for (const it of (itemsAntes || [])) {
+    const k = clave(it)
+    if (!pool.has(k)) pool.set(k, [])
+    pool.get(k).push(it)
+  }
+  const agregados = []
+  for (const it of (itemsDespues || [])) {
+    const bucket = pool.get(clave(it))
+    if (bucket && bucket.length > 0) bucket.shift()
+    else agregados.push(it)
+  }
+  const quitados = [...pool.values()].flat()
+  return { quitados, agregados }
+}
+
 const CATEGORIA_A_STOCK = {
   bovino_mr: 'bovino_mr',
   bovino_corte: 'bovino_corte',
@@ -326,12 +385,23 @@ const CATEGORIA_A_STOCK = {
   embutido: null,
   pollo: 'pollo',
   rebozado: 'rebozado',
+  // insumos: se venden por unidad y NO tienen stock trackeado — solo se
+  // facturan. El mapeo explícito en null evita que resolverDescuentoStock
+  // caiga al nombre crudo y cree un bucket 'insumos' en stock_actual (era
+  // lo que pasaba al anular un remito con insumos). Los loops igual lo
+  // saltean por tipo; esto es la red por si aparece otro caller.
+  insumos: null,
 }
 
 export function Deposito() {
-  // El ajuste de stock es exclusivo del dueño: al resto de los admin ni
-  // siquiera les aparece la pestaña (ver lib/permisos.js).
-  const { isCEO } = useAuth()
+  // El ajuste de stock es del DUEÑO del depósito: en la central, solo
+  // Fabricio; en una sucursal, su encargado sobre el suyo (ver lib/permisos.js).
+  // Lo único que una sucursal no ve es el Flujo Depósito: los pedidos internos
+  // son de la central. Las Cajas Bovinas SÍ, porque se les despachan armadas
+  // (confirmado por Fabricio 18/08/2026) y cada una entra como una unidad con
+  // su peso propio, igual que en Río Primero.
+  const { isCEO, isSucursal, profile, user } = useAuth()
+  const puedeAjustar = puedeAjustarStock(profile, user)
   const [tab, setTab] = useState('entradas')
   const [alert, setAlert] = useState(null)
   const [remitoActual, setRemitoActual] = useState(null)
@@ -353,12 +423,22 @@ export function Deposito() {
         {[
           { id: 'entradas', label: '📥 Ingresos' },
           { id: 'desposte', label: '🔪 Desposte' },
+          // Para una sucursal la elaboración sale de adentro del Desposte y
+          // sube acá: casi no desposta (recibe las piezas ya hechas), así que
+          // elaborar es una tarea propia y no un paso del desposte. En la
+          // central queda donde estaba, que es su flujo real.
+          ...(isSucursal ? [{ id: 'elaborar', label: '🍔 Elab. Hamburguesas y Milanesas' }] : []),
           { id: 'piezas', label: '🥩 Piezas' },
+          // Los kilos de cada pieza de cerdo con su historial. A la central le
+          // sirve igual, pero para una sucursal es la única forma de saber
+          // cuánto le queda: no recibe capones para despostar, recibe las
+          // piezas ya hechas.
+          { id: 'cerdo', label: '🐷 Cerdo y Embutidos' },
           { id: 'cajas', label: '📦 Cajas Bovinas' },
           { id: 'pollo_cajones', label: '🍗 Pollo Cajones' },
-          { id: 'flujo', label: '📥 Flujo Depósito' },
+          ...(isSucursal ? [] : [{ id: 'flujo', label: '📥 Flujo Depósito' }]),
           { id: 'remitos', label: '🧾 Remitos' },
-          ...(isCEO ? [{ id: 'ajuste', label: '🔧 Ajuste Stock' }] : []),
+          ...(puedeAjustar ? [{ id: 'ajuste', label: '🔧 Ajuste Stock' }] : []),
         ].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
             style={{ padding: '8px 16px', borderRadius: 8, border: `1px solid ${tab === t.id ? 'var(--amber)' : 'var(--border)'}`, background: tab === t.id ? 'var(--amber)' : 'transparent', color: tab === t.id ? '#fff' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
@@ -368,12 +448,16 @@ export function Deposito() {
       </div>
       {tab === 'entradas' && <EntradaForm onSaved={() => {}} showAlert={showAlert} proveedores={proveedores} />}
         {tab === 'desposte' && <DesposteTab key={tab} onSaved={() => {}} />}
+{/* Misma pantalla, pero abierta directo en Elaborar y sin la fila de
+    sub-solapas del desposte. */}
+{tab === 'elaborar' && <DesposteTab key={tab} onSaved={() => {}} soloElaborar />}
 {tab === 'piezas' && <PiezasTab key={tab} />}
+{tab === 'cerdo' && <StockPiezasTab key={tab} />}
 {tab === 'cajas' && <CajasTab key={tab} />}
 {tab === 'pollo_cajones' && <PolloCajonesTab key={tab} />}
 {tab === 'remitos' && <RemitosTab remitoActual={remitoActual} />}
-      {tab === 'flujo' && <FlujoDeposito />}
-      {tab === 'ajuste' && isCEO && <AjusteStock />}
+      {tab === 'flujo' && !isSucursal && <FlujoDeposito />}
+      {tab === 'ajuste' && puedeAjustar && <AjusteStock />}
     </div>
   )
 }
@@ -382,8 +466,12 @@ export default Deposito
 // =============================================
 // MÓDULO DE DESPOSTE BOVINO
 // =============================================
-function DesposteTab({ onSaved }) {
-  const [subtab, setSubtab] = useState('piezas')
+// `soloElaborar`: la pantalla se abre directo en Elaborar y sin la fila de
+// sub-solapas. La usa la sucursal, que tiene Elaborar como solapa propia
+// arriba en vez de escondida adentro del Desposte.
+function DesposteTab({ onSaved, soloElaborar = false }) {
+  const { isSucursal: esSucursal } = useAuth()
+  const [subtab, setSubtab] = useState(soloElaborar ? 'embutidos' : 'piezas')
   const [mediasRes, setMediasRes] = useState([])
   const [piezasStock, setPiezasStock] = useState({})
   const [despostes, setDespostes] = useState([])
@@ -412,7 +500,13 @@ const [piezasCerdo, setPiezasCerdo] = useState({
   pierna: '', carre: '', pechito: '', matambre: '',
   paleta: '', parrillero: '', bondiola: '', huesos: '', tocino: '', cuero: '', cabeza: ''
 })
-const [tipoElaboracion, setTipoElaboracion] = useState('embutido')
+// La sucursal solo elabora hamburguesas, así que arranca ya parada ahí.
+const [tipoElaboracion, setTipoElaboracion] = useState(esSucursal ? 'hamburguesa' : 'embutido')
+// Milanesas (mig 99): tipo y, para las de cerdo, de qué pieza salen.
+const [tipoMilanesa, setTipoMilanesa] = useState('milanesa_carne')
+const [piezaMilaCerdo, setPiezaMilaCerdo] = useState('cerdo_pierna')
+const [kgOrigenMila, setKgOrigenMila] = useState('')
+const [kgFinalMila, setKgFinalMila] = useState('')
 const [tipoEmbutido, setTipoEmbutido] = useState('chorizo_parrillero')
 // Hamburguesas: tipo elegido, kg de materia prima (carne/pollo — el cerdo usa
 // la grilla de piezas) y kg FINALES de hamburguesas producidas (puede haber
@@ -843,6 +937,61 @@ async function confirmarElaboracionHamburguesa() {
   setLoading(false)
 }
 
+// ── ELABORAR MILANESAS ──────────────────────────────────────
+// Mismo molde que las hamburguesas: se pesa la materia prima, se carga el peso
+// final y la diferencia queda registrada. Con el rebozado normalmente SALEN
+// MÁS kilos de los que entraron, así que el porcentaje suele ser positivo —
+// al revés que un desposte, donde siempre hay merma.
+async function confirmarElaboracionMilanesa() {
+  const esCerdo = tipoMilanesa === 'milanesa_cerdo'
+  // El cerdo sale de una pieza puntual (pierna o carré); carne y pollo, de su
+  // bucket genérico.
+  const bucketOrigen = esCerdo ? piezaMilaCerdo : ORIGEN_MILANESA[tipoMilanesa].bucket
+  const kgOrigen = parseNumero(kgOrigenMila)
+  if (esCerdo && !piezaMilaCerdo) { showAlert('Elegí de qué pieza de cerdo salen las milanesas', 'error'); return }
+  if (kgOrigen <= 0) { showAlert('Ingresá los kg de materia prima que se usaron', 'error'); return }
+  const kgFinal = parseNumero(kgFinalMila)
+  if (kgFinal <= 0) { showAlert('Ingresá los kg de milanesas que salieron (peso final)', 'error'); return }
+
+  setLoading(true)
+  try {
+    const bucket = BUCKET_MILANESA[tipoMilanesa]
+    const pctFinal = parseFloat(((kgFinal / kgOrigen - 1) * 100).toFixed(2))
+    const piezasUsadas = [{ tipo: bucketOrigen, kg: kgOrigen }]
+
+    await supabase.from('elaboraciones_embutidos').insert({
+      fecha, tipo: 'milanesa', tipo_embutido: tipoMilanesa,
+      piezas_usadas: piezasUsadas,
+      kg_carne_cerdo: esCerdo ? kgOrigen : 0,
+      kg_carne_bovina: tipoMilanesa === 'milanesa_carne' ? kgOrigen : 0,
+      kg_elaborado: kgOrigen, pct_aumento: pctFinal,
+      productos_finales: [{ tipo: tipoMilanesa, kg: kgFinal }],
+      kg_final: kgFinal, maduracion_completa: true, notas,
+    })
+
+    const { error } = await actualizarStock(bucketOrigen, -kgOrigen)
+    if (error) throw new Error(`No se descontó ${bucketOrigen}: ${error.message}`)
+    await sumarStockVerificado(bucket, kgFinal)
+
+    // Entrada informativa (importe 0, destino 'elaboracion') para que la
+    // elaboración aparezca en el historial de Cerdo y Embutidos y en el Cierre.
+    const { error: errEntrada } = await supabase.from('entradas_deposito').insert({
+      fecha,
+      tipo: bucket,
+      proveedor_nombre: 'Elaboración propia',
+      descripcion: `${LABEL_BUCKET_MILA[bucket]} ${kgFinal.toFixed(1)} kg elaboradas (de ${kgOrigen.toFixed(1)} kg · ${pctFinal >= 0 ? '+' : ''}${pctFinal.toFixed(1)}%)`,
+      kg: kgFinal, kg_real: kgFinal, merma_pct: 0, precio_kg: 0, importe: 0,
+      destino: 'elaboracion', cantidad: 1,
+    })
+    if (errEntrada) console.warn('No se pudo registrar la entrada de la elaboración:', errEntrada.message)
+
+    showAlert(`✅ ${kgFinal.toFixed(1)} kg de ${LABEL_BUCKET_MILA[bucket]} al stock (${pctFinal >= 0 ? '+' : ''}${pctFinal.toFixed(1)}% vs ${kgOrigen.toFixed(1)} kg usados)`)
+    setKgOrigenMila(''); setKgFinalMila(''); setNotas('')
+    await cargarDatos(); onSaved()
+  } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
+  setLoading(false)
+}
+
 async function confirmarElaboracionSalame() {
     const kgCerdo = Object.values(piezasEmbutido).reduce((s, v) => s + (parseFloat(v) || 0), 0)
     if (kgCerdo === 0) { showAlert('Ingresá al menos una pieza de cerdo', 'error'); return }
@@ -1190,15 +1339,27 @@ async function confirmarDesposteCerdo() {
   return (
     <div>
       {alert && <div style={{ background: alert.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${alert.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: alert.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>{alert.msg}</div>}
+      {/* Abierta como "Elaborar" desde el menú de arriba, esta fila no va: ya
+          se eligió qué hacer. */}
+      {!soloElaborar && (
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
-        {[{ id: 'piezas', label: '🍖 Desposte en Piezas' }, { id: 'kilo', label: '⚖️ Desposte para venta por Kilo' }, { id: 'pieza_kilo', label: '🔄 Convertir Pieza a Cortes' }, { id: 'cerdo', label: '🐷 Desposte Cerdo' },
-{ id: 'embutidos', label: '🌭 Elaborar Embutidos' }, { id: 'medias_hist', label: '🐄 Historial Medias' }, { id: 'historial', label: '📋 Historial Desposte' }].map(t => (
+        {/* Una sucursal no desposta cerdo: recibe las piezas ya despostadas de
+            la central, nunca capones enteros. Y de elaboración solo hace
+            hamburguesas — los embutidos frescos y los salames los elabora la
+            central y se los distribuye. La solapa se llama distinto por eso. */}
+        {[{ id: 'piezas', label: '🍖 Desposte en Piezas' }, { id: 'kilo', label: '⚖️ Desposte para venta por Kilo' }, { id: 'pieza_kilo', label: '🔄 Convertir Pieza a Cortes' },
+...(esSucursal ? [] : [{ id: 'cerdo', label: '🐷 Desposte Cerdo' }]),
+// En la sucursal, Elaborar ya es una solapa propia arriba: si además la
+// dejáramos acá, el mismo tablero estaría en dos lugares.
+...(esSucursal ? [] : [{ id: 'embutidos', label: '🌭 Elaborar Embutidos' }]),
+{ id: 'medias_hist', label: '🐄 Historial Medias' }, { id: 'historial', label: '📋 Historial Desposte' }].map(t => (
           <button key={t.id} onClick={() => { setSubtab(t.id); setSeleccionada(null); setPiezas([]); cargarDatos() }}
             style={{ padding: '8px 16px', borderRadius: 8, border: `1px solid ${subtab === t.id ? 'var(--gold)' : 'var(--border)'}`, background: subtab === t.id ? 'var(--gold)' : 'transparent', color: subtab === t.id ? '#000' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
             {t.label}
           </button>
         ))}
       </div>
+      )}
 
       {subtab === 'piezas' && (
         <div style={{ display: 'grid', gridTemplateColumns: seleccionada ? '1fr 1.5fr' : '1fr', gap: 16 }}>
@@ -1602,7 +1763,14 @@ async function confirmarDesposteCerdo() {
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="card-title">🌭 Tipo de elaboración</div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-          {[{ id: 'embutido', label: '🌭 Embutidos frescos' }, { id: 'salame', label: '🥩 Salames' }, { id: 'hamburguesa', label: '🍔 Hamburguesas' }].map(t => (
+          {/* Las MILANESAS con stock propio son solo de las franquicias: la
+              central mantiene su trazabilidad de siempre (la milanesa
+              descuenta la materia prima directo al venderse, sin paso de
+              elaboración). Ver supabase/99. */}
+          {(esSucursal
+            ? [{ id: 'hamburguesa', label: '🍔 Hamburguesas' }, { id: 'milanesa', label: '🍗 Milanesas' }]
+            : [{ id: 'embutido', label: '🌭 Embutidos frescos' }, { id: 'salame', label: '🥩 Salames' }, { id: 'hamburguesa', label: '🍔 Hamburguesas' }]
+          ).map(t => (
             <button key={t.id} onClick={() => setTipoElaboracion(t.id)}
               style={{ flex: 1, padding: '10px', borderRadius: 8, border: `2px solid ${tipoElaboracion === t.id ? 'var(--gold)' : 'var(--border)'}`, background: tipoElaboracion === t.id ? 'rgba(201,168,76,0.1)' : 'var(--surface2)', color: tipoElaboracion === t.id ? 'var(--gold)' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
               {t.label}
@@ -1665,6 +1833,11 @@ async function confirmarDesposteCerdo() {
           </div>
         )}
       </div>
+      {/* Para una sucursal estos dos paneles (piezas de cerdo y embutidos)
+          quedan afuera: ese stock ahora se mira completo, y con su historial,
+          en Depósito → 🐷 Cerdo y Embutidos. Acá solo interesa lo que se
+          elabora. La central los conserva: es su pantalla de siempre. */}
+      {!esSucursal && (<>
       <div className="card">
         <div className="card-title">📦 Stock piezas de cerdo disponibles</div>
         {[
@@ -1704,6 +1877,7 @@ async function confirmarDesposteCerdo() {
           </span>
         </div>
       </div>
+      </>)}
       {/* Stock de hamburguesas por tipo (mig 85): mismo modelo que embutidos */}
       <div className="card" style={{ marginTop: 16 }}>
         <div className="card-title">🍔 Stock hamburguesas</div>
@@ -1722,9 +1896,132 @@ async function confirmarDesposteCerdo() {
           </span>
         </div>
       </div>
+      {/* Stock de milanesas (mig 99) — solo franquicias */}
+      {esSucursal && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <div className="card-title">🍗 Stock milanesas</div>
+          {Object.entries(LABEL_BUCKET_MILA).map(([tipo, label]) => (
+            <div key={tipo} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>{label}</span>
+              <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: (piezasStock[tipo] || 0) > 0 ? 'var(--green)' : 'var(--muted)' }}>
+                {fmtKg(piezasStock[tipo] || 0, { decimales: 2 })}
+              </span>
+            </div>
+          ))}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0 2px' }}>
+            <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--gold)' }}>TOTAL MILANESAS</span>
+            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>
+              {fmtKg(Object.keys(LABEL_BUCKET_MILA).reduce((s, t) => s + (piezasStock[t] || 0), 0), { decimales: 2 })}
+            </span>
+          </div>
+        </div>
+      )}
     </div>
     <div className="card">
-      <div className="card-title">{tipoElaboracion === 'hamburguesa' ? '🍔 Elaborar hamburguesas' : `🌭 ${tipoElaboracion === 'embutido' ? 'Elaborar embutidos' : 'Elaborar salames'}`}</div>
+      <div className="card-title">{tipoElaboracion === 'milanesa' ? '🍗 Elaborar milanesas' : tipoElaboracion === 'hamburguesa' ? '🍔 Elaborar hamburguesas' : `🌭 ${tipoElaboracion === 'embutido' ? 'Elaborar embutidos' : 'Elaborar salames'}`}</div>
+
+      {/* ── FORMULARIO DE MILANESAS ────────────────────────────
+          Se pesa lo que entra y se carga lo que sale. Con el rebozado
+          normalmente salen MÁS kilos, así que el porcentaje suele ser
+          positivo — al revés que un desposte. */}
+      {tipoElaboracion === 'milanesa' && (() => {
+        const esCerdoMila = tipoMilanesa === 'milanesa_cerdo'
+        const bucketOrigen = esCerdoMila ? piezaMilaCerdo : ORIGEN_MILANESA[tipoMilanesa]?.bucket
+        const dispon = piezasStock[bucketOrigen] || 0
+        const kgIn = parseNumero(kgOrigenMila)
+        const kgOut = parseNumero(kgFinalMila)
+        const pct = kgIn > 0 && kgOut > 0 ? ((kgOut / kgIn - 1) * 100) : null
+        return (
+          <>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
+              Pesá los kg de materia prima que vas a usar y después cargá los kg de milanesas que salieron.
+            </div>
+
+            <div className="form-group" style={{ marginBottom: 12 }}>
+              <label>Tipo de milanesa</label>
+              <select value={tipoMilanesa} onChange={e => setTipoMilanesa(e.target.value)} style={inp}>
+                <option value="milanesa_carne">🐄 Milanesas de Carne</option>
+                <option value="milanesa_cerdo">🐷 Milanesas de Cerdo</option>
+                <option value="milanesa_pollo">🐔 Milanesas de Pollo</option>
+              </select>
+            </div>
+
+            {esCerdoMila && (
+              <div className="form-group" style={{ marginBottom: 12 }}>
+                <label>¿De qué pieza salen?</label>
+                <select value={piezaMilaCerdo} onChange={e => setPiezaMilaCerdo(e.target.value)} style={inp}>
+                  {PIEZAS_MILANESA_CERDO.map(p => (
+                    <option key={p.tipo} value={p.tipo}>{p.label}</option>
+                  ))}
+                </select>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                  Solo pierna y carré: son las únicas piezas de las que salen milanesas.
+                </div>
+              </div>
+            )}
+
+            <div style={{ background: '#1a1a2a', border: '1px solid #2a2a5a', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#7db5ff', marginBottom: 14 }}>
+              ℹ️ Se descuenta de <strong>{LABEL_BUCKET_MILA[BUCKET_MILANESA[tipoMilanesa]] ? (esCerdoMila ? (PIEZAS_MILANESA_CERDO.find(p => p.tipo === piezaMilaCerdo)?.label || piezaMilaCerdo) : ORIGEN_MILANESA[tipoMilanesa].label.split('—')[1]?.trim() || bucketOrigen) : bucketOrigen}</strong> y
+              entra como <strong>{LABEL_BUCKET_MILA[BUCKET_MILANESA[tipoMilanesa]]}</strong> (stock propio).
+              Disponible ahora: <strong>{fmtKg(dispon, { decimales: 2 })}</strong>.
+            </div>
+
+            <div className="form-group" style={{ marginBottom: 12 }}>
+              <label>{esCerdoMila ? 'Kg de la pieza que se usaron' : ORIGEN_MILANESA[tipoMilanesa].label}</label>
+              <input type="number" step="0.01" value={kgOrigenMila} onChange={e => setKgOrigenMila(e.target.value)}
+                placeholder="0" style={{ ...inp, borderColor: kgIn > dispon ? 'var(--red-light)' : 'var(--border)' }} />
+              {kgIn > dispon && (
+                <div style={{ fontSize: 11, color: 'var(--red-light)', marginTop: 4, fontWeight: 600 }}>
+                  ⚠️ Estás usando más de lo que hay en stock ({fmtKg(dispon, { decimales: 2 })}). Va a quedar en negativo.
+                </div>
+              )}
+            </div>
+
+            <div className="form-group" style={{ marginBottom: 12 }}>
+              <label>🍗 Kg de milanesas que salieron (peso final)</label>
+              <input type="number" step="0.01" value={kgFinalMila} onChange={e => setKgFinalMila(e.target.value)}
+                placeholder="0" style={{ ...inp, borderColor: kgOut > 0 ? 'var(--green)' : 'var(--border)' }} />
+            </div>
+
+            {pct !== null && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, background: 'var(--surface2)', borderRadius: 8, padding: '12px 14px', marginBottom: 14, textAlign: 'center' }}>
+                <div>
+                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>MATERIA PRIMA</div>
+                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{fmtKg(kgIn, { decimales: 2 })}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>REBOZADO</div>
+                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: pct >= 0 ? 'var(--green)' : 'var(--amber)' }}>
+                    {pct >= 0 ? '+' : ''}{pct.toFixed(1)}%
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>AL STOCK</div>
+                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{fmtKg(kgOut, { decimales: 2 })}</div>
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label>Fecha</label>
+                <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} style={inp} />
+              </div>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label>Notas</label>
+                <input value={notas} onChange={e => setNotas(e.target.value)} placeholder="Observaciones..." style={inp} />
+              </div>
+            </div>
+
+            <button className="btn btn-gold" onClick={confirmarElaboracionMilanesa} disabled={loading} style={{ width: '100%' }}>
+              {loading ? '⏳ Procesando...' : '🍗 Confirmar elaboración de milanesas'}
+            </button>
+          </>
+        )
+      })()}
+      {/* El formulario de embutidos / salames / hamburguesas. Se apaga entero
+          cuando se está elaborando milanesas, que tiene el suyo arriba. */}
+      {tipoElaboracion !== 'milanesa' && (<>
       <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
         {tipoElaboracion === 'hamburguesa' && tipoHamburguesa !== 'hamburguesa_cerdo'
           ? 'Ingresá los kg de materia prima usados y el peso final elaborado.'
@@ -1894,6 +2191,7 @@ async function confirmarDesposteCerdo() {
       <button className="btn btn-gold" onClick={tipoElaboracion === 'embutido' ? confirmarElaboracionEmbutido : tipoElaboracion === 'salame' ? confirmarElaboracionSalame : confirmarElaboracionHamburguesa} disabled={loading} style={{ width: '100%' }}>
         {loading ? '⏳ Procesando...' : tipoElaboracion === 'embutido' ? '🌭 Confirmar elaboración de embutidos' : tipoElaboracion === 'salame' ? '🥩 Registrar salame en secado' : '🍔 Confirmar elaboración de hamburguesas'}
       </button>
+      </>)}
     </div>
   </div>
   <div style={{ marginTop: 16 }}>
@@ -2436,6 +2734,40 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
   const TIPOS_SOLO_UNIDADES = ['almacen', 'bebidas']
   const esSoloUnidades = TIPOS_SOLO_UNIDADES.includes(form.tipo)
 
+  // ── CUADRE: kg × precio/kg tiene que dar el importe ────────────────────
+  // El importe total se carga a mano, así que es fácil que no coincida con lo
+  // que dicen los kg y el precio (caso real: 2 cajones × 5 kg a $7.210 =
+  // $72.100, pero se tipeó $77.210 — que a ese precio serían 10,7 kg). Antes
+  // la entrada se registraba igual y el error aparecía recién al cuadrar la
+  // cuenta del proveedor, con el stock ya movido.
+  //
+  // No aplica a los tipos que se compran POR KG (ahí el importe lo calcula el
+  // sistema, no se puede desalinear) ni a las cajas individuales (no tienen
+  // precio/kg: se deriva del peso de cada caja).
+  const cuadre = useMemo(() => {
+    if (TIPOS_COMPRA_POR_KG.has(form.tipo) || esCajaIndividual) return null
+    const cantidad = TIPOS_EN_UNIDADES.includes(form.tipo) ? Math.max(1, parseInt(form.cantidad) || 1) : 1
+    const kgUnidad = esSoloUnidades ? 1 : parseNumero(form.kg)
+    const kgTotal = kgUnidad * cantidad
+    const precio = parseNumero(form.precioKg)
+    const importe = parseNumero(form.importe)
+    // Con algún campo vacío no hay nada que comparar todavía.
+    if (!(kgTotal > 0) || !(precio > 0) || !(importe > 0)) return null
+    const esperado = Math.round(kgTotal * precio * 100) / 100
+    const dif = Math.round((importe - esperado) * 100) / 100
+    // Tolerancia 1% (mínimo $1): aguanta el redondeo de la factura pero no
+    // deja pasar un dígito de más.
+    const cuadra = Math.abs(dif) <= Math.max(1, esperado * 0.01)
+    return {
+      cantidad, kgTotal, precio, importe, esperado, dif, cuadra,
+      unidad: esSoloUnidades ? 'u' : 'kg',
+      porUnidad: esSoloUnidades,
+      // Las dos salidas posibles: o está mal el importe, o está mal el precio.
+      precioImplicito: Math.round((importe / kgTotal) * 100) / 100,
+      kgImplicito: Math.round((importe / precio) * 1000) / 1000,
+    }
+  }, [form.tipo, form.cantidad, form.kg, form.precioKg, form.importe, esCajaIndividual, esSoloUnidades])
+
   async function guardar() {
     if (guardandoRef.current) return       // bloqueo síncrono contra doble click
     guardandoRef.current = true
@@ -2602,6 +2934,13 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
       showAlert({ type: 'error', msg: esPorKg
         ? '⛔ Cargá el precio por kg — no se puede ingresar sin precio.'
         : '⛔ Cargá el importe (precio total) — no se puede ingresar al depósito sin precio.' })
+      return
+    }
+    // BLOQUEO: los kg, el precio y el importe tienen que cerrar entre sí.
+    // El panel del formulario ya lo muestra y ofrece corregirlo con un click;
+    // esto es la red por si se llega igual al botón.
+    if (cuadre && !cuadre.cuadra) {
+      showAlert({ type: 'error', msg: `⛔ Los números no cuadran: ${fmtKg(cuadre.kgTotal)} × ${fmtPrecio(cuadre.precio)} = ${fmtPrecio(cuadre.esperado)}, pero el importe dice ${fmtPrecio(cuadre.importe)}. Corregí el importe o el precio antes de registrar.` })
       return
     }
     // Media res: exigir el tipo (Premium NT-VQ u Overo Chico) — no texto libre.
@@ -3166,10 +3505,51 @@ async function eliminar(entrada) {
             </select>
           </div>
         </div>
+        {/* Cuadre kg × precio = importe. Verde cuando cierra, rojo cuando no,
+            con las dos correcciones posibles a un click. */}
+        {cuadre && (
+          cuadre.cuadra ? (
+            <div style={{ fontSize: 12, color: 'var(--green)', marginBottom: 8, fontWeight: 600 }}>
+              ✅ Cuadra: {cuadre.cantidad > 1 ? `${cuadre.cantidad} × ${fmtKg(cuadre.kgTotal / cuadre.cantidad)} = ` : ''}
+              {cuadre.porUnidad ? `${cuadre.kgTotal} u` : fmtKg(cuadre.kgTotal)} × {fmtPrecio(cuadre.precio)} = {fmtPrecio(cuadre.esperado)}
+            </div>
+          ) : (
+            <div style={{ background: '#3a1a1a', border: '1px solid var(--red-light, #ff6b6b)', borderRadius: 8, padding: '10px 14px', marginBottom: 12 }}>
+              <div style={{ color: '#ff8b8b', fontWeight: 800, fontSize: 13, marginBottom: 5 }}>
+                ⛔ Los números no cuadran — revisá antes de registrar
+              </div>
+              <div style={{ fontSize: 12.5, color: 'var(--text)', lineHeight: 1.6 }}>
+                {cuadre.cantidad > 1 && <>{cuadre.cantidad} × {fmtKg(cuadre.kgTotal / cuadre.cantidad)} = </>}
+                <b>{cuadre.porUnidad ? `${cuadre.kgTotal} u` : fmtKg(cuadre.kgTotal)}</b> × <b>{fmtPrecio(cuadre.precio)}</b> = <b>{fmtPrecio(cuadre.esperado)}</b>,
+                {' '}pero cargaste <b style={{ color: '#ff8b8b' }}>{fmtPrecio(cuadre.importe)}</b>
+                {' '}({cuadre.dif > 0 ? '+' : ''}{fmtPrecio(cuadre.dif)}).
+                <div style={{ color: 'var(--muted)', marginTop: 3 }}>
+                  A {fmtPrecio(cuadre.precio)} el {cuadre.porUnidad ? 'unidad' : 'kg'}, {fmtPrecio(cuadre.importe)} serían{' '}
+                  <b style={{ color: 'var(--text)' }}>{cuadre.porUnidad ? `${cuadre.kgImplicito} u` : fmtKg(cuadre.kgImplicito)}</b>.
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 9, flexWrap: 'wrap' }}>
+                <button onClick={() => setForm(f => ({ ...f, importe: String(cuadre.esperado) }))}
+                  style={{ background: 'transparent', border: '1px solid var(--gold)', color: 'var(--gold)', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+                  Corregir importe → {fmtPrecio(cuadre.esperado)}
+                </button>
+                <button onClick={() => setForm(f => ({ ...f, precioKg: String(cuadre.precioImplicito) }))}
+                  style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+                  Corregir precio → {fmtPrecio(cuadre.precioImplicito)}/{cuadre.porUnidad ? 'u' : 'kg'}
+                </button>
+              </div>
+            </div>
+          )
+        )}
+
         <div style={{ fontSize: 12, color: 'var(--green)', marginBottom: 12 }}>
           ✅ La entrada actualizará el stock y se registrará en Cuenta Proveedores
         </div>
-        <button className="btn btn-gold" onClick={guardar} disabled={guardandoEntrada} style={{ opacity: guardandoEntrada ? 0.5 : 1, cursor: guardandoEntrada ? 'not-allowed' : 'pointer' }}>{guardandoEntrada ? '⏳ Registrando…' : '✅ Registrar entrada'}</button>
+        <button className="btn btn-gold" onClick={guardar} disabled={guardandoEntrada || (cuadre && !cuadre.cuadra)}
+          title={cuadre && !cuadre.cuadra ? 'Los kg, el precio y el importe no coinciden' : ''}
+          style={{ opacity: (guardandoEntrada || (cuadre && !cuadre.cuadra)) ? 0.5 : 1, cursor: (guardandoEntrada || (cuadre && !cuadre.cuadra)) ? 'not-allowed' : 'pointer' }}>
+          {guardandoEntrada ? '⏳ Registrando…' : (cuadre && !cuadre.cuadra) ? '⛔ Revisá los números' : '✅ Registrar entrada'}
+        </button>
       </div>
 
       <div className="card">
@@ -3247,6 +3627,7 @@ async function eliminar(entrada) {
 }
 
 export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
+  const { sucursalId, isSucursal: esSucursal } = useAuth()
   const [form, setForm] = useState({ destino: '', clienteId: '', clienteNombre: '', domicilio: '', fecha: fechaHoyARG(), categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
   // Pago dividido (cobro='mixto'): hasta 3 líneas { metodo, monto }. Solo se usa
   // cuando la venta se cobra en 2-3 formas distintas (ej. parte efectivo + parte
@@ -3315,7 +3696,12 @@ export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
     setStockMap(m)
   }
   useEffect(() => {
-    supabase.from('precios').select('*').order('nombre').then(({ data }) => setTodosPrecios(data || []))
+    // Los precios que se ofrecen al remitar salen del catálogo, pisados por
+    // los de la sucursal si el que remita es de una (ver lib/preciosSucursal).
+    supabase.from('precios').select('*').order('nombre').then(async ({ data }) => {
+      const overlay = await overlayDeSucursal(sucursalId)
+      setTodosPrecios(productosQueVende(conPreciosDeSucursal(data || [], overlay), esSucursal))
+    })
     supabase.from('clientes').select('*').order('nombre').then(({ data }) => setClientes(data || []))
     // Ofertas vigentes (activas y dentro del rango de fechas) para aplicar
     // el precio de oferta en los despachos, igual que en Caja Rápida.
@@ -4421,6 +4807,7 @@ for (const item of items) {
 }
 
 export function RemitosTab({ remitoActual }) {
+  const { sucursalId, isSucursal: esSucursal } = useAuth()
   const [remitos, setRemitos] = useState([])
   const [seleccionado, setSeleccionado] = useState(remitoActual)
   const [anulando, setAnulando] = useState(false)
@@ -4488,7 +4875,12 @@ export function RemitosTab({ remitoActual }) {
   }
   useEffect(() => {
     cargarRemitos()
-    supabase.from('precios').select('*').order('nombre').then(({ data }) => setTodosPrecios(data || []))
+    // Los precios que se ofrecen al remitar salen del catálogo, pisados por
+    // los de la sucursal si el que remita es de una (ver lib/preciosSucursal).
+    supabase.from('precios').select('*').order('nombre').then(async ({ data }) => {
+      const overlay = await overlayDeSucursal(sucursalId)
+      setTodosPrecios(productosQueVende(conPreciosDeSucursal(data || [], overlay), esSucursal))
+    })
     cargarCategoriasPrecios().then(l => setLabelsCatalogo(labelsDeCategorias(l)))
   }, [])
 
@@ -4588,12 +4980,16 @@ export function RemitosTab({ remitoActual }) {
     if (error) console.warn('No se pudo revertir pieza vendida:', error.message)
   }
 
-  // Devolver el stock descontado. Mismo criterio que guardar(): se saltean
-  // los items manuales (no descontaron stock) y las cajas individuales (ya se
-  // revirtieron arriba con revertirVentaCaja, que ajusta stock_actual).
+  // Devolver el stock descontado. Los skips tienen que ser IDÉNTICOS a los de
+  // guardar(): manual e insumos nunca descontaron nada, y las cajas ya se
+  // revirtieron arriba con revertirVentaCaja (que ajusta stock_actual).
+  // Faltaba el de insumos: resolverDescuentoStock caía al nombre crudo de la
+  // categoría y actualizarStock('insumos', kg) creaba un bucket fantasma en
+  // stock_actual que nunca debió existir (2.000 acumulados al 18/08/2026).
   const kgPorTipoDevolver = {}
   for (const it of (remito.items || [])) {
     if (it.manual) continue
+    if (it.tipo === 'insumos') continue
     if (it.caja_id) continue
     const { tipoStock, cantidad } = resolverDescuentoStock(it, CATEGORIA_A_STOCK)
     if (!tipoStock || !cantidad) continue
@@ -4653,6 +5049,86 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
     const fechaCambio = fechaEdit !== fechaAnterior
 
     await supabase.from('remitos').update({ items: itemsEdit, total: nuevoTotal, fecha: fechaEdit }).eq('id', editando.id)
+
+    // ── RECONCILIAR EL DEPÓSITO CON LA EDICIÓN ─────────────────────────────
+    // Editar un remito tocaba items/total/fecha y la cuenta corriente, pero
+    // NO el depósito: quedaba la foto de la versión vieja. Bug real del
+    // 18/08/2026 (remito 01743, MONTE CRISTO): sacaron una media res de 126 kg
+    // y la media quedó 'vendida' — no volvió al stock, había que borrar el
+    // remito y rehacerlo — mientras una paleta agregada en la misma edición
+    // nunca se descontó de bovino_corte.
+    // Ahora se calcula el DELTA (qué ítems se fueron y cuáles entraron) y se
+    // aplica el mismo criterio que la anulación: medias/piezas/cajas vuelven a
+    // 'disponible' y el stock se devuelve o se descuenta según corresponda.
+    const { quitados, agregados } = diffItemsRemito(editando.items || [], itemsEdit)
+
+    if (quitados.length > 0) {
+      // Medias res → vuelven a 'disponible'. Se libera despostada Y reservada:
+      // la lista de medias para despachar/despostar filtra por las dos.
+      const mediasQuitadas = quitados.map(it => it.media_res_id).filter(Boolean)
+      if (mediasQuitadas.length > 0) {
+        await supabase.from('entradas_deposito').update({ despostada: false, reservada: false }).in('id', mediasQuitadas)
+        await supabase.from('medias_stock').update({
+          estado: 'disponible',
+          cliente_nombre: null, cliente_id: null, fecha_salida: null, destino: null,
+        }).in('entrada_id', mediasQuitadas)
+      }
+      // Piezas enteras → vuelven a 'disponible' limpiando los datos de venta
+      for (const it of quitados.filter(i => i.tipo === 'pieza_entera' && i.pieza_id)) {
+        const { error } = await supabase.from('piezas_stock').update({
+          estado: 'disponible',
+          destino: null, cliente_id: null, cliente_nombre: null,
+          precio_venta_kg: null, total_venta: null, fecha_salida: null, notas_salida: null,
+        }).eq('id', it.pieza_id)
+        if (error) console.warn('No se pudo revertir pieza vendida al editar:', error.message)
+      }
+      // Cajas individuales → revertirVentaCaja ya reajusta stock_actual
+      for (const it of quitados.filter(i => i.caja_id)) {
+        const { error } = await revertirVentaCaja(it.caja_id)
+        if (error) console.warn('No se pudo revertir caja vendida al editar:', error)
+      }
+    }
+
+    // Stock por bucket: + lo que se quitó, − lo que se agregó. Los skips son
+    // los MISMOS que al crear el remito (manual/insumos no descuentan, y las
+    // cajas ya se ajustaron arriba) — si no, se devuelve algo que nunca salió.
+    const deltaStock = {}
+    const acumular = (lista, signo) => {
+      for (const it of lista) {
+        if (it.manual) continue
+        if (it.tipo === 'insumos') continue
+        if (it.caja_id) continue
+        const { tipoStock, cantidad } = resolverDescuentoStock(it, CATEGORIA_A_STOCK)
+        if (!tipoStock || !cantidad) continue
+        deltaStock[tipoStock] = (deltaStock[tipoStock] || 0) + signo * cantidad
+      }
+    }
+    acumular(quitados, +1)
+    acumular(agregados, -1)
+    for (const [tipo, kg] of Object.entries(deltaStock)) {
+      if (Math.abs(kg) < 0.001) continue   // se quitó y se volvió a agregar igual
+      await actualizarStock(tipo, kg)
+    }
+
+    // Salidas de depósito: se rehacen desde los items finales para que el
+    // remito y el depósito cuenten lo mismo (alimentan Dashboard, Cierre y
+    // reportes). Solo si este remito tiene salidas vinculadas por remito_id:
+    // en los remitos viejos sin vínculo no hay forma seguísima de saber cuáles
+    // son las suyas, y duplicarlas sería peor que dejarlas como están.
+    const { data: salsPrevias } = await supabase.from('salidas_deposito')
+      .select('id, lista, cobro, notas').eq('remito_id', editando.id)
+    if (salsPrevias && salsPrevias.length > 0) {
+      const { lista, cobro, notas } = salsPrevias[0]
+      await supabase.from('salidas_deposito').delete().eq('remito_id', editando.id)
+      for (const it of itemsEdit) {
+        await supabase.from('salidas_deposito').insert({
+          fecha: fechaEdit, cliente_nombre: editando.cliente_nombre,
+          tipo: it.tipo, descripcion: it.descripcion,
+          kg: it.kg, precio_kg: it.precio, total: it.importe,
+          lista, cobro, notas, remito_id: editando.id,
+        })
+      }
+    }
 
     // Si cambió la fecha de emisión, mover también las salidas_deposito que se
     // crearon JUNTO con este remito (no hay FK: las emparejamos por cliente +

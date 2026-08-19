@@ -8,7 +8,8 @@ import { parseNumero, fmtPrecio } from '../../lib/formatos'
 import { imprimirHTML } from '../../lib/imprimir'
 import { recomputarSaldoCliente, conSaldoCorriente } from '../../lib/ctaCorriente'
 import { lunesDeLaSemana } from '../../lib/cierreAuto'
-import { getEtiquetaLista } from '../../lib/listasPrecios'
+import { getEtiquetaLista, listasDeVenta, listaPorDefecto } from '../../lib/listasPrecios'
+import { useAuth } from '../../context/AuthContext'
 import { vencidoPorCliente, setBloqueoCliente, setConfigCtaCte, plazoCliente, DIAS_BLOQUEO } from '../../lib/moraClientes'
 import { useEsMovil } from '../../lib/useEsMovil'
 import Paginador, { usePaginacion } from '../../components/Paginador'
@@ -17,6 +18,7 @@ import Paginador, { usePaginacion } from '../../components/Paginador'
 const PORTAL_URL = 'https://fabricius-sistema.vercel.app/login'
 
 export function Clientes() {
+  const { isSucursal: esSucursal } = useAuth()
   const [clientes, setClientes] = useState([])
   const [seleccionado, setSeleccionado] = useState(null)
   const [movimientos, setMovimientos] = useState([])
@@ -27,7 +29,7 @@ export function Clientes() {
   const [busquedaCliente, setBusquedaCliente] = useState('')   // filtro lista clientes
   const [filtroSaldo, setFiltroSaldo] = useState('todos')      // todos | con_deuda | al_dia
   const [pago, setPago] = useState({ importe: '', forma: 'efectivo', fecha: fechaHoyARG(), notas: '' })
-  const [form, setForm] = useState({ nombre: '', nombre_fantasia: '', tipo: 'carniceria', telefono: '', localidad: '', domicilio: '', cuit: '', lista_precios: 'carn', notas: '', titular: '', es_franquicia: false })
+  const [form, setForm] = useState({ nombre: '', nombre_fantasia: '', tipo: 'carniceria', telefono: '', localidad: '', domicilio: '', cuit: '', lista_precios: listaPorDefecto(esSucursal), notas: '', titular: '', es_franquicia: false })
   // Modal de gestion del portal: { tipo: 'habilitar'|'credenciales'|'revocar', cliente, email, credenciales, loading }
   const [modalPortal, setModalPortal] = useState(null)
   // Reporte "Cobranzas por período": aísla las compras/pagos de un rango de fechas
@@ -304,7 +306,7 @@ async function eliminarMovimiento(mov) {
 
   function abrirFormNuevo() {
     setEditandoId(null)
-    setForm({ nombre: '', nombre_fantasia: '', tipo: 'carniceria', telefono: '', localidad: '', domicilio: '', cuit: '', lista_precios: 'carn', notas: '', titular: '', es_franquicia: false })
+    setForm({ nombre: '', nombre_fantasia: '', tipo: 'carniceria', telefono: '', localidad: '', domicilio: '', cuit: '', lista_precios: listaPorDefecto(esSucursal), notas: '', titular: '', es_franquicia: false })
     setShowForm(true)
     setSeleccionado(null)
   }
@@ -319,7 +321,7 @@ async function eliminarMovimiento(mov) {
       localidad: cliente.localidad || '',
       domicilio: cliente.domicilio || '',
       cuit: cliente.cuit || '',
-      lista_precios: cliente.lista_precios || 'carn',
+      lista_precios: cliente.lista_precios || listaPorDefecto(esSucursal),
       notas: cliente.notas || '',
       titular: cliente.titular || '',
       es_franquicia: !!cliente.es_franquicia
@@ -338,7 +340,7 @@ async function eliminarMovimiento(mov) {
     } else {
       await supabase.from('clientes').insert({ ...form, saldo: 0 })
     }
-    setForm({ nombre: '', nombre_fantasia: '', tipo: 'carniceria', telefono: '', localidad: '', domicilio: '', cuit: '', lista_precios: 'carn', notas: '', titular: '', es_franquicia: false })
+    setForm({ nombre: '', nombre_fantasia: '', tipo: 'carniceria', telefono: '', localidad: '', domicilio: '', cuit: '', lista_precios: listaPorDefecto(esSucursal), notas: '', titular: '', es_franquicia: false })
     setShowForm(false)
     setEditandoId(null)
     fetchClientes()
@@ -639,10 +641,14 @@ async function eliminarMovimiento(mov) {
           <div className="form-row">
             <div className="form-group"><label>Domicilio</label><input style={inp} value={form.domicilio} onChange={e => setForm(f => ({ ...f, domicilio: e.target.value }))} /></div>
             <div className="form-group"><label>Lista de precios</label>
+              {/* Una sucursal vende Mayorista (rotiserías, restaurantes) y
+                  Minorista (mostrador). La lista Carnicería es con la que la
+                  central le vende A ELLA: si apareciera acá, un empleado
+                  podría facturarle a un cliente al precio de compra. */}
               <select style={inp} value={form.lista_precios} onChange={e => setForm(f => ({ ...f, lista_precios: e.target.value }))}>
-                <option value="carn">🔴 Precio Carnicería</option>
-                <option value="may">🟡 Precio Mayorista</option>
-                <option value="min">🟢 Precio Minorista</option>
+                {listasDeVenta(esSucursal).map(l => (
+                  <option key={l.codigo} value={l.codigo}>{l.labelEmoji}</option>
+                ))}
               </select>
             </div>
           </div>

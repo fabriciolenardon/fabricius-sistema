@@ -1,12 +1,15 @@
 // ============================================================
-// MAYORISTA — antes "Ventas"
+// VENTAS CTA/CTE — antes "Mayorista", antes "Ventas"
 // ============================================================
-// Esta pantalla unifica el flujo de DESPACHO de mercadería a clientes
-// mayoristas y la consulta de REMITOS generados. Reutiliza los mismos
-// componentes SalidaForm y RemitosTab que antes vivían dentro de Depósito.
+// Esta pantalla unifica el flujo de DESPACHO de mercadería y la consulta de
+// REMITOS generados. Reutiliza los mismos componentes SalidaForm y RemitosTab
+// que antes vivían dentro de Depósito.
 //
-// La pantalla "Caja" maneja las ventas minoristas con balanza.
-// Esta pantalla "Mayorista" maneja los despachos con remitos.
+// El nombre "Mayorista" quedó chico y confundía: acá se le remita a CUALQUIER
+// cliente con cuenta corriente, sea mayorista, minorista o carnicería. Lo que
+// define a esta pantalla es el remito y la cuenta, no el tipo de cliente.
+//
+// La pantalla "Caja" maneja la venta al público que se cobra en el momento.
 // ============================================================
 import { useEffect, useMemo, useState } from 'react'
 import { SalidaForm, RemitosTab } from './Deposito'
@@ -56,8 +59,8 @@ export default function Ventas() {
 
   return (
     <div>
-      <div className="page-title">MAYORISTA</div>
-      <div className="page-sub">Despachos a clientes mayoristas y remitos emitidos</div>
+      <div className="page-title">VENTAS CTA/CTE</div>
+      <div className="page-sub">Despachos y remitos a clientes con cuenta corriente</div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap' }}>
         {tabBtn('despacho', '📤 Nuevo despacho')}

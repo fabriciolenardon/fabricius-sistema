@@ -5,6 +5,8 @@ import { useAuth } from '../../context/AuthContext'
 import DashboardCajaWidget from './DashboardCajaWidget'
 import AlertasAnomalias from './AlertasAnomalias'
 import { fmtPrecio, fmtKg } from '../../lib/formatos'
+import { cargarSocios, socioPrincipal, comoLoLlamamos } from '../../lib/socios'
+import SociosEditor from '../../components/SociosEditor'
 
 // fmt compacto para KPIs grandes: "$22,7M" o "$345K" o "$12.345"
 // Reemplaza el "." de los decimales por coma para formato AR.
@@ -17,9 +19,15 @@ function fmt(n) {
 // fmtFull = precio completo con formato AR (35.600,50)
 const fmtFull = n => fmtPrecio(Math.abs(Number(n) || 0))
 
+// Colores de las barras de distribución. Alcanzan para varios socios; si un
+// negocio tiene más, se repiten y no pasa nada.
+const COLORES_SOCIO = ['var(--gold)', 'var(--blue)', 'var(--green)', 'var(--amber)', 'var(--teal)']
+
 export default function Dashboard() {
-  const { profile, isAdmin } = useAuth()
+  const { profile, isAdmin, isSucursal } = useAuth()
   const navigate = useNavigate()
+  const [socios, setSocios] = useState([])
+  const [local, setLocal] = useState(null)
   const [cierres, setCierres] = useState([])
   const [clientes, setClientes] = useState([])
   const [stock, setStock] = useState({})
@@ -38,6 +46,17 @@ export default function Dashboard() {
   const [fechaCorte, setFechaCorte] = useState('')
 
   useEffect(() => { fetchData() }, [])
+
+  // Los dueños del negocio y dónde queda el local. El RLS ya devuelve solo lo
+  // de la sucursal de quien entró, así que acá no hace falta filtrar.
+  async function refrescarSocios() { setSocios(await cargarSocios()) }
+  useEffect(() => {
+    refrescarSocios()
+    if (profile?.sucursal_id) {
+      supabase.from('sucursales').select('nombre, direccion').eq('id', profile.sucursal_id).maybeSingle()
+        .then(({ data }) => setLocal(data || null))
+    }
+  }, [profile?.sucursal_id])
 
   async function fetchData() {
     const [c, cl, st, r, g, ch, chProp, pr, md] = await Promise.all([
@@ -58,7 +77,13 @@ export default function Dashboard() {
     setCierres(c.data || [])
     setClientes(cl.data || [])
     const s = {}
-    ;(st.data || []).forEach(r => s[r.tipo] = r.kg_disponible)
+    // Number() acá y no en cada cuenta: los `numeric` de Supabase llegan como
+    // STRING, así que las sumas de varios buckets (piezas, cajas, cerdo
+    // piezas, embutidos, hamburguesas, milanesas) CONCATENABAN en vez de
+    // sumar — "0.000" + "30.900" da "0.00030.900", y Math.max de eso es NaN.
+    // Normalizando en el origen quedan bien todas de una, y la próxima que se
+    // agregue nace sana. Regla 1 del proyecto.
+    ;(st.data || []).forEach(r => s[r.tipo] = Number(r.kg_disponible) || 0)
     setStock(s)
     setRemitos(r.data || [])
     setGastos(g.data || [])
@@ -233,7 +258,12 @@ export default function Dashboard() {
 
   const hora = new Date().getHours()
   const saludo = hora < 12 ? 'Buen día' : hora < 18 ? 'Buenas tardes' : 'Buenas noches'
-  const nombre = profile?.nombre?.split(' ')[0] || 'Admin'
+  // Saluda al DUEÑO, no al local. El usuario de una sucursal se llama como el
+  // negocio ("Monte Cristo"), así que sin esto el sistema decía "Buenas
+  // noches, Monte". Si cargaron a Pamela Tissera como dueña principal y
+  // pusieron que le dicen Pame, la saluda por ahí.
+  const principal = socioPrincipal(socios)
+  const nombre = comoLoLlamamos(principal) || profile?.nombre?.split(' ')[0] || 'Admin'
 
   const ultimo = cierres[0]
   const mesActual = cierres.filter(c => c.mes === ultimo?.mes)
@@ -253,6 +283,9 @@ export default function Dashboard() {
   const stockCajas = Math.max(0, (stock.caja_cb || 0) + (stock.caja_pt || 0))
   const stockCortes = Math.max(0, stock.bovino_corte || 0)
   const stockCerdo = Math.max(0, stock.cerdo || 0)
+  // Milanesas elaboradas por la sucursal (mig 99). En la central da 0: no usa
+  // este circuito, su milanesa descuenta la materia prima al venderse.
+  const stockMilanesas = Math.max(0, (stock.mila_carne || 0) + (stock.mila_cerdo || 0) + (stock.mila_pollo || 0))
   const stockCerdoPiezas = Math.max(0,
     (stock.cerdo_pierna || 0) +
     (stock.cerdo_carre || 0) +
@@ -332,8 +365,30 @@ export default function Dashboard() {
       <div style={{ background: 'linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%)', border: '1px solid var(--border)', borderRadius: 16, padding: 24, marginBottom: 20, backgroundImage: 'radial-gradient(circle at 90% 50%, rgba(201,168,76,0.08), transparent 60%)' }}>
         <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 30, letterSpacing: 2, color: 'var(--gold)' }}>{saludo}, {nombre} 👋</div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div>
-        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>Sistema de gestión · Carnicerías Fabricius · Río Primero, Córdoba</div>
+        {/* La dirección sale de la sucursal: antes decía "Río Primero, Córdoba"
+            escrito a mano y Monte Cristo abría el sistema leyendo el domicilio
+            de la central. */}
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
+          Sistema de gestión · {local?.nombre ? `${local.nombre}${local.direccion ? ' · ' + local.direccion : ''}` : 'Carnicerías Fabricius · Río Primero, Córdoba'}
+        </div>
       </div>
+
+      {/* PRIMER ARRANQUE: un negocio sin dueños cargados no puede repartir la
+          ganancia ni controlar los gastos de cada socio. Va arriba de todo,
+          antes que cualquier número, porque es lo primero que hay que definir.
+          Cuando cargan al menos uno, esta tarjeta desaparece sola. */}
+      {socios.length === 0 && (
+        <div className="card" style={{ marginBottom: 20, border: '1px solid var(--gold)' }}>
+          <div className="card-title">👥 ¿Quiénes son los dueños de este negocio?</div>
+          <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 16, lineHeight: 1.6 }}>
+            Cargá a los socios para que el sistema pueda repartir la ganancia del mes y llevar el
+            control de los gastos de cada uno. Si sos el único dueño, cargate a vos con el 100%.
+            <br />
+            Después lo podés cambiar cuando quieras desde <strong>Gastos</strong>.
+          </div>
+          <SociosEditor socios={socios} onCambio={refrescarSocios} />
+        </div>
+      )}
 
       {/* WIDGET CAJA RÁPIDA — Ventas minoristas del día */}
       <DashboardCajaWidget />
@@ -489,7 +544,12 @@ export default function Dashboard() {
             // (capón entero → piezas). Por eso sus salidas son los despostes de cerdo
             // (despostesCerdo), NO las ventas de piezas. Las ventas/elaborados de piezas
             // (matambre, pulpa, etc. = cerdo_corte/cerdo_pieza) se descuentan de Cerdo Piezas.
-            { label: '🐷 Cerdo Capones', valor: fmtKg(stockCerdo), color: 'var(--amber)', aprox: Math.round(stockCerdo / 107) + ' capones', bajo: stockCerdo < 50, stockKg: stockCerdo, tiposEntradas: ['cerdo'], tiposSalidas: ['cerdo'], despostesCerdo: true },
+            // Una franquicia no recibe capones (le llegan las piezas ya
+            // despostadas), así que ese widget le quedaba siempre en cero. En
+            // su lugar ve sus MILANESAS, que sí elabora y vende (mig 99).
+            isSucursal
+              ? { label: '🍗 Milanesas', valor: fmtKg(stockMilanesas), color: 'var(--amber)', aprox: 'al peso', bajo: stockMilanesas < 10, stockKg: stockMilanesas, tiposEntradas: ['mila_carne', 'mila_cerdo', 'mila_pollo'], tiposSalidas: ['mila_carne', 'mila_cerdo', 'mila_pollo'], elaboraciones: true }
+              : { label: '🐷 Cerdo Capones', valor: fmtKg(stockCerdo), color: 'var(--amber)', aprox: Math.round(stockCerdo / 107) + ' capones', bajo: stockCerdo < 50, stockKg: stockCerdo, tiposEntradas: ['cerdo'], tiposSalidas: ['cerdo'], despostesCerdo: true },
             { label: '🐷 Cerdo Piezas', valor: fmtKg(stockCerdoPiezas), color: 'var(--amber)', aprox: 'al peso', bajo: stockCerdoPiezas < 20, stockKg: stockCerdoPiezas, tiposEntradas: ['cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza','cerdo_huesos'], tiposSalidas: ['cerdo_pieza','cerdo_corte','cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza','cerdo_huesos'], elaboraciones: true },
             { label: '🍗 Pollo', valor: fmtKg(stockPollo), color: 'var(--blue)', aprox: Math.round(stockPollo / 20) + ' cajones', bajo: stockPollo < 50, stockKg: stockPollo, tiposEntradas: ['pollo'], tiposSalidas: ['pollo'], elaboraciones: true },
             { label: '🫀 Brosas', valor: fmtKg(stockBrosas), color: 'var(--amber)', aprox: 'al peso', bajo: stockBrosas < 20, stockKg: stockBrosas, tiposEntradas: ['bovino_brosa', 'brosa_chinchulin', 'brosa_corazon', 'brosa_entrana', 'brosa_higado', 'brosa_lengua', 'brosa_molleja', 'brosa_mondongo', 'brosa_rabo', 'brosa_rinon', 'brosa_sesos', 'brosa_tripa_gorda'], tiposSalidas: ['bovino_brosa', 'brosa_chinchulin', 'brosa_corazon', 'brosa_entrana', 'brosa_higado', 'brosa_lengua', 'brosa_molleja', 'brosa_mondongo', 'brosa_rabo', 'brosa_rinon', 'brosa_sesos', 'brosa_tripa_gorda'] },
@@ -626,26 +686,32 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* DISTRIBUCIÓN SOCIOS */}
-      <div className="card">
-        <div className="card-title">👥 Distribución socios — mes actual</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          {[
-            { nombre: 'Fabricio Lenardon', pct: 85, color: 'var(--gold)' },
-            { nombre: 'Ariel Garrone', pct: 15, color: 'var(--blue)' },
-          ].map(s => (
-            <div key={s.nombre}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 8 }}>
-                <span style={{ fontWeight: 600 }}>{s.nombre} ({s.pct}%)</span>
-                <span style={{ color: s.color, fontFamily: "'Bebas Neue', cursive", fontSize: 20 }}>{fmt(totMesGanancia * s.pct / 100)}</span>
-              </div>
-              <div style={{ background: 'var(--border)', borderRadius: 8, height: 10 }}>
-                <div style={{ height: 10, borderRadius: 8, background: s.color, width: s.pct + '%' }} />
-              </div>
-            </div>
-          ))}
+      {/* DISTRIBUCIÓN SOCIOS — sale de la tabla `socios`, que es por sucursal.
+          Antes estaba escrito a mano (Fabricio 85 / Ariel 15) y Monte Cristo
+          veía la sociedad de la central en su propio tablero. Si el negocio
+          todavía no cargó a nadie, no se muestra: el pedido va arriba de todo. */}
+      {socios.length > 0 && (
+        <div className="card">
+          <div className="card-title">👥 Distribución socios — mes actual</div>
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(socios.length, 3)}, 1fr)`, gap: 16 }}>
+            {socios.map((s, i) => {
+              const pct = Number(s.porcentaje) || 0
+              const color = COLORES_SOCIO[i % COLORES_SOCIO.length]
+              return (
+                <div key={s.id}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 8 }}>
+                    <span style={{ fontWeight: 600 }}>{s.nombre} ({pct}%)</span>
+                    <span style={{ color, fontFamily: "'Bebas Neue', cursive", fontSize: 20 }}>{fmt(totMesGanancia * pct / 100)}</span>
+                  </div>
+                  <div style={{ background: 'var(--border)', borderRadius: 8, height: 10 }}>
+                    <div style={{ height: 10, borderRadius: 8, background: color, width: Math.min(pct, 100) + '%' }} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* MODAL DE DETALLE DE STOCK */}
       {detalleAbierto && (

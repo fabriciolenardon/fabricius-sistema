@@ -16,6 +16,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
+import { puedeAjustarStock } from '../../lib/permisos'
 import { logAuditoria } from '../../lib/auditoria'
 import { EPSILON_STOCK, stockNormalizado, redondearStock, excedeTopeStock, TOPE_STOCK } from '../../lib/stockHelpers'
 import { imprimirHTML } from '../../lib/imprimir'
@@ -254,9 +255,14 @@ const fFecha = s => s ? new Date(s).toLocaleString('es-AR', {
 }) : '—'
 
 export default function AjusteStock() {
-  // Solo el DUEÑO ajusta stock (pedido de Fabricio 14/08/2026): ser admin no
-  // alcanza — Ariel y Giuliana también lo son. Ver lib/permisos.js.
-  const { isCEO } = useAuth()
+  // Ajusta stock el DUEÑO DEL DEPÓSITO, no cualquier admin: reescribir el
+  // stock a mano borra el rastro de qué pasó.
+  //   · en la central  → solo Fabricio (Ariel y Giuliana también son admin)
+  //   · en una sucursal → su dueño, sobre SU propio depósito
+  // El aislamiento lo garantiza la base (supabase/93): una sucursal no puede
+  // ni ver ni tocar el stock de la otra. Ver lib/permisos.js.
+  const { profile, user } = useAuth()
+  const puedeAjustar = puedeAjustarStock(profile, user)
   const [stocks, setStocks] = useState([])
   const [historial, setHistorial] = useState([])  // ajustes registrados (auditoría) = desfasajes
   const [loading, setLoading] = useState(true)
@@ -379,8 +385,8 @@ export default function AjusteStock() {
 
   // Paso 1: validar y abrir el panel de confirmación inline con el resumen.
   function pedirGuardar() {
-    if (!isCEO) {
-      showMsg('Solo el dueño puede ajustar stock', 'error')
+    if (!puedeAjustar) {
+      showMsg('Solo el dueño del negocio puede ajustar stock', 'error')
       return
     }
     const cambios = filas.filter(f => f.modificado)
@@ -448,13 +454,13 @@ export default function AjusteStock() {
     await cargar()
   }
 
-  if (!isCEO) {
+  if (!puedeAjustar) {
     return (
       <div style={{ padding: 20, background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 8, color: '#ff6b6b' }}>
-        🔒 El ajuste de stock es exclusivo del dueño de la empresa.
+        🔒 El ajuste de stock lo hace el dueño del negocio.
         <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
-          Si contaste stock y no coincide con el sistema, avisale a Fabricio con el detalle
-          (producto, kg contados y por qué) para que lo corrija él.
+          Si contaste stock y no coincide con el sistema, pasale el detalle
+          (producto, kg contados y por qué) para que lo corrija.
         </div>
       </div>
     )

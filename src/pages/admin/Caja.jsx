@@ -11,10 +11,14 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { decodificarEANBalanza, esCodigoBalanza } from '../../lib/balanzaEAN'
+import { resolverFormatoEAN } from '../../lib/balanzaFormato'
 import { fechaHoyARG, horaHoyARG, horaNumARG } from '../../lib/fechas'
 import { kgPorUnidadDeProducto, bucketPiezaBovina, redondearStock } from '../../lib/stockHelpers'
 import { cargarCajasDisponibles, venderCaja, CATEGORIA_A_TIPO_CAJA } from '../../lib/cajasStock'
 import { fmtPrecio, fmtKg, parseNumero } from '../../lib/formatos'
+import { overlayDeSucursal, conPreciosDeSucursal } from '../../lib/preciosSucursal'
+import { productosQueVende } from '../../lib/categoriasPrecios'
+import { useAuth } from '../../context/AuthContext'
 import HistorialCaja from './HistorialCaja'
 import HistorialDiaCaja from './HistorialDiaCaja'
 import ArqueoCaja from './ArqueoCaja'
@@ -50,6 +54,7 @@ const CATEGORIAS = {
 }
 
 export default function Caja() {
+  const { sucursalId, isSucursal: esSucursal } = useAuth()
   const [precios, setPrecios] = useState([])
   const [ofertas, setOfertas] = useState([])
   // Promo Mundial: -X% en compras pagadas 100% con efectivo y/o transferencia.
@@ -103,7 +108,10 @@ export default function Caja() {
   const efectivoRef = useRef(null)
 
   // ---- Carga inicial ----
-  useEffect(() => { cargarTodo() }, [])
+  // Depende de sucursalId: el perfil llega un instante después del primer
+  // render, y sin esto la caja de una sucursal se quedaría mostrando los
+  // precios de la central hasta recargar la página.
+  useEffect(() => { cargarTodo() }, [sucursalId])
 
   // Realtime: cuando el admin actualiza precios/ofertas o cuando el
   // depostero suma piezas/cajas al stock, la Caja Rapida se entera al
@@ -120,6 +128,9 @@ export default function Caja() {
     }
     const canal = supabase.channel('caja-catalogo-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'precios' }, debouncedReload)
+      // Una sucursal carga sus precios en su propia tabla, no en el catálogo:
+      // sin esto, la caja no se enteraría de su propia actualización.
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'precios_sucursal' }, debouncedReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'ofertas' }, debouncedReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'config_sistema' }, debouncedReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cajas_stock' }, debouncedReload)
@@ -154,8 +165,15 @@ export default function Caja() {
       // Combos disponibles para vender (los pausados no se muestran).
       supabase.from('combos_venta').select('*').eq('disponible', true).order('orden').order('nombre'),
     ])
-    setPrecios(pre || [])
-    if (cfg?.valor) setConfigEAN(cfg.valor)
+    // Si quien está en la caja es de una sucursal, sus precios pisan a los del
+    // catálogo. Para la central esto no hace nada (ver lib/preciosSucursal.js).
+    // Y los insumos no van: se los compra a la central, no los revende.
+    const overlay = await overlayDeSucursal(sucursalId)
+    setPrecios(productosQueVende(conPreciosDeSucursal(pre || [], overlay), esSucursal))
+    // El formato puede diferir por boca: cada balanza se reconfigura en un
+    // momento distinto, así que se resuelve con el override de ESTA sucursal
+    // (ver lib/balanzaFormato.js). Sin override cae al global de siempre.
+    if (cfg?.valor) setConfigEAN(resolverFormatoEAN(cfg.valor, sucursalId))
     setVentasHoy(ventas || [])
     setOfertas(ofs || [])
     setCajasDisp(cajas || [])
@@ -1617,6 +1635,7 @@ const LISTAS_TICKET_MANUAL = {
 }
 
 function TicketManualCaja({ onGuardado }) {
+  const { sucursalId, isSucursal: esSucursal } = useAuth()
   const [form, setForm] = useState({ fecha: fechaHoyARG(), hora: '12:00', medio: 'efectivo', lista: 'minorista' })
   const [items, setItems] = useState([])
   const [precios, setPrecios] = useState([])
@@ -1628,11 +1647,16 @@ function TicketManualCaja({ onGuardado }) {
   const [msg, setMsg] = useState(null)
 
   useEffect(() => {
-    supabase.from('precios')
-      .select('id, nombre, categoria, precio_minorista, precio_mayorista, precio_carniceria, stock_origen, kg_por_unidad')
-      .order('nombre')
-      .then(({ data }) => setPrecios((data || []).filter(p => !p.nombre?.startsWith('ZZ_'))))
-  }, [])
+    async function cargar() {
+      const { data } = await supabase.from('precios')
+        .select('id, nombre, categoria, precio_minorista, precio_mayorista, precio_carniceria, stock_origen, kg_por_unidad')
+        .order('nombre')
+      const overlay = await overlayDeSucursal(sucursalId)
+      const lista = productosQueVende(conPreciosDeSucursal(data || [], overlay), esSucursal)
+      setPrecios(lista.filter(p => !p.nombre?.startsWith('ZZ_')))
+    }
+    cargar()
+  }, [sucursalId])
 
   // Precio del producto según la lista elegida para este ticket
   const precioDe = p => Number(p?.[LISTAS_TICKET_MANUAL[form.lista]?.campo || 'precio_minorista']) || 0
