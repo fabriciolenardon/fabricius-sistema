@@ -2621,7 +2621,11 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, onEditarProd
 }
 
 function EntradaForm({ onSaved, showAlert, proveedores }) {
-  const [form, setForm] = useState({ tipo: '', proveedor: '', descripcion: '', fecha: fechaHoyARG(), kg: '', precioKg: '9800', merma: '', destino: 'DEPOSITO', importe: '', cantidad: '1', cajaProductoId: '', polloProductoId: '', embutidoProductoId: '', brosaProductoId: '' })
+  // precioKg arranca VACÍO, no con un precio puesto. Antes venía con 9800
+  // (precio viejo de media res): en los tipos donde ese campo se ignoraba se
+  // guardaba ese 9800 en entradas_deposito y ensuciaba el costo, y desde que
+  // existe el cuadre (kg × precio = importe) además hacía saltar la alerta.
+  const [form, setForm] = useState({ tipo: '', proveedor: '', descripcion: '', fecha: fechaHoyARG(), kg: '', precioKg: '', merma: '', destino: 'DEPOSITO', importe: '', cantidad: '1', cajaProductoId: '', polloProductoId: '', embutidoProductoId: '', brosaProductoId: '' })
   const [historial, setHistorial] = useState([])
   const [editando, setEditando] = useState(null)
   const [formEdit, setFormEdit] = useState({})
@@ -2880,7 +2884,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
         descripcion: descripcionCajas, entradaId: entradaIns?.id,
       })
       showAlert({ type: 'success', msg: `✅ ${cantPesperada} cajas de ${productoCaja?.nombre || 'sin nombre'} registradas — ${kgTotalCajas.toFixed(1)} kg en total` })
-      setForm(f => ({ ...f, descripcion: '', kg: '', importe: '', precioKg: '9800', cantidad: '1', cajaProductoId: '' }))
+      setForm(f => ({ ...f, descripcion: '', kg: '', importe: '', precioKg: '', cantidad: '1', cajaProductoId: '' }))
       setCajasPesos([])
       onSaved()
       cargarHistorial()
@@ -3051,7 +3055,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
       ? `✅ ${cantidad} unidades de ${descripcionBase} registradas — ${kgTotal.toFixed(1)} kg al stock`
       : '✅ Entrada registrada — Stock actualizado'
     showAlert({ type: 'success', msg: msgOK })
-    setForm(f => ({ ...f, descripcion: '', kg: '', importe: '', precioKg: '9800', cantidad: '1', polloProductoId: '', embutidoProductoId: '', brosaProductoId: '' }))
+    setForm(f => ({ ...f, descripcion: '', kg: '', importe: '', precioKg: '', cantidad: '1', polloProductoId: '', embutidoProductoId: '', brosaProductoId: '' }))
     onSaved()
     cargarHistorial()
     setTimeout(() => showAlert(null), 3000)
