@@ -4090,9 +4090,35 @@ const item = {
   }
   const total = items.reduce((s, i) => s + i.importe, 0)
 
+  // ── ANTI DOBLE EMISIÓN ──────────────────────────────────────────────
+  // El candado se prende ACÁ, antes de cualquier `await`.
+  //
+  // Antes se prendía ~100 líneas más abajo, después de consultar el bloqueo
+  // de cuenta corriente y los remitos recientes. Entre el chequeo y el
+  // encendido había DOS `await`, y un `await` le devuelve el control al
+  // navegador: el segundo click entraba con la bandera todavía en `false`,
+  // pasaba, y salían DOS remitos con números consecutivos separados por
+  // décimas de segundo. En la base había 14 pares así (0,2 a 1,3 seg), el
+  // último del 21/08/2026.
+  //
+  // El aviso de "posible remito duplicado" tampoco lo agarraba, y por lo
+  // mismo: las dos consultas corrían antes de que ninguno de los dos
+  // remitos existiera, así que las dos daban "no hay duplicados". Ese aviso
+  // sirve para la re-emisión a los minutos, no para el doble click.
   async function guardar() {
-    // Bloqueo síncrono contra doble emisión (doble click / doble envío).
     if (guardandoRef.current) return
+    guardandoRef.current = true
+    try {
+      await emitirDespacho()
+    } finally {
+      // Se suelta pase lo que pase: si una validación corta temprano, el
+      // botón tiene que volver a funcionar.
+      guardandoRef.current = false
+      setGuardando(false)
+    }
+  }
+
+  async function emitirDespacho() {
     if (items.length === 0) { showAlert({ type: 'error', msg: 'Agregá al menos un producto' }); return }
     if (!form.destino) { showAlert({ type: 'error', msg: 'Elegí un destino antes de despachar' }); return }
     if (esFechaFutura(form.fecha)) { showAlert({ type: 'error', msg: `⛔ La fecha no puede ser futura (hoy es ${fechaHoyARG()})` }); return }
@@ -4194,7 +4220,6 @@ const item = {
         setAvisoDuplicado(null)
       } catch { /* si la consulta falla no bloqueamos el despacho */ }
     }
-    guardandoRef.current = true
     setGuardando(true)
     try {
     let clienteId = form.clienteId
@@ -4372,10 +4397,9 @@ for (const item of items) {
     setTimeout(() => { showAlert(null); setTab('remitos') }, 1500)
     } catch (err) {
       showAlert({ type: 'error', msg: '❌ Error al registrar el despacho: ' + (err?.message || err) })
-    } finally {
-      guardandoRef.current = false
-      setGuardando(false)
     }
+    // El candado y el estado del botón los suelta el envoltorio `guardar()`,
+    // que tiene su propio finally.
   }
 
   return (
