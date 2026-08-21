@@ -6369,6 +6369,19 @@ function DetalleItem({ label, valor, highlight }) {
   )
 }
 
+// Día en criollo: 'vie 21/08/2026'. La columna viene como 'YYYY-MM-DD';
+// se fija al mediodía ARG (-03:00) para que ningún navegador la corra un
+// día para atrás al formatearla.
+function fechaDiaARG(iso) {
+  if (!iso) return null
+  const d = new Date(String(iso).slice(0, 10) + 'T12:00:00-03:00')
+  if (isNaN(d.getTime())) return null
+  return new Intl.DateTimeFormat('es-AR', {
+    timeZone: 'America/Argentina/Cordoba',
+    weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric',
+  }).format(d).replace(',', '')
+}
+
 // =============================================
 // PESTAÑA HISTORIAL/STOCK DE PIEZAS INDIVIDUALES
 // =============================================
@@ -6504,10 +6517,10 @@ function PiezasTab() {
                   <th>Tipo</th>
                   <th>Kg</th>
                   <th>Origen (MR)</th>
-                  <th>Ingreso</th>
+                  <th>Entró al stock</th>
                   <th>Estado</th>
                   <th>Destino / Cliente</th>
-                  <th>Salida</th>
+                  <th>Día que salió</th>
                   <th>$ Venta</th>
                 </tr>
               </thead>
@@ -6524,7 +6537,10 @@ function PiezasTab() {
                         <div style={{ color: 'var(--text)' }}>{p.proveedor_origen || '—'}</div>
                         <div style={{ color: 'var(--muted)' }}>{p.descripcion_origen || ''}{p.modelo_desposte && ' · Mod. ' + p.modelo_desposte}</div>
                       </td>
-                      <td style={{ fontSize: 11, color: 'var(--muted)' }}>{p.fecha_ingreso || '—'}</td>
+                      {/* Día en que la pieza entró al stock (desposte o compra) */}
+                      <td style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
+                        <div style={{ color: 'var(--text)', fontWeight: 600 }}>{fechaDiaARG(p.fecha_ingreso) || '—'}</div>
+                      </td>
                       <td>
                         <span style={{ background: info.bg, color: info.color, borderRadius: 4, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>
                           {info.label}
@@ -6544,7 +6560,22 @@ function PiezasTab() {
                               {!p.destino && <span style={{ color: 'var(--muted)' }}>—</span>}
                             </>}
                       </td>
-                      <td style={{ fontSize: 11, color: 'var(--muted)' }}>{p.fecha_salida || '—'}</td>
+                      {/* Día en que salió del stock: vendida entera, convertida
+                          a cortes o anulada. Si sigue disponible, no salió. */}
+                      <td style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
+                        {p.fecha_salida ? (
+                          <>
+                            <div style={{ color: 'var(--text)', fontWeight: 600 }}>{fechaDiaARG(p.fecha_salida)}</div>
+                            <div style={{ color: info.color }}>
+                              {p.estado === 'vendida' ? 'vendida' : p.estado === 'convertida_cortes' ? 'pasó a cortes' : info.label.toLowerCase()}
+                            </div>
+                          </>
+                        ) : (
+                          <span style={{ color: p.estado === 'disponible' ? 'var(--green)' : 'var(--muted)' }}>
+                            {p.estado === 'disponible' ? 'en stock' : '—'}
+                          </span>
+                        )}
+                      </td>
                       <td style={{ fontSize: 11, color: 'var(--green)', fontWeight: 700 }}>
                         {p.total_venta ? '$' + Math.round(p.total_venta).toLocaleString('es-AR') : (p.precio_venta_kg ? '$' + Math.round(p.precio_venta_kg).toLocaleString('es-AR') + '/kg' : '—')}
                       </td>
