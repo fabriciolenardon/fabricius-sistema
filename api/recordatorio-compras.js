@@ -31,6 +31,12 @@ export default async function handler(req, res) {
     const esCron = (req.headers['user-agent'] || '').includes('vercel-cron')
     const okSecret = req.query.secret === VERIFY
     if (!esCron && !okSecret) return res.status(403).json({ error: 'forbidden' })
+    // Un deploy secundario (el de una sucursal, que corre el MISMO repo contra
+    // la MISMA base) tiene su propia copia de este cron: sin este freno, Iris
+    // mandaría el aviso dos veces. En ese proyecto se define DEPLOY_SECUNDARIO=1.
+    if (process.env.DEPLOY_SECUNDARIO === '1') {
+      return res.status(200).json({ ok: true, enviado: false, motivo: 'deploy secundario: el cron lo corre la central' })
+    }
     if (!SB_URL || !SB_KEY || !WA_TOKEN || !AVISOS_TO) return res.status(200).json({ ok: false, motivo: 'config faltante' })
 
     const hoy = new Date()
