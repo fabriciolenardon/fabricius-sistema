@@ -62,6 +62,9 @@ const LABELS = {
   emb_salame_comun: '🥩 Salame Común Casero (elab.)',
   emb_salame_holanda: '🧀 Salame Holanda (elab.)',
   emb_salame_rockeford: '🧀 Salame Rockeford (elab.)',
+  mila_carne: '🍢 Milanesas de Carne (elab.)',
+  mila_cerdo: '🍢 Milanesas de Cerdo (elab.)',
+  mila_pollo: '🍢 Milanesas de Pollo (elab.)',
   hamb_carne: '🍔 Hamburguesas de Carne (elab.)',
   hamb_pollo: '🍔 Hamburguesas de Pollo (elab.)',
   hamb_cerdo: '🍔 Hamburguesas de Cerdo (elab.)',
@@ -75,9 +78,25 @@ const LABELS = {
   pieza_costeletal: '🥩 Pieza — Costeletal con Lomo',
   pieza_paleta: '🥩 Pieza — Paleta',
   pieza_parrillero: '🥩 Pieza — Parrillero',
+  insumos: '🧰 Insumos',
+  cerdo_corte: '🐷 Cerdo — Cortes (bucket viejo)',
   caja_cb: '📦 Caja CB',
   caja_pt: '📦 Caja PT',
 }
+
+// Buckets que NO se listan salvo que esa boca ya tenga la fila:
+//   - legacy: viejos que ya no se usan; aparecen sólo si les quedó saldo, para
+//     poder repartirlo y dejarlos en cero. Nunca se crean de nuevo.
+//   - mila_*: son de las franquicias, que elaboran la milanesa (mig 99). La
+//     central vende milanesa descontando bovino_corte directo, así que no
+//     tiene por qué ver esas tres líneas en su conteo.
+const TIPOS_SOLO_SI_EXISTEN = new Set([
+  'embutido', 'bovino_brosa', 'bovino_pieza', 'cerdo_corte',
+  'mila_carne', 'mila_cerdo', 'mila_pollo',
+  // Los insumos los vende la central a sus carnicerías; la sucursal los compra
+  // y no los revende (PR #332), así que tampoco los cuenta.
+  'insumos',
+])
 
 // Tipos que se manejan por unidad (no por kg). La columna kg_disponible
 // guarda la cantidad de unidades para estos. Se muestra "u" en vez de "kg".
@@ -110,6 +129,7 @@ const GRUPOS_PLANILLA = [
   { titulo: '🐷 CERDO',              col: 'b', test: t => t === 'cerdo' || t.startsWith('cerdo_') },
   { titulo: '🌭 EMBUTIDOS',          col: 'b', test: t => t.startsWith('emb_') },
   { titulo: '🍔 HAMBURGUESAS',       col: 'b', test: t => t.startsWith('hamb_') },
+  { titulo: '🍢 MILANESAS',          col: 'b', test: t => t.startsWith('mila_') },
 ]
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
@@ -396,8 +416,24 @@ export default function AjusteStock() {
     setTimeout(() => setMsg(null), ms)
   }
 
-  // Lista de filas con la diferencia ya calculada (memo para no recalcular en cada tecla)
-  const filas = useMemo(() => stocks.map(s => {
+  // Lista de filas con la diferencia ya calculada (memo para no recalcular en cada tecla).
+  //
+  // Se listan TODOS los buckets conocidos, no sólo los que ya tienen fila en
+  // `stock_actual`. Esa tabla se puebla recién cuando entra o sale mercadería,
+  // así que una boca nueva veía apenas un puñado de líneas: Monte Cristo tenía
+  // 4 (bovino_corte y las 3 de milanesas) y no podía cargar el conteo del resto
+  // — ni siquiera aparecían el pollo, las piezas, los embutidos o las brosas.
+  // El que no existe se muestra en 0 y, si se le carga un conteo, se crea al
+  // guardar (con su sucursal, que la pone el trigger).
+  const filas = useMemo(() => {
+    const porTipo = new Map((stocks || []).map(s => [s.tipo, s]))
+    const tipos = [...new Set([...Object.keys(LABELS), ...porTipo.keys()])]
+      .filter(t => !TIPOS_SOLO_SI_EXISTEN.has(t) || porTipo.has(t))
+      .sort()
+    return tipos.map(t => porTipo.get(t) || { tipo: t, kg_disponible: 0, _nueva: true })
+  }, [stocks])
+
+  const filasCalculadas = useMemo(() => filas.map(s => {
     // stockNormalizado: un bucket vaciado queda con residuo de float
     // (-0,0000000000000036) que se muestra como 0 pero es < 0 — se pintaba en
     // rojo, contaba como negativo y "0 → 0" daba un ajuste fantasma de +0.
@@ -417,14 +453,14 @@ export default function AjusteStock() {
       // escribir en stock_actual (ni loguear en auditoría) un cambio de 0.
       modificado: tieneInput && !Number.isNaN(contado) && Math.abs(diferencia) >= EPSILON_STOCK,
     }
-  }), [stocks, contados])
+  }), [filas, contados])
 
   // Filtro de la tabla
   const filasVisibles = useMemo(() => {
-    if (filtro === 'negativos') return filas.filter(f => f.actual < 0)
-    if (filtro === 'modificados') return filas.filter(f => f.modificado)
-    return filas
-  }, [filas, filtro])
+    if (filtro === 'negativos') return filasCalculadas.filter(f => f.actual < 0)
+    if (filtro === 'modificados') return filasCalculadas.filter(f => f.modificado)
+    return filasCalculadas
+  }, [filasCalculadas, filtro])
 
   // ── Historial de desfasajes: cada ajuste registrado = un desfasaje (físico − sistema) ──
   const desfasajes = useMemo(() => (historial || []).map(r => {
@@ -460,7 +496,7 @@ export default function AjusteStock() {
       .sort((a, b) => Math.abs(b.total) - Math.abs(a.total))
   }, [desfasajes])
 
-  const cantModificados = filas.filter(f => f.modificado).length
+  const cantModificados = filasCalculadas.filter(f => f.modificado).length
 
   function setContado(tipo, val) {
     // Si estaba abierta una confirmación, la invalidamos: lo que se muestra en
@@ -487,7 +523,7 @@ export default function AjusteStock() {
       showMsg('Solo el dueño del negocio puede ajustar stock', 'error')
       return
     }
-    const cambios = filas.filter(f => f.modificado)
+    const cambios = filasCalculadas.filter(f => f.modificado)
     if (cambios.length === 0) {
       showMsg('No hay valores nuevos para guardar', 'error')
       return
@@ -521,11 +557,12 @@ export default function AjusteStock() {
       // valor que realmente quedó, no el que se tipeó.
       const guardado = redondearStock(c.contado)
 
-      // 1) Actualizar el stock
-      const { error } = await supabase
-        .from('stock_actual')
-        .update({ kg_disponible: guardado })
-        .eq('tipo', c.tipo)
+      // 1) Actualizar el stock. Si el bucket todavía no tenía fila en esta boca
+      //    (`_nueva`), se crea: la sucursal la pone el trigger. Sin esto, el
+      //    UPDATE no encontraba nada y el ajuste se perdía en silencio.
+      const { error } = c._nueva
+        ? await supabase.from('stock_actual').insert({ tipo: c.tipo, kg_disponible: guardado })
+        : await supabase.from('stock_actual').update({ kg_disponible: guardado }).eq('tipo', c.tipo)
       if (error) { errores.push(`${c.label}: ${error.message}`); continue }
       guardados.push({ ...c, contado: guardado })
 
@@ -642,8 +679,8 @@ export default function AjusteStock() {
       {/* Filtros */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap' }}>
         {[
-          { id: 'todos', label: `Todos (${filas.length})` },
-          { id: 'negativos', label: `🚨 Negativos (${filas.filter(f => f.actual < 0).length})` },
+          { id: 'todos', label: `Todos (${filasCalculadas.length})` },
+          { id: 'negativos', label: `🚨 Negativos (${filasCalculadas.filter(f => f.actual < 0).length})` },
           { id: 'modificados', label: `✏️ Modificados (${cantModificados})` },
         ].map(b => (
           <button key={b.id} onClick={() => setFiltro(b.id)}
@@ -657,7 +694,7 @@ export default function AjusteStock() {
             {b.label}
           </button>
         ))}
-        <button onClick={() => imprimirHTML(planillaHTML(filas, { conSistema: planillaConSistema }))}
+        <button onClick={() => imprimirHTML(planillaHTML(filasCalculadas, { conSistema: planillaConSistema }))}
           title="Imprime la lista de todos los productos para contar a mano"
           style={{ padding: '6px 14px', background: 'transparent', border: '1px solid var(--gold)', color: 'var(--gold)', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700, marginLeft: 'auto' }}>
           🖨️ Planilla de conteo
