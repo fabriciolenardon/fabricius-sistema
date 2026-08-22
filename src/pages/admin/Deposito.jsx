@@ -372,14 +372,19 @@ const CATEGORIA_A_STOCK = {
   caja_pt: 'caja_pt',
   // ── CERDO ──────────────────────────────────────────────
   // cerdo (capón entero) → stock_actual.tipo='cerdo' (capones)
-  // cerdo_corte / cerdo_pieza → SIEMPRE se descuenta del stock_origen del
-  //   producto (ej. 'cerdo_bondiola', 'cerdo_pierna'). Todos los cortes de
-  //   cerdo tienen stock_origen configurado. El bucket genérico 'cerdo_pieza'
-  //   fue ELIMINADO (acumulaba negativos). Por eso NO se mapea acá: si un
-  //   producto de cerdo no tuviera stock_origen, resolverDescuentoStock cae al
-  //   nombre crudo de la categoría (queda visible como tipo sin mapear) en vez
-  //   de resucitar el bucket buggy. NUNCA descontar de 'cerdo' (capones).
   cerdo: 'cerdo',
+  // cerdo_corte / cerdo_pieza: el descuento sale SIEMPRE del `stock_origen` del
+  //   producto (cerdo_bondiola, cerdo_pierna…), que tiene prioridad sobre este
+  //   mapeo. El null es para los que NO lo tienen cargado: que no descuenten
+  //   nada. Antes estaban sin mapear a propósito, con la idea de que cayeran al
+  //   nombre crudo de la categoría y "quedaran visibles" — pero eso creó el
+  //   bucket fantasma `cerdo_corte`, que sólo recibe débitos: la venta de una
+  //   CABEZA DE CERDO del 11/08 lo dejó en -1 kg mientras `cerdo_cabeza` seguía
+  //   con los 82 kg intactos. Decisión de Fabricio (22/08/2026): los productos
+  //   sin bucket propio —cabeza y los dos capones enteros— NO tocan stock.
+  //   NUNCA descontar de 'cerdo' (capones): ese baja sólo al despostar.
+  cerdo_corte: null,
+  cerdo_pieza: null,
   // embutido: los de elaboración propia tienen stock_origen (emb_*, mig 60);
   // el resto (jamón crudo, arrollado, etc.) NO trackea stock — el bucket
   // genérico 'embutido' fue eliminado, null = no descontar (como cerdo_pieza).
