@@ -4,14 +4,12 @@ import { supabase, fetchAllRows } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
-const EMPLEADOS_DEFAULT = [
-  { id: 1, apellido: 'FRONTERA', nombre: 'GERMAN GABRIEL', valor_hora: 6000, modalidad: 'hora', cbu: '' },
-  { id: 2, apellido: 'ARNAUDO', nombre: 'ELIAS COLO', valor_hora: 5500, modalidad: 'hora', cbu: '0200382311000030167612' },
-  { id: 3, apellido: 'PAEZ', nombre: 'LUCIANO', valor_hora: 5000, modalidad: 'hora', cbu: '' },
-  { id: 4, apellido: 'SCIENZA', nombre: 'CAMILA', valor_hora: 5000, modalidad: 'hora', cbu: 'Camilabelenscienza' },
-  { id: 5, apellido: 'FRONTERA', nombre: 'GIULIANA', valor_hora: 6000, modalidad: 'hora', cbu: 'giu.frontera' },
-  { id: 6, apellido: 'MANSILLA', nombre: 'PRISCILA', valor_hora: 5000, modalidad: 'hora', cbu: '' },
-]
+// Los empleados salen SIEMPRE de `empleados_sueldos`, que está aislada por
+// sucursal. Acá había una lista hardcodeada con los 6 de la central —nombres,
+// valor hora y CBU— que se usaba como estado inicial y como fallback cuando la
+// consulta no traía nada: Monte Cristo abría Sueldos y veía el personal de Río
+// Primero con sus CBU. Si una boca todavía no cargó a nadie, la lista va vacía
+// y el formulario de alta queda a la vista, que es lo correcto.
 
 // Mapeo de nombres del iVMS a IDs de empleados.
 // Importante: las claves se comparan en lowercase y por inclusión, así
@@ -37,10 +35,23 @@ const NOMBRE_A_EMPLEADO = {
   'mansilla priscila': 6,
 }
 
-function buscarEmpleado(nombreRaw) {
+// `empleados` es la lista REAL del negocio que está usando la pantalla. Se pasa
+// a propósito: NOMBRE_A_EMPLEADO son los alias de las tarjetas del reloj de la
+// central (ids 1-6), y sin este filtro una sucursal que importe fichadas
+// generaría liquidaciones contra empleados de OTRO negocio.
+function buscarEmpleado(nombreRaw, empleados = []) {
   const lower = nombreRaw.toLowerCase().trim()
+  // 1) Contra su propia gente: tiene que coincidir apellido Y primer nombre,
+  //    para no confundir dos personas del mismo apellido (hay dos FRONTERA).
+  for (const e of empleados) {
+    const ap = String(e.apellido || '').toLowerCase().trim()
+    const no = String(e.nombre || '').toLowerCase().trim().split(' ')[0]
+    if (ap && no && lower.includes(ap) && lower.includes(no)) return e.id
+  }
+  // 2) Alias del iVMS (la tarjeta a veces emite un apodo, ej. "colo"), pero
+  //    sólo si ese empleado es de este negocio.
   for (const [key, id] of Object.entries(NOMBRE_A_EMPLEADO)) {
-    if (lower.includes(key) || key.includes(lower)) return id
+    if ((lower.includes(key) || key.includes(lower)) && empleados.some(e => e.id === id)) return id
   }
   return null
 }
@@ -148,7 +159,7 @@ export default function Sueldos() {
   const [importando, setImportando] = useState(false)
   const [detalleImport, setDetalleImport] = useState([])
   // Empleados cargados de la base (valor_hora editable). Fallback al hardcode.
-  const [empleados, setEmpleados] = useState(EMPLEADOS_DEFAULT)
+  const [empleados, setEmpleados] = useState([])
   const [editHora, setEditHora] = useState({})     // valor_hora tipeado en la pestaña Empleados
   const [guardandoEmp, setGuardandoEmp] = useState(null)
   const [nuevoEmp, setNuevoEmp] = useState({ apellido: '', nombre: '', valor_hora: '', cbu: '' })
@@ -199,10 +210,11 @@ export default function Sueldos() {
   }
 
   async function cargarEmpleados() {
-    // Los empleados (con su valor hora) viven en la tabla empleados_sueldos.
-    // Si la tabla está vacía o falla, se usa el hardcode como fallback.
+    // Los empleados (con su valor hora) viven en `empleados_sueldos`, una fila
+    // por persona y por negocio. Si no hay ninguno, la lista queda VACÍA: nunca
+    // se rellena con los de otra boca.
     const { data } = await supabase.from('empleados_sueldos').select('*').eq('activo', true).order('id')
-    if (data && data.length) setEmpleados(data.map(e => ({ ...e, valor_hora: Number(e.valor_hora) || 0 })))
+    setEmpleados((data || []).map(e => ({ ...e, valor_hora: Number(e.valor_hora) || 0 })))
   }
 
   // Guarda el nuevo valor hora de un empleado (pestaña Empleados).
@@ -329,7 +341,7 @@ export default function Sueldos() {
         const nombre = cols[1]
         const horaStr = cols[3] // '2026-04-29 14:21:24'
         if (!nombre || !horaStr || !horaStr.includes('-')) continue
-        const empId = buscarEmpleado(nombre)
+        const empId = buscarEmpleado(nombre, empleados)
         if (!empId) continue
         const [fecha, hora] = horaStr.split(' ')
         registros.push({ empId, fecha, hora })
@@ -807,6 +819,14 @@ export default function Sueldos() {
 
       {tab === 'empleados' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
+          {/* Una boca nueva arranca sin nadie cargado: que se entienda que está
+              vacía a propósito y que el alta está justo abajo. */}
+          {empleados.length === 0 && (
+            <div className="card" style={{ gridColumn: '1 / -1', color: 'var(--muted)', fontSize: 13 }}>
+              Todavía no cargaste ningún empleado. Agregalos con el formulario de abajo:
+              cada negocio tiene su propia gente y su propio valor hora.
+            </div>
+          )}
           {empleados.map(emp => {
             const editando = editHora[emp.id] !== undefined
             return (
