@@ -15,6 +15,7 @@ import { useState, useEffect } from 'react'
 import { fmtKg } from '../../lib/formatos'
 import { fechaHoyARG } from '../../lib/fechas'
 import { FAMILIAS, cargarStockFamilia, cargarMovimientos, resumirPorBucket } from '../../lib/stockPiezas'
+import Paginador, { usePaginacion } from '../../components/Paginador'
 
 const CLASES = {
   ingreso:     { label: 'Compra',      color: '#7dff7d', icono: '📥' },
@@ -60,6 +61,10 @@ export default function StockPiezasTab() {
   const resumen = resumirPorBucket(familia, movs)
   const movsFiltrados = bucketSel === 'todos' ? movs : movs.filter(m => m.bucket === bucketSel)
   const totalKg = Object.values(stock).reduce((s, k) => s + k, 0)
+  // Antes se cortaba en los 300 más recientes y el resto no se podía ver:
+  // había que achicar el período para llegar a un movimiento viejo. Ahora se
+  // pagina, así que está todo accesible.
+  const pag = usePaginacion(movsFiltrados, 20)
 
   const th = { textAlign: 'left', padding: '8px 10px', fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, borderBottom: '1px solid var(--border)' }
   const td = { padding: '8px 10px', fontSize: 13, borderBottom: '1px solid var(--border)' }
@@ -161,7 +166,7 @@ export default function StockPiezasTab() {
                 </tr>
               </thead>
               <tbody>
-                {movsFiltrados.slice(0, 300).map(m => {
+                {pag.items.map(m => {
                   const c = CLASES[m.clase] || CLASES.ingreso
                   return (
                     <tr key={m.id}>
@@ -181,11 +186,7 @@ export default function StockPiezasTab() {
                 })}
               </tbody>
             </table>
-            {movsFiltrados.length > 300 && (
-              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
-                Mostrando los 300 más recientes de {movsFiltrados.length}. Filtrá por pieza o achicá el período para ver el resto.
-              </div>
-            )}
+            <Paginador {...pag.controles} />
           </div>
         )}
       </div>

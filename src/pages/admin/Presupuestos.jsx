@@ -9,6 +9,7 @@ import { fmtPrecio, fmtKg, fmtUnidades } from '../../lib/formatos'
 import { LISTAS, getLista, getCampoPrecio, listasDeVenta } from '../../lib/listasPrecios'
 import { abrirVentanaImprimible } from '../../lib/pdfPrintable'
 import { useEsMovil } from '../../lib/useEsMovil'
+import Paginador, { usePaginacion } from '../../components/Paginador'
 import { overlayDeSucursal, conPreciosDeSucursal } from '../../lib/preciosSucursal'
 import { useAuth } from '../../context/AuthContext'
 import { productosQueVende } from '../../lib/categoriasPrecios'
@@ -63,6 +64,9 @@ export default function Presupuestos() {
   const [msg, setMsg] = useState('')
 
   const [form, setForm] = useState(FORM_VACIO)
+  // El historial se dibujaba entero: con el tiempo la tabla se hacía
+  // interminable y había que scrollear todo para llegar a uno viejo.
+  const pagPresu = usePaginacion(presupuestos, 20)
 
   // Adder de ítems
   const [busqueda, setBusqueda] = useState('')
@@ -399,7 +403,7 @@ export default function Presupuestos() {
                 <th>Acciones</th>
               </tr></thead>
               <tbody>
-                {presupuestos.map(p => (
+                {pagPresu.items.map(p => (
                   <tr key={p.id}>
                     <td style={{ fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap' }}>
                       {p.created_at ? new Date(p.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '—'}
@@ -425,6 +429,7 @@ export default function Presupuestos() {
               </tbody>
             </table>
           )}
+          <Paginador {...pagPresu.controles} />
         </div>
       )}
     </div>
