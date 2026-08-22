@@ -3,7 +3,7 @@
 // del usuario en la esquina superior derecha de cada layout.
 //
 // Click sobre el bloque (avatar + nombre + rol) → dropdown con:
-//   - 🔑 Cambiar contraseña (abre CambiarPasswordModal)
+//   - 🔑 Contraseñas (la del sistema y la clave de caja)
 //   - 🚪 Cerrar sesión
 //
 // Diseñado para reemplazar el bloque que hoy está copiado en
@@ -19,7 +19,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import CambiarPasswordModal from './CambiarPasswordModal'
+import ClavesModal from './ClavesModal'
 
 export default function UserDropdown({ rolLabel, accentColor }) {
   const { profile, signOut, user } = useAuth()
@@ -90,7 +90,7 @@ export default function UserDropdown({ rolLabel, accentColor }) {
               style={btnItem}
               onMouseOver={e => e.currentTarget.style.background = 'var(--surface2)'}
               onMouseOut={e => e.currentTarget.style.background = 'transparent'}>
-              🔑 Cambiar contraseña
+              🔑 Contraseñas
             </button>
             <div style={{ height: 1, background: 'var(--border)' }} />
             <button
@@ -104,7 +104,7 @@ export default function UserDropdown({ rolLabel, accentColor }) {
         )}
       </div>
 
-      {modalAbierto && <CambiarPasswordModal onClose={() => setModalAbierto(false)} />}
+      {modalAbierto && <ClavesModal onClose={() => setModalAbierto(false)} />}
     </>
   )
 }

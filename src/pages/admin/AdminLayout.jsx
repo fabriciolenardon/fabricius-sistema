@@ -10,7 +10,7 @@ import BuscadorGlobal from '../../components/BuscadorGlobal'
 import CentroActividad from '../../components/CentroActividad'
 import LogoFabricius from '../../components/LogoFabricius'
 import UserDropdown from '../../components/UserDropdown'
-import CambiarPasswordModal from '../../components/CambiarPasswordModal'
+import ClavesModal from '../../components/ClavesModal'
 import BotonAvisos from '../../components/BotonAvisos'
 import RecordatorioPagos from '../../components/RecordatorioPagos'
 import PanelDividido from '../../components/PanelDividido'
@@ -393,14 +393,14 @@ function MenuMobile({ onClose }) {
         {/* Acciones de cuenta */}
         <div style={{ padding: '14px 12px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
           <button onClick={() => setModalPwd(true)} style={{ width: '100%', padding: '12px', background: 'var(--surface2)', color: 'var(--text2)', border: '1px solid var(--border)', borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-            🔑 Cambiar contraseña
+            🔑 Contraseñas
           </button>
           <button onClick={handleLogout} style={{ width: '100%', padding: '12px', background: '#3a1a1a', color: 'var(--red-light)', border: '1px solid #5a2a2a', borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
             🚪 Cerrar sesión
           </button>
         </div>
       </div>
-      {modalPwd && <CambiarPasswordModal onClose={() => setModalPwd(false)} />}
+      {modalPwd && <ClavesModal onClose={() => setModalPwd(false)} />}
     </>
   )
 }

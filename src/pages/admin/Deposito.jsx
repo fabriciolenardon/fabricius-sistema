@@ -24,6 +24,7 @@ import { logAuditoria } from '../../lib/auditoria'
 import { useAuth } from '../../context/AuthContext'
 import { puedeAjustarStock } from '../../lib/permisos'
 import { overlayDeSucursal, conPreciosDeSucursal } from '../../lib/preciosSucursal'
+import { hayClaveCaja, verificarClaveCaja } from '../../lib/clavesOperativas'
 import { productosQueVende } from '../../lib/categoriasPrecios'
 
 // Nombre legible de cada tipo de embutido/salame (para descripciones de
@@ -2687,6 +2688,10 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
   // existe el cuadre (kg × precio = importe) además hacía saltar la alerta.
   const [form, setForm] = useState({ tipo: '', proveedor: '', descripcion: '', fecha: fechaHoyARG(), kg: '', precioKg: '', merma: '', destino: 'DEPOSITO', importe: '', cantidad: '1', cajaProductoId: '', polloProductoId: '', embutidoProductoId: '', brosaProductoId: '' })
   const [historial, setHistorial] = useState([])
+  // Anular un ingreso pide la CLAVE DE CAJA (mig 102), que define el dueño en
+  // Perfil → Contraseñas. Confirmación INLINE, nunca window.confirm: en
+  // iPhone/PWA se suprime sin error y la acción se pierde (regla de oro N°4).
+  const [confirmAnular, setConfirmAnular] = useState(null)   // { entrada, clave, error, hayClave, loading }
   const [editando, setEditando] = useState(null)
   const [formEdit, setFormEdit] = useState({})
   // Anti doble-submit: el ref bloquea de forma SÍNCRONA (el estado de React se
@@ -3125,10 +3130,29 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     }
   }
 
+// Paso 1: abrir la confirmación y averiguar si este negocio ya tiene clave.
 async function eliminar(entrada) {
   if (entrada.eliminado) { showAlert({ type: 'error', msg: 'Este ingreso ya está anulado' }); return }
-  if (!confirm(`¿Anular este ingreso de ${entrada.kg} kg de ${entrada.proveedor_nombre}?\n\nQueda marcado ANULADO (no se borra), se revierte el stock, se anulan sus piezas y se anula la compra en la cuenta del proveedor.`)) return
+  setConfirmAnular({ entrada, clave: '', error: null, hayClave: null, loading: false })
+  const hay = await hayClaveCaja()
+  setConfirmAnular(c => (c && c.entrada.id === entrada.id) ? { ...c, hayClave: hay } : c)
+}
 
+// Paso 2: validar la clave de caja (si el negocio la tiene definida) y recién
+// ahí anular de verdad.
+async function confirmarAnulacion() {
+  const c = confirmAnular
+  if (!c) return
+  if (c.hayClave) {
+    setConfirmAnular(x => ({ ...x, loading: true, error: null }))
+    const ok = await verificarClaveCaja(c.clave)
+    if (!ok) { setConfirmAnular(x => ({ ...x, loading: false, error: 'Clave incorrecta.' })); return }
+  }
+  setConfirmAnular(null)
+  await ejecutarAnulacion(c.entrada)
+}
+
+async function ejecutarAnulacion(entrada) {
   // Quién anula — para la trazabilidad (igual patrón que la anulación de remitos)
   const { data: { user } } = await supabase.auth.getUser()
   const { data: perfil } = await supabase.from('profiles').select('nombre').eq('id', user?.id).maybeSingle()
@@ -3686,6 +3710,68 @@ async function eliminar(entrada) {
         </table>
         <Paginador {...pag.controles} label="entradas" />
       </div>
+
+      {/* ── ANULAR UN INGRESO: confirmación + clave de caja ── */}
+      {confirmAnular && (
+        <div onClick={() => !confirmAnular.loading && setConfirmAnular(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 1500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div onClick={ev => ev.stopPropagation()}
+            style={{ background: 'var(--surface)', border: '1px solid #5a2a2a', borderRadius: 14, padding: 24, width: '100%', maxWidth: 460, boxShadow: '0 16px 48px rgba(0,0,0,0.6)' }}>
+            <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 22, color: 'var(--red-light)', letterSpacing: 2, marginBottom: 10 }}>
+              🗑️ ANULAR INGRESO
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6, marginBottom: 14 }}>
+              <strong>{fmtKg(Number(confirmAnular.entrada.kg_real || confirmAnular.entrada.kg || 0), { decimales: 2 })}</strong>
+              {' '}de <strong>{confirmAnular.entrada.proveedor_nombre || '—'}</strong>
+              {confirmAnular.entrada.fecha ? ` · ${confirmAnular.entrada.fecha}` : ''}
+              <div style={{ color: 'var(--muted)', marginTop: 6 }}>
+                Queda marcado ANULADO (no se borra), se revierte el stock, se anulan sus piezas
+                y se anula la compra en la cuenta del proveedor.
+              </div>
+            </div>
+
+            {confirmAnular.hayClave === null && (
+              <div style={{ fontSize: 12, color: 'var(--muted)' }}>Verificando…</div>
+            )}
+
+            {confirmAnular.hayClave === true && (
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>Clave de caja</label>
+                <input type="password" autoFocus value={confirmAnular.clave}
+                  onChange={ev => setConfirmAnular(c => ({ ...c, clave: ev.target.value, error: null }))}
+                  onKeyDown={ev => { if (ev.key === 'Enter') confirmarAnulacion() }}
+                  style={{ width: '100%', boxSizing: 'border-box', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '10px 12px', fontSize: 14, fontFamily: "'DM Sans', sans-serif" }} />
+              </div>
+            )}
+
+            {confirmAnular.hayClave === false && (
+              <div style={{ background: '#3a2a1a', border: '1px solid var(--amber)', borderRadius: 8, padding: '10px 12px', fontSize: 12, color: 'var(--text)', marginBottom: 12 }}>
+                ⚠️ Este negocio todavía no tiene <strong>clave de caja</strong>. El dueño la define en
+                su nombre (arriba a la derecha) → <strong>Contraseñas</strong>. Mientras tanto se puede
+                anular sin clave.
+              </div>
+            )}
+
+            {confirmAnular.error && (
+              <div style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', color: 'var(--red-light)', borderRadius: 8, padding: '10px 12px', fontSize: 13, marginBottom: 12 }}>
+                ❌ {confirmAnular.error}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => setConfirmAnular(null)} disabled={confirmAnular.loading}
+                style={{ flex: 1, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '10px 14px', cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", fontSize: 14 }}>
+                Cancelar
+              </button>
+              <button onClick={confirmarAnulacion}
+                disabled={confirmAnular.loading || confirmAnular.hayClave === null || (confirmAnular.hayClave && !confirmAnular.clave)}
+                style={{ flex: 1, background: '#3a1a1a', border: '1px solid #5a2a2a', color: '#ff6b6b', borderRadius: 8, padding: '10px 14px', cursor: 'pointer', fontWeight: 700, fontFamily: "'DM Sans', sans-serif", fontSize: 14 }}>
+                {confirmAnular.loading ? 'Verificando…' : '🗑️ Anular ingreso'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
