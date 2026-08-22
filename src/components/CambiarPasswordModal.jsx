@@ -10,6 +10,7 @@
 // para que el usuario sepa qué le faltó.
 // ============================================================
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { supabase } from '../lib/supabase'
 
 export default function CambiarPasswordModal({ onClose }) {
@@ -78,7 +79,11 @@ export default function CambiarPasswordModal({ onClose }) {
     fontSize: 14, fontFamily: "'DM Sans', sans-serif", outline: 'none',
   }
 
-  return (
+  // Portal a <body>: el header del admin tiene `backdrop-filter`, que hace de
+  // marco de referencia para los `position: fixed` de sus hijos. Abierto desde
+  // el menú del usuario (que vive en el header), el modal quedaba encajado en
+  // esa franja de 56px en vez de ocupar la pantalla.
+  return createPortal((
     <div onClick={onClose} style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
       zIndex: 1500, display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -141,5 +146,5 @@ export default function CambiarPasswordModal({ onClose }) {
         )}
       </div>
     </div>
-  )
+  ), document.body)
 }
