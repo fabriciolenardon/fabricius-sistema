@@ -229,10 +229,12 @@ export default function Sueldos() {
     if (!apellido || !nombre) { setAlert({ type: 'error', msg: 'Cargá apellido y nombre' }); return }
     if (!(valor > 0)) { setAlert({ type: 'error', msg: 'Ingresá un valor hora válido' }); return }
     setGuardandoNuevo(true)
-    const { data: maxRow } = await supabase.from('empleados_sueldos').select('id').order('id', { ascending: false }).limit(1)
-    const nuevoId = (maxRow?.[0]?.id || 0) + 1
+    // El id lo pone la base (mig 101). Antes se calculaba acá con max(id)+1 y
+    // eso se rompía con el aislamiento por sucursal: una sucursal no ve los
+    // empleados de la central, leía max = NULL, intentaba el id 1 y chocaba con
+    // un empleado ajeno. La sucursal queda en su sucursal por el trigger.
     const { error } = await supabase.from('empleados_sueldos').insert({
-      id: nuevoId, apellido, nombre, valor_hora: valor,
+      apellido, nombre, valor_hora: valor,
       modalidad: 'hora', cbu: nuevoEmp.cbu.trim(), activo: true,
     })
     setGuardandoNuevo(false)
