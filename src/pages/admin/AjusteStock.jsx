@@ -102,7 +102,15 @@ const TIPOS_SOLO_SI_EXISTEN = new Set([
 // guarda la cantidad de unidades para estos. Se muestra "u" en vez de "kg".
 // brosa_sesos: el producto "SESOS (la unidad)" se vende por unidad (no
 // pesable), así que su bucket también cuenta unidades.
-const TIPOS_POR_UNIDAD = new Set(['almacen', 'bebidas', 'pollo', 'caja_cb', 'caja_pt', 'rebozado', 'brosa_sesos'])
+//
+// OJO con los que NO están acá aunque se compren por bulto:
+//   pollo / rebozado → el cajón se convierte a kg al entrar (kg_por_unidad) y
+//     al vender, así que el bucket está en KILOS. Decían "u" y el conteo
+//     físico salía con la unidad equivocada (1.365 u por 1.365 kg).
+//   caja_cb / caja_pt → `crearCajasIngreso` suma al bucket el PESO de las
+//     cajas (cajasStock.js), no la cantidad. Las unidades se cuentan aparte,
+//     una fila por caja, en `cajas_stock`.
+const TIPOS_POR_UNIDAD = new Set(['almacen', 'bebidas', 'brosa_sesos'])
 
 // ── PLANILLA DE CONTEO ────────────────────────────────────────────────
 // Lo que NO va a la planilla de papel (sí sigue en la pantalla de ajuste):
