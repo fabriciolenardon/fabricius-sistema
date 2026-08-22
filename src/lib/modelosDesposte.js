@@ -81,9 +81,20 @@ export const MERMA_PIEZA_DEFAULT = {
 // Merma default para cualquier pieza sin % explícito.
 export const MERMA_PIEZA_GENERICA = 25
 
+// Cada tipo de media res tiene DOS mermas, una por cada forma de despostarla:
+//   merma        → desposte X KILO: la media va entera a Bovino Cortes.
+//                  Es alta (20-30%): se va el hueso, la grasa y el recorte.
+//   merma_piezas → desposte A PIEZAS: la media se abre en pierna, costillar,
+//                  cortito, costeletal. Es baja (~2,5%): la pieza se lleva casi
+//                  todo, el hueso se va después al convertirla a cortes (eso lo
+//                  cubre MERMA_PIEZA_DEFAULT).
+// Hasta la mig 100 el 2,5% del desposte a piezas estaba HARDCODEADO en el
+// código; ahora sale de acá y se edita en Depósito → Desposte → ⚙️ Mermas.
+export const MERMA_DESPOSTE_PIEZAS_DEFAULT = 2.5
+
 export const MERMA_MEDIA_RES_DEFAULT = [
-  { id: 'novillito',       label: 'Novillito (Nt)',       merma: 22 },
-  { id: 'vaca_vaquillona', label: 'Vaca/Vaquillona (VQ)', merma: 28 },
+  { id: 'novillito',       label: 'Novillito (Nt)',       merma: 22, merma_piezas: MERMA_DESPOSTE_PIEZAS_DEFAULT },
+  { id: 'vaca_vaquillona', label: 'Vaca/Vaquillona (VQ)', merma: 28, merma_piezas: MERMA_DESPOSTE_PIEZAS_DEFAULT },
 ]
 
 // Lista de piezas de cerdo (capón) que se cargan al desposte

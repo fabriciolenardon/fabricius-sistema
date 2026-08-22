@@ -237,7 +237,10 @@ export default function Precios() {
     }
 
     // Si está asignando un PLU, verificar si ya está ocupado por OTRO producto
-    if (nuevoPlu != null) {
+    // El PLU vive en el catálogo compartido: reasignarlo es de la central.
+    // Una sucursal que edita su precio no pasa por acá (si no, liberaría el
+    // PLU de un producto de la central — y la mig 100 se lo rechaza).
+    if (nuevoPlu != null && !esSucursal) {
       const { data: conflicto } = await supabase
         .from('precios')
         .select('id, nombre')
@@ -570,11 +573,15 @@ export default function Precios() {
         {tabBtn('masivo', '🚀 Actualización masiva')}
         {tabBtn('ofertas', `🏷️ Ofertas${ofertasVigentes.length > 0 ? ` (${ofertasVigentes.length})` : ''}`)}
         {tabBtn('combos', '🍱 Combos')}
-        {tabBtn('categorias', '🗂️ Categorías')}
+        {/* Categorías, Limpieza e Importar PLUs escriben el CATÁLOGO COMPARTIDO
+            (`precios` y `config_sistema`): las tres son de la central. Para una
+            sucursal la base ya las rechaza (mig 100) — mejor que ni aparezcan
+            a que tiren un error. */}
+        {!esSucursal && tabBtn('categorias', '🗂️ Categorías')}
         {tabBtn('chat', '🤖 Asistente IA')}
 {tabBtn('plu', '🏷️ PLU / Balanza')}
-{tabBtn('limpieza', '🧹 Limpieza duplicados')}
-{tabBtn('importar_plu', '📥 Importar PLUs CSV')}
+{!esSucursal && tabBtn('limpieza', '🧹 Limpieza duplicados')}
+{!esSucursal && tabBtn('importar_plu', '📥 Importar PLUs CSV')}
 {/* Comparativo contra las sucursales: solo lo ve la central, que es quien
     define la lista. Una sucursal ya ve sus propios precios en "Ver Precios". */}
 {!esSucursal && tabBtn('sucursales', '🏪 Sucursales')}
@@ -949,7 +956,11 @@ export default function Precios() {
 
       {tab === 'ofertas' && (
         <div>
-          {/* PROMO MUNDIAL */}
+          {/* PROMO MUNDIAL — vive en `config_sistema`, que es UNA sola para las
+              dos bocas: si la activara una sucursal, la Caja de la central
+              saldría a −10%. Es una decisión comercial de la central. Las
+              ofertas de abajo sí son de cada boca (`ofertas` tiene sucursal_id). */}
+          {!esSucursal && (
           <div className="card" style={{ marginBottom: 20, borderColor: promoMundial.activa ? '#3a6ea5' : 'var(--border)', background: promoMundial.activa ? '#16243a' : undefined }}>
             <div className="card-title" style={{ color: '#7ec8ff' }}>⚽ Promo Mundial — día de partido de Argentina</div>
             <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
@@ -984,6 +995,7 @@ export default function Precios() {
               )}
             </div>
           </div>
+          )}
 
           {/* NUEVA OFERTA */}
           <div className="card" style={{ marginBottom: 20, borderColor: '#4a8a2a' }}>
@@ -1253,7 +1265,7 @@ export default function Precios() {
       )}
 
      {tab === 'plu' && (
-  <PLUTab precios={precios} ofertas={ofertas} onRecargar={cargar} categoriasOrden={categoriasVisibles} />
+  <PLUTab precios={precios} ofertas={ofertas} onRecargar={cargar} categoriasOrden={categoriasVisibles} esSucursal={esSucursal} />
 )}
       {tab === 'categorias' && (() => {
         // Copia editable: se trabaja sobre catEdit y recién al Guardar se
@@ -1552,7 +1564,10 @@ function FormatoBalanzaCard({ precios }) {
   )
 }
 
-function PLUTab({ precios, ofertas = [], onRecargar, categoriasOrden = [] }) {
+// esSucursal: la sucursal usa esta pestaña para EXPORTAR el CSV de su balanza
+// (los PLU son los mismos en las dos bocas, viven en el catálogo compartido),
+// pero no renumera: eso reescribe `precios` de la central.
+function PLUTab({ precios, ofertas = [], onRecargar, categoriasOrden = [], esSucursal = false }) {
   const [msg, setMsg] = useState('')
   const [confirmandoRenum, setConfirmandoRenum] = useState(false)
   const [renumerando, setRenumerando] = useState(false)
@@ -1786,10 +1801,12 @@ function PLUTab({ precios, ofertas = [], onRecargar, categoriasOrden = [] }) {
           <button onClick={exportarCSV} className="btn btn-ghost" disabled={plus.length === 0}>📥 Exportar CSV simple</button>
           <button onClick={exportarQendra} className="btn btn-ghost" style={{ background: 'var(--gold)', color: '#000', fontWeight: 700 }} disabled={plus.length === 0}>⚖️ Exportar CSV para Qendra</button>
           <button onClick={pdfPlusEmpleados} className="btn btn-ghost" title="Lista imprimible con el PLU de cada producto, agrupada por categoría — para el mostrador" disabled={plus.length === 0}>🖨️ PDF PLUs para empleados</button>
-          <button onClick={() => { setConfirmandoRenum(c => !c); setRenumMsg(null) }} className="btn btn-ghost" disabled={renumerando}
-            style={{ borderColor: 'var(--amber)', color: 'var(--amber)' }}>
-            🔁 Renumerar PLUs (alfabético)
-          </button>
+          {!esSucursal && (
+            <button onClick={() => { setConfirmandoRenum(c => !c); setRenumMsg(null) }} className="btn btn-ghost" disabled={renumerando}
+              style={{ borderColor: 'var(--amber)', color: 'var(--amber)' }}>
+              🔁 Renumerar PLUs (alfabético)
+            </button>
+          )}
           <label style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
             Lista 2: −
             <input type="number" min="0" max="50" step="0.5" value={lista2Pct}

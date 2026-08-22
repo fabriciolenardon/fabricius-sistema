@@ -3,7 +3,7 @@ import { supabase, fetchAllRows } from '../../lib/supabase'
 import { fechaHoyARG, fechaRelativaARG, esFechaFutura } from '../../lib/fechas'
 import { lunesDeLaSemana, domingoDeLaSemana } from '../../lib/cierreAuto'
 import { resolverDescuentoStock, bucketPiezaBovina, redondearStock } from '../../lib/stockHelpers'
-import { bucketDePiezaBovina, MERMA_PIEZA_DEFAULT, MERMA_PIEZA_GENERICA, MERMA_MEDIA_RES_DEFAULT } from '../../lib/modelosDesposte'
+import { bucketDePiezaBovina, MERMA_PIEZA_DEFAULT, MERMA_PIEZA_GENERICA, MERMA_MEDIA_RES_DEFAULT, MERMA_DESPOSTE_PIEZAS_DEFAULT } from '../../lib/modelosDesposte'
 import { cargarCajasDisponibles, crearCajasIngreso, venderCaja, revertirVentaCaja, CATEGORIA_A_TIPO_CAJA } from '../../lib/cajasStock'
 import { fmtPrecio, fmtKg, parseNumero } from '../../lib/formatos'
 import { imprimirHTML } from '../../lib/imprimir'
@@ -543,6 +543,14 @@ const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(n
     acc[m.id] = { label: m.label, merma: (Number(m.merma) || 0) / 100, color: MERMA_COLORS[i % MERMA_COLORS.length] }
     return acc
   }, {})
+  // Merma del desposte A PIEZAS del tipo de media res elegido, en fracción.
+  // Antes era 0.975 clavado en el código; ahora sale de la config (y si un
+  // tipo no la tiene cargada, cae al 2,5% de siempre → nada cambia solo).
+  function mermaPiezasDe(tipoId) {
+    const t = (mermaConfig.media_res || []).find(m => m.id === tipoId)
+    const pct = Number(t?.merma_piezas)
+    return (Number.isFinite(pct) ? pct : MERMA_DESPOSTE_PIEZAS_DEFAULT) / 100
+  }
 
   useEffect(() => { cargarDatos(); cargarMermaConfig() }, [])
 
@@ -654,7 +662,7 @@ setElaboraciones(elaboracionesData || [])
   function calcularPiezas(entrada, modeloId) {
     if (!entrada) return []
     const kgBase = entrada.kg_real || entrada.kg || 0
-    const kgNeto = kgBase * 0.975
+    const kgNeto = kgBase * (1 - mermaPiezasDe(tipoAnimal))
     return MODELOS_DESPOSTE[modeloId].piezas.map(pieza => ({
       nombre: pieza.nombre,
       kg: parseFloat((kgNeto * pieza.pct).toFixed(2)),
@@ -694,11 +702,12 @@ setElaboraciones(elaboracionesData || [])
     setLoading(true)
     try {
       const kgBase = seleccionada.kg_real || seleccionada.kg || 0
-      const kgNeto = kgBase * 0.975
+      const mermaPiezas = mermaPiezasDe(tipoAnimal)
+      const kgNeto = kgBase * (1 - mermaPiezas)
       const { data: desposteData, error } = await supabase.from('despostes').insert({
         fecha, entrada_id: seleccionada.id, modelo,
         tipo_desposte: 'piezas', tipo_animal: tipoAnimal,
-        kg_media_res: kgBase, merma_pct: 2.5, kg_neto: kgNeto,
+        kg_media_res: kgBase, merma_pct: mermaPiezas * 100, kg_neto: kgNeto,
         piezas: piezas.map(p => ({ nombre: p.nombre, kg: p.kg_editado, precio_venta: p.precio_venta, tipo_stock: p.tipo_stock })),
         notas
       }).select().single()
@@ -1352,7 +1361,9 @@ async function confirmarDesposteCerdo() {
 // En la sucursal, Elaborar ya es una solapa propia arriba: si además la
 // dejáramos acá, el mismo tablero estaría en dos lugares.
 ...(esSucursal ? [] : [{ id: 'embutidos', label: '🌭 Elaborar Embutidos' }]),
-{ id: 'medias_hist', label: '🐄 Historial Medias' }, { id: 'historial', label: '📋 Historial Desposte' }].map(t => (
+{ id: 'medias_hist', label: '🐄 Historial Medias' }, { id: 'historial', label: '📋 Historial Desposte' },
+// Las mermas las define la CENTRAL (una sola config para las dos bocas).
+...(esSucursal ? [] : [{ id: 'mermas', label: '⚙️ Mermas' }])].map(t => (
           <button key={t.id} onClick={() => { setSubtab(t.id); setSeleccionada(null); setPiezas([]); cargarDatos() }}
             style={{ padding: '8px 16px', borderRadius: 8, border: `1px solid ${subtab === t.id ? 'var(--gold)' : 'var(--border)'}`, background: subtab === t.id ? 'var(--gold)' : 'transparent', color: subtab === t.id ? '#000' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
             {t.label}
@@ -1529,7 +1540,8 @@ async function confirmarDesposteCerdo() {
             </div>
           )}
         </div>
-        <EditorMerma config={mermaConfig} onSave={guardarMermaConfig} />
+        {/* El editor de mermas vive en su propia solapa (⚙️ Mermas): es
+            configuración de la central, no algo para tocar mientras se desposta. */}
         </>
       )}
 
@@ -1657,7 +1669,7 @@ async function confirmarDesposteCerdo() {
       </button>
     </div>
   </div>
-  <EditorMerma config={mermaConfig} onSave={guardarMermaConfig} />
+
   </>
 )}
 {subtab === 'cerdo' && (
@@ -2202,6 +2214,39 @@ async function confirmarDesposteCerdo() {
 
 {subtab === 'medias_hist' && (
   <HistorialMedias medias={mediasStockAll} />
+)}
+
+{/* ⚙️ MERMAS — la sección de configuración de la central.
+    Los tres despostes del sistema, cada uno con su merma:
+      media res → piezas      (columna "A piezas")
+      media res → cortes      (columna "A cortes (x kilo)")
+      pieza     → cortes      (bloque "Piezas")
+    Antes esto estaba en dos paneles colapsados al pie de las pantallas de
+    trabajo, y el % del desposte a piezas ni siquiera se podía tocar: estaba
+    clavado en 2,5% en el código. */}
+{subtab === 'mermas' && (
+  <div>
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card-title">⚙️ Mermas de conversión</div>
+      <div style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.6 }}>
+        Acá se define cuánto se pierde en cada tipo de desposte. El % se autocompleta
+        al despostar o convertir (el operario todavía puede ajustarlo en el momento, y
+        los kilos finales son siempre los que se pesan de verdad).
+        <div style={{ marginTop: 10, color: 'var(--text)' }}>
+          🐄 <strong>Media res → piezas</strong>: lo que se pierde al abrir la media en pierna,
+          costillar, cortito y costeletal. Es baja (~2,5%): la pieza se lleva casi todo.
+          <br />⚖️ <strong>Media res → cortes (x kilo)</strong>: la media entera va a Bovino Cortes.
+          Es alta (20-30%): se va el hueso, la grasa y el recorte.
+          <br />🍖 <strong>Pieza → cortes</strong>: lo que pierde cada pieza cuando se la rompe
+          en cortes. Depende de la pieza (una pierna no rinde como un costeletal).
+        </div>
+        <div style={{ marginTop: 10, fontSize: 12 }}>
+          Vale para todas las bocas: la merma la calcula la central.
+        </div>
+      </div>
+    </div>
+    <EditorMerma config={mermaConfig} onSave={guardarMermaConfig} inicialAbierto />
+  </div>
 )}
 
 {subtab === 'historial' && (
@@ -6602,8 +6647,8 @@ function PiezasTab() {
 // Panel colapsable para editar el % de merma enlazado a cada pieza
 // y a cada tipo de media res. Se guarda en config_sistema y de ahí
 // se autocompleta al convertir a cortes. Editable por si cambia.
-function EditorMerma({ config, onSave }) {
-  const [open, setOpen] = useState(false)
+function EditorMerma({ config, onSave, inicialAbierto = false }) {
+  const [open, setOpen] = useState(inicialAbierto)
   const [draft, setDraft] = useState(config)
   const [ok, setOk] = useState(false)
   useEffect(() => { setDraft(config) }, [config])
@@ -6612,7 +6657,7 @@ function EditorMerma({ config, onSave }) {
 
   const setPieza = (nombre, val) => setDraft(d => ({ ...d, piezas: { ...d.piezas, [nombre]: val } }))
   const setMedia = (i, field, val) => setDraft(d => ({ ...d, media_res: d.media_res.map((m, j) => j === i ? { ...m, [field]: val } : m) }))
-  const addMedia = () => setDraft(d => ({ ...d, media_res: [...(d.media_res || []), { id: '', label: '', merma: 25 }] }))
+  const addMedia = () => setDraft(d => ({ ...d, media_res: [...(d.media_res || []), { id: '', label: '', merma: 25, merma_piezas: MERMA_DESPOSTE_PIEZAS_DEFAULT }] }))
   const delMedia = (i) => setDraft(d => ({ ...d, media_res: d.media_res.filter((_, j) => j !== i) }))
 
   const clamp = v => Math.max(0, Math.min(50, Number(v) || 0))
@@ -6628,7 +6673,12 @@ function EditorMerma({ config, onSave }) {
         let id = ((m.id || '').trim() || (m.label || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')) || ('m' + i)
         while (usados.has(id)) id += '_' + i
         usados.add(id)
-        return { id, label: m.label.trim(), merma: clamp(m.merma) }
+        return {
+          id, label: m.label.trim(),
+          merma: clamp(m.merma),
+          // % del desposte a piezas (antes 2,5 clavado en el código)
+          merma_piezas: clamp(m.merma_piezas ?? MERMA_DESPOSTE_PIEZAS_DEFAULT),
+        }
       })
     onSave({ piezas, media_res })
     setOk(true); setTimeout(() => setOk(false), 2500)
@@ -6637,7 +6687,7 @@ function EditorMerma({ config, onSave }) {
   return (
     <div className="card" style={{ marginTop: 16, borderColor: 'var(--border)' }}>
       <div onClick={() => setOpen(o => !o)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
-        <div className="card-title" style={{ margin: 0 }}>⚙️ Merma por producto (editable)</div>
+        <div className="card-title" style={{ margin: 0 }}>⚙️ Mermas por producto</div>
         <span style={{ fontSize: 12, color: 'var(--muted)' }}>{open ? '▲ ocultar' : '▼ editar %'}</span>
       </div>
       {!open && (
@@ -6647,7 +6697,7 @@ function EditorMerma({ config, onSave }) {
       )}
       {open && (
         <div style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>Piezas</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>Pieza → cortes</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8, marginBottom: 18 }}>
             {Object.keys(draft.piezas || {}).map(nombre => (
               <div key={nombre} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface2)', borderRadius: 8, padding: '6px 10px' }}>
@@ -6658,13 +6708,34 @@ function EditorMerma({ config, onSave }) {
             ))}
           </div>
 
-          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>Media res</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Media res</div>
+          {/* Dos mermas por tipo, una por cada forma de despostar la media:
+              entera a cortes (alta, se va hueso y grasa) o abierta en piezas
+              (baja, la pieza pierde poco; el hueso se va al convertirla). */}
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+            Cada tipo de media res tiene su merma para <strong>cada tipo de desposte</strong>.
+          </div>
+          <div style={{ display: 'flex', gap: 8, padding: '0 10px', marginBottom: 4, fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1 }}>
+            <span style={{ flex: 1 }}>Tipo</span>
+            <span style={{ width: 96, textAlign: 'center' }}>A cortes (x kilo)</span>
+            <span style={{ width: 96, textAlign: 'center' }}>A piezas</span>
+            <span style={{ width: 22 }} />
+          </div>
           <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
             {(draft.media_res || []).map((m, i) => (
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface2)', borderRadius: 8, padding: '6px 10px' }}>
                 <input value={m.label} onChange={e => setMedia(i, 'label', e.target.value)} placeholder="Ej: Novillito (Nt)" style={{ ...inp, flex: 1 }} />
-                <input type="number" step="0.5" min="0" max="50" value={m.merma} onChange={e => setMedia(i, 'merma', e.target.value)} style={{ ...inp, width: 64, textAlign: 'center', fontWeight: 700 }} />
-                <span style={{ fontSize: 12, color: 'var(--muted)' }}>%</span>
+                <div style={{ width: 96, display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
+                  <input type="number" step="0.5" min="0" max="50" value={m.merma} onChange={e => setMedia(i, 'merma', e.target.value)} style={{ ...inp, width: 64, textAlign: 'center', fontWeight: 700 }} />
+                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>%</span>
+                </div>
+                <div style={{ width: 96, display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
+                  <input type="number" step="0.5" min="0" max="50"
+                    value={m.merma_piezas ?? MERMA_DESPOSTE_PIEZAS_DEFAULT}
+                    onChange={e => setMedia(i, 'merma_piezas', e.target.value)}
+                    style={{ ...inp, width: 64, textAlign: 'center', fontWeight: 700 }} />
+                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>%</span>
+                </div>
                 <button type="button" onClick={() => delMedia(i)} title="Eliminar" style={{ background: 'none', border: 'none', color: 'var(--red-light)', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}>✕</button>
               </div>
             ))}
