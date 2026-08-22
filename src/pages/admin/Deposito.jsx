@@ -1529,7 +1529,9 @@ async function confirmarDesposteCerdo() {
             </div>
           )}
         </div>
-        <EditorMerma config={mermaConfig} onSave={guardarMermaConfig} />
+        {/* Las mermas las define la CENTRAL (una sola config para las dos
+            bocas). La sucursal ve el % ya cargado al despostar, pero no lo edita. */}
+        {!esSucursal && <EditorMerma config={mermaConfig} onSave={guardarMermaConfig} />}
         </>
       )}
 
@@ -1657,7 +1659,7 @@ async function confirmarDesposteCerdo() {
       </button>
     </div>
   </div>
-  <EditorMerma config={mermaConfig} onSave={guardarMermaConfig} />
+  {!esSucursal && <EditorMerma config={mermaConfig} onSave={guardarMermaConfig} />}
   </>
 )}
 {subtab === 'cerdo' && (
