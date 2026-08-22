@@ -17,6 +17,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import { puedeAjustarStock } from '../../lib/permisos'
+import Paginador, { usePaginacion } from '../../components/Paginador'
 import { logAuditoria } from '../../lib/auditoria'
 import { EPSILON_STOCK, stockNormalizado, redondearStock, excedeTopeStock, TOPE_STOCK } from '../../lib/stockHelpers'
 import { imprimirHTML } from '../../lib/imprimir'
@@ -442,6 +443,10 @@ export default function AjusteStock() {
     }
   }).filter(d => d.tipo), [historial])
 
+  // Antes se mostraban solo los 80 más recientes y al resto no se llegaba.
+  // La consulta ya trae hasta 500, así que se paginan y están todos.
+  const pagDesf = usePaginacion(desfasajes, 20)
+
   // Acumulado por producto (para detectar desfasajes recurrentes vs puntuales)
   const resumenDesfasajes = useMemo(() => {
     const m = new Map()
@@ -863,7 +868,7 @@ export default function AjusteStock() {
               </table>
             </div>
 
-            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>🕒 Detalle (últimos {Math.min(desfasajes.length, 80)})</div>
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>🕒 Detalle ({desfasajes.length})</div>
             <div style={{ maxHeight: 380, overflowY: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 660 }}>
                 <thead><tr style={{ background: 'var(--surface2)', position: 'sticky', top: 0 }}>
@@ -871,7 +876,7 @@ export default function AjusteStock() {
                   <th style={thR}>Dif.</th><th style={thL}>Motivo</th><th style={thL}>Por</th>
                 </tr></thead>
                 <tbody>
-                  {desfasajes.slice(0, 80).map(d => (
+                  {pagDesf.items.map(d => (
                     <tr key={d.id} style={{ borderTop: '1px solid var(--border)' }}>
                       <td style={{ padding: '6px 10px', whiteSpace: 'nowrap', color: 'var(--muted)' }}>{fFecha(d.fecha)}</td>
                       <td style={{ padding: '6px 10px', fontWeight: 600 }}>{d.label}</td>
@@ -884,6 +889,7 @@ export default function AjusteStock() {
                 </tbody>
               </table>
             </div>
+            <Paginador {...pagDesf.controles} />
           </>
         )}
       </div>
