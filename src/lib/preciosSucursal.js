@@ -127,6 +127,71 @@ export async function desviosDeSucursal(sucursalId, productosCentral) {
   return desvios.sort((a, b) => Math.abs(b.diferencia) - Math.abs(a.diferencia))
 }
 
+// ============================================================
+// EMPUJAR LA LISTA DE LA CENTRAL A UNA SUCURSAL
+// ============================================================
+// Los precios los define la central (decisión de Fabricio, 21/08/2026): cada
+// vez que actualiza su lista, se la empuja a la boca en vez de que la carguen
+// a mano producto por producto. Reemplaza a la siembra de la mig 97, que fue
+// una sola vez y por SQL.
+//
+// Dos modos, y la diferencia importa:
+//   soloFaltantes: true  → sólo crea los que todavía no tienen precio propio.
+//                          No pisa nada de lo que la sucursal ya tenga.
+//   soloFaltantes: false → además actualiza los que difieren. Es el que se usa
+//                          después de un aumento.
+//
+// Se copian SOLO las dos listas que vende una sucursal: minorista y mayorista.
+// `precio_carniceria` no va — esa es la lista con la que la central les vende
+// A ELLOS; mandársela sería darles su propio precio de compra como precio de
+// venta.
+//
+// TRAMPA (mig 99): el upsert manda `stock_origen` con el valor que YA tiene la
+// fila. Si se omitiera, el upsert lo pisaría con NULL y el producto volvería
+// en silencio al bucket del catálogo — la milanesa de la sucursal dejaría de
+// descontar de `mila_carne`.
+export async function empujarListaASucursal(sucursalId, productosCentral, { soloFaltantes = false } = {}) {
+  if (!sucursalId || Number(sucursalId) === SUCURSAL_CENTRAL) {
+    return { error: new Error('Elegí una sucursal (la central usa su propio catálogo).') }
+  }
+  const overlay = (await overlayDeSucursal(sucursalId)) || {}
+  const filas = []
+  let creados = 0, actualizados = 0, sinCambios = 0
+
+  for (const p of (productosCentral || [])) {
+    const propio = overlay[p.id]
+    if (propio && soloFaltantes) { sinCambios++; continue }
+    const min = p.precio_minorista ?? null
+    const may = p.precio_mayorista ?? null
+    // Un producto sin ningún precio en la central no tiene qué empujar.
+    if (min == null && may == null) { sinCambios++; continue }
+    if (propio) {
+      const igual = Number(propio.precio_minorista ?? 0) === Number(min ?? 0)
+        && Number(propio.precio_mayorista ?? 0) === Number(may ?? 0)
+      if (igual) { sinCambios++; continue }
+      actualizados++
+    } else {
+      creados++
+    }
+    filas.push({
+      sucursal_id: sucursalId,
+      precio_id: p.id,
+      precio_minorista: min,
+      precio_mayorista: may,
+      stock_origen: propio?.stock_origen ?? null,
+      updated_at: new Date().toISOString(),
+    })
+  }
+
+  if (filas.length === 0) return { error: null, creados: 0, actualizados: 0, sinCambios }
+
+  const { error } = await supabase
+    .from('precios_sucursal')
+    .upsert(filas, { onConflict: 'sucursal_id,precio_id' })
+  if (error) return { error }
+  return { error: null, creados, actualizados, sinCambios }
+}
+
 // Guarda el precio de un producto para una sucursal. La central NO pasa por
 // acá: sigue escribiendo en `precios` como siempre.
 export async function guardarPrecioDeSucursal(sucursalId, precioId, { precio_minorista, precio_mayorista }) {
