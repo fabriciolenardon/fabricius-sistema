@@ -15,9 +15,12 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fmtPrecio } from '../../lib/formatos'
 import { SUCURSAL_CENTRAL } from '../../lib/permisos'
-import { overlayDeSucursal, desviosDeSucursal, preciosPropiosFaltantes } from '../../lib/preciosSucursal'
+import { overlayDeSucursal, desviosDeSucursal, preciosPropiosFaltantes, empujarListaASucursal } from '../../lib/preciosSucursal'
 
 const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
+
+// Los ZZ_ son productos dados de baja: no se les manda precio a nadie.
+const vendibles = (productos) => (productos || []).filter(p => !String(p.nombre || '').startsWith('ZZ_'))
 
 export default function SucursalesPrecios({ productos }) {
   const [sucursales, setSucursales] = useState([])
@@ -26,6 +29,12 @@ export default function SucursalesPrecios({ productos }) {
   const [faltantes, setFaltantes] = useState(0)
   const [conPrecio, setConPrecio] = useState(0)
   const [cargando, setCargando] = useState(true)
+  // Empujar la lista: confirmación INLINE (en iOS/PWA los confirm() del
+  // navegador se suprimen sin error y la acción se pierde en silencio).
+  const [confirmando, setConfirmando] = useState(false)
+  const [empujando, setEmpujando] = useState(false)
+  const [resultado, setResultado] = useState(null)
+  const [recarga, setRecarga] = useState(0)
 
   useEffect(() => {
     supabase.from('sucursales').select('id, nombre').neq('id', SUCURSAL_CENTRAL).order('id')
@@ -52,7 +61,30 @@ export default function SucursalesPrecios({ productos }) {
       setCargando(false)
     })()
     return () => { vivo = false }
-  }, [elegida, productos])
+  }, [elegida, productos, recarga])
+
+  // Manda la lista de la central a la sucursal elegida. `soloFaltantes` crea
+  // nada más los que no tienen precio propio (no pisa lo que ya cargaron);
+  // sin eso, además actualiza los que difieren — es el botón de después de un
+  // aumento.
+  async function empujar(soloFaltantes) {
+    setEmpujando(true)
+    setResultado(null)
+    const r = await empujarListaASucursal(elegida, vendibles(productos), { soloFaltantes })
+    setEmpujando(false)
+    setConfirmando(false)
+    if (r.error) { setResultado({ error: true, texto: '❌ No se pudo: ' + r.error.message }); return }
+    const partes = []
+    if (r.creados) partes.push(`${r.creados} cargado${r.creados === 1 ? '' : 's'} por primera vez`)
+    if (r.actualizados) partes.push(`${r.actualizados} actualizado${r.actualizados === 1 ? '' : 's'}`)
+    setResultado({
+      error: false,
+      texto: partes.length
+        ? `✅ Listo: ${partes.join(' y ')}. Ya lo ven en su mostrador.`
+        : '✅ No había nada para cambiar: su lista ya es igual a la tuya.',
+    })
+    setRecarga(n => n + 1)
+  }
 
   if (sucursales.length === 0) {
     return <div className="card"><div style={{ color: 'var(--muted)', fontSize: 13 }}>No hay sucursales cargadas todavía.</div></div>
@@ -88,6 +120,61 @@ export default function SucursalesPrecios({ productos }) {
           <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Distintos a tu lista</div>
           <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 28, color: desvios.length > 0 ? '#ff9b6b' : '#7dff7d' }}>{desvios.length}</div>
         </div>
+      </div>
+
+      {/* MANDARLES LA LISTA — los precios los define la central, así que en vez
+          de que los carguen a mano producto por producto, se los empuja. */}
+      <div className="card" style={{ marginBottom: 20, borderColor: 'var(--gold)' }}>
+        <div className="card-title">📤 Mandarles tu lista de precios</div>
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
+          Copia tus precios <strong>minorista y mayorista</strong> a{' '}
+          <strong style={{ color: 'var(--text)' }}>{sucursales.find(s => s.id === elegida)?.nombre || 'la sucursal'}</strong>.
+          La lista de <strong>carnicería no se manda</strong>: esa es con la que vos les vendés a ellos.
+          No se tocan los productos ni el PLU — sólo el precio de venta.
+        </div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          <button className="btn btn-ghost" disabled={empujando || cargando || faltantes === 0}
+            onClick={() => empujar(true)}
+            title="Crea sólo los que todavía no tienen precio propio. No pisa nada de lo que ya cargaron.">
+            {empujando ? '⏳ Mandando…' : `➕ Cargar sólo los que faltan (${faltantes})`}
+          </button>
+          <button className="btn btn-gold" disabled={empujando || cargando}
+            onClick={() => { setConfirmando(true); setResultado(null) }}>
+            📤 Actualizar TODOS con mi lista
+          </button>
+        </div>
+
+        {confirmando && (
+          <div style={{ marginTop: 14, background: '#3a2a1a', border: '1px solid var(--amber)', borderRadius: 10, padding: 14 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--amber)', marginBottom: 6 }}>
+              ¿Pisar los precios de {sucursales.find(s => s.id === elegida)?.nombre}?
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text)', marginBottom: 10 }}>
+              Van a quedar con TU lista: {faltantes > 0 && <>se cargan los <strong>{faltantes}</strong> que les faltan</>}
+              {faltantes > 0 && desvios.length > 0 && ' y '}
+              {desvios.length > 0 && <>se corrigen los <strong>{desvios.length}</strong> que hoy difieren</>}
+              {faltantes === 0 && desvios.length === 0 && <>hoy ya coinciden, no cambiaría nada</>}.
+              <br />Los ven al instante en su Caja (se actualiza sola).
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-gold" disabled={empujando} onClick={() => empujar(false)}>
+                {empujando ? '⏳ Mandando…' : '✅ Sí, mandar mi lista'}
+              </button>
+              <button className="btn btn-ghost" disabled={empujando} onClick={() => setConfirmando(false)}>Cancelar</button>
+            </div>
+          </div>
+        )}
+
+        {resultado && (
+          <div style={{
+            marginTop: 12, borderRadius: 8, padding: '10px 14px', fontSize: 13, fontWeight: 600,
+            background: resultado.error ? '#3a1a1a' : '#1a2a1a',
+            border: `1px solid ${resultado.error ? '#5a2a2a' : '#2d5a2d'}`,
+            color: resultado.error ? '#ff6b6b' : '#7dff7d',
+          }}>
+            {resultado.texto}
+          </div>
+        )}
       </div>
 
       {cargando ? (
