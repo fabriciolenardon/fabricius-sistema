@@ -14,6 +14,7 @@
 // que sepan que existe y a quién pedírsela, en vez de un botón que da error.
 // ============================================================
 import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { useAuth } from '../context/AuthContext'
 import { esCEO, esSucursal } from '../lib/permisos'
 import { hayClaveCaja, setClaveCaja } from '../lib/clavesOperativas'
@@ -41,7 +42,11 @@ export default function ClavesModal({ onClose }) {
     boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
   }
 
-  return (
+  // PORTAL A <body> — el <header> del admin tiene `backdrop-filter`, y eso
+  // convierte al header en el marco de referencia de sus hijos `position:
+  // fixed`. Sin el portal, este modal se ancla a la franja de 56px del header:
+  // el fondo no se oscurece y la tarjeta sale recortada arriba a la derecha.
+  return createPortal((
     <div onClick={onClose} style={overlay}>
       <div onClick={e => e.stopPropagation()} style={caja}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
@@ -83,7 +88,7 @@ export default function ClavesModal({ onClose }) {
         )}
       </div>
     </div>
-  )
+  ), document.body)
 }
 
 function Opcion({ icono, titulo, detalle, onClick, alerta }) {
