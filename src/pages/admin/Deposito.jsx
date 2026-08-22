@@ -3,7 +3,7 @@ import { supabase, fetchAllRows } from '../../lib/supabase'
 import { fechaHoyARG, fechaRelativaARG, esFechaFutura } from '../../lib/fechas'
 import { lunesDeLaSemana, domingoDeLaSemana } from '../../lib/cierreAuto'
 import { resolverDescuentoStock, bucketPiezaBovina, redondearStock } from '../../lib/stockHelpers'
-import { bucketDePiezaBovina, MERMA_PIEZA_DEFAULT, MERMA_PIEZA_GENERICA, MERMA_MEDIA_RES_DEFAULT, MERMA_DESPOSTE_PIEZAS_DEFAULT } from '../../lib/modelosDesposte'
+import { bucketDePiezaBovina, MERMA_PIEZA_DEFAULT, MERMA_PIEZA_GENERICA, MERMA_MEDIA_RES_DEFAULT, MERMA_FRIO_DEFAULT } from '../../lib/modelosDesposte'
 import { cargarCajasDisponibles, crearCajasIngreso, venderCaja, revertirVentaCaja, CATEGORIA_A_TIPO_CAJA } from '../../lib/cajasStock'
 import { fmtPrecio, fmtKg, parseNumero } from '../../lib/formatos'
 import { imprimirHTML } from '../../lib/imprimir'
@@ -493,7 +493,7 @@ function DesposteTab({ onSaved, soloElaborar = false }) {
   // Merma por producto (editable). Fuente: config_sistema.merma_conversion.
   // Se usa para autocompletar el % al elegir una pieza / tipo de media res,
   // así no se convierte apurado sin ver la merma. Arranca con los defaults.
-  const [mermaConfig, setMermaConfig] = useState({ piezas: MERMA_PIEZA_DEFAULT, media_res: MERMA_MEDIA_RES_DEFAULT })
+  const [mermaConfig, setMermaConfig] = useState({ piezas: MERMA_PIEZA_DEFAULT, media_res: MERMA_MEDIA_RES_DEFAULT, merma_frio: MERMA_FRIO_DEFAULT })
   const [caponesDisponibles, setCaponesDisponibles] = useState([])
 const [caponSeleccionado, setCaponSeleccionado] = useState(null)
 const [piezasCerdo, setPiezasCerdo] = useState({
@@ -543,13 +543,17 @@ const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(n
     acc[m.id] = { label: m.label, merma: (Number(m.merma) || 0) / 100, color: MERMA_COLORS[i % MERMA_COLORS.length] }
     return acc
   }, {})
-  // Merma del desposte A PIEZAS del tipo de media res elegido, en fracción.
-  // Antes era 0.975 clavado en el código; ahora sale de la config (y si un
-  // tipo no la tiene cargada, cae al 2,5% de siempre → nada cambia solo).
-  function mermaPiezasDe(tipoId) {
-    const t = (mermaConfig.media_res || []).find(m => m.id === tipoId)
-    const pct = Number(t?.merma_piezas)
-    return (Number.isFinite(pct) ? pct : MERMA_DESPOSTE_PIEZAS_DEFAULT) / 100
+  // MERMA DE FRÍO (agua/sangre que pierde la carne en cámara después de la
+  // faena), en fracción. Antes era el `* 0.975` clavado en el código.
+  const mermaFrio = (() => {
+    const pct = Number(mermaConfig.merma_frio)
+    return (Number.isFinite(pct) ? pct : MERMA_FRIO_DEFAULT) / 100
+  })()
+  // Desposte X KILO: la merma del tipo de animal MÁS la de frío. El novillito
+  // pierde 22% por hueso/grasa/recorte y otro 2,5% por frío → 24,5% real.
+  const mermaKiloTotal = (tipoId) => {
+    const t = MERMAS_KILO[tipoId]
+    return (t ? t.merma : 0) + mermaFrio
   }
 
   useEffect(() => { cargarDatos(); cargarMermaConfig() }, [])
@@ -567,6 +571,8 @@ const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(n
       setMermaConfig({
         piezas: { ...MERMA_PIEZA_DEFAULT, ...(data.valor.piezas || {}) },
         media_res: (data.valor.media_res && data.valor.media_res.length) ? data.valor.media_res : MERMA_MEDIA_RES_DEFAULT,
+        // Si la config es vieja (sin merma_frio), vale el 2,5% de siempre.
+        merma_frio: Number.isFinite(Number(data.valor.merma_frio)) ? Number(data.valor.merma_frio) : MERMA_FRIO_DEFAULT,
       })
     }
   }
@@ -662,7 +668,7 @@ setElaboraciones(elaboracionesData || [])
   function calcularPiezas(entrada, modeloId) {
     if (!entrada) return []
     const kgBase = entrada.kg_real || entrada.kg || 0
-    const kgNeto = kgBase * (1 - mermaPiezasDe(tipoAnimal))
+    const kgNeto = kgBase * (1 - mermaFrio)
     return MODELOS_DESPOSTE[modeloId].piezas.map(pieza => ({
       nombre: pieza.nombre,
       kg: parseFloat((kgNeto * pieza.pct).toFixed(2)),
@@ -702,12 +708,13 @@ setElaboraciones(elaboracionesData || [])
     setLoading(true)
     try {
       const kgBase = seleccionada.kg_real || seleccionada.kg || 0
-      const mermaPiezas = mermaPiezasDe(tipoAnimal)
-      const kgNeto = kgBase * (1 - mermaPiezas)
+      // A piezas no se configura merma de desposte: se cargan los pesos finales
+      // y la merma sale de la resta. Lo único que se descuenta antes es el frío.
+      const kgNeto = kgBase * (1 - mermaFrio)
       const { data: desposteData, error } = await supabase.from('despostes').insert({
         fecha, entrada_id: seleccionada.id, modelo,
         tipo_desposte: 'piezas', tipo_animal: tipoAnimal,
-        kg_media_res: kgBase, merma_pct: mermaPiezas * 100, kg_neto: kgNeto,
+        kg_media_res: kgBase, merma_pct: mermaFrio * 100, kg_neto: kgNeto,
         piezas: piezas.map(p => ({ nombre: p.nombre, kg: p.kg_editado, precio_venta: p.precio_venta, tipo_stock: p.tipo_stock })),
         notas
       }).select().single()
@@ -783,7 +790,8 @@ setElaboraciones(elaboracionesData || [])
     setLoading(true)
     try {
       const kgBase = seleccionada.kg_real || seleccionada.kg || 0
-      const merma = MERMAS_KILO[tipoAnimal].merma
+      // Merma del tipo de animal + merma de frío (ver mermaKiloTotal)
+      const merma = mermaKiloTotal(tipoAnimal)
       const kgNeto = parseFloat((kgBase * (1 - merma)).toFixed(2))
       const precioCostoKg = seleccionada.precio_kg > 0 ? parseFloat((seleccionada.precio_kg / (1 - merma)).toFixed(0)) : 0
       const { data: desposteData, error } = await supabase.from('despostes').insert({
@@ -1331,7 +1339,7 @@ async function confirmarDesposteCerdo() {
   setLoading(false)
 }
   const kgBase = seleccionada ? (seleccionada.kg_real || seleccionada.kg || 0) : 0
-  const kgNetoPiezas = kgBase * 0.975
+  const kgNetoPiezas = kgBase * (1 - mermaFrio)
   const kgTotalPiezas = piezas.reduce((s, p) => s + (p.kg_editado || 0), 0)
   // Merma de desposte REAL = lo que sobra del kg neto después de pesar todas las piezas
   // (huesos, recortes, sangre, pérdidas de corte). Antes se llamaba "Diferencia".
@@ -1341,8 +1349,10 @@ async function confirmarDesposteCerdo() {
   // Alias para no romper referencias previas
   const diferencia = mermaDesposteKg
   const mermaKilo = MERMAS_KILO[tipoAnimal] || Object.values(MERMAS_KILO)[0] || { label: '—', merma: 0, color: 'var(--muted)' }
-  const kgNetoKilo = kgBase * (1 - mermaKilo.merma)
-  const precioCostoKilo = seleccionada?.precio_kg > 0 ? (seleccionada.precio_kg / (1 - mermaKilo.merma)).toFixed(0) : 0
+  // La que se aplica de verdad: la del tipo + la de frío
+  const mermaKiloAplicada = mermaKilo.merma + mermaFrio
+  const kgNetoKilo = kgBase * (1 - mermaKiloAplicada)
+  const precioCostoKilo = seleccionada?.precio_kg > 0 ? (seleccionada.precio_kg / (1 - mermaKiloAplicada)).toFixed(0) : 0
  const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '7px 10px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, boxSizing: 'border-box' }
 
   return (
@@ -1393,7 +1403,7 @@ async function confirmarDesposteCerdo() {
                     </div>
                     <div style={{ textAlign: 'right' }}>
                       <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{fmtKg(e.kg_real || e.kg || 0, { decimales: 2 })}</div>
-                      <div style={{ fontSize: 10, color: 'var(--muted)' }}>Neto: {fmtKg((e.kg_real || e.kg || 0) * 0.975, { decimales: 2 })}</div>
+                      <div style={{ fontSize: 10, color: 'var(--muted)' }}>Neto: {fmtKg((e.kg_real || e.kg || 0) * (1 - mermaFrio), { decimales: 2 })}</div>
                     </div>
                   </div>
                 </div>
@@ -1510,7 +1520,8 @@ async function confirmarDesposteCerdo() {
                     <button key={id} onClick={() => setTipoAnimal(id)}
                       style={{ flex: 1, padding: '10px', borderRadius: 8, border: `2px solid ${tipoAnimal === id ? m.color : 'var(--border)'}`, background: tipoAnimal === id ? m.color + '22' : 'var(--surface2)', color: tipoAnimal === id ? m.color : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
                       <div>{m.label}</div>
-                      <div style={{ fontSize: 11, marginTop: 2 }}>Merma: {(m.merma * 100).toFixed(0)}%</div>
+                      <div style={{ fontSize: 11, marginTop: 2 }}>Merma: {((m.merma + mermaFrio) * 100).toFixed(1)}%</div>
+                      <div style={{ fontSize: 9, opacity: 0.75 }}>{(m.merma * 100).toFixed(0)}% + {(mermaFrio * 100).toFixed(1)}% frío</div>
                     </button>
                   ))}
                 </div>
@@ -1518,7 +1529,7 @@ async function confirmarDesposteCerdo() {
               <div style={{ background: 'var(--surface2)', borderRadius: 10, padding: 16, marginBottom: 16 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
                   <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>Kg entrada</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24 }}>{fmtKg(kgBase, { decimales: 2 })}</div></div>
-                  <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>Merma {(mermaKilo.merma * 100).toFixed(0)}%</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: 'var(--red-light)' }}>-{fmtKg(kgBase * mermaKilo.merma, { decimales: 2 })}</div></div>
+                  <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>Merma {(mermaKiloAplicada * 100).toFixed(1)}% <span style={{ opacity: 0.7 }}>({(mermaKilo.merma * 100).toFixed(0)}% + {(mermaFrio * 100).toFixed(1)}% frío)</span></div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: 'var(--red-light)' }}>-{fmtKg(kgBase * mermaKiloAplicada, { decimales: 2 })}</div></div>
                   <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>Kg vendibles</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: 'var(--green)' }}>{fmtKg(kgNetoKilo, { decimales: 2 })}</div></div>
                 </div>
                 {seleccionada.precio_kg > 0 && (
@@ -2233,12 +2244,16 @@ async function confirmarDesposteCerdo() {
         al despostar o convertir (el operario todavía puede ajustarlo en el momento, y
         los kilos finales son siempre los que se pesan de verdad).
         <div style={{ marginTop: 10, color: 'var(--text)' }}>
-          🐄 <strong>Media res → piezas</strong>: lo que se pierde al abrir la media en pierna,
-          costillar, cortito y costeletal. Es baja (~2,5%): la pieza se lleva casi todo.
-          <br />⚖️ <strong>Media res → cortes (x kilo)</strong>: la media entera va a Bovino Cortes.
-          Es alta (20-30%): se va el hueso, la grasa y el recorte.
+          ⚖️ <strong>Media res → cortes (x kilo)</strong>: la media entera va a Bovino Cortes.
+          Se va el hueso, la grasa y el recorte (20-30% según el animal), <strong>más la
+          merma de frío</strong>.
+          <br />❄️ <strong>Merma de frío</strong>: el agua y la sangre que pierde la carne en la
+          cámara después de la faena. Es una sola y se suma a la de arriba.
           <br />🍖 <strong>Pieza → cortes</strong>: lo que pierde cada pieza cuando se la rompe
-          en cortes. Depende de la pieza (una pierna no rinde como un costeletal).
+          en cortes. Cada una tiene la suya (una pierna no rinde como un costeletal).
+          <br /><br />🐄 <strong>Media res → piezas no lleva merma configurada</strong>: ahí se
+          cargan los pesos finales de cada pieza y el sistema saca la merma solo, comparándola
+          con la sugerida por el modelo A/B/C.
         </div>
         <div style={{ marginTop: 10, fontSize: 12 }}>
           Vale para todas las bocas: la merma la calcula la central.
@@ -6657,7 +6672,7 @@ function EditorMerma({ config, onSave, inicialAbierto = false }) {
 
   const setPieza = (nombre, val) => setDraft(d => ({ ...d, piezas: { ...d.piezas, [nombre]: val } }))
   const setMedia = (i, field, val) => setDraft(d => ({ ...d, media_res: d.media_res.map((m, j) => j === i ? { ...m, [field]: val } : m) }))
-  const addMedia = () => setDraft(d => ({ ...d, media_res: [...(d.media_res || []), { id: '', label: '', merma: 25, merma_piezas: MERMA_DESPOSTE_PIEZAS_DEFAULT }] }))
+  const addMedia = () => setDraft(d => ({ ...d, media_res: [...(d.media_res || []), { id: '', label: '', merma: 25 }] }))
   const delMedia = (i) => setDraft(d => ({ ...d, media_res: d.media_res.filter((_, j) => j !== i) }))
 
   const clamp = v => Math.max(0, Math.min(50, Number(v) || 0))
@@ -6673,14 +6688,9 @@ function EditorMerma({ config, onSave, inicialAbierto = false }) {
         let id = ((m.id || '').trim() || (m.label || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')) || ('m' + i)
         while (usados.has(id)) id += '_' + i
         usados.add(id)
-        return {
-          id, label: m.label.trim(),
-          merma: clamp(m.merma),
-          // % del desposte a piezas (antes 2,5 clavado en el código)
-          merma_piezas: clamp(m.merma_piezas ?? MERMA_DESPOSTE_PIEZAS_DEFAULT),
-        }
+        return { id, label: m.label.trim(), merma: clamp(m.merma) }
       })
-    onSave({ piezas, media_res })
+    onSave({ piezas, media_res, merma_frio: clamp(draft.merma_frio ?? MERMA_FRIO_DEFAULT) })
     setOk(true); setTimeout(() => setOk(false), 2500)
   }
 
@@ -6713,12 +6723,12 @@ function EditorMerma({ config, onSave, inicialAbierto = false }) {
               entera a cortes (alta, se va hueso y grasa) o abierta en piezas
               (baja, la pieza pierde poco; el hueso se va al convertirla). */}
           <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
-            Cada tipo de media res tiene su merma para <strong>cada tipo de desposte</strong>.
+            Lo que se pierde al convertir la media entera a cortes: hueso, grasa y recorte.
+            A este % se le suma la <strong>merma de frío</strong> de abajo.
           </div>
           <div style={{ display: 'flex', gap: 8, padding: '0 10px', marginBottom: 4, fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1 }}>
             <span style={{ flex: 1 }}>Tipo</span>
             <span style={{ width: 96, textAlign: 'center' }}>A cortes (x kilo)</span>
-            <span style={{ width: 96, textAlign: 'center' }}>A piezas</span>
             <span style={{ width: 22 }} />
           </div>
           <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
@@ -6729,20 +6739,34 @@ function EditorMerma({ config, onSave, inicialAbierto = false }) {
                   <input type="number" step="0.5" min="0" max="50" value={m.merma} onChange={e => setMedia(i, 'merma', e.target.value)} style={{ ...inp, width: 64, textAlign: 'center', fontWeight: 700 }} />
                   <span style={{ fontSize: 12, color: 'var(--muted)' }}>%</span>
                 </div>
-                <div style={{ width: 96, display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
-                  <input type="number" step="0.5" min="0" max="50"
-                    value={m.merma_piezas ?? MERMA_DESPOSTE_PIEZAS_DEFAULT}
-                    onChange={e => setMedia(i, 'merma_piezas', e.target.value)}
-                    style={{ ...inp, width: 64, textAlign: 'center', fontWeight: 700 }} />
-                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>%</span>
-                </div>
                 <button type="button" onClick={() => delMedia(i)} title="Eliminar" style={{ background: 'none', border: 'none', color: 'var(--red-light)', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}>✕</button>
               </div>
             ))}
           </div>
           <button type="button" className="btn btn-ghost" onClick={addMedia} style={{ fontSize: 12, marginBottom: 12 }}>+ Agregar tipo de media res</button>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 6 }}>
+          {/* MERMA DE FRÍO — es una sola, no depende del tipo ni del desposte:
+              es el agua y la sangre que pierde la carne en cámara después de
+              la faena. Se suma a la merma de "a cortes" y define el kg neto
+              del desposte a piezas. */}
+          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4, marginTop: 18 }}>Merma de frío</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+            El agua y la sangre que pierde la carne en la cámara después de la faena. Es una sola
+            para todas las medias. <strong>Se suma</strong> a la merma de arriba cuando se convierte a
+            cortes (novillito {(Number(draft.media_res?.[0]?.merma) || 0)}% + {Number(draft.merma_frio ?? MERMA_FRIO_DEFAULT)}% ={' '}
+            <strong style={{ color: 'var(--text)' }}>{((Number(draft.media_res?.[0]?.merma) || 0) + Number(draft.merma_frio ?? MERMA_FRIO_DEFAULT)).toFixed(1)}%</strong>),
+            y es lo único que se descuenta antes en el desposte a piezas.
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface2)', borderRadius: 8, padding: '6px 10px', marginBottom: 4, maxWidth: 340 }}>
+            <span style={{ flex: 1, fontSize: 12 }}>❄️ Frío (agua/sangre post-faena)</span>
+            <input type="number" step="0.5" min="0" max="50"
+              value={draft.merma_frio ?? MERMA_FRIO_DEFAULT}
+              onChange={e => setDraft(d => ({ ...d, merma_frio: e.target.value }))}
+              style={{ ...inp, width: 64, textAlign: 'center', fontWeight: 700 }} />
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>%</span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
             <button type="button" className="btn btn-gold" onClick={guardar}>💾 Guardar merma</button>
             {ok && <span style={{ fontSize: 13, color: 'var(--green)', fontWeight: 700 }}>✅ Guardado</span>}
           </div>
