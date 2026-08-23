@@ -649,10 +649,20 @@ const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(n
   // de codigos. El historial completo vive en la solapa 🐄 Media Reses.
   supabase.from('medias_stock').select('*').order('id', { ascending: false }),
 ])
-// Enriquecer cada entrada con el codigo MR-XXX de medias_stock
+// Enriquecer cada entrada con el codigo MR-XXX y con su RESERVA (si el dueño
+// la apartó desde la solapa Media Reses, acá no se puede despostar).
 const codigoPorEntrada = {}
-;(mediasStockData || []).forEach(m => { if (m.entrada_id) codigoPorEntrada[m.entrada_id] = m.codigo })
-setMediasRes((entradas || []).map(e => ({ ...e, codigo_media: codigoPorEntrada[e.id] || null })))
+const reservaPorEntrada = {}
+;(mediasStockData || []).forEach(m => {
+  if (!m.entrada_id) return
+  codigoPorEntrada[m.entrada_id] = m.codigo
+  if (m.estado === 'reservada') reservaPorEntrada[m.entrada_id] = m.reservada_para || 'reservada'
+})
+setMediasRes((entradas || []).map(e => ({
+  ...e,
+  codigo_media: codigoPorEntrada[e.id] || null,
+  reservada_para_txt: reservaPorEntrada[e.id] || null,
+})))
 setDespostes(despostesData || [])
 setPrecios(preciosData || [])
 setPiezasIndividuales(piezasIndivData || [])
@@ -1397,8 +1407,9 @@ async function confirmarDesposteCerdo() {
               <div className="card-title">🐄 Medias Reses disponibles</div>
               <AvisoDuplicadas cantidad={idsConPosibleDuplicado(mediasRes).size} />
               {mediasRes.length === 0 ? <div className="empty">Sin medias reses para despostar</div> : (() => { const dupIds = idsConPosibleDuplicado(mediasRes); return mediasRes.map(e => (
-                <div key={e.id} onClick={() => seleccionarMedia(e)}
-                  style={{ padding: 12, borderRadius: 8, marginBottom: 8, cursor: 'pointer', border: `2px solid ${seleccionada?.id === e.id ? 'var(--gold)' : (dupIds.has(e.id) ? '#ffb86b' : 'var(--border)')}`, background: seleccionada?.id === e.id ? 'rgba(201,168,76,0.08)' : 'var(--surface2)' }}>
+                <div key={e.id} onClick={() => e.reservada_para_txt ? null : seleccionarMedia(e)}
+                  title={e.reservada_para_txt ? `Reservada para ${e.reservada_para_txt}` : ''}
+                  style={{ padding: 12, borderRadius: 8, marginBottom: 8, cursor: e.reservada_para_txt ? 'not-allowed' : 'pointer', opacity: e.reservada_para_txt ? 0.55 : 1, border: `2px solid ${e.reservada_para_txt ? '#ffd17a' : (seleccionada?.id === e.id ? 'var(--gold)' : (dupIds.has(e.id) ? '#ffb86b' : 'var(--border)'))}`, background: seleccionada?.id === e.id ? 'rgba(201,168,76,0.08)' : 'var(--surface2)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <div>
                       <div style={{ fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1406,6 +1417,7 @@ async function confirmarDesposteCerdo() {
                         🐄 {e.descripcion || 'Media Res'}
                         {dupIds.has(e.id) && <TagDuplicada />}
                       </div>
+                      {e.reservada_para_txt && <div style={{ fontSize: 11, color: '#ffd17a', fontWeight: 700 }}>🔒 RESERVADA — {e.reservada_para_txt}</div>}
                       <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.fecha} · {e.proveedor_nombre}</div>
                       {e.precio_kg > 0 && <div style={{ fontSize: 11, color: 'var(--amber)' }}>{fmtPrecio(e.precio_kg)}/kg</div>}
                     </div>
@@ -1500,8 +1512,9 @@ async function confirmarDesposteCerdo() {
               <div className="card-title">🐄 Seleccioná una media res</div>
               <AvisoDuplicadas cantidad={idsConPosibleDuplicado(mediasRes).size} />
               {mediasRes.length === 0 ? <div className="empty">Sin medias reses disponibles</div> : (() => { const dupIds = idsConPosibleDuplicado(mediasRes); return mediasRes.map(e => (
-                <div key={e.id} onClick={() => setSeleccionada(e)}
-                  style={{ padding: 12, borderRadius: 8, marginBottom: 8, cursor: 'pointer', border: `2px solid ${seleccionada?.id === e.id ? 'var(--blue)' : (dupIds.has(e.id) ? '#ffb86b' : 'var(--border)')}`, background: seleccionada?.id === e.id ? 'rgba(41,128,185,0.08)' : 'var(--surface2)' }}>
+                <div key={e.id} onClick={() => e.reservada_para_txt ? null : setSeleccionada(e)}
+                  title={e.reservada_para_txt ? `Reservada para ${e.reservada_para_txt}` : ''}
+                  style={{ padding: 12, borderRadius: 8, marginBottom: 8, cursor: e.reservada_para_txt ? 'not-allowed' : 'pointer', opacity: e.reservada_para_txt ? 0.55 : 1, border: `2px solid ${e.reservada_para_txt ? '#ffd17a' : (seleccionada?.id === e.id ? 'var(--blue)' : (dupIds.has(e.id) ? '#ffb86b' : 'var(--border)'))}`, background: seleccionada?.id === e.id ? 'rgba(41,128,185,0.08)' : 'var(--surface2)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <div>
                       <div style={{ fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1509,6 +1522,7 @@ async function confirmarDesposteCerdo() {
                         🐄 {e.descripcion || 'Media Res'}
                         {dupIds.has(e.id) && <TagDuplicada />}
                       </div>
+                      {e.reservada_para_txt && <div style={{ fontSize: 11, color: '#ffd17a', fontWeight: 700 }}>🔒 RESERVADA — {e.reservada_para_txt}</div>}
                       <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.fecha} · {e.proveedor_nombre}</div>
                       {e.precio_kg > 0 && <div style={{ fontSize: 11, color: 'var(--amber)' }}>Costo: {fmtPrecio(e.precio_kg)}/kg</div>}
                     </div>
@@ -2397,6 +2411,36 @@ function MediasResesTab() {
     return () => { clearTimeout(t); supabase.removeChannel(canal) }
   }, [])
 
+  // Reservar = apartar una media para algo puntual (un cliente que la encargó,
+  // una fiesta, un despiece especial). No la saca del stock: sigue contando en
+  // los kilos, pero NADIE la puede despostar ni despachar hasta liberarla, y
+  // el depostero la ve marcada en su planilla.
+  const [reservando, setReservando] = useState(null)   // { media, para }
+  const [msg, setMsg] = useState(null)
+
+  async function confirmarReserva() {
+    const { media, para } = reservando
+    if (!String(para || '').trim()) { setMsg({ tipo: 'error', txt: 'Poné para quién / por qué la reservás.' }); return }
+    const { error } = await supabase.from('medias_stock').update({
+      estado: 'reservada', reservada_para: para.trim(), reservada_en: new Date().toISOString(),
+    }).eq('id', media.id)
+    setReservando(null)
+    if (error) { setMsg({ tipo: 'error', txt: 'No se pudo reservar: ' + error.message }); return }
+    setMsg({ tipo: 'ok', txt: `🔒 ${media.codigo} reservada para ${para.trim()}.` })
+    cargar()
+    setTimeout(() => setMsg(null), 4000)
+  }
+
+  async function liberar(media) {
+    const { error } = await supabase.from('medias_stock').update({
+      estado: 'disponible', reservada_para: null, reservada_en: null,
+    }).eq('id', media.id)
+    if (error) { setMsg({ tipo: 'error', txt: 'No se pudo liberar: ' + error.message }); return }
+    setMsg({ tipo: 'ok', txt: `🔓 ${media.codigo} liberada: vuelve a estar disponible.` })
+    cargar()
+    setTimeout(() => setMsg(null), 4000)
+  }
+
   const disponibles = medias.filter(m => m.estado === 'disponible')
   const reservadas = medias.filter(m => m.estado === 'reservada')
   const kgDisponibles = disponibles.reduce((s, m) => s + (Number(m.kg) || 0), 0)
@@ -2433,6 +2477,37 @@ function MediasResesTab() {
         </div>
       </div>
 
+      {msg && (
+        <div className={`alert alert-${msg.tipo === 'error' ? 'error' : 'success'}`} style={{ marginBottom: 12 }}>{msg.txt}</div>
+      )}
+
+      {/* ── RESERVADAS: apartadas, nadie las puede tocar ── */}
+      {reservadas.length > 0 && (
+        <div className="card" style={{ marginBottom: 16, borderColor: '#ffd17a' }}>
+          <div className="card-title" style={{ color: '#ffd17a' }}>🔒 Reservadas ({reservadas.length})</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
+            Siguen en el stock pero no se pueden despostar ni despachar, y el depostero las ve
+            bloqueadas en su planilla.
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }}>
+            {reservadas.map(m => (
+              <div key={m.id} style={{ ...card, borderColor: '#ffd17a' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                  <span style={{ background: '#ffd17a', color: '#000', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 800 }}>{m.codigo}</span>
+                  <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: '#ffd17a' }}>{fmtKg(m.kg || 0, { decimales: 1 })}</span>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text)', marginTop: 6 }}>
+                  Para: <strong>{m.reservada_para || '—'}</strong>
+                </div>
+                <button onClick={() => liberar(m)} className="btn btn-ghost" style={{ fontSize: 12, marginTop: 8, width: '100%' }}>
+                  🔓 Liberar
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ── LAS QUE ESTÁN EN STOCK, UNA POR UNA ── */}
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="card-title">🐄 En stock ahora ({disponibles.length})</div>
@@ -2452,8 +2527,14 @@ function MediasResesTab() {
                     <div style={{ fontSize: 11, color: 'var(--amber)' }}>{fmtPrecio(m.precio_costo_kg)}/kg</div>
                   )}
                 </div>
-                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: 'var(--gold)', flexShrink: 0 }}>
-                  {fmtKg(m.kg || 0, { decimales: 1 })}
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: 'var(--gold)' }}>
+                    {fmtKg(m.kg || 0, { decimales: 1 })}
+                  </div>
+                  <button onClick={() => { setReservando({ media: m, para: '' }); setMsg(null) }}
+                    className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 8px', marginTop: 4 }}>
+                    🔒 Reservar
+                  </button>
                 </div>
               </div>
             ))}
@@ -2463,6 +2544,34 @@ function MediasResesTab() {
 
       {/* ── QUÉ SE HIZO CON CADA UNA ── */}
       <HistorialMedias medias={medias} />
+
+      {/* Para quién se reserva. Inline y no prompt(): en iPhone/PWA el prompt
+          se suprime sin error y la reserva se perdería en silencio. */}
+      {reservando && (
+        <div onClick={() => setReservando(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 1500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: 'var(--surface)', border: '1px solid #ffd17a', borderRadius: 14, padding: 24, width: '100%', maxWidth: 420 }}>
+            <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: '#ffd17a', letterSpacing: 2, marginBottom: 8 }}>
+              🔒 RESERVAR {reservando.media.codigo}
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
+              {fmtKg(reservando.media.kg || 0, { decimales: 2 })} · {reservando.media.proveedor_origen || '—'}
+              <br />Queda apartada: nadie la puede despostar ni despachar hasta que la liberes.
+            </div>
+            <label style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>¿Para quién / por qué?</label>
+            <input autoFocus value={reservando.para}
+              onChange={e => setReservando(r => ({ ...r, para: e.target.value }))}
+              onKeyDown={e => { if (e.key === 'Enter') confirmarReserva() }}
+              placeholder="Ej: Pedido de Juan Pérez · Fiesta del sábado"
+              style={{ width: '100%', boxSizing: 'border-box', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '10px 12px', fontSize: 14, fontFamily: "'DM Sans',sans-serif" }} />
+            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+              <button onClick={() => setReservando(null)} className="btn btn-ghost" style={{ flex: 1 }}>Cancelar</button>
+              <button onClick={confirmarReserva} className="btn btn-gold" style={{ flex: 1 }}>🔒 Reservar</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -3945,6 +4054,23 @@ export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   // categoría personalizada (cat_pescados) muestra su nombre y no la clave.
   const [labelsCatalogo, setLabelsCatalogo] = useState({})
   useEffect(() => { cargarCategoriasPrecios().then(l => setLabelsCatalogo(labelsDeCategorias(l))) }, [])
+  // Medias que se pueden despachar. Las que el dueño reservó desde la solapa
+  // 🐄 Media Reses quedan marcadas y no se pueden elegir: están apartadas.
+  async function cargarMediasDespacho() {
+    const [{ data: medias }, { data: ms }] = await Promise.all([
+      supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).eq('eliminado', false)
+        .order('fecha', { ascending: false }).order('created_at', { ascending: false }),
+      supabase.from('medias_stock').select('entrada_id, codigo, estado, reservada_para'),
+    ])
+    const porEntrada = {}
+    ;(ms || []).forEach(m => { if (m.entrada_id) porEntrada[m.entrada_id] = m })
+    setMediasDisponibles((medias || []).map(e => ({
+      ...e,
+      codigo_media: porEntrada[e.id]?.codigo || null,
+      reservada_para_txt: porEntrada[e.id]?.estado === 'reservada' ? (porEntrada[e.id]?.reservada_para || 'reservada') : null,
+    })))
+  }
+
   async function recargarPiezasDispVenta() {
     const { data } = await supabase.from('piezas_stock').select('*').eq('estado', 'disponible').order('fecha_ingreso', { ascending: true }).order('id', { ascending: true })
     setPiezasDispVenta(data || [])
@@ -3976,7 +4102,7 @@ export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   // Orden por created_at además de fecha: dos medias reses cargadas el mismo
   // día necesitan ordenarse por hora real de creación (la columna `fecha` es
   // DATE y `id` es UUID — ninguno sirve solo como criterio cronológico).
-  supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).eq('eliminado', false).order('fecha', { ascending: false }).order('created_at', { ascending: false }).then(({ data }) => setMediasDisponibles(data || []))
+  cargarMediasDespacho()
   recargarPiezasDispVenta()
   recargarCajasDispVenta()
   recargarStockMap()
@@ -4571,8 +4697,7 @@ for (const item of items) {
         }).in('entrada_id', mediasIds)
       }
       setMediaSeleccionada(null)
-      const { data: medias } = await supabase.from('entradas_deposito').select('*').eq('tipo', 'bovino_mr').eq('despostada', false).eq('eliminado', false).order('fecha', { ascending: false }).order('created_at', { ascending: false })
-      setMediasDisponibles(medias || [])
+      await cargarMediasDespacho()
     const { data: remitoData } = await supabase.from('remitos').insert({
       fecha: form.fecha, cliente_nombre: clienteNombre,
       cliente_id: clienteId || null,
@@ -4691,11 +4816,13 @@ for (const item of items) {
     {mediasVisibles.length === 0 ? (
       <div style={{ fontSize: 12, color: 'var(--muted)' }}>Sin medias reses disponibles</div>
     ) : (() => { const dupIds = idsConPosibleDuplicado(mediasVisibles); return mediasVisibles.map(e => (
-      <div key={e.id} onClick={() => { setMediaSeleccionada(e); setForm(f => ({ ...f, kg: (e.kg_real || e.kg || 0).toString() })) }}
-        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderRadius: 8, marginBottom: 6, cursor: 'pointer', border: `2px solid ${mediaSeleccionada?.id === e.id ? 'var(--gold)' : (dupIds.has(e.id) ? '#ffb86b' : 'var(--border)')}`, background: mediaSeleccionada?.id === e.id ? 'rgba(201,168,76,0.1)' : 'var(--surface2)' }}>
+      <div key={e.id} onClick={() => { if (e.reservada_para_txt) return; setMediaSeleccionada(e); setForm(f => ({ ...f, kg: (e.kg_real || e.kg || 0).toString() })) }}
+        title={e.reservada_para_txt ? `Reservada para ${e.reservada_para_txt}` : ''}
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderRadius: 8, marginBottom: 6, cursor: e.reservada_para_txt ? 'not-allowed' : 'pointer', opacity: e.reservada_para_txt ? 0.55 : 1, border: `2px solid ${e.reservada_para_txt ? '#ffd17a' : (mediaSeleccionada?.id === e.id ? 'var(--gold)' : (dupIds.has(e.id) ? '#ffb86b' : 'var(--border)'))}`, background: mediaSeleccionada?.id === e.id ? 'rgba(201,168,76,0.1)' : 'var(--surface2)' }}>
         <div>
           <div style={{ fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>🐄 {e.descripcion || 'Media Res'}{dupIds.has(e.id) && <TagDuplicada />}</div>
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.fecha} · {e.proveedor_nombre}</div>
+          {e.reservada_para_txt && <div style={{ fontSize: 11, color: '#ffd17a', fontWeight: 700 }}>🔒 RESERVADA — {e.reservada_para_txt}</div>}
         </div>
         <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{(Number(e.kg_real) || Number(e.kg) || 0).toFixed(1)} kg</div>
       </div>
