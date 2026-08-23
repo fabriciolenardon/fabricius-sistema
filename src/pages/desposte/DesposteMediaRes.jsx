@@ -62,7 +62,7 @@ export default function DesposteMediaRes() {
       supabase.from('flujo_deposito').select('*')
         .order('created_at', { ascending: false }).limit(10),
       // Trazabilidad individual: trae el codigo MR-XXX de cada media
-      supabase.from('medias_stock').select('entrada_id, codigo'),
+      supabase.from('medias_stock').select('entrada_id, codigo, estado, reservada_para'),
       // Flujos activos (pendiente/aprobado) para mapear el estado de cada
       // media reservada y qué admin la aprobó.
       supabase.from('flujo_deposito').select('entrada_id, estado, aprobado_por_nombre, created_at')
@@ -70,11 +70,19 @@ export default function DesposteMediaRes() {
     ])
     // Enriquecer cada media con su codigo MR-XXX
     const codigoPor = {}
-    ;(medias || []).forEach(m => { if (m.entrada_id) codigoPor[m.entrada_id] = m.codigo })
+    // Medias que el dueño apartó desde Depósito → 🐄 Media Reses. Acá se ven
+    // pero NO se pueden usar: no se despostan ni se despachan hasta que las
+    // libere. (Distinto de "ya enviada al admin", que es sólo informativo.)
+    const reservaPor = {}
+    ;(medias || []).forEach(m => {
+      if (!m.entrada_id) return
+      codigoPor[m.entrada_id] = m.codigo
+      if (m.estado === 'reservada') reservaPor[m.entrada_id] = m.reservada_para || 'reservada'
+    })
     // Mapa entrada_id → flujo activo más reciente (para el estado de la reserva)
     const flujoPor = {}
     ;(flujosAct || []).forEach(f => { if (f.entrada_id && !flujoPor[f.entrada_id]) flujoPor[f.entrada_id] = f })
-    setMediasRes((mr || []).map(m => ({ ...m, codigo_media: codigoPor[m.id] || null, flujo: flujoPor[m.id] || null })))
+    setMediasRes((mr || []).map(m => ({ ...m, codigo_media: codigoPor[m.id] || null, flujo: flujoPor[m.id] || null, reservada_para_txt: reservaPor[m.id] || null })))
     setMisEnvios(env || [])
   }
 
@@ -263,12 +271,14 @@ export default function DesposteMediaRes() {
               const flujoActivo = mr.flujo
               const aprobada = flujoActivo?.estado === 'aprobado'
               return (
-                <button key={mr.id} onClick={() => { setSeleccionada(sel ? null : mr); setKgManual(sel ? '' : String(mr.kg_real || mr.kg || '')) }}
+                <button key={mr.id} disabled={!!mr.reservada_para_txt}
+                  onClick={() => { setSeleccionada(sel ? null : mr); setKgManual(sel ? '' : String(mr.kg_real || mr.kg || '')) }}
                   style={{
                     padding: 12, background: sel ? 'var(--gold)22' : 'var(--surface)',
-                    border: `2px solid ${sel ? 'var(--gold)' : 'var(--border)'}`,
+                    border: `2px solid ${mr.reservada_para_txt ? '#ffd17a' : (sel ? 'var(--gold)' : 'var(--border)')}`,
                     color: sel ? 'var(--gold)' : 'var(--text)',
-                    borderRadius: 10, cursor: 'pointer', textAlign: 'left',
+                    borderRadius: 10, cursor: mr.reservada_para_txt ? 'not-allowed' : 'pointer',
+                    opacity: mr.reservada_para_txt ? 0.6 : 1, textAlign: 'left',
                   }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                     {mr.codigo_media && <span style={{ background: 'var(--gold)', color: '#000', padding: '2px 7px', borderRadius: 6, fontSize: 11, fontWeight: 800, letterSpacing: 0.5 }}>{mr.codigo_media}</span>}
@@ -276,6 +286,12 @@ export default function DesposteMediaRes() {
                   </div>
                   <div style={{ fontSize: 20, fontWeight: 700 }}>{fmtKg(mr.kg_real || mr.kg)}</div>
                   <div style={{ fontSize: 10, color: 'var(--muted)' }}>{mr.proveedor_nombre || mr.proveedor || '—'}</div>
+                  {mr.reservada_para_txt && (
+                    <div style={{ marginTop: 6, fontSize: 11, fontWeight: 800, color: '#ffd17a' }}>
+                      🔒 RESERVADA — {mr.reservada_para_txt}
+                      <div style={{ fontSize: 10, fontWeight: 400, color: 'var(--muted)' }}>No se puede despostar ni vender</div>
+                    </div>
+                  )}
                   {flujoActivo && (
                     <div style={{ marginTop: 6, fontSize: 10, fontWeight: 700, color: aprobada ? '#7dff7d' : '#ffd17a' }}>
                       {aprobada ? 'ℹ️ Ya enviada al admin (aprobada)' : 'ℹ️ Ya enviada al admin (pendiente)'} · sigue disponible
