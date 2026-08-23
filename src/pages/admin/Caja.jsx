@@ -57,11 +57,6 @@ export default function Caja() {
   const { sucursalId, isSucursal: esSucursal } = useAuth()
   const [precios, setPrecios] = useState([])
   const [ofertas, setOfertas] = useState([])
-  // Promo Mundial: -X% en compras pagadas 100% con efectivo y/o transferencia.
-  // Mientras está activa las ofertas se IGNORAN en la Caja para no acumular
-  // doble descuento. Se prende/apaga desde Precios → Ofertas (config_sistema,
-  // clave 'promo_mundial') y llega acá por el realtime de config_sistema.
-  const [promoMundial, setPromoMundial] = useState({ activa: false, descuento_pct: 10 })
   const [listaPrecio, setListaPrecio] = useState('minorista') // 'minorista' | 'mayorista'
   const [configEAN, setConfigEAN] = useState({
     // Formato REAL Cuora Max Fabricius — verificado con tickets el 2026-05-22:
@@ -145,7 +140,7 @@ export default function Caja() {
 
   async function cargarTodo() {
     const hoy = fechaHoyARG()  // Hora local ARG, NO UTC. Ver lib/fechas.js
-    const [{ data: pre }, { data: cfg }, { data: ventas }, { data: ofs }, { data: cajas }, { data: piezas }, { data: promo }, { data: cbs }] = await Promise.all([
+    const [{ data: pre }, { data: cfg }, { data: ventas }, { data: ofs }, { data: cajas }, { data: piezas }, { data: cbs }] = await Promise.all([
       supabase.from('precios').select('*').order('nombre'),
       supabase.from('config_sistema').select('*').eq('clave', 'ean13_formato').maybeSingle(),
       supabase.from('ventas_minoristas').select('*')
@@ -161,7 +156,6 @@ export default function Caja() {
       // Piezas bovinas individuales disponibles (para productos con vende_por_pieza=true)
       supabase.from('piezas_stock').select('*').eq('estado', 'disponible')
         .order('fecha_ingreso', { ascending: true }).order('id', { ascending: true }),
-      supabase.from('config_sistema').select('*').eq('clave', 'promo_mundial').maybeSingle(),
       // Combos disponibles para vender (los pausados no se muestran).
       supabase.from('combos_venta').select('*').eq('disponible', true).order('orden').order('nombre'),
     ])
@@ -178,7 +172,6 @@ export default function Caja() {
     setOfertas(ofs || [])
     setCajasDisp(cajas || [])
     setPiezasDisp(piezas || [])
-    setPromoMundial(promo?.valor || { activa: false, descuento_pct: 10 })
     setCombos(cbs || [])
   }
 
@@ -193,12 +186,7 @@ export default function Caja() {
 
     const flagLista = listaPrecio === 'mayorista' ? 'aplica_mayorista' : 'aplica_minorista'
     // Ofertas viejas sin flags se asumen aplicables (default DB es TRUE).
-    // Con Promo Mundial activa las ofertas quedan PAUSADAS: el -X% se aplica
-    // sobre el total al cobrar, y si además aplicáramos la oferta sería doble
-    // descuento (pérdida de plata).
-    const oferta = promoMundial?.activa
-      ? null
-      : ofertas.find(o => o.precio_id === producto.id && o[flagLista] !== false)
+    const oferta = ofertas.find(o => o.precio_id === producto.id && o[flagLista] !== false)
 
     let precio = precioBase
     if (oferta) {
@@ -421,7 +409,7 @@ export default function Caja() {
   // pero reparte el precio FIJO del combo entre las líneas en proporción a
   // su valor minorista normal. Así Σ importe = precio del combo, no la suma
   // de los precios sueltos. Las líneas quedan marcadas con combo_id/combo_nombre
-  // para excluirlas de Promo Mundial / Blangino (el precio del combo YA es la oferta).
+  // para excluirlas del descuento Blangino (el precio del combo YA es la oferta).
   function agregarCombo(combo) {
     const items = Array.isArray(combo?.items) ? combo.items : []
     if (!items.length) { showMsg('❌ El combo no tiene productos cargados', 'error'); return }
@@ -529,34 +517,20 @@ export default function Caja() {
   // parseNumero acepta "1500,50" o "1500.50" — el cajero puede tipear
   // con coma o punto sin preocuparse del formato.
   const total = carrito.reduce((s, i) => s + i.importe, 0)
-  // Los combos ya vienen con su precio de oferta: NO se les aplica Promo
-  // Mundial ni Blangino. La base descontable es el total SIN las líneas de combo.
+  // Los combos ya vienen con su precio de oferta: NO se les aplica el
+  // descuento Blangino. La base descontable es el total SIN las líneas de combo.
   const totalCombos = carrito.reduce((s, i) => s + (i.combo_id ? i.importe : 0), 0)
   const baseDescuento = total - totalCombos
   const cobrado = parseNumero(pago.efectivo) + parseNumero(pago.debito) + parseNumero(pago.transferencia)
-  // ── Promo Mundial ──────────────────────────────────────────
-  // El descuento aplica SOLO si el pago es 100% efectivo y/o transferencia.
-  // Apenas el cajero carga algo en débito, el descuento desaparece y se
-  // cobra el total completo (la promo no cubre débito).
-  const promoPct = Number(promoMundial?.descuento_pct) || 10
-  const pagaConDebito = parseNumero(pago.debito) > 0
   // ── Descuento Blangino (convenio) ──────────────────────────
   // Empleado de la firma Blangino: 10% en CUALQUIER medio de pago.
-  // Pisa la Promo Mundial para no aplicar doble descuento.
   const BLANGINO_PCT = 10
   const blanginoDescuento = blangino.activo ? Math.round(baseDescuento * BLANGINO_PCT / 100) : 0
-  // ── Promo Mundial ──────────────────────────────────────────
-  // Aplica SOLO si NO hay Blangino y el pago es 100% efectivo/transferencia.
-  const promoDescuento = (!blangino.activo && promoMundial?.activa && !pagaConDebito)
-    ? Math.round(baseDescuento * promoPct / 100)
-    : 0
-  const descuentoAplicado = blanginoDescuento || promoDescuento
-  const descuentoPctAplicado = blanginoDescuento > 0 ? BLANGINO_PCT : (promoDescuento > 0 ? promoPct : 0)
-  // Montos para los botones rápidos. Blangino aplica a todos los medios;
-  // la Promo Mundial solo a efectivo/transferencia (no a débito).
-  const promoFull = promoMundial?.activa ? Math.round(baseDescuento * promoPct / 100) : 0
-  const fillEfvoTransf = total - (blangino.activo ? blanginoDescuento : promoFull)
-  const fillDebito     = total - blanginoDescuento
+  const descuentoAplicado = blanginoDescuento
+  const descuentoPctAplicado = blanginoDescuento > 0 ? BLANGINO_PCT : 0
+  // Monto para los botones rápidos: Blangino aplica a todos los medios de pago,
+  // así que los tres botones cobran lo mismo.
+  const fillTotal = total - blanginoDescuento
   const totalACobrar = total - descuentoAplicado
   const vuelto = cobrado - totalACobrar
   const blanginoIncompleto = blangino.activo && (!blangino.empleado.trim() || !blangino.legajo.trim())
@@ -647,7 +621,7 @@ export default function Caja() {
         combo_id: i.combo_id || null,
         combo_nombre: i.combo_nombre || null,
       })),
-      // total = lo efectivamente cobrado (con Promo Mundial ya descontada).
+      // total = lo efectivamente cobrado (con el descuento ya aplicado).
       // La suma de items.importe puede ser mayor: la diferencia queda
       // registrada en descuento_monto para auditoría/reportes.
       total: totalACobrar,
@@ -926,16 +900,7 @@ export default function Caja() {
             ⚠️ cambiar lista no recalcula los items ya cargados
           </div>
         )}
-        {promoMundial?.activa ? (
-          <div style={{
-            marginLeft: 'auto', fontSize: 12, fontWeight: 800, color: '#7ec8ff',
-            background: '#16243a', border: '1px solid #3a6ea5', borderRadius: 8,
-            padding: '6px 14px', letterSpacing: 0.5,
-          }}>
-            ⚽ PROMO MUNDIAL −{promoPct}% efectivo/transferencia
-            {ofertas.length > 0 && <span style={{ color: '#ffb86b', fontWeight: 600 }}> · ofertas pausadas</span>}
-          </div>
-        ) : ofertas.length > 0 && (
+        {ofertas.length > 0 && (
           <div style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--green)', fontWeight: 700 }}>
             🏷️ {ofertas.length} oferta(s) vigente(s)
           </div>
@@ -1205,7 +1170,7 @@ export default function Caja() {
               </div>
               {ultimaVenta.descuento_monto > 0 && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#7ec8ff', marginBottom: 4 }}>
-                  <span>{ultimaVenta.convenio === 'blangino' ? '🔵 Descuento Blangino' : '⚽ Promo Mundial'} −{ultimaVenta.descuento_pct}%:</span>
+                  <span>{ultimaVenta.convenio === 'blangino' ? '🔵 Descuento Blangino' : '🏷️ Descuento'} −{ultimaVenta.descuento_pct}%:</span>
                   <span>−{fmt(ultimaVenta.descuento_monto)}</span>
                 </div>
               )}
@@ -1460,18 +1425,11 @@ export default function Caja() {
                   <div style={{ fontSize: 16, color: 'var(--muted)', textDecoration: 'line-through' }}>{fmt(total)}</div>
                   <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 48, color: '#7ec8ff' }}>{fmt(totalACobrar)}</div>
                   <div style={{ fontSize: 12, color: '#7ec8ff', fontWeight: 700 }}>
-                    {blanginoDescuento > 0
-                      ? `🔵 Descuento Blangino −${BLANGINO_PCT}%: ahorra ${fmt(blanginoDescuento)}`
-                      : `⚽ Promo Mundial −${promoPct}%: ahorra ${fmt(promoDescuento)}`}
+                    🔵 Descuento Blangino −{BLANGINO_PCT}%: ahorra {fmt(blanginoDescuento)}
                   </div>
                 </>
               ) : (
                 <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 48, color: 'var(--gold)' }}>{fmt(totalACobrar)}</div>
-              )}
-              {!blangino.activo && promoMundial?.activa && pagaConDebito && (
-                <div style={{ fontSize: 11, color: '#ffb86b', fontWeight: 700, marginTop: 4 }}>
-                  ⚠️ Con débito NO aplica la Promo Mundial — se cobra el total completo
-                </div>
               )}
             </div>
 
@@ -1523,17 +1481,16 @@ export default function Caja() {
             </div>
 
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-              {/* Con Blangino el 10% aplica a todos los medios; con Promo Mundial
-                  solo a efectivo/transferencia (el débito va sin descuento). */}
-              <button onClick={() => setPago(p => ({ ...p, efectivo: fillEfvoTransf.toString(), debito: '', transferencia: '' }))}
+              {/* El 10% de Blangino aplica a todos los medios de pago. */}
+              <button onClick={() => setPago(p => ({ ...p, efectivo: fillTotal.toString(), debito: '', transferencia: '' }))}
                 style={{ flex: 1, padding: 10, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text)', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
                 ✋ Justo efectivo
               </button>
-              <button onClick={() => setPago(p => ({ ...p, debito: fillDebito.toString(), efectivo: '', transferencia: '' }))}
+              <button onClick={() => setPago(p => ({ ...p, debito: fillTotal.toString(), efectivo: '', transferencia: '' }))}
                 style={{ flex: 1, padding: 10, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text)', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
                 💳 Solo débito
               </button>
-              <button onClick={() => setPago(p => ({ ...p, transferencia: fillEfvoTransf.toString(), efectivo: '', debito: '' }))}
+              <button onClick={() => setPago(p => ({ ...p, transferencia: fillTotal.toString(), efectivo: '', debito: '' }))}
                 style={{ flex: 1, padding: 10, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text)', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
                 📲 Transfer.
               </button>

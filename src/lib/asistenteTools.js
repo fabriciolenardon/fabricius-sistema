@@ -507,11 +507,6 @@ El saldo del cliente se actualiza AUTOMÁTICAMENTE por un trigger en la base de 
     parameters: { type: 'object', properties: { limite: { type: 'number', description: 'Cantidad (default 5)' } } }
   },
   {
-    name: 'consultar_promo_mundial',
-    description: 'Estado de la Promo Mundial (descuento en efectivo/transferencia de la caja): activa o no y % de descuento.',
-    parameters: { type: 'object', properties: {} }
-  },
-  {
     name: 'consultar_arqueos',
     description: 'Últimos arqueos de caja: fecha, cajero, total contado y diferencia contra lo esperado. Usar para "cómo dieron los arqueos", "faltó plata en caja".',
     parameters: { type: 'object', properties: { limite: { type: 'number', description: 'Cantidad (default 5)' } } }
@@ -1458,13 +1453,6 @@ export async function ejecutarFuncion(nombre, args) {
           return `• ${formatearFecha(e.fecha)} · ${prods} · ${Number(e.kg_final || e.kg_elaborado || 0).toFixed(1)} kg${estado}`
         }).join('\n')
         return { resultado: `Últimas elaboraciones:\n${lista}` }
-      }
-
-      case 'consultar_promo_mundial': {
-        const { data, error } = await supabase.from('config_sistema').select('valor').eq('clave', 'promo_mundial').maybeSingle()
-        if (error) throw error
-        const v = data?.valor || {}
-        return { resultado: v.activa ? `⚽ Promo Mundial ACTIVA: −${v.descuento_pct || 10}% en efectivo/transferencia en la caja.` : 'La Promo Mundial está APAGADA.' }
       }
 
       case 'consultar_arqueos': {

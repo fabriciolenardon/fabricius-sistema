@@ -221,7 +221,7 @@ function useDashboardData(refreshMs = 120000) {
     const anioPasadoHoy    = `${hoyDt.getFullYear() - 1}-${String(hoyDt.getMonth() + 1).padStart(2, '0')}-${String(hoyDt.getDate()).padStart(2, '0')}`
     const [ventasHoy, ventasAyer, ventasSemana, ventasMes, ventasMesAnt, ventasAnioPasado,
            salidasMes, cuentas, facturas12m, stock, cheques, clientes,
-           gastosMes, sueldosMes, pagosProvMes, movCtacteMes, todasCajas, todosDeudores, promoCfg,
+           gastosMes, sueldosMes, pagosProvMes, movCtacteMes, todasCajas, todosDeudores,
            comprasMesQ, cierresQ, comprasSemQ, remitosHoyQ, cobranzaQ, arqueosSemQ,
            cobranzaTotalQ, conceptosQ,
            piezasQ, mediasQ, movSemanasQ, entradasHoyQ] = await Promise.all([
@@ -251,7 +251,6 @@ function useDashboardData(refreshMs = 120000) {
       supabase.from('cajas_stock').select('id, tipo_caja, kg, fecha_ingreso').eq('estado', 'disponible'),
       // id + nombre: además del total pendiente alimenta el rotativo "EN MORA"
       supabase.from('clientes').select('id, nombre, saldo').gt('saldo', 0),
-      supabase.from('config_sistema').select('valor').eq('clave', 'promo_mundial').maybeSingle(),
       // COMPRAS del mes: ingresos de mercadería al depósito con importe real
       // (las entradas generadas por desposte tienen importe 0 y quedan afuera)
       supabase.from('entradas_deposito').select('importe').gte('fecha', mesIni).lte('fecha', hoy).gt('importe', 0).eq('eliminado', false),
@@ -648,7 +647,6 @@ function useDashboardData(refreshMs = 120000) {
       comprasSemanaProv, comprasSemanaTotal,
       cierreSemana: (cierresQ?.data || [])[0] || null,
       cierresHistorial: [...(cierresQ?.data || [])].reverse(), // viejas → nuevas (para las barras)
-      promoMundial: promoCfg?.data?.valor || { activa: false },
       // Solo recibidos: los emitidos propios son plata que SALE, no que entra
       cheques: (cheques.data || []).filter(c => c.origen !== 'emitido'),
       chequesProx, chequesProxTotal,
@@ -1183,11 +1181,6 @@ function ResumenEjecutivo() {
               </span>
             )}
           </div>
-          {data.promoMundial?.activa && (
-            <div style={{ marginTop: 10, display: 'inline-block', padding: '4px 12px', borderRadius: 999, background: 'rgba(107,229,255,0.1)', border: '1px solid rgba(107,229,255,0.4)', color: NEON.cian, fontSize: 11, fontWeight: 800 }}>
-              ⚽ PROMO MUNDIAL −{data.promoMundial.descuento_pct || 10}% ACTIVA
-            </div>
-          )}
         </div>
 
         <CardKPI label="ÚLTIMOS 7 DÍAS" valor={fmtArs(data.totalSemana)} color={NEON.azul}
@@ -1967,11 +1960,6 @@ function ModoTV({ onSalir }) {
           FACTURACIÓN · ALERTAS · BALANCE · RESULTADOS INSTANTÁNEOS
         </span>
         <PuntoVivo size={8} />
-        {data?.promoMundial?.activa && (
-          <span style={{ padding: '0.25vw 0.8vw', borderRadius: 999, background: 'rgba(107,229,255,0.1)', border: '1px solid rgba(107,229,255,0.4)', color: NEON.cian, fontSize: '0.8vw', fontWeight: 800, letterSpacing: 1 }}>
-            ⚽ PROMO MUNDIAL −{data.promoMundial.descuento_pct || 10}%
-          </span>
-        )}
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.8vw' }}>
           {/* Clima: pestañea entre hoy y mañana */}
           <ClimaTV />
@@ -2258,12 +2246,6 @@ function ModoTVMovil({ onSalir }) {
           ✕
         </button>
       </div>
-
-      {data?.promoMundial?.activa && (
-        <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 999, textAlign: 'center', background: 'rgba(107,229,255,0.1)', border: '1px solid rgba(107,229,255,0.4)', color: NEON.cian, fontSize: 13, fontWeight: 800, letterSpacing: 1 }}>
-          ⚽ PROMO MUNDIAL −{data.promoMundial.descuento_pct || 10}%
-        </div>
-      )}
 
       {loading || !data ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', color: NEON.muted, fontSize: 16 }}>
