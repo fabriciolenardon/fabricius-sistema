@@ -11,6 +11,7 @@ import { abrirVentanaImprimible } from '../../lib/pdfPrintable'
 import { compartirListaPrecios } from '../../lib/listasPreciosPdf'
 import { overlayDeSucursal, conPreciosDeSucursal, preciosPropiosFaltantes, guardarPrecioDeSucursal } from '../../lib/preciosSucursal'
 import { useAuth } from '../../context/AuthContext'
+import { SUCURSAL_CENTRAL } from '../../lib/permisos'
 import { decodificarEANBalanza } from '../../lib/balanzaEAN'
 import {
   resolverFormatoEAN, conModoDeSucursal, patronLegible, MODOS_BALANZA, FORMATO_DEFAULT,
@@ -62,6 +63,10 @@ export default function Precios() {
   const [tab, setTab] = useState('ver')
   const { sucursalId, isSucursal: esSucursal } = useAuth()
   const [overlay, setOverlay] = useState(null)
+  // Las bocas donde puede correr una oferta. Solo las carga la central: es
+  // quien las elige. `sucursales` se puede leer desde la mig 94.
+  const [sucursalesLista, setSucursalesLista] = useState([])
+  const nombreSucursal = id => sucursalesLista.find(s => s.id === id)?.nombre || `Sucursal ${id}`
   const [precios, setPrecios] = useState([])
   const [stockBuckets, setStockBuckets] = useState([])  // tipos de stock_actual (cerdo_*, emb_*) para enlazar
   const [filtro, setFiltro] = useState('bovino_corte')
@@ -94,7 +99,7 @@ export default function Precios() {
 
   // Ofertas
   const [ofertas, setOfertas] = useState([])
-  const [ofertaForm, setOfertaForm] = useState({ precio_id: '', tipo: 'fijo', precio_oferta: '', descuento_pct: '', fecha_inicio: fechaHoyARG(), fecha_fin: '', notas: '', aplica_carniceria: true, aplica_mayorista: true, aplica_minorista: true })
+  const [ofertaForm, setOfertaForm] = useState({ precio_id: '', tipo: 'fijo', precio_oferta: '', descuento_pct: '', fecha_inicio: fechaHoyARG(), fecha_fin: '', notas: '', aplica_carniceria: true, aplica_mayorista: true, aplica_minorista: true, sucursales: [SUCURSAL_CENTRAL] })
   const [ofertaLoading, setOfertaLoading] = useState(false)
   const [busquedaOferta, setBusquedaOferta] = useState('')
   const [mostrarDropdown, setMostrarDropdown] = useState(false)
@@ -110,6 +115,13 @@ export default function Precios() {
   // sucursalId en las dependencias: el perfil llega un instante después del
   // primer render y sin esto la sucursal vería la lista de la central.
   useEffect(() => { cargar(); cargarOfertas(); cargarPromoMundial(); cargarCategoriasPrecios().then(setCategorias) }, [sucursalId])
+
+  // Bocas disponibles para dirigir una oferta (solo le sirve a la central).
+  useEffect(() => {
+    if (esSucursal) return
+    supabase.from('sucursales').select('id, nombre').order('id')
+      .then(({ data }) => setSucursalesLista(data || []))
+  }, [esSucursal])
 
   async function cargarPromoMundial() {
     const { data } = await supabase.from('config_sistema').select('*').eq('clave', 'promo_mundial').maybeSingle()
@@ -393,8 +405,20 @@ export default function Precios() {
     if (!ofertaForm.aplica_carniceria && !ofertaForm.aplica_mayorista && !ofertaForm.aplica_minorista) {
       mostrarMsg('❌ Tildá al menos una lista (carnicería, mayorista o minorista)'); return
     }
+    // ── EN QUÉ BOCAS CORRE ──────────────────────────────────────────
+    // Una fila por sucursal, todas con el mismo `grupo_id` (mig 103). Así la
+    // Caja y el remito siguen leyendo `ofertas` filtrado por RLS igual que
+    // siempre — no cambia nada de CÓMO se aplica una oferta —, y desde acá se
+    // manejan como una sola.
+    // Una sucursal no elige: su oferta es para su propia boca y el trigger de
+    // la base la marca como propia.
+    const destinos = esSucursal ? [sucursalId] : (ofertaForm.sucursales?.length ? ofertaForm.sucursales : [SUCURSAL_CENTRAL])
+    if (!esSucursal && destinos.length === 0) {
+      mostrarMsg('❌ Elegí al menos una sucursal donde aplicar la oferta'); return
+    }
     setOfertaLoading(true)
-    const { error } = await supabase.from('ofertas').insert({
+    const grupoId = crypto.randomUUID()
+    const base = {
       precio_id: ofertaForm.precio_id,
       producto_nombre: productoSeleccionado?.nombre,
       precio_original_carniceria: productoSeleccionado?.precio_carniceria,
@@ -409,7 +433,11 @@ export default function Precios() {
       aplica_carniceria: ofertaForm.aplica_carniceria,
       aplica_mayorista: ofertaForm.aplica_mayorista,
       aplica_minorista: ofertaForm.aplica_minorista,
-    })
+      grupo_id: grupoId,
+    }
+    const { error } = await supabase.from('ofertas').insert(
+      destinos.map(sid => ({ ...base, sucursal_id: sid }))
+    )
     setOfertaLoading(false)
     if (error) {
       mostrarMsg('❌ Error al guardar la oferta: ' + error.message)
@@ -417,13 +445,18 @@ export default function Precios() {
       return
     }
     mostrarMsg('✅ Oferta registrada correctamente')
-    setOfertaForm({ precio_id: '', tipo: 'fijo', precio_oferta: '', descuento_pct: '', fecha_inicio: fechaHoyARG(), fecha_fin: '', notas: '', aplica_carniceria: true, aplica_mayorista: true, aplica_minorista: true })
+    setOfertaForm({ precio_id: '', tipo: 'fijo', precio_oferta: '', descuento_pct: '', fecha_inicio: fechaHoyARG(), fecha_fin: '', notas: '', aplica_carniceria: true, aplica_mayorista: true, aplica_minorista: true, sucursales: destinos })
     setBusquedaOferta(''); setProductoSeleccionado(null)
     await cargarOfertas()
   }
 
-  async function desactivarOferta(id) {
-    await supabase.from('ofertas').update({ activa: false }).eq('id', id)
+  // Se apaga el GRUPO, no la fila: una oferta que corre en tres bocas son tres
+  // filas y tienen que caerse juntas. Las viejas (previas a la mig 103) tienen
+  // grupo_id = su propio id, así que el mismo camino les sirve.
+  async function desactivarOferta(o) {
+    const { error } = await supabase.from('ofertas').update({ activa: false })
+      .eq('grupo_id', o.grupo_id || o.id)
+    if (error) { mostrarMsg('❌ No se pudo desactivar: ' + error.message); return }
     mostrarMsg('✅ Oferta desactivada')
     await cargarOfertas()
   }
@@ -477,6 +510,20 @@ export default function Precios() {
   }
 
   const ofertasVigentes = ofertas.filter(o => o.activa && o.fecha_inicio <= hoy && o.fecha_fin >= hoy)
+  // Para la TABLA: una fila por oferta, no por boca. Una oferta que corre en
+  // la central y en Monte Cristo son dos filas en la base con el mismo
+  // `grupo_id`; acá se juntan y se muestran las bocas como chips.
+  // `ofertasVigentes` se deja plano porque es lo que usa el resto de la
+  // pantalla para saber si UN producto está en oferta.
+  const ofertasAgrupadas = useMemo(() => {
+    const m = new Map()
+    for (const o of ofertasVigentes) {
+      const k = o.grupo_id || o.id
+      if (!m.has(k)) m.set(k, { ...o, bocas: [] })
+      m.get(k).bocas.push(o.sucursal_id)
+    }
+    return [...m.values()]
+  }, [ofertasVigentes])
   const ofertasVencidas = ofertas.filter(o => !o.activa || o.fecha_fin < hoy)
   const productosFiltrados = precios.filter(p => p.categoria === filtro)
   const productosBusqueda = precios.filter(p => p.nombre.toLowerCase().includes(busquedaOferta.toLowerCase()))
@@ -1091,6 +1138,44 @@ export default function Precios() {
 
             {/* Selector de listas a las que aplica la oferta */}
             <div style={{ marginBottom: 16 }}>
+              {/* ── DÓNDE CORRE (solo la central elige) ──
+                  Las ofertas las define la central y decide en qué bocas se
+                  aplican. Una sucursal que arma una oferta propia no elige:
+                  va a la suya. */}
+              {!esSucursal && sucursalesLista.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 8 }}>🏪 ¿En qué sucursales corre esta oferta?</label>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {sucursalesLista.map(s => {
+                      const elegida = (ofertaForm.sucursales || []).includes(s.id)
+                      return (
+                        <button key={s.id} type="button"
+                          onClick={() => setOfertaForm(f => ({
+                            ...f,
+                            sucursales: elegida
+                              ? f.sucursales.filter(x => x !== s.id)
+                              : [...(f.sucursales || []), s.id],
+                          }))}
+                          style={{
+                            padding: '8px 14px', borderRadius: 8, cursor: 'pointer',
+                            fontSize: 12, fontWeight: 700, fontFamily: "'DM Sans',sans-serif",
+                            border: `1px solid ${elegida ? 'var(--gold)' : 'var(--border)'}`,
+                            background: elegida ? 'var(--gold)' : 'transparent',
+                            color: elegida ? '#000' : 'var(--muted)',
+                          }}>
+                          {elegida ? '✓ ' : ''}🏪 {s.nombre}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {(ofertaForm.sucursales || []).length === 0 && (
+                    <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 6 }}>
+                      ⚠️ Elegí al menos una: si no, la oferta no corre en ningún lado.
+                    </div>
+                  )}
+                </div>
+              )}
+
               <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 8 }}>📋 Aplicar esta oferta a las listas:</label>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 {[
@@ -1175,9 +1260,9 @@ export default function Precios() {
                 </div>
               )}
               <table>
-                <thead><tr><th>Producto</th><th>Aplica a</th><th>Tipo</th><th>Descuento</th><th>Resulta en</th><th>Vigencia</th><th>Acciones</th></tr></thead>
+                <thead><tr><th>Producto</th><th>Aplica a</th>{!esSucursal && <th>Dónde corre</th>}<th>Tipo</th><th>Descuento</th><th>Resulta en</th><th>Vigencia</th><th>Acciones</th></tr></thead>
                 <tbody>
-                  {ofertasVigentes.map(o => {
+                  {ofertasAgrupadas.map(o => {
                     const listas = []
                     if (o.aplica_carniceria !== false) listas.push({ l: '🔴 Carn', c: '#ff6b6b' })
                     if (o.aplica_mayorista  !== false) listas.push({ l: '🟡 May',  c: 'var(--amber)' })
@@ -1191,8 +1276,18 @@ export default function Precios() {
                       ? Number(o.descuento_pct)
                       : (baseRef > 0 ? Math.round((1 - resultante / baseRef) * 100) : null)
                     return (
-                    <tr key={o.id}>
-                      <td style={{ fontWeight: 600 }}>{o.producto_nombre}</td>
+                    <tr key={o.grupo_id || o.id}>
+                      <td style={{ fontWeight: 600 }}>
+                        {o.producto_nombre}
+                        {/* A la sucursal se le avisa cuál bajó de la central:
+                            esa no la puede tocar. */}
+                        {esSucursal && o.origen === 'central' && (
+                          <span title="Oferta de la central — no se puede desactivar desde acá"
+                            style={{ marginLeft: 6, background: 'var(--gold)22', color: 'var(--gold)', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700 }}>
+                            🔒 de la central
+                          </span>
+                        )}
+                      </td>
                       <td>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                           {listas.map((x, i) => (
@@ -1200,6 +1295,17 @@ export default function Precios() {
                           ))}
                         </div>
                       </td>
+                      {!esSucursal && (
+                        <td>
+                          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                            {[...new Set(o.bocas)].sort((a, b) => a - b).map(sid => (
+                              <span key={sid} style={{ background: 'var(--surface2)', color: 'var(--text2)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 6px', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                                🏪 {nombreSucursal(sid)}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                      )}
                       <td>
                         <span style={{ background: esPct ? 'var(--gold)22' : 'var(--green)22', color: esPct ? 'var(--gold)' : 'var(--green)', borderRadius: 4, padding: '2px 8px', fontSize: 10, fontWeight: 700 }}>
                           {esPct ? '📉 %' : '💰 FIJO'}
@@ -1218,10 +1324,17 @@ export default function Precios() {
                       </td>
                       <td style={{ fontSize: 11, color: 'var(--muted)' }}>{o.fecha_inicio} → {o.fecha_fin}</td>
                       <td>
-                        <button onClick={() => desactivarOferta(o.id)}
-                          style={{ padding: '4px 10px', background: '#3a1a1a', color: '#ff6b6b', border: '1px solid #5a2a2a', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
-                          ✕ Desactivar
-                        </button>
+                        {/* La sucursal no puede apagar una oferta de la
+                            central. Además del botón, lo impide la base
+                            (policy `oferta_central_intocable`, mig 103). */}
+                        {esSucursal && o.origen === 'central' ? (
+                          <span style={{ fontSize: 11, color: 'var(--muted)' }}>La define la central</span>
+                        ) : (
+                          <button onClick={() => desactivarOferta(o)}
+                            style={{ padding: '4px 10px', background: '#3a1a1a', color: '#ff6b6b', border: '1px solid #5a2a2a', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+                            ✕ Desactivar{!esSucursal && new Set(o.bocas).size > 1 ? ` (${new Set(o.bocas).size} bocas)` : ''}
+                          </button>
+                        )}
                       </td>
                     </tr>
                   )})}
