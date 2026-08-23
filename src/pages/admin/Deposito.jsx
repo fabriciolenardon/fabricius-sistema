@@ -18,6 +18,7 @@ import AjusteStock from './AjusteStock'
 import CajasTab from './CajasTab'
 import PolloCajonesTab from './PolloCajonesTab'
 import StockPiezasTab from './StockPiezasTab'
+import MermasHistorial from './MermasHistorial'
 import { cargarCategoriasPrecios, labelsDeCategorias } from '../../lib/categoriasPrecios'
 import { estadoBloqueoCliente } from '../../lib/moraClientes'
 import { logAuditoria } from '../../lib/auditoria'
@@ -2279,6 +2280,11 @@ async function confirmarDesposteCerdo() {
       </div>
     </div>
     <EditorMerma config={mermaConfig} onSave={guardarMermaConfig} inicialAbierto />
+    {/* Los % de arriba son la CONFIGURACIÓN; esto de abajo es lo que pasó de
+        verdad con esos % en la semana, en kilos y en plata. */}
+    <div style={{ marginTop: 24 }}>
+      <MermasHistorial mermaConfig={mermaConfig} />
+    </div>
   </div>
 )}
 
