@@ -429,6 +429,9 @@ export function Deposito() {
         {[
           { id: 'entradas', label: '📥 Ingresos' },
           { id: 'desposte', label: '🔪 Desposte' },
+          // Al lado del Desposte porque es su insumo: qué medias hay en la
+          // cámara ahora y qué se hizo con cada una de las que pasaron.
+          { id: 'medias', label: '🐄 Media Reses' },
           // Para una sucursal la elaboración sale de adentro del Desposte y
           // sube acá: casi no desposta (recibe las piezas ya hechas), así que
           // elaborar es una tarea propia y no un paso del desposte. En la
@@ -454,6 +457,7 @@ export function Deposito() {
       </div>
       {tab === 'entradas' && <EntradaForm onSaved={() => {}} showAlert={showAlert} proveedores={proveedores} />}
         {tab === 'desposte' && <DesposteTab key={tab} onSaved={() => {}} />}
+        {tab === 'medias' && <MediasResesTab key={tab} />}
 {/* Misma pantalla, pero abierta directo en Elaborar y sin la fila de
     sub-solapas del desposte. */}
 {tab === 'elaborar' && <DesposteTab key={tab} onSaved={() => {}} soloElaborar />}
@@ -539,7 +543,6 @@ const [elaboraciones, setElaboraciones] = useState([])
 const [piezasIndividuales, setPiezasIndividuales] = useState([])
 // Historial completo de medias_stock (todos los estados) para la pestana
 // "Historial Medias". Se carga junto con cargarDatos.
-const [mediasStockAll, setMediasStockAll] = useState([])
 const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(null)
   // MERMAS_KILO se arma desde la config editable (media_res). La merma se
   // guarda como % entero en config y acá se pasa a fracción para conservar
@@ -643,13 +646,12 @@ const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(n
   supabase.from('piezas_stock').select('*').order('fecha_ingreso', { ascending: false }).order('id', { ascending: false }),
   // Trazabilidad individual de medias reses con codigo MR-XXX.
   // Traemos TODAS las filas (cualquier estado) para alimentar tanto el mapeo
-  // de codigos como el historial completo de medias en el sub-tab "Historial Medias".
+  // de codigos. El historial completo vive en la solapa 🐄 Media Reses.
   supabase.from('medias_stock').select('*').order('id', { ascending: false }),
 ])
 // Enriquecer cada entrada con el codigo MR-XXX de medias_stock
 const codigoPorEntrada = {}
 ;(mediasStockData || []).forEach(m => { if (m.entrada_id) codigoPorEntrada[m.entrada_id] = m.codigo })
-setMediasStockAll(mediasStockData || [])
 setMediasRes((entradas || []).map(e => ({ ...e, codigo_media: codigoPorEntrada[e.id] || null })))
 setDespostes(despostesData || [])
 setPrecios(preciosData || [])
@@ -1377,7 +1379,7 @@ async function confirmarDesposteCerdo() {
 // En la sucursal, Elaborar ya es una solapa propia arriba: si además la
 // dejáramos acá, el mismo tablero estaría en dos lugares.
 ...(esSucursal ? [] : [{ id: 'embutidos', label: '🌭 Elaborar Embutidos' }]),
-{ id: 'medias_hist', label: '🐄 Historial Medias' }, { id: 'historial', label: '📋 Historial Desposte' },
+{ id: 'historial', label: '📋 Historial Desposte' },
 // Las mermas las define la CENTRAL (una sola config para las dos bocas).
 ...(esSucursal ? [] : [{ id: 'mermas', label: '⚙️ Mermas' }])].map(t => (
           <button key={t.id} onClick={() => { setSubtab(t.id); setSeleccionada(null); setPiezas([]); cargarDatos() }}
@@ -2229,10 +2231,6 @@ async function confirmarDesposteCerdo() {
   </>
 )}
 
-{subtab === 'medias_hist' && (
-  <HistorialMedias medias={mediasStockAll} />
-)}
-
 {/* ⚙️ MERMAS — la sección de configuración de la central.
     Los tres despostes del sistema, cada uno con su merma:
       media res → piezas      (columna "A piezas")
@@ -2357,11 +2355,122 @@ async function confirmarDesposteCerdo() {
     </div>
   )
 }
+// ═══════════════════════════════════════════════════════════
+// 🐄 MEDIA RESES — solapa propia del Depósito
+// ═══════════════════════════════════════════════════════════
+// Antes esto vivía escondido adentro de Desposte → "Historial Medias".
+// Pedido de Fabricio (23/08/2026): que esté arriba, al lado de Desposte, y
+// que muestre las dos cosas juntas — lo que hay AHORA en la cámara y qué se
+// hizo con cada media que pasó por el sistema.
+//
+// Se carga sola (no depende del tab de Desposte) y escucha realtime: si el
+// depostero manda una media desde el tablet, la lista se actualiza sin F5.
+//
+// El chequeo del invariante que muestra arriba vale oro: `stock_actual.
+// bovino_mr` TIENE que ser igual a la suma de los kg de las medias
+// disponibles. Cuando se desacoplan, alguna media se descontó del stock sin
+// marcarse (o al revés) y el depósito empieza a mentir.
+// ═══════════════════════════════════════════════════════════
+function MediasResesTab() {
+  const [medias, setMedias] = useState([])
+  const [stockMR, setStockMR] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  async function cargar() {
+    const [{ data: ms }, { data: st }] = await Promise.all([
+      supabase.from('medias_stock').select('*').order('id', { ascending: false }),
+      supabase.from('stock_actual').select('kg_disponible').eq('tipo', 'bovino_mr').maybeSingle(),
+    ])
+    setMedias(ms || [])
+    setStockMR(st ? Number(st.kg_disponible) || 0 : 0)
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    cargar()
+    let t = null
+    const debounced = () => { clearTimeout(t); t = setTimeout(cargar, 800) }
+    const canal = supabase.channel('medias-reses-tab')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'medias_stock' }, debounced)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_actual' }, debounced)
+      .subscribe()
+    return () => { clearTimeout(t); supabase.removeChannel(canal) }
+  }, [])
+
+  const disponibles = medias.filter(m => m.estado === 'disponible')
+  const reservadas = medias.filter(m => m.estado === 'reservada')
+  const kgDisponibles = disponibles.reduce((s, m) => s + (Number(m.kg) || 0), 0)
+  // Tolerancia de un gramo: el residuo de float no es un descuadre real.
+  const descuadre = stockMR == null ? 0 : stockMR - kgDisponibles
+  const hayDescuadre = Math.abs(descuadre) > 0.01
+
+  const card = { background: 'var(--surface2)', borderRadius: 10, padding: '12px 16px', border: '1px solid var(--border)' }
+
+  return (
+    <div>
+      {/* ── EN LA CÁMARA AHORA ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>
+        <div style={{ ...card, borderColor: 'var(--gold)' }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>🐄 Disponibles ahora</div>
+          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 30, color: 'var(--gold)' }}>{disponibles.length}</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)' }}>{fmtKg(kgDisponibles, { decimales: 2 })}</div>
+        </div>
+        <div style={card}>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>🟡 Reservadas</div>
+          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 30, color: reservadas.length ? '#ffd17a' : 'var(--muted)' }}>{reservadas.length}</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)' }}>{fmtKg(reservadas.reduce((s, m) => s + (Number(m.kg) || 0), 0), { decimales: 2 })}</div>
+        </div>
+        <div style={{ ...card, borderColor: hayDescuadre ? 'var(--red-light)' : 'var(--border)' }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>Stock del sistema (bovino_mr)</div>
+          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 30, color: hayDescuadre ? 'var(--red-light)' : 'var(--green)' }}>
+            {stockMR == null ? '—' : fmtKg(stockMR, { decimales: 2 })}
+          </div>
+          <div style={{ fontSize: 11, color: hayDescuadre ? 'var(--red-light)' : 'var(--green)' }}>
+            {hayDescuadre
+              ? `⚠️ No coincide: ${descuadre > 0 ? 'sobran' : 'faltan'} ${fmtKg(Math.abs(descuadre), { decimales: 2 })}`
+              : '✅ Coincide con las medias disponibles'}
+          </div>
+        </div>
+      </div>
+
+      {/* ── LAS QUE ESTÁN EN STOCK, UNA POR UNA ── */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-title">🐄 En stock ahora ({disponibles.length})</div>
+        {loading ? <div className="empty">Cargando…</div>
+          : disponibles.length === 0 ? <div className="empty">No hay medias reses en la cámara.</div> : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 10 }}>
+            {disponibles.map(m => (
+              <div key={m.id} style={{ ...card, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                <div style={{ minWidth: 0 }}>
+                  <span style={{ background: 'var(--gold)', color: '#000', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 800, letterSpacing: 0.5 }}>
+                    {m.codigo}
+                  </span>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 5 }}>
+                    {m.fecha_ingreso} · {m.proveedor_origen || '—'}
+                  </div>
+                  {m.precio_costo_kg > 0 && (
+                    <div style={{ fontSize: 11, color: 'var(--amber)' }}>{fmtPrecio(m.precio_costo_kg)}/kg</div>
+                  )}
+                </div>
+                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: 'var(--gold)', flexShrink: 0 }}>
+                  {fmtKg(m.kg || 0, { decimales: 1 })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── QUÉ SE HIZO CON CADA UNA ── */}
+      <HistorialMedias medias={medias} />
+    </div>
+  )
+}
+
 // ───────────────────────────────────────────────────────────
-// Componentes auxiliares para paginar los historiales del tab
-// "Desposte → Historial Medias" — historial completo de medias_stock.
-// Una fila por cada media res fisica con su codigo MR-XXX, estado actual,
-// y trazabilidad (proveedor, fecha ingreso, destino, cliente, fecha salida).
+// Historial completo de medias_stock: una fila por cada media res física
+// con su codigo MR-XXX, estado actual y trazabilidad (proveedor, fecha
+// ingreso, destino, cliente, fecha salida). Vive dentro de MediasResesTab.
 // Patron equivalente al de piezas individuales pero para medias.
 // ───────────────────────────────────────────────────────────
 function HistorialMedias({ medias }) {
