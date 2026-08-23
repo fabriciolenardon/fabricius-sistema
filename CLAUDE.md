@@ -49,7 +49,7 @@ Una compra vive en `entradas_deposito` (stock) + `movimientos_proveedores` (cta 
 ### Caja / ventas minoristas
 - El mostrador SOLO cobra ventas al público; las cobranzas mayoristas van por transferencia (no pasan por el arqueo). El arqueo es venta minorista limpia.
 - Ventas guardan `items` JSON con `categoria`, `stock_origen`, `kg_por_unidad`, `caja_id`/`pieza_id` para poder anular con reversión exacta.
-- Convenios: Blangino (10% empleados, `ventas_minoristas.convenio`), Promo Mundial (toggle en `config_sistema`), combos (`combos_venta`, excluidos de promos).
+- Convenios: Blangino (10% empleados, `ventas_minoristas.convenio`), combos (`combos_venta`, excluidos del descuento). La Promo Mundial se eliminó del sistema (ago/2026).
 
 ### Cheques
 - **Recibidos** de clientes: se endosan a proveedores, NO se cobran → no son ingreso ni tocan cta cte del cliente. Módulo = solo registro + vencimientos.
