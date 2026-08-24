@@ -351,9 +351,10 @@ function TablaGastos({ d, abierta, setAbierta, esMovil }) {
 // decidir nada: junta el pollo por cajón a $3.800 con los embutidos a
 // $21.000 y da un número que no es el precio de nada.
 //
-// Al pie, lo único que sí tiene sentido mirar junto: el precio REAL por
-// kilo de cada lista, que no es un promedio de promedios sino la plata
-// facturada dividida los kilos que salieron por esa lista.
+// Al pie, el promedio de cada LISTA mirada como lista: la suma del precio
+// por kilo de todos sus artículos dividida la cantidad de artículos. No
+// entran los kilos despachados ni la plata facturada — es cómo está parada
+// la lista, no lo que se cobró.
 function PromedioListas({ d, precios, esMovil, comis, rent }) {
   const listas = useMemo(() => promediosDeListas(precios, d.vendidoPorCategoria), [precios, d])
 
@@ -441,22 +442,23 @@ function PromedioListas({ d, precios, esMovil, comis, rent }) {
         </table>
       </div>
 
-      {/* Pie: el precio real de cada lista. NO es promedio de categorías —
-          es la plata que entró por esa lista sobre los kilos que salieron. */}
+      {/* Pie: el promedio de la LISTA, solo con sus precios. No entran los
+          kilos despachados ni la plata facturada: es la suma del precio por
+          kilo de todos los artículos dividida la cantidad de artículos. */}
       <div style={{ marginTop: 14, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
         <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
-          Precio real del kilo por lista — plata facturada ÷ kilos despachados por esa lista:
+          Promedio del kilo de cada lista — suma del precio por kilo de todos los artículos ÷ cantidad de artículos:
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : 'repeat(3, 1fr)', gap: 10 }}>
           {listas.map(l => (
             <div key={l.codigo} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, padding: '8px 12px', background: 'var(--surface)', borderRadius: 8 }}>
               <span style={{ fontSize: 12 }}>{l.label}</span>
               <span style={{ textAlign: 'right' }}>
-                <b style={{ fontSize: 15, color: l.real != null ? 'var(--green)' : 'var(--muted)' }}>
-                  {l.real != null ? $(l.real) : '—'}
+                <b style={{ fontSize: 15, color: l.simple != null ? 'var(--green)' : 'var(--muted)' }}>
+                  {l.simple != null ? $(l.simple) : '—'}
                 </b>
                 <div style={{ fontSize: 10, color: 'var(--muted)' }}>
-                  {l.kgVendidos > 0 ? fmtKg(l.kgVendidos, { decimales: 0 }) : 'sin salidas'}
+                  {l.productos > 0 ? `${l.productos} artículos` : 'sin precios cargados'}
                 </div>
               </span>
             </div>
