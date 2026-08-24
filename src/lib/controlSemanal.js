@@ -60,7 +60,7 @@ export async function calcularControlSemanal(desde, hasta) {
   // (Supabase corta en 1000; ver lib/fetchAllRows.js).
   const [{ data: ent }, { data: sal }, { data: vts }, { data: snap }, { data: stk }] = await Promise.all([
     fetchAllRows(() => supabase.from('entradas_deposito').select('tipo, kg, kg_real, destino').eq('eliminado', false).gte('fecha', desde).lte('fecha', hasta)),
-    fetchAllRows(() => supabase.from('salidas_deposito').select('tipo, kg, descripcion, cobro, lista, cliente_nombre').gte('fecha', desde).lte('fecha', hasta)),
+    fetchAllRows(() => supabase.from('salidas_deposito').select('tipo, kg, total, descripcion, cobro, lista, cliente_nombre').gte('fecha', desde).lte('fecha', hasta)),
     fetchAllRows(() => supabase.from('ventas_minoristas').select('items').eq('origen', 'caja').gte('fecha', desde).lte('fecha', hasta)),
     supabase.from('stock_snapshots').select('stock').eq('fecha', hasta).maybeSingle(),
     supabase.from('stock_actual').select('tipo, kg_disponible'),
@@ -84,26 +84,61 @@ export async function calcularControlSemanal(desde, hasta) {
   // ── VENDIDO (mayorista + minorista) ──
   const esInterno = s => s.cobro === 'interno' || s.lista === 'desposte'
   const esMitre = s => (s.cliente_nombre || '').toUpperCase().includes('MITRE')
-  const vendMap = new Map() // categoria → { may, min }
+  // categoria → { may, min } en kg y { impMay, impMin } en plata. La plata
+  // sirve para saber a cuánto salió REALMENTE el kilo de cada categoría
+  // (Costos y Precios): la lista dice un precio y la calle suele decir otro
+  // — la media res, sin ir más lejos, sale siempre a precio carnicería.
+  const vendMap = new Map()
+  // `listas` guarda lo mismo abierto por la lista con la que se despachó
+  // (precio_carniceria / precio_mayorista / precio_minorista, y 'caja' para
+  // el mostrador). Sin eso no se puede promediar bien una lista: la media res
+  // sale SIEMPRE a precio carnicería (franquicias y carnicerías), y al cliente
+  // mayorista común no le vendés medias — pesarla en la lista mayorista dice
+  // un precio que nadie paga.
+  const vac = () => ({ may: 0, min: 0, impMay: 0, impMin: 0, listas: {} })
+  const sumarLista = (c, lista, kg, imp) => {
+    const l = c.listas[lista] || { kg: 0, imp: 0 }
+    l.kg += kg; l.imp += imp
+    c.listas[lista] = l
+  }
   let conversionInterna = 0
   for (const s of salidas) {
     if (esInterno(s)) { conversionInterna += n(s.kg); continue }
     if (esMitre(s)) continue
     if (SIN_KG.has(s.tipo)) continue
-    const c = vendMap.get(s.tipo) || { may: 0, min: 0 }
-    c.may += kgRealCajon(s.tipo, s.kg, s.descripcion); vendMap.set(s.tipo, c)
+    const c = vendMap.get(s.tipo) || vac()
+    const kgSal = kgRealCajon(s.tipo, s.kg, s.descripcion)
+    c.may += kgSal
+    c.impMay += n(s.total)
+    sumarLista(c, s.lista || '(sin lista)', kgSal, n(s.total))
+    vendMap.set(s.tipo, c)
   }
   for (const v of ventas) {
     const items = Array.isArray(v.items) ? v.items : []
     for (const it of items) {
       const cat = it.categoria || '(sin cat)'
       if (SIN_KG.has(cat)) continue
-      const c = vendMap.get(cat) || { may: 0, min: 0 }
-      c.min += kgRealCajon(cat, it.kg, it); vendMap.set(cat, c)
+      const c = vendMap.get(cat) || vac()
+      const kgIt = kgRealCajon(cat, it.kg, it)
+      c.min += kgIt
+      c.impMin += n(it.importe)
+      sumarLista(c, 'caja', kgIt, n(it.importe))
+      vendMap.set(cat, c)
     }
   }
   const vendido = [...vendMap]
-    .map(([categoria, v]) => ({ categoria, may: v.may, min: v.min, total: v.may + v.min }))
+    .map(([categoria, v]) => {
+      const kg = v.may + v.min
+      const importe = v.impMay + v.impMin
+      return {
+        categoria, may: v.may, min: v.min, total: kg,
+        impMay: v.impMay, impMin: v.impMin, importe, listas: v.listas,
+        // Precio real por kilo: lo facturado sobre los kilos que salieron
+        realPorKg: kg > 0.01 ? importe / kg : null,
+        realMayPorKg: v.may > 0.01 ? v.impMay / v.may : null,
+        realMinPorKg: v.min > 0.01 ? v.impMin / v.min : null,
+      }
+    })
     .filter(x => x.total > 0.01).sort((a, b) => b.total - a.total)
 
   // ── STOCK que debería quedar ──
