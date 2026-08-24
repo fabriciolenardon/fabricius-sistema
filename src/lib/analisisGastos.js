@@ -186,17 +186,20 @@ export async function calcularEstructura(desde, hasta, gastos) {
 // sin que eso diga nada del precio del kilo).
 const CAT_SIN_KG = new Set(['almacen', 'bebidas', 'insumos'])
 
-// Precio POR KILO de un producto en una lista. Si no se vende pesado
-// (cajón, pack), se divide por los kg que trae; sin ese dato, se descarta.
+// Precio POR KILO de un producto en una lista.
+//
+// El que manda es `kg_por_unidad`: si está cargado, el precio es de un
+// BULTO (cajón de 20 kg, caja de menudos de 15) y hay que dividirlo, o el
+// cajón de pechuga de $92.000 entra al promedio como si fuera un kilo.
+// `pesable` NO sirve para decidir: hay cajones con pesable=true (CAJA MDM,
+// CAJON DE MENUDOS) y cortes que se venden por kilo con pesable=false
+// (los Novara PT). Con kg_por_unidad vacío, el precio ya es por kilo.
 function precioPorKg(p, campo) {
   const precio = n(p[campo])
   if (precio <= 0) return null
   if (CAT_SIN_KG.has(p.categoria)) return null
-  if (p.pesable === false) {
-    const kpu = n(p.kg_por_unidad)
-    return kpu > 0 ? precio / kpu : null
-  }
-  return precio
+  const kpu = n(p.kg_por_unidad)
+  return kpu > 0 ? precio / kpu : precio
 }
 
 /**
