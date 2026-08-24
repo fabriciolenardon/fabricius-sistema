@@ -307,6 +307,10 @@ function TarjetaReceta({ receta, puedeEditar, est, setKg, formulas, recetas, vin
   // "sale" (50 kg de pasta) y lo que engancha a los condimentos.
   const totalBase = totalDeReceta(receta)
   const total = totalBase * factor
+  // Si la receta YA está escrita por kilo (base 1), el "cada kilo lleva"
+  // sobra y encima confunde: daría un número apenas distinto, porque se
+  // calcula sobre el producto terminado y los condimentos también pesan.
+  const escritaPorKilo = base === 1
   // Otras fórmulas de la misma familia a las que se puede enganchar.
   const opciones = formulas.filter(f => f.id !== receta.id)
   const fuente = vinculadoA ? recetas.find(r => r.id === vinculadoA) : null
@@ -392,12 +396,13 @@ function TarjetaReceta({ receta, puedeEditar, est, setKg, formulas, recetas, vin
               lee, y así entra en la columna "cada kilo lleva". */}
           {!esCondimentos && (
             <FilaIngrediente
-              nombre={receta.base_label} destacado
+              nombre={receta.base_label} destacado mostrarPorKilo={escritaPorKilo ? false : true}
               cantidad={base} unidad="kg" factor={factor} totalBase={totalBase} escalada={escalada} />
           )}
           {(receta.ingredientes || []).map((i, k) => (
             <FilaIngrediente key={k} nombre={i.nombre} nota={i.nota}
               cantidad={i.cantidad} unidad={i.unidad} factor={factor}
+              mostrarPorKilo={!escritaPorKilo}
               totalBase={esCondimentos ? base : totalBase} escalada={escalada} />
           ))}
         </tbody>
@@ -413,8 +418,8 @@ function TarjetaReceta({ receta, puedeEditar, est, setKg, formulas, recetas, vin
 // Un renglón de la receta: la cantidad escalada y, abajo, cuánto de eso
 // entra en UN kilo de producto terminado — que es la lectura que evita
 // tener que hacer la cuenta contra la tabla de 30 kg.
-function FilaIngrediente({ nombre, nota, cantidad, unidad, factor, totalBase, escalada, destacado }) {
-  const unitario = cantidad != null ? porKilo(cantidad, unidad, totalBase) : null
+function FilaIngrediente({ nombre, nota, cantidad, unidad, factor, totalBase, escalada, destacado, mostrarPorKilo = true }) {
+  const unitario = mostrarPorKilo && cantidad != null ? porKilo(cantidad, unidad, totalBase) : null
   return (
     <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
       <td style={{ padding: '6px 4px', fontSize: 13, fontWeight: destacado ? 700 : 400 }}>
