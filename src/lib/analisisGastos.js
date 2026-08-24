@@ -216,17 +216,31 @@ function precioPorKg(p, campo) {
  * @param {Array} vendidoPorCategoria  [{categoria, may, min, total}] del período
  */
 export function promediosDeListas(precios, vendidoPorCategoria) {
+  // `claves` son los valores de salidas_deposito.lista (y 'caja' para el
+  // mostrador) que corresponden a cada lista. Cada lista se pesa con los
+  // kilos que salieron POR ESA LISTA, no con el total del negocio: la media
+  // res sale siempre a precio carnicería (franquicias y carnicerías), y al
+  // cliente mayorista común no le vendés medias. Pesarla en la lista
+  // mayorista daría un promedio que nadie paga.
   const LISTAS = [
-    { codigo: 'min', label: '🟢 Minorista', campo: 'precio_minorista', canal: 'minorista' },
-    { codigo: 'may', label: '🟡 Mayorista', campo: 'precio_mayorista', canal: 'mayorista' },
-    { codigo: 'carn', label: '🔴 Carnicería', campo: 'precio_carniceria', canal: null },
+    { codigo: 'min', label: '🟢 Minorista', campo: 'precio_minorista', claves: ['caja', 'precio_minorista'] },
+    { codigo: 'may', label: '🟡 Mayorista', campo: 'precio_mayorista', claves: ['precio_mayorista'] },
+    { codigo: 'carn', label: '🔴 Carnicería', campo: 'precio_carniceria', claves: ['precio_carniceria'] },
   ]
-  // kg vendidos por categoría — para el ponderado
-  const kgCat = new Map()
-  for (const v of vendidoPorCategoria || []) kgCat.set(v.categoria, n(v.total))
 
   return LISTAS.map(l => {
-    // categoría → { suma, cant } de precios por kilo cargados en esta lista
+    // Kilos y plata que salieron por esta lista, por categoría
+    const movido = new Map()
+    for (const v of vendidoPorCategoria || []) {
+      let kg = 0, imp = 0
+      for (const k of l.claves) {
+        const x = v.listas?.[k]
+        if (x) { kg += n(x.kg); imp += n(x.imp) }
+      }
+      if (kg > 0.01) movido.set(v.categoria, { kg, imp })
+    }
+
+    // Promedio de la lista por categoría (y el simple, sobre todo el catálogo)
     const porCat = new Map()
     let suma = 0, cant = 0
     for (const p of precios || []) {
@@ -238,22 +252,29 @@ export function promediosDeListas(precios, vendidoPorCategoria) {
       porCat.set(p.categoria, c)
     }
 
-    // Ponderado: promedio de cada categoría × los kilos que vendiste de ella
-    let pesoTotal = 0, acum = 0
+    // Ponderado y precio real, ambos sobre lo que salió por esta lista
+    let pesoTotal = 0, acum = 0, kgReal = 0, impReal = 0
     const categorias = []
     for (const [categoria, c] of porCat) {
       const prom = c.suma / c.cant
-      const kg = kgCat.get(categoria) || 0
-      categorias.push({ categoria, promedio: prom, productos: c.cant, kg })
+      const m = movido.get(categoria)
+      const kg = m ? m.kg : 0
+      categorias.push({
+        categoria, promedio: prom, productos: c.cant, kg,
+        real: m && m.kg > 0.01 ? m.imp / m.kg : null,
+      })
       if (kg > 0) { acum += prom * kg; pesoTotal += kg }
     }
+    // El real toma TODO lo que salió por la lista, tenga o no precio cargado
+    for (const [, m] of movido) { kgReal += m.kg; impReal += m.imp }
 
     return {
       ...l,
       productos: cant,
       simple: cant > 0 ? suma / cant : null,
       ponderado: pesoTotal > 0 ? acum / pesoTotal : null,
-      kgPonderados: pesoTotal,
+      real: kgReal > 0.01 ? impReal / kgReal : null,
+      kgVendidos: kgReal,
       categorias: categorias.sort((a, b) => b.kg - a.kg),
     }
   })

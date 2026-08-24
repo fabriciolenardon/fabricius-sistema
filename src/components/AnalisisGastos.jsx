@@ -335,13 +335,20 @@ function PromedioListas({ d, precios, esMovil, comis, rent }) {
     for (const l of listas) {
       for (const c of l.categorias) {
         const row = m.get(c.categoria) || { categoria: c.categoria, kg: 0 }
-        row.kg = Math.max(row.kg, c.kg || 0)
+        row.kg += c.kg || 0
         row[l.codigo] = c.promedio
+        if (c.real != null) row[l.codigo + '_real'] = c.real
         m.set(c.categoria, row)
       }
     }
+    // El "cobrado real" de la categoría sale de lo vendido en el período,
+    // sin importar por qué lista salió: plata facturada ÷ kilos que salieron.
+    for (const v of d.vendidoPorCategoria || []) {
+      const row = m.get(v.categoria)
+      if (row && v.realPorKg != null) row.realTotal = v.realPorKg
+    }
     return [...m.values()].sort((a, b) => b.kg - a.kg)
-  }, [listas])
+  }, [listas, d])
 
   if (!precios.length) return null
 
@@ -358,7 +365,7 @@ function PromedioListas({ d, precios, esMovil, comis, rent }) {
 
       <div className="grid3" style={{ marginBottom: 14 }}>
         {listas.map(l => {
-          const real = l.canal ? d.realPorKg[l.canal] : null
+          const real = l.real
           const dif = real != null && l.ponderado != null ? real - l.ponderado : null
           return (
             <div className="stat" key={l.codigo}>
@@ -371,18 +378,18 @@ function PromedioListas({ d, precios, esMovil, comis, rent }) {
               </div>
               <div style={{ marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 6, display: 'grid', gap: 3, fontSize: 11 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--muted)' }}>Pesado por lo que vendés</span>
+                  <span style={{ color: 'var(--muted)' }}>Pesado por lo que sale por esta lista</span>
                   <b>{l.ponderado != null ? $(l.ponderado) : '—'}</b>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ color: 'var(--muted)' }}>Lo que realmente cobrás</span>
                   <b style={{ color: real != null ? 'var(--green)' : 'var(--muted)' }}>{real != null ? $(real) : '—'}</b>
                 </div>
-                {dif != null && (
-                  <div style={{ color: 'var(--muted)', fontSize: 10 }}>
-                    Cobrás {dif >= 0 ? '+' : '−'}{$(dif)} por kilo {dif >= 0 ? 'arriba' : 'abajo'} de tu lista
-                  </div>
-                )}
+                <div style={{ color: 'var(--muted)', fontSize: 10 }}>
+                  {l.kgVendidos > 0
+                    ? <>{fmtKg(l.kgVendidos, { decimales: 0 })} salieron por esta lista{dif != null && <> · cobrás {dif >= 0 ? '+' : '−'}{$(dif)} por kilo {dif >= 0 ? 'arriba' : 'abajo'}</>}</>
+                    : 'No salió nada por esta lista en el período'}
+                </div>
                 {libre > 0 && l.ponderado != null && (
                   <div style={{ color: 'var(--gold)', fontSize: 10, marginTop: 2 }}>
                     Con esta lista, el kilo no te puede costar más de <b>{$(l.ponderado * libre)}</b> para
@@ -404,6 +411,7 @@ function PromedioListas({ d, precios, esMovil, comis, rent }) {
               <th style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600 }}>Minorista</th>
               <th style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600 }}>Mayorista</th>
               <th style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600 }}>Carnicería</th>
+              <th style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600 }}>Cobrado real</th>
             </tr>
           </thead>
           <tbody>
@@ -414,6 +422,7 @@ function PromedioListas({ d, precios, esMovil, comis, rent }) {
                 <td style={{ padding: '6px 8px', textAlign: 'right' }}>{f.min != null ? $(f.min) : '—'}</td>
                 <td style={{ padding: '6px 8px', textAlign: 'right' }}>{f.may != null ? $(f.may) : '—'}</td>
                 <td style={{ padding: '6px 8px', textAlign: 'right' }}>{f.carn != null ? $(f.carn) : '—'}</td>
+                <td style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--green)' }}>{f.realTotal != null ? $(f.realTotal) : '—'}</td>
               </tr>
             ))}
           </tbody>
