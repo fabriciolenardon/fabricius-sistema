@@ -23,13 +23,14 @@ const td = { fontSize: 12, padding: '6px 8px', borderBottom: '1px solid rgba(255
 const num = { ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
 const numTh = { ...th, textAlign: 'right' }
 
-// Cada categoría con su color y su cartelito de dónde sale el número.
+// Cada categoría con su color y si su merma se pesa o se calcula
+// (dentro de una categoría es siempre lo mismo, ver lib/mermas.js).
 const ESTILO_CAT = {
-  medias_kilo: { icono: '⚖️', color: 'var(--gold)' },
-  medias_pieza: { icono: '🍖', color: 'var(--green)' },
-  piezas: { icono: '🔄', color: 'var(--blue)' },
-  capones: { icono: '🐷', color: 'var(--amber)' },
-  elaborados: { icono: '🌭', color: 'var(--red-light)' },
+  medias_kilo: { icono: '⚖️', color: 'var(--gold)', medida: false },
+  medias_pieza: { icono: '🍖', color: 'var(--green)', medida: true },
+  piezas: { icono: '🔄', color: 'var(--blue)', medida: false },
+  capones: { icono: '🐷', color: 'var(--amber)', medida: true },
+  elaborados: { icono: '🌭', color: 'var(--red-light)', medida: true },
 }
 
 function ChipOrigen({ medida }) {
@@ -105,31 +106,7 @@ export default function MermasHistorial({ mermaConfig }) {
 
       {!loading && data && (
         <>
-          {/* ── Resumen de la semana ── */}
-          <div className="card" style={{ marginBottom: 16, borderColor: 'var(--gold)' }}>
-            <div className="card-title">Resumen de la semana</div>
-            <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr 1fr' : 'repeat(4, 1fr)', gap: 12 }}>
-              <Kpi label="KILOS PROCESADOS" valor={fmtKg(data.totales.kgEntra, { decimales: 1 })} color="var(--text)" />
-              <Kpi label="SE PERDIÓ EN MERMA" valor={fmtKg(data.totales.kgMerma, { decimales: 1 })} color="var(--red-light)" />
-              <Kpi label="% SOBRE LO PROCESADO" valor={`${fmtNumero(data.totales.pct, 2)}%`} color="var(--amber)" />
-              <Kpi label="COSTO DE LA MERMA" valor={fmtPrecio(data.totales.costo, { decimales: 0 })} color="var(--red-light)" />
-            </div>
-            {data.totales.costoPorKg > 0 && (
-              <div style={{ marginTop: 10, fontSize: 12, color: 'var(--muted)' }}>
-                Cada kilo de merma costó en promedio <strong style={{ color: 'var(--text)' }}>{fmtPrecio(data.totales.costoPorKg, { decimales: 0 })}</strong>.
-              </div>
-            )}
-            {/* Los kilos merman en cascada y hay que decirlo: si no, "kilos
-                procesados" se lee como "kilos comprados" y no es lo mismo.
-                Los kilos de merma y la plata SÍ son exactos: cada pérdida se
-                cuenta una sola vez, en la etapa donde ocurrió. */}
-            <div style={{ marginTop: 8, fontSize: 11, color: 'var(--muted)', lineHeight: 1.5 }}>
-              ℹ️ <strong>Kilos procesados</strong> no es lo mismo que kilos comprados: una media res que se desposta
-              a piezas y después esas piezas se convierten a cortes pasa dos veces por este tablero.
-              Los <strong>kilos de merma y el costo sí son exactos</strong> — cada pérdida se cuenta una sola vez,
-              en la etapa donde ocurrió.
-            </div>
-          </div>
+          <ResumenPorCategoria categorias={data.categorias} totales={data.totales} esMovil={esMovil} />
 
           {/* ── Avisos: lo que el informe no puede dar por sentado ── */}
           {data.avisos.length > 0 && (
@@ -151,11 +128,82 @@ export default function MermasHistorial({ mermaConfig }) {
   )
 }
 
-function Kpi({ label, valor, color }) {
+// ── RESUMEN: UN PANEL POR CATEGORÍA ─────────────────────────
+// El promedio de todo junto no es la merma de nada: un 22% de media res
+// y un 1,7% de capón dan un 11% que no describe a ninguno de los dos, y
+// el kilo de cada uno vale muy distinto. Por eso cada categoría trae sus
+// propios kilos, su % y su plata, y el total va abajo, chico y avisado.
+function ResumenPorCategoria({ categorias, totales, esMovil }) {
+  const conDatos = categorias.filter(c => c.total.n > 0)
+  const sinDatos = categorias.filter(c => c.total.n === 0)
   return (
-    <div style={{ background: 'var(--surface2)', borderRadius: 10, padding: 12 }}>
-      <div style={{ fontSize: 10, color: 'var(--muted)', letterSpacing: 0.5, marginBottom: 4 }}>{label}</div>
-      <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 26, color, lineHeight: 1 }}>{valor}</div>
+    <div className="card" style={{ marginBottom: 16, borderColor: 'var(--gold)' }}>
+      <div className="card-title">Resumen de la semana — cada categoría por separado</div>
+      {conDatos.length === 0
+        ? <div style={{ fontSize: 13, color: 'var(--muted)', padding: '8px 0' }}>Sin movimientos en la semana.</div>
+        : (
+          <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
+            {conDatos.map(c => <PanelCategoria key={c.id} cat={c} />)}
+          </div>
+        )}
+
+      {sinDatos.length > 0 && (
+        <div style={{ marginTop: 10, fontSize: 11, color: 'var(--muted)' }}>
+          Sin movimientos: {sinDatos.map(c => c.label).join(' · ')}
+        </div>
+      )}
+
+      {/* El total va acá abajo y con la advertencia pegada: es una referencia,
+          no la merma de ningún producto. */}
+      {conDatos.length > 1 && (
+        <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'baseline', fontSize: 13 }}>
+            <span style={{ fontSize: 10, color: 'var(--muted)', letterSpacing: 1, fontWeight: 700 }}>TODAS JUNTAS</span>
+            <span>Procesados <strong>{fmtKg(totales.kgEntra, { decimales: 1 })}</strong></span>
+            <span>Merma <strong style={{ color: 'var(--red-light)' }}>{fmtKg(totales.kgMerma, { decimales: 1 })}</strong></span>
+            <span>Costo <strong style={{ color: 'var(--red-light)' }}>{fmtPrecio(totales.costo, { decimales: 0 })}</strong></span>
+          </div>
+          <div style={{ marginTop: 6, fontSize: 11, color: 'var(--muted)', lineHeight: 1.5 }}>
+            ⚠️ El total <strong>no lleva %</strong> a propósito: mezclar una media res al 22% con un capón al 1,7%
+            da un número que no es la merma de ninguno de los dos. Sirve para saber cuánta plata se fue en la
+            semana; para decidir, mirá cada categoría. Y ojo: una media res que va a piezas y después a cortes
+            pasa <strong>dos veces</strong> por estos kilos procesados — la merma y el costo, en cambio, se
+            cuentan una sola vez, en la etapa donde ocurrieron.
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PanelCategoria({ cat }) {
+  const est = ESTILO_CAT[cat.id] || { icono: '•', color: 'var(--muted)' }
+  const t = cat.total
+  return (
+    <div style={{ background: 'var(--surface2)', borderRadius: 10, padding: 12, borderLeft: `3px solid ${est.color}` }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 6, marginBottom: 8 }}>
+        <div style={{ fontSize: 12, fontWeight: 800, color: est.color, lineHeight: 1.3 }}>{est.icono} {cat.label}</div>
+        {est.medida != null && <ChipOrigen medida={est.medida} />}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+        <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 30, color: 'var(--red-light)', lineHeight: 1 }}>
+          {fmtKg(t.kgMerma, { decimales: 1 })}
+        </div>
+        <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--amber)', lineHeight: 1 }}>
+          {fmtNumero(t.pct, 2)}%
+        </div>
+        <div style={{ fontSize: 10, color: 'var(--muted)' }}>de merma</div>
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.7 }}>
+        <div>Procesados <strong style={{ color: 'var(--text)' }}>{fmtKg(t.kgEntra, { decimales: 1 })}</strong>
+          {' → '}vendible <strong style={{ color: 'var(--green)' }}>{fmtKg(t.kgSale, { decimales: 1 })}</strong></div>
+        <div>Costo de la merma <strong style={{ color: 'var(--red-light)' }}>{fmtPrecio(t.costo, { decimales: 0 })}</strong></div>
+        {t.precioReal > 0 && (
+          <div>Kilo vendible <strong style={{ color: 'var(--gold)' }}>{fmtPrecio(t.precioReal, { decimales: 0 })}</strong>
+            {t.precioIngreso > 0 && <span> (comprado a {fmtPrecio(t.precioIngreso, { decimales: 0 })})</span>}</div>
+        )}
+        <div style={{ opacity: 0.8 }}>{t.n} {t.n === 1 ? 'movimiento' : 'movimientos'}</div>
+      </div>
     </div>
   )
 }
@@ -273,10 +321,16 @@ function TablaRelacion({ categorias, totales, esMovil }) {
       </td>
       <td style={{ ...num, fontWeight: esTotal ? 800 : 400 }}>{fmtKg(total.kgEntra, { decimales: 1 })}</td>
       <td style={{ ...num, color: 'var(--red-light)', fontWeight: esTotal ? 800 : 400 }}>{fmtKg(total.kgMerma, { decimales: 1 })}</td>
-      <td style={{ ...num, color: 'var(--amber)', fontWeight: esTotal ? 800 : 400 }}>{fmtNumero(total.pct, 2)}%</td>
+      {/* El % de la fila TOTAL no va: promediar 22% de media res con 1,7% de
+          capón da un número que no es la merma de ningún producto. */}
+      <td style={{ ...num, color: 'var(--amber)', fontWeight: esTotal ? 800 : 400 }}>
+        {esTotal ? <span style={{ color: 'var(--muted)', fontWeight: 400 }}>—</span> : `${fmtNumero(total.pct, 2)}%`}
+      </td>
       <td style={{ ...num, color: 'var(--green)', fontWeight: 700 }}>{fmtKg(total.kgSale, { decimales: 1 })}</td>
-      <td style={{ ...num, color: 'var(--muted)' }}>{total.precioIngreso > 0 ? fmtPrecio(total.precioIngreso, { decimales: 0 }) : '—'}</td>
-      <td style={{ ...num, color: 'var(--gold)', fontWeight: 800 }}>{total.precioReal > 0 ? fmtPrecio(total.precioReal, { decimales: 0 }) : '—'}</td>
+      {/* Tampoco un $/kg total: promediar el kilo de media res ($9.845) con el
+          de capón ($3.952) no describe el costo de nada. */}
+      <td style={{ ...num, color: 'var(--muted)' }}>{!esTotal && total.precioIngreso > 0 ? fmtPrecio(total.precioIngreso, { decimales: 0 }) : '—'}</td>
+      <td style={{ ...num, color: 'var(--gold)', fontWeight: 800 }}>{!esTotal && total.precioReal > 0 ? fmtPrecio(total.precioReal, { decimales: 0 }) : '—'}</td>
     </tr>
   )
   return (
