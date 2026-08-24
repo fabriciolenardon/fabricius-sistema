@@ -120,8 +120,12 @@ export async function calcularEstructura(desde, hasta, gastos) {
     ...extra,
   })
 
+  // La misma categoría puede estar cargada como fijo Y como variable (ej.
+  // Insumos), así que la fila lleva el tipo al lado — si no, en la tabla se
+  // ven dos "Insumos" y parece un duplicado.
+  const SUFIJO_TIPO = { fijo: 'fijo', variable: 'variable', socio: 'socio' }
   const lineas = [...catMap.values()]
-    .map(c => conLecturas(labelCategoria(c.categoria), c.total, {
+    .map(c => conLecturas(`${labelCategoria(c.categoria)} · ${SUFIJO_TIPO[c.tipo] || c.tipo}`, c.total, {
       tipo: c.tipo,
       categoria: c.categoria,
       conceptos: [...c.conceptos.values()]
