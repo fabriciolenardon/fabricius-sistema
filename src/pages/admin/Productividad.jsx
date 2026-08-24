@@ -9,7 +9,7 @@
 //     esa estructura y encima dejar rentabilidad (components/AnalisisGastos)
 // Todo es SOLO LECTURA: esta pantalla no modifica ninguna tabla.
 // ============================================================
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { supabase, fetchAllRows } from '../../lib/supabase'
 import { fmtPrecio, fmtKg, fmtNumero } from '../../lib/formatos'
 import { fechaHoyARG, fechaRelativaARG, horaNumARG } from '../../lib/fechas'
@@ -67,8 +67,23 @@ const RANGOS = [
   { id: 'pasada', label: 'Semana pasada' },
   { id: '30', label: 'Últimos 30 días' },
 ]
-function rangoFechas(modo) {
+
+// Rango de fechas del período elegido. Con 'mesop' las fechas NO se calculan:
+// salen tal cual del mes operativo cargado en Cierre → Por Mes (que no coincide
+// con el mes del calendario: agosto/2026 va del 03/08 al 30/08).
+function rangoFechas(modo, mesesOp = [], mesOpId = '') {
   const hoy = fechaHoyARG()
+  if (modo === 'mesop') {
+    const m = mesesOp.find(x => String(x.id) === String(mesOpId))
+    // Sin mes elegido (todavía no cargaron) caemos a la semana en curso.
+    if (!m) return { desde: lunesDeLaSemana(), hasta: hoy }
+    const fin = m.fecha_cierre || hoy
+    // Un mes que todavía no arrancó se muestra entero: cortar en "hoy" daría
+    // un rango invertido (desde > hasta) y la consulta volvería vacía sin decir
+    // por qué. En curso, en cambio, se corta hoy: no hay datos del futuro.
+    if (hoy < m.fecha_inicio) return { desde: m.fecha_inicio, hasta: fin }
+    return { desde: m.fecha_inicio, hasta: hoy < fin ? hoy : fin }
+  }
   if (modo === 'esta') return { desde: lunesDeLaSemana(), hasta: hoy }
   if (modo === 'pasada') { const lun = lunesDeLaSemana(); return { desde: sumarDias(lun, -7), hasta: sumarDias(lun, -1) } }
   return { desde: fechaRelativaARG(-29), hasta: hoy }
@@ -104,20 +119,20 @@ const tdStyle = { textAlign: 'right', padding: '6px 8px', fontSize: 13, whiteSpa
 // ──────────────────────────────────────────────────────────
 // TAB 1: POR HORA (Caja)
 // ──────────────────────────────────────────────────────────
-function TabPorHora({ rango, esMovil }) {
+function TabPorHora({ periodo, esMovil }) {
   const [cargando, setCargando] = useState(true)
   const [ventas, setVentas] = useState([])
+  const { desde, hasta } = periodo
 
   useEffect(() => {
     let vivo = true
     setCargando(true)
-    const { desde, hasta } = rangoFechas(rango)
     fetchAllRows(() => supabase.from('ventas_minoristas')
       .select('fecha, hora, created_at, total, items')
       .eq('origen', 'caja').gte('fecha', desde).lte('fecha', hasta))
       .then(({ data }) => { if (vivo) { setVentas(data || []); setCargando(false) } })
     return () => { vivo = false }
-  }, [rango])
+  }, [desde, hasta])
 
   if (cargando) return <div className="empty">Cargando ventas…</div>
   if (!ventas.length) return <div className="empty">No hay ventas de caja en el período.</div>
@@ -186,21 +201,21 @@ function TabPorHora({ rango, esMovil }) {
 // ──────────────────────────────────────────────────────────
 // TAB 2: DEPÓSITO (desposte + elaboración por día)
 // ──────────────────────────────────────────────────────────
-function TabDeposito({ rango, esMovil }) {
+function TabDeposito({ periodo, esMovil }) {
   const [cargando, setCargando] = useState(true)
   const [entradas, setEntradas] = useState([])
+  const { desde, hasta } = periodo
 
   useEffect(() => {
     let vivo = true
     setCargando(true)
-    const { desde, hasta } = rangoFechas(rango)
     fetchAllRows(() => supabase.from('entradas_deposito')
       .select('fecha, tipo, kg, kg_real, destino')
       .eq('eliminado', false).in('destino', ['desposte', 'elaboracion'])
       .gte('fecha', desde).lte('fecha', hasta))
       .then(({ data }) => { if (vivo) { setEntradas(data || []); setCargando(false) } })
     return () => { vivo = false }
-  }, [rango])
+  }, [desde, hasta])
 
   if (cargando) return <div className="empty">Cargando producción…</div>
   if (!entradas.length) return <div className="empty">No hubo desposte ni elaboración en el período.</div>
@@ -532,6 +547,26 @@ export default function Productividad() {
   const esMovil = useEsMovil()
   const [tab, setTab] = useState('hora')
   const [rango, setRango] = useState('esta')
+  // Meses operativos (Cierre → Por Mes). Al elegir uno, las fechas del período
+  // salen de su inicio/cierre cargados, no de un cálculo del calendario.
+  const [mesesOp, setMesesOp] = useState([])
+  const [mesOpId, setMesOpId] = useState('')
+
+  useEffect(() => {
+    supabase.from('meses_operativos').select('id, etiqueta, mes, fecha_inicio, fecha_cierre')
+      .order('fecha_inicio', { ascending: false })
+      .then(({ data }) => setMesesOp(data || []))
+  }, [])
+
+  const periodo = useMemo(
+    () => rangoFechas(rango, mesesOp, mesOpId),
+    [rango, mesesOp, mesOpId])
+
+  // Al elegir un mes del desplegable, el período pasa a ser ese mes.
+  function elegirMesOp(id) {
+    setMesOpId(id)
+    setRango(id ? 'mesop' : 'esta')
+  }
 
   const TABS = [
     { id: 'hora', label: '⏰ Por Hora' },
@@ -555,19 +590,45 @@ export default function Productividad() {
           </button>
         ))}
         {usaRango && (
-          <div style={{ display: 'flex', gap: 6, marginLeft: esMovil ? 0 : 'auto' }}>
+          <div style={{ display: 'flex', gap: 6, marginLeft: esMovil ? 0 : 'auto', flexWrap: 'wrap', alignItems: 'center' }}>
             {RANGOS.map(r => (
-              <button key={r.id} onClick={() => setRango(r.id)}
+              <button key={r.id} onClick={() => { setRango(r.id); setMesOpId('') }}
                 style={{ padding: '6px 12px', borderRadius: 999, border: '1px solid var(--border)', background: rango === r.id ? 'var(--gold)' : 'transparent', color: rango === r.id ? '#000' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", fontWeight: 600, fontSize: 12 }}>
                 {r.label}
               </button>
             ))}
+            {mesesOp.length > 0 && (
+              <select value={rango === 'mesop' ? mesOpId : ''} onChange={e => elegirMesOp(e.target.value)}
+                style={{
+                  padding: '6px 12px', borderRadius: 999,
+                  border: `1px solid ${rango === 'mesop' ? 'var(--gold)' : 'var(--border)'}`,
+                  background: rango === 'mesop' ? 'var(--gold)' : 'transparent',
+                  color: rango === 'mesop' ? '#000' : 'var(--muted)',
+                  cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", fontWeight: 600, fontSize: 12,
+                }}>
+                <option value="">📅 Mes operativo…</option>
+                {mesesOp.map(m => (
+                  <option key={m.id} value={m.id}>{m.etiqueta || m.mes}</option>
+                ))}
+              </select>
+            )}
           </div>
         )}
       </div>
 
-      {tab === 'hora' && <TabPorHora rango={rango} esMovil={esMovil} />}
-      {tab === 'deposito' && <TabDeposito rango={rango} esMovil={esMovil} />}
+      {/* Qué fechas quedaron seleccionadas. Con el mes operativo es lo primero
+          que hay que poder ver: no arranca el 1° ni termina a fin de mes. */}
+      {usaRango && (
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: -8, marginBottom: 14 }}>
+          Período: <strong style={{ color: 'var(--text)' }}>{ddmm(periodo.desde)} → {ddmm(periodo.hasta)}</strong>
+          {rango === 'mesop' && periodo.desde > fechaHoyARG() && (
+            <span style={{ color: 'var(--amber)' }}> · este mes operativo todavía no empezó</span>
+          )}
+        </div>
+      )}
+
+      {tab === 'hora' && <TabPorHora periodo={periodo} esMovil={esMovil} />}
+      {tab === 'deposito' && <TabDeposito periodo={periodo} esMovil={esMovil} />}
       {tab === 'semanas' && <TabSemanas esMovil={esMovil} />}
       {tab === 'franquicias' && <TabFranquicias esMovil={esMovil} />}
       {/* Trae sus gastos solos y tiene su propio selector de período

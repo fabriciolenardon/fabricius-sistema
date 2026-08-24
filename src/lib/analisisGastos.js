@@ -2,10 +2,9 @@
 // analisisGastos.js — estructura de costos del negocio y cuánto
 // de esa estructura tiene que soportar CADA PRODUCTO.
 // ============================================================
-// La pregunta que responde: "¿qué % de mi facturación (y de mi
-// ganancia) se lleva cada gasto, y cuánto tengo que cargarle a un
-// producto para que el precio pague la estructura y encima deje
-// rentabilidad?".
+// La pregunta que responde: "¿qué % de mi facturación se lleva cada
+// gasto, y cuánto tengo que cargarle a un producto para que el precio
+// pague la estructura y encima deje rentabilidad?".
 //
 // El armado del período es el MISMO que usa el Cierre
 // (calcularCierreAuto) para que los números coincidan con el
@@ -141,13 +140,18 @@ export async function calcularEstructura(desde, hasta, gastos) {
     catMap.set(key, c)
   }
 
-  // Cada línea con sus tres lecturas: sobre facturación, sobre ganancia y
-  // sobre la estructura. `pctGanancia` es "cuánto de tu ganancia se llevó"
-  // → null si el período no dio ganancia (dividir por ≤0 no significa nada).
+  // Cada línea con sus dos lecturas: sobre la facturación y sobre la
+  // estructura. Las dos tienen una base grande y estable.
+  //
+  // Hubo una tercera, `pctGanancia` ("cuánto de tu ganancia se llevó este
+  // gasto"), y se sacó por pedido de Fabricio (24/08/2026): la ganancia es
+  // un RESTO, chico contra la facturación, así que dividir por ella
+  // amplifica todo — la mercadería daba 974,3%. Ese número no describe al
+  // gasto, describe lo flaco que quedó el resto, y encima se mueve solo
+  // cuando cambia cualquier OTRO gasto. No volver a agregarla.
   const conLecturas = (label, monto, extra = {}) => ({
     label, monto,
     pctFacturacion: pct(monto, facturacion),
-    pctGanancia: ganancia > 0 ? pct(monto, ganancia) : null,
     pctEstructura: pct(monto, estructura),
     porDia: monto / dias,
     porKg: kgVendidos > 0 ? monto / kgVendidos : null,

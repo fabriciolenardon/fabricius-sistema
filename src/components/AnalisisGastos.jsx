@@ -3,8 +3,8 @@
 // ============================================================
 // Tres preguntas, tres bloques:
 //   1) ¿A dónde se va la plata?  → cascada Facturación → Ganancia
-//   2) ¿Cuánto se llevó CADA gasto? → % sobre facturación, sobre la
-//      ganancia y sobre la estructura, más $/día y $/kg vendido
+//   2) ¿Cuánto se llevó CADA gasto? → % sobre facturación y sobre la
+//      estructura, más $/día y $/kg vendido
 //   3) ¿Qué precio tiene que tener un producto? → calculadora que
 //      le carga al costo la estructura real del negocio
 //
@@ -99,6 +99,9 @@ export default function AnalisisGastos({ gastos: gastosProp }) {
       // (un período que termina en el futuro daría $/día y $/kg diluidos).
       const m = mesesOp.find(x => String(x.id) === String(mesOpId)) || mesesOpCerrados[0]
       if (!m) return { desde: hoy.slice(0, 8) + '01', hasta: hoy }
+      // Un mes que todavía no arrancó se muestra entero: cortarlo en "hoy"
+      // daría desde > hasta y la consulta volvería vacía sin decir por qué.
+      if (hoy < m.fecha_inicio) return { desde: m.fecha_inicio, hasta: m.fecha_cierre, etiqueta: m.etiqueta }
       return { desde: m.fecha_inicio, hasta: hoy < m.fecha_cierre ? hoy : m.fecha_cierre, etiqueta: m.etiqueta }
     }
     // mes operativo vigente (o el último cargado); si no hay ninguno, mes calendario
@@ -238,8 +241,8 @@ function Cascada({ d, esMovil }) {
       </div>
       {d.ganancia <= 0 && (
         <div style={{ marginTop: 10, fontSize: 12, color: 'var(--gold)' }}>
-          ⚠️ El período no cerró con ganancia, así que la columna "% de tu ganancia" queda en —.
-          Ojo: en períodos cortos la compra de una media res puede caer adentro y la venta afuera.
+          ⚠️ El período no cerró con ganancia. Ojo: en períodos cortos la compra de una
+          media res puede caer adentro y la venta afuera.
         </div>
       )}
     </div>
@@ -288,7 +291,6 @@ function TablaGastos({ d, abierta, setAbierta, esMovil }) {
       </td>
       <td style={{ ...td, fontWeight: hijo ? 500 : 700 }}>{$(f.monto)}</td>
       <td style={{ ...td, color: 'var(--gold)' }}>{pctTxt(f.pctFacturacion, 2)}</td>
-      <td style={{ ...td, color: 'var(--red-light)' }}>{pctTxt(f.pctGanancia)}</td>
       {!esMovil && <td style={{ ...td, color: 'var(--muted)' }}>{pctTxt(f.pctEstructura)}</td>}
       {!esMovil && <td style={{ ...td, color: 'var(--muted)' }}>{$(f.porDia)}</td>}
       {!esMovil && <td style={{ ...td, color: 'var(--muted)' }}>{f.porKg != null ? $(f.porKg) : '—'}</td>}
@@ -298,10 +300,17 @@ function TablaGastos({ d, abierta, setAbierta, esMovil }) {
   return (
     <div className="card" style={{ marginBottom: 16 }}>
       <div className="card-title">🧾 Cuánto se llevó cada gasto</div>
+      {/* Acá había un "% de tu ganancia" (cuánto crecería la ganancia si el
+          gasto no existiera). Se sacó por pedido de Fabricio: la ganancia es
+          un resto chico contra la facturación, así que cualquier gasto normal
+          daba porcentajes enormes —la mercadería marcaba 974,3%— que no
+          hablan del gasto sino de lo flaco que quedó el resto. Las dos
+          lecturas que quedan sí tienen una base estable: la facturación y el
+          total de la estructura. */}
       <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
         Tocá una categoría para abrir el detalle (luz, internet, alquiler… uno por uno).
-        <b> % facturación</b> = de cada peso que entra. <b>% de tu ganancia</b> = si ese gasto no existiera,
-        tu ganancia sería eso más grande.
+        <b> % facturación</b> = de cada peso que entra. <b>% de la estructura</b> = qué parte
+        de todo lo que gastás es este gasto.
       </div>
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
@@ -310,7 +319,6 @@ function TablaGastos({ d, abierta, setAbierta, esMovil }) {
               <th style={{ ...th, textAlign: 'left' }}>Concepto</th>
               <th style={th}>$ del período</th>
               <th style={th}>% facturación</th>
-              <th style={th}>% de tu ganancia</th>
               {!esMovil && <th style={th}>% de la estructura</th>}
               {!esMovil && <th style={th}>$ por día</th>}
               {!esMovil && <th style={th}>$ por kg</th>}
@@ -319,7 +327,7 @@ function TablaGastos({ d, abierta, setAbierta, esMovil }) {
           <tbody>
             {/* Bloques grandes primero (mercadería, sueldos, fijos, variables, socios) */}
             {d.bloques.map(b => <Fila key={b.clave} f={b} />)}
-            <tr><td colSpan={esMovil ? 4 : 7} style={{ padding: '12px 8px 4px', color: 'var(--muted)', fontSize: 11, fontWeight: 700 }}>DETALLE POR CATEGORÍA</td></tr>
+            <tr><td colSpan={esMovil ? 3 : 6} style={{ padding: '12px 8px 4px', color: 'var(--muted)', fontSize: 11, fontWeight: 700 }}>DETALLE POR CATEGORÍA</td></tr>
             {d.lineas.map(l => {
               const k = l.tipo + '|' + l.categoria
               const open = abierta === k
@@ -333,7 +341,7 @@ function TablaGastos({ d, abierta, setAbierta, esMovil }) {
               )
             })}
             {d.lineas.length === 0 && (
-              <tr><td colSpan={esMovil ? 4 : 7} style={{ padding: 20, textAlign: 'center', color: 'var(--muted)' }}>Sin gastos cargados en este período.</td></tr>
+              <tr><td colSpan={esMovil ? 3 : 6} style={{ padding: 20, textAlign: 'center', color: 'var(--muted)' }}>Sin gastos cargados en este período.</td></tr>
             )}
           </tbody>
         </table>
