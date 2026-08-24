@@ -43,6 +43,40 @@ export const LABEL_CATEGORIA = {
 }
 export const labelCategoria = c => LABEL_CATEGORIA[c] || '📝 Otro'
 
+// ============================================================
+// El depósito y el catálogo le dicen distinto a lo mismo: las piezas
+// bovinas se despachan como `pieza_entera` (o al bucket específico
+// `pieza_costillar`, `pieza_cortito`, …) pero en la lista de precios
+// viven bajo `bovino_pieza`. Sin unificar, la misma mercadería sale en
+// dos filas: una con precios y sin kilos, otra con kilos y sin precios.
+export function categoriaCanonica(c) {
+  const k = String(c || '')
+  if (k === 'pieza_entera' || k.startsWith('pieza_')) return 'bovino_pieza'
+  return k
+}
+
+// Junta las filas de vendido que caen en la misma categoría canónica,
+// sumando kilos, plata y el desglose por lista.
+function unificarVendido(vendido) {
+  const m = new Map()
+  for (const v of vendido || []) {
+    const k = categoriaCanonica(v.categoria)
+    const a = m.get(k) || { categoria: k, may: 0, min: 0, total: 0, impMay: 0, impMin: 0, importe: 0, listas: {} }
+    a.may += n(v.may); a.min += n(v.min); a.total += n(v.total)
+    a.impMay += n(v.impMay); a.impMin += n(v.impMin); a.importe += n(v.importe)
+    for (const [lista, x] of Object.entries(v.listas || {})) {
+      const l = a.listas[lista] || { kg: 0, imp: 0 }
+      l.kg += n(x.kg); l.imp += n(x.imp)
+      a.listas[lista] = l
+    }
+    m.set(k, a)
+  }
+  return [...m.values()].map(a => ({
+    ...a,
+    realPorKg: a.total > 0.01 ? a.importe / a.total : null,
+  }))
+}
+
 // Normaliza la descripción para agrupar el mismo gasto mes a mes
 // ("Luz Alvear", "LUZ ALVEAR " y "luz  alvear" son el mismo concepto).
 export function claveConcepto(desc) {
@@ -85,7 +119,7 @@ export async function calcularEstructura(desde, hasta, gastos) {
   // para dos cosas: el $/kg de cada gasto y el precio promedio REAL por kilo
   // de cada canal (facturación ÷ kg), que es el que se compara contra el
   // promedio de la lista.
-  const vendidoPorCategoria = control?.vendido || []
+  const vendidoPorCategoria = unificarVendido(control?.vendido)
   const kgVendidos = vendidoPorCategoria.reduce((s, v) => s + n(v.total), 0)
   const kgMay = vendidoPorCategoria.reduce((s, v) => s + n(v.may), 0)
   const kgMin = vendidoPorCategoria.reduce((s, v) => s + n(v.min), 0)
@@ -247,9 +281,10 @@ export function promediosDeListas(precios, vendidoPorCategoria) {
       const pk = precioPorKg(p, l.campo)
       if (pk == null) continue
       suma += pk; cant++
-      const c = porCat.get(p.categoria) || { suma: 0, cant: 0 }
+      const cat = categoriaCanonica(p.categoria)
+      const c = porCat.get(cat) || { suma: 0, cant: 0 }
       c.suma += pk; c.cant++
-      porCat.set(p.categoria, c)
+      porCat.set(cat, c)
     }
 
     // Ponderado y precio real, ambos sobre lo que salió por esta lista
