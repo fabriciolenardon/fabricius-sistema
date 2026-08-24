@@ -4,6 +4,9 @@
 //   - Depósito: kg despostados y elaborados por día
 //   - Semana a Semana: comparativa apoyada en los cierres existentes
 //   - Franquicias: kg despachados, mix, evolución, saldo y pagos
+//   - Costos y Precios: qué % de la facturación (y de la ganancia) se
+//     lleva cada gasto, y qué precio necesita un producto para bancar
+//     esa estructura y encima dejar rentabilidad (components/AnalisisGastos)
 // Todo es SOLO LECTURA: esta pantalla no modifica ninguna tabla.
 // ============================================================
 import { useState, useEffect } from 'react'
@@ -14,6 +17,7 @@ import { lunesDeLaSemana } from '../../lib/cierreAuto'
 import { kgPorUnidadDeProducto } from '../../lib/stockHelpers'
 import { nombreTipo } from '../../lib/controlSemanal'
 import { useEsMovil } from '../../lib/useEsMovil'
+import AnalisisGastos from '../../components/AnalisisGastos'
 
 const n = v => Number(v) || 0
 const fmt = v => fmtPrecio(n(v), { decimales: 0 })
@@ -534,13 +538,14 @@ export default function Productividad() {
     { id: 'deposito', label: '🏭 Depósito' },
     { id: 'semanas', label: '📅 Semana a Semana' },
     { id: 'franquicias', label: '🏪 Franquicias' },
+    { id: 'costos', label: '💰 Costos y Precios' },
   ]
   const usaRango = tab === 'hora' || tab === 'deposito'
 
   return (
     <div>
       <div className="page-title">PRODUCTIVIDAD</div>
-      <div className="page-sub">Rendimiento por números: franjas horarias de Caja, producción de Depósito, comparativa semanal y despachos a franquicias.</div>
+      <div className="page-sub">Rendimiento por números: franjas horarias de Caja, producción de Depósito, comparativa semanal, despachos a franquicias y la estructura de costos volcada al precio de cada producto.</div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
         {TABS.map(t => (
@@ -565,6 +570,10 @@ export default function Productividad() {
       {tab === 'deposito' && <TabDeposito rango={rango} esMovil={esMovil} />}
       {tab === 'semanas' && <TabSemanas esMovil={esMovil} />}
       {tab === 'franquicias' && <TabFranquicias esMovil={esMovil} />}
+      {/* Trae sus gastos solos y tiene su propio selector de período
+          (mes operativo / calendario / semana / rango), por eso no usa
+          el `rango` de arriba. */}
+      {tab === 'costos' && <AnalisisGastos />}
     </div>
   )
 }

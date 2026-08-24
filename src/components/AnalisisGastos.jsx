@@ -1,5 +1,5 @@
 // ============================================================
-// AnalisisGastos.jsx — pestaña "📊 Análisis" de Gastos.
+// AnalisisGastos.jsx — pestaña "💰 Costos y Precios" de Productividad (Dirección).
 // ============================================================
 // Tres preguntas, tres bloques:
 //   1) ¿A dónde se va la plata?  → cascada Facturación → Ganancia
@@ -12,7 +12,7 @@
 // que arma el período con la MISMA lógica del Cierre.
 // ============================================================
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import { supabase } from '../lib/supabase'
+import { supabase, fetchAllRows } from '../lib/supabase'
 import { fechaHoyARG } from '../lib/fechas'
 import { fmtPrecio, parseNumero } from '../lib/formatos'
 import { useEsMovil } from '../lib/useEsMovil'
@@ -30,9 +30,13 @@ function fmtFechaCorta(f) {
   return `${d}/${m}`
 }
 
-export default function AnalisisGastos({ gastos }) {
+// `gastos` es opcional: si la pantalla que lo monta ya los tiene cargados
+// (Gastos), los pasa y evitamos la consulta; si no (Productividad), los
+// trae la pantalla. Paginado — un año de gastos pasa las 1000 filas.
+export default function AnalisisGastos({ gastos: gastosProp }) {
   const esMovil = useEsMovil()
   const [mesesOp, setMesesOp] = useState([])
+  const [gastosPropios, setGastosPropios] = useState(null)
   const [modo, setModo] = useState('mesop')   // mesop | mes | mesant | semana | rango
   const [rango, setRango] = useState({ desde: '', hasta: fechaHoyARG() })
   const [data, setData] = useState(null)
@@ -40,11 +44,18 @@ export default function AnalisisGastos({ gastos }) {
   const [error, setError] = useState('')
   const [abierta, setAbierta] = useState(null) // categoría expandida en la tabla
 
+  const gastos = gastosProp || gastosPropios
+
   useEffect(() => {
     supabase.from('meses_operativos').select('mes,etiqueta,fecha_inicio,fecha_cierre')
       .order('fecha_inicio', { ascending: false })
       .then(({ data }) => setMesesOp(data || []))
-  }, [])
+    if (!gastosProp) {
+      fetchAllRows(() => supabase.from('gastos').select('*').order('fecha', { ascending: false }))
+        .then(({ data }) => setGastosPropios(data || []))
+        .catch(() => setGastosPropios([]))
+    }
+  }, [gastosProp])
 
   // Rango efectivo según el modo elegido
   const periodo = useMemo(() => {
@@ -65,6 +76,10 @@ export default function AnalisisGastos({ gastos }) {
   }, [modo, rango, mesesOp])
 
   useEffect(() => {
+    // Sin los gastos todavía cargados no calculamos: los totales saldrían
+    // bien igual (los trae el cierre) pero el detalle por concepto quedaría
+    // vacío por un instante, que es peor que esperar.
+    if (!gastos) return
     let vivo = true
     setCargando(true); setError('')
     calcularEstructura(periodo.desde, periodo.hasta, gastos)
