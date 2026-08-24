@@ -19,6 +19,7 @@ import CajasTab from './CajasTab'
 import PolloCajonesTab from './PolloCajonesTab'
 import StockPiezasTab from './StockPiezasTab'
 import MermasHistorial from './MermasHistorial'
+import Recetas from '../../components/Recetas'
 import { cargarCategoriasPrecios, labelsDeCategorias } from '../../lib/categoriasPrecios'
 import { estadoBloqueoCliente } from '../../lib/moraClientes'
 import { logAuditoria } from '../../lib/auditoria'
@@ -449,6 +450,10 @@ export function Deposito() {
           ...(isSucursal ? [] : [{ id: 'flujo', label: '📥 Flujo Depósito' }]),
           { id: 'remitos', label: '🧾 Remitos' },
           ...(puedeAjustar ? [{ id: 'ajuste', label: '🔧 Ajuste Stock' }] : []),
+          // Última de la fila: es material de consulta, no un paso del
+          // trabajo diario. Las ven las dos bocas; las edita sólo la
+          // central (la mig 104 lo aplica en la base).
+          { id: 'recetas', label: '📖 Recetas' },
         ].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
             style={{ padding: '8px 16px', borderRadius: 8, border: `1px solid ${tab === t.id ? 'var(--amber)' : 'var(--border)'}`, background: tab === t.id ? 'var(--amber)' : 'transparent', color: tab === t.id ? '#fff' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
@@ -464,6 +469,7 @@ export function Deposito() {
 {tab === 'elaborar' && <DesposteTab key={tab} onSaved={() => {}} soloElaborar />}
 {tab === 'piezas' && <PiezasTab key={tab} />}
 {tab === 'cerdo' && <StockPiezasTab key={tab} />}
+{tab === 'recetas' && <Recetas key={tab} puedeEditar={!isSucursal} />}
 {tab === 'cajas' && <CajasTab key={tab} />}
 {tab === 'pollo_cajones' && <PolloCajonesTab key={tab} />}
 {tab === 'remitos' && <RemitosTab remitoActual={remitoActual} />}

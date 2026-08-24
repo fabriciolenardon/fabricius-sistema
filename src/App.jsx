@@ -29,6 +29,10 @@ import Deposito from './pages/admin/Deposito'
 import Caja from './pages/admin/Caja'
 import Precios from './pages/admin/Precios'
 import AsistenteIA from './components/AsistenteIA'
+// Estático a propósito: Deposito.jsx ya lo importa así, y con `lazy()` acá
+// Vite no lo separa en su propio chunk — el portal Desposte terminaba
+// bajándose el chunk entero de Depósito sólo para ver las recetas.
+import Recetas from './components/Recetas'
 import PerfilPendiente from './components/PerfilPendiente'
 
 // Lazy: pantallas admin que NO se usan en cada sesion
@@ -207,6 +211,10 @@ export default function App() {
           <Route path="capones" element={<DesposteCapones />} />
           <Route path="media-res" element={<DesposteMediaRes />} />
           <Route path="historial" element={<DesposteHistorial />} />
+          {/* Sólo lectura, y no sólo porque no le pasamos `puedeEditar`: la
+              policy de la mig 104 pide is_admin() Y es_central(), y el
+              perfil del desposte no es admin. */}
+          <Route path="recetas" element={<Recetas />} />
         </Route>
       </Routes>
       </Suspense>
