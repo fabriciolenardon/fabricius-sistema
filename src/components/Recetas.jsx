@@ -16,6 +16,22 @@
 // se hacen 35. Multiplica las cantidades numéricas; las que son una nota
 // ("1 cabeza de ajo cada 10 kg") se muestran tal cual, porque no hay forma
 // honesta de escalar un texto.
+//
+// LA BASE NO ES EL TOTAL. En el salame la base son 30 kg de cerdo y de ahí
+// salen 50 kg de pasta (56 con el queso). La base es el ancla del
+// multiplicador; el TOTAL lo calcula la pantalla sumando base + todo lo que
+// esté en kg o g. Por eso la carne de la base NO va también en la lista de
+// ingredientes: se contaría dos veces.
+//
+// "CADA KILO LLEVA" es la lectura que pidió Fabricio: en vez de leer la
+// tabla de 30 kg y hacer la cuenta, cada renglón dice cuánto entra en UN
+// kilo de producto terminado (cantidad ÷ total). Como es una proporción, no
+// cambia al escalar.
+//
+// LOS CONDIMENTOS NO SON UNA RECETA SUELTA (`rol = 'condimentos'`): son los
+// de la pasta de salame. Su tarjeta tiene un selector para elegir a qué
+// salame acompañan, y toma los kilos del TOTAL de ese salame — así mover el
+// salame a 60 kg mueve los condimentos solos.
 // ============================================================
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
@@ -36,6 +52,44 @@ const UNIDADES = ['g', 'kg', 'ml', 'l', 'u', 'cda', 'cdta', 'cabeza', 'diente']
 
 const nuevaFila = () => ({ nombre: '', cantidad: '', unidad: 'g', nota: '' })
 
+// Kilos que aporta un ingrediente. Sólo kg y g pesan: los huevos, el vino y
+// las cabezas de ajo no entran al total (son unidades y líquidos).
+function kgDeIngrediente(i) {
+  const c = Number(i?.cantidad)
+  if (!isFinite(c)) return 0
+  const u = String(i?.unidad || '').toLowerCase()
+  if (u === 'kg') return c
+  if (u === 'g') return c / 1000
+  return 0
+}
+
+// Lo que RINDE la receta: la base más todo lo que se le suma en peso.
+// La carne de la base no va en `ingredientes` justamente para no contarla dos
+// veces (ver la cabecera).
+function totalDeReceta(r) {
+  return (Number(r.base_kg) || 0) + (r.ingredientes || []).reduce((s, i) => s + kgDeIngrediente(i), 0)
+}
+
+// Cantidad con los decimales que el número necesita: 0,24 g no puede
+// redondearse a 0, y 30 kg no necesita decimales.
+function fmtCant(v) {
+  const n = Number(v)
+  if (!isFinite(n)) return ''
+  const dec = Math.abs(n) < 1 ? 3 : Math.abs(n) < 10 ? 2 : n % 1 === 0 ? 0 : 2
+  return fmtNumero(n, dec)
+}
+
+// Cuánto de este ingrediente entra en UN kilo de producto terminado.
+// Se pasa a gramos cuando queda por debajo del kilo, que es como se lee.
+function porKilo(cantidad, unidad, totalKg) {
+  const c = Number(cantidad)
+  if (!isFinite(c) || !(totalKg > 0)) return null
+  const u = String(unidad || '').toLowerCase()
+  const v = c / totalKg
+  if (u === 'kg') return v < 1 ? `${fmtCant(v * 1000)} g` : `${fmtCant(v)} kg`
+  return `${fmtCant(v)} ${unidad || ''}`.trim()
+}
+
 const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '7px 10px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, boxSizing: 'border-box' }
 
 export default function Recetas({ puedeEditar = false }) {
@@ -45,6 +99,10 @@ export default function Recetas({ puedeEditar = false }) {
   const [error, setError] = useState('')
   const [editando, setEditando] = useState(null)  // receta en edición (borrador)
   const [msg, setMsg] = useState(null)
+  // Los kilos elegidos en cada tarjeta viven ACÁ y no adentro de la tarjeta:
+  // la de condimentos necesita leer el total de OTRA receta.
+  const [kgPorReceta, setKgPorReceta] = useState({})   // recetaId → kg (string)
+  const [vinculo, setVinculo] = useState({})           // condimentoId → recetaId | ''
 
   useEffect(() => { cargar() }, [])
 
@@ -72,9 +130,46 @@ export default function Recetas({ puedeEditar = false }) {
       CATEGORIAS.findIndex(c => c.id === a[0]) - CATEGORIAS.findIndex(c => c.id === b[0]))
   }, [recetas])
 
+  // Las fórmulas a las que se puede enganchar una tarjeta de condimentos:
+  // las de su misma familia (los condimentos del salame no sirven para la
+  // hamburguesa). Se calcula una vez para todas.
+  const formulasPorCategoria = useMemo(() => {
+    const m = {}
+    for (const r of recetas) {
+      if (r.rol === 'condimentos') continue
+      ;(m[r.categoria] = m[r.categoria] || []).push(r)
+    }
+    return m
+  }, [recetas])
+
+  // Estado calculado de cada tarjeta: kilos elegidos, factor y total que rinde.
+  // Una receta de condimentos vinculada NO tiene kilos propios: toma el total
+  // del salame elegido, así mover el salame a 60 kg mueve los condimentos.
+  const estado = useMemo(() => {
+    const propio = {}
+    for (const r of recetas) {
+      const base = Number(r.base_kg) || 1
+      const kg = Number(String(kgPorReceta[r.id] ?? r.base_kg).replace(',', '.'))
+      const usados = isFinite(kg) && kg > 0 ? kg : base
+      propio[r.id] = { kg: usados, factor: usados / base, total: totalDeReceta(r) * (usados / base) }
+    }
+    const final = {}
+    for (const r of recetas) {
+      const destino = r.rol === 'condimentos' ? vinculo[r.id] : ''
+      const fuente = destino && propio[destino]
+      if (fuente) {
+        const base = Number(r.base_kg) || 1
+        final[r.id] = { ...propio[r.id], kg: fuente.total, factor: fuente.total / base, vinculadoA: destino }
+      } else {
+        final[r.id] = propio[r.id]
+      }
+    }
+    return final
+  }, [recetas, kgPorReceta, vinculo])
+
   function abrirNueva() {
     setEditando({
-      nombre: '', categoria: 'embutido', base_kg: 10, base_label: 'Masa',
+      nombre: '', categoria: 'embutido', rol: 'formula', base_kg: 10, base_label: 'Masa',
       notas: '', ingredientes: [nuevaFila()],
     })
   }
@@ -111,6 +206,7 @@ export default function Recetas({ puedeEditar = false }) {
     const fila = {
       nombre: b.nombre.trim(),
       categoria: b.categoria,
+      rol: b.rol === 'condimentos' ? 'condimentos' : 'formula',
       base_kg: Number(String(b.base_kg).replace(',', '.')) || 1,
       base_label: b.base_label?.trim() || 'Masa',
       notas: b.notas?.trim() || null,
@@ -178,6 +274,12 @@ export default function Recetas({ puedeEditar = false }) {
           <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : 'repeat(auto-fit, minmax(340px, 1fr))', gap: 12 }}>
             {lista.map(r => (
               <TarjetaReceta key={r.id} receta={r} puedeEditar={puedeEditar}
+                est={estado[r.id]}
+                setKg={v => setKgPorReceta(m => ({ ...m, [r.id]: v }))}
+                formulas={(formulasPorCategoria[r.categoria] || [])}
+                recetas={recetas}
+                vinculadoA={vinculo[r.id] || ''}
+                setVinculo={v => setVinculo(m => ({ ...m, [r.id]: v }))}
                 onEditar={() => abrirEdicion(r)} onBorrar={() => borrar(r)} />
             ))}
           </div>
@@ -193,25 +295,23 @@ export default function Recetas({ puedeEditar = false }) {
 }
 
 // ── Una receta, con su escalador ────────────────────────────
-function TarjetaReceta({ receta, puedeEditar, onEditar, onBorrar }) {
-  const [kg, setKg] = useState(String(receta.base_kg))
+function TarjetaReceta({ receta, puedeEditar, est, setKg, formulas, recetas, vinculadoA, setVinculo, onEditar, onBorrar }) {
   const [confirmar, setConfirmar] = useState(false)
 
   const base = Number(receta.base_kg) || 1
-  const objetivo = Number(String(kg).replace(',', '.'))
-  const factor = isFinite(objetivo) && objetivo > 0 ? objetivo / base : 1
+  const factor = est?.factor ?? 1
   const escalada = Math.abs(factor - 1) > 0.0001
-
-  // Los decimales se ajustan al número: 0,24 g no puede redondearse a 0.
-  const fmtCant = v => {
-    const n = Number(v)
-    if (!isFinite(n)) return ''
-    const dec = Math.abs(n) < 1 ? 3 : Math.abs(n) < 10 ? 2 : n % 1 === 0 ? 0 : 2
-    return fmtNumero(n, dec)
-  }
+  const esCondimentos = receta.rol === 'condimentos'
+  // El total lo calcula la tarjeta: base + todo lo que pese. Es lo que
+  // "sale" (50 kg de pasta) y lo que engancha a los condimentos.
+  const totalBase = totalDeReceta(receta)
+  const total = totalBase * factor
+  // Otras fórmulas de la misma familia a las que se puede enganchar.
+  const opciones = formulas.filter(f => f.id !== receta.id)
+  const fuente = vinculadoA ? recetas.find(r => r.id === vinculadoA) : null
 
   return (
-    <div className="card" style={{ borderColor: escalada ? 'var(--gold)' : 'var(--border)' }}>
+    <div className="card" style={{ borderColor: escalada || fuente ? 'var(--gold)' : 'var(--border)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 10 }}>
         <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)', letterSpacing: 1, lineHeight: 1.1 }}>
           {receta.nombre}
@@ -240,45 +340,64 @@ function TarjetaReceta({ receta, puedeEditar, onEditar, onBorrar }) {
         </div>
       )}
 
-      {/* Base + escalador */}
-      <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 12px', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 0.5 }}>{receta.base_label.toUpperCase()}</div>
-        <input type="number" step="any" value={kg} onChange={e => setKg(e.target.value)}
-          style={{ ...inp, width: 90, textAlign: 'right', fontWeight: 800 }} />
-        <div style={{ fontSize: 13, color: 'var(--muted)' }}>kg</div>
-        {escalada && (
-          <button onClick={() => setKg(String(base))}
-            style={{ marginLeft: 'auto', padding: '4px 10px', borderRadius: 999, border: '1px solid var(--gold)', background: 'transparent', color: 'var(--gold)', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
-            ×{fmtNumero(factor, 2)} · volver a {fmtNumero(base, 0)} kg
-          </button>
-        )}
-      </div>
+      {/* Cabecera: o el escalador propio, o el enganche a un salame */}
+      {esCondimentos && opciones.length > 0 ? (
+        <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 12px', marginBottom: 10 }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 0.5, marginBottom: 6 }}>CONDIMENTOS PARA</div>
+          <select value={vinculadoA} onChange={e => setVinculo(e.target.value)} style={{ ...inp, width: '100%' }}>
+            <option value="">— elegir a mano —</option>
+            {opciones.map(f => <option key={f.id} value={f.id}>{f.nombre}</option>)}
+          </select>
+          {fuente ? (
+            <div style={{ marginTop: 8, fontSize: 12, color: 'var(--gold)', fontWeight: 700 }}>
+              {fmtCant(est?.kg || 0)} kg de pasta · sale del kilaje de «{fuente.nombre}»
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+              <input type="number" step="any" value={String(est?.kg ?? base)}
+                onChange={e => setKg(e.target.value)}
+                style={{ ...inp, width: 100, textAlign: 'right', fontWeight: 800 }} />
+              <div style={{ fontSize: 13, color: 'var(--muted)' }}>kg de pasta</div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 12px', marginBottom: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 0.5 }}>{(receta.base_label || 'BASE').toUpperCase()}</div>
+            <input type="number" step="any" value={String(est?.kg ?? base)} onChange={e => setKg(e.target.value)}
+              style={{ ...inp, width: 90, textAlign: 'right', fontWeight: 800 }} />
+            <div style={{ fontSize: 13, color: 'var(--muted)' }}>kg</div>
+            {escalada && (
+              <button onClick={() => setKg(String(base))}
+                style={{ marginLeft: 'auto', padding: '4px 10px', borderRadius: 999, border: '1px solid var(--gold)', background: 'transparent', color: 'var(--gold)', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
+                ×{fmtNumero(factor, 2)} · volver a {fmtNumero(base, 0)} kg
+              </button>
+            )}
+          </div>
+          {/* Lo que SALE. En el salame la base son 30 kg de cerdo pero salen
+              50 de pasta, y es el número con el que se trabaja después. */}
+          {total > base + 0.001 && (
+            <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)', fontSize: 12, color: 'var(--muted)' }}>
+              Salen <strong style={{ color: 'var(--green)', fontSize: 15 }}>{fmtCant(total)} kg</strong> de producto
+            </div>
+          )}
+        </div>
+      )}
 
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <tbody>
+          {/* La base va como primer renglón: es un ingrediente más para el que
+              lee, y así entra en la columna "cada kilo lleva". */}
+          {!esCondimentos && (
+            <FilaIngrediente
+              nombre={receta.base_label} destacado
+              cantidad={base} unidad="kg" factor={factor} totalBase={totalBase} escalada={escalada} />
+          )}
           {(receta.ingredientes || []).map((i, k) => (
-            <tr key={k} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-              <td style={{ padding: '6px 4px', fontSize: 13 }}>
-                {i.nombre}
-                {/* La nota es la parte que no se puede escalar: se muestra
-                    igual siempre y se avisa cuando la receta está escalada. */}
-                {i.nota && (
-                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>
-                    {i.nota}{escalada && i.cantidad == null ? ' · no escala' : ''}
-                  </div>
-                )}
-              </td>
-              <td style={{ padding: '6px 4px', textAlign: 'right', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
-                {i.cantidad != null ? (
-                  <>
-                    <strong style={{ fontSize: 15, color: escalada ? 'var(--gold)' : 'var(--text)' }}>
-                      {fmtCant(Number(i.cantidad) * factor)}
-                    </strong>
-                    <span style={{ fontSize: 11, color: 'var(--muted)' }}> {i.unidad || ''}</span>
-                  </>
-                ) : <span style={{ fontSize: 11, color: 'var(--muted)' }}>—</span>}
-              </td>
-            </tr>
+            <FilaIngrediente key={k} nombre={i.nombre} nota={i.nota}
+              cantidad={i.cantidad} unidad={i.unidad} factor={factor}
+              totalBase={esCondimentos ? base : totalBase} escalada={escalada} />
           ))}
         </tbody>
       </table>
@@ -287,6 +406,40 @@ function TarjetaReceta({ receta, puedeEditar, onEditar, onBorrar }) {
         <div style={{ marginTop: 10, fontSize: 11, color: 'var(--muted)', lineHeight: 1.5 }}>{receta.notas}</div>
       )}
     </div>
+  )
+}
+
+// Un renglón de la receta: la cantidad escalada y, abajo, cuánto de eso
+// entra en UN kilo de producto terminado — que es la lectura que evita
+// tener que hacer la cuenta contra la tabla de 30 kg.
+function FilaIngrediente({ nombre, nota, cantidad, unidad, factor, totalBase, escalada, destacado }) {
+  const unitario = cantidad != null ? porKilo(cantidad, unidad, totalBase) : null
+  return (
+    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+      <td style={{ padding: '6px 4px', fontSize: 13, fontWeight: destacado ? 700 : 400 }}>
+        {nombre}
+        {/* La nota es la parte que no se puede escalar: se muestra igual
+            siempre y se avisa cuando la receta está escalada. */}
+        {nota && (
+          <div style={{ fontSize: 10, color: 'var(--muted)' }}>
+            {nota}{escalada && cantidad == null ? ' · no escala' : ''}
+          </div>
+        )}
+      </td>
+      <td style={{ padding: '6px 4px', textAlign: 'right', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+        {cantidad != null ? (
+          <>
+            <div>
+              <strong style={{ fontSize: 15, color: escalada ? 'var(--gold)' : 'var(--text)' }}>
+                {fmtCant(Number(cantidad) * factor)}
+              </strong>
+              <span style={{ fontSize: 11, color: 'var(--muted)' }}> {unidad || ''}</span>
+            </div>
+            {unitario && <div style={{ fontSize: 10, color: 'var(--muted)' }}>{unitario} por kg</div>}
+          </>
+        ) : <span style={{ fontSize: 11, color: 'var(--muted)' }}>—</span>}
+      </td>
+    </tr>
   )
 }
 
@@ -342,10 +495,19 @@ function EditorReceta({ borrador, setBorrador, onGuardar, onCancelar, esMovil })
               placeholder="Carne vacuna / Masa" style={{ ...inp, width: '100%' }} />
           </div>
         </div>
-        <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 14, lineHeight: 1.5 }}>
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10, lineHeight: 1.5 }}>
           A cuántos kilos corresponden las cantidades de abajo. Si la receta está escrita
-          <strong> por kilo</strong>, poné 1.
+          <strong> por kilo</strong>, poné 1. <strong>La base no va también en la lista</strong>:
+          se contaría dos veces al calcular lo que sale.
         </div>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 12, marginBottom: 14, color: borrador.rol === 'condimentos' ? 'var(--gold)' : 'var(--muted)' }}>
+          <input type="checkbox" checked={borrador.rol === 'condimentos'}
+            onChange={e => set('rol', e.target.checked ? 'condimentos' : 'formula')}
+            style={{ width: 16, height: 16, cursor: 'pointer' }} />
+          Son <strong>condimentos de otra receta</strong> — la tarjeta va a tener un selector para
+          elegir a cuál acompaña y toma los kilos de ella.
+        </label>
 
         <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 1, fontWeight: 700, marginBottom: 8 }}>INGREDIENTES</div>
         {borrador.ingredientes.map((i, idx) => (
