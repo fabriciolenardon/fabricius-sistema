@@ -40,6 +40,7 @@ import { useEsMovil } from '../lib/useEsMovil'
 
 const CATEGORIAS = [
   { id: 'hamburguesa', label: '🍔 Hamburguesas' },
+  { id: 'milanesa', label: '🍗 Milanesas' },
   { id: 'embutido', label: '🌭 Embutidos' },
   { id: 'salame', label: '🥓 Salames' },
   { id: 'otro', label: '📖 Otras' },
