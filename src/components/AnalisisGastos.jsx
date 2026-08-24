@@ -315,34 +315,37 @@ function TablaGastos({ d, abierta, setAbierta, esMovil }) {
 // ────────────────────────────────────────────────────────────
 // 4) PROMEDIO DEL KILO EN CADA LISTA
 // ────────────────────────────────────────────────────────────
-// Tres números por lista, de menos a más honesto:
-//   simple    → sumar todos los precios y dividir por la cantidad
-//   ponderado → el mismo promedio pesado por los kg que vendés de cada
-//               categoría (el hueso deja de valer lo mismo que el lomo)
-//   real      → facturación ÷ kg del período: lo que de verdad cobrás
+// El protagonista es la TABLA POR CATEGORÍA: bovino cortes, cerdo cortes,
+// embutidos, pollo por kilo, pollo por cajón… cada una con su promedio en
+// cada lista. Un promedio que mezcla todas las categorías no sirve para
+// decidir nada: junta el pollo por cajón a $3.800 con los embutidos a
+// $21.000 y da un número que no es el precio de nada.
+//
+// Al pie, lo único que sí tiene sentido mirar junto: el precio REAL por
+// kilo de cada lista, que no es un promedio de promedios sino la plata
+// facturada dividida los kilos que salieron por esa lista.
 function PromedioListas({ d, precios, esMovil, comis, rent }) {
   const listas = useMemo(() => promediosDeListas(precios, d.vendidoPorCategoria), [precios, d])
 
-  // Lo máximo que puede costarte el kilo promedio para que, después de la
+  // Lo que puede costarte el kilo de esa categoría para que, después de la
   // estructura y las comisiones, quede la rentabilidad buscada.
   const libre = 1 - (d.coef.cargaPct + parseNumero(comis) + parseNumero(rent)) / 100
 
   const etiquetaCat = c => CATEGORIAS_SISTEMA.find(x => x.clave === c)?.label || c
 
-  // Filas por categoría: kg vendidos + promedio en cada lista
   const filas = useMemo(() => {
     const m = new Map()
     for (const l of listas) {
       for (const c of l.categorias) {
-        const row = m.get(c.categoria) || { categoria: c.categoria, kg: 0 }
+        const row = m.get(c.categoria) || { categoria: c.categoria, kg: 0, productos: 0 }
         row.kg += c.kg || 0
+        row.productos = Math.max(row.productos, c.productos || 0)
         row[l.codigo] = c.promedio
-        if (c.real != null) row[l.codigo + '_real'] = c.real
         m.set(c.categoria, row)
       }
     }
-    // El "cobrado real" de la categoría sale de lo vendido en el período,
-    // sin importar por qué lista salió: plata facturada ÷ kilos que salieron.
+    // Cobrado real de la categoría: plata facturada ÷ kilos que salieron,
+    // sin importar por qué lista salió. Es el único sin supuestos.
     for (const v of d.vendidoPorCategoria || []) {
       const row = m.get(v.categoria)
       if (row && v.realPorKg != null) row.realTotal = v.realPorKg
@@ -352,81 +355,83 @@ function PromedioListas({ d, precios, esMovil, comis, rent }) {
 
   if (!precios.length) return null
 
+  const th = { padding: '6px 8px', textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap' }
+  const td = { padding: '7px 8px', textAlign: 'right', whiteSpace: 'nowrap' }
+
   return (
     <div className="card" style={{ marginBottom: 16 }}>
-      <div className="card-title">📋 A cuánto vendés el kilo, en promedio, en cada lista</div>
+      <div className="card-title">📋 Promedio del kilo por categoría, en cada lista</div>
       <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 12, lineHeight: 1.5 }}>
-        El <b>promedio de lista</b> suma el precio de todos los artículos y lo divide por la cantidad:
-        te dice cómo está parada la lista, pero trata igual al hueso que al lomo.
-        El <b>promedio real</b> es lo que de verdad cobraste: la facturación del período dividida los
-        kilos que salieron — ahí ya está adentro el mix, las ofertas y los descuentos.
-        Se cuentan solo los productos que se venden por kilo (almacén, bebidas e insumos quedan afuera).
-      </div>
-
-      <div className="grid3" style={{ marginBottom: 14 }}>
-        {listas.map(l => {
-          const real = l.real
-          const dif = real != null && l.ponderado != null ? real - l.ponderado : null
-          return (
-            <div className="stat" key={l.codigo}>
-              <div className="stat-label">{l.label}</div>
-              <div className="stat-value" style={{ fontSize: 22 }}>
-                {l.simple != null ? $(l.simple) : '—'}
-              </div>
-              <div style={{ fontSize: 10, color: 'var(--muted)' }}>
-                promedio de lista · {l.productos} producto{l.productos !== 1 ? 's' : ''} por kilo
-              </div>
-              <div style={{ marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 6, display: 'grid', gap: 3, fontSize: 11 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--muted)' }}>Pesado por lo que sale por esta lista</span>
-                  <b>{l.ponderado != null ? $(l.ponderado) : '—'}</b>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--muted)' }}>Lo que realmente cobrás</span>
-                  <b style={{ color: real != null ? 'var(--green)' : 'var(--muted)' }}>{real != null ? $(real) : '—'}</b>
-                </div>
-                <div style={{ color: 'var(--muted)', fontSize: 10 }}>
-                  {l.kgVendidos > 0
-                    ? <>{fmtKg(l.kgVendidos, { decimales: 0 })} salieron por esta lista{dif != null && <> · cobrás {dif >= 0 ? '+' : '−'}{$(dif)} por kilo {dif >= 0 ? 'arriba' : 'abajo'}</>}</>
-                    : 'No salió nada por esta lista en el período'}
-                </div>
-                {libre > 0 && l.ponderado != null && (
-                  <div style={{ color: 'var(--gold)', fontSize: 10, marginTop: 2 }}>
-                    Con esta lista, el kilo no te puede costar más de <b>{$(l.ponderado * libre)}</b> para
-                    dejarte {pctTxt(parseNumero(rent))} limpio.
-                  </div>
-                )}
-              </div>
-            </div>
-          )
-        })}
+        Cada categoría con su propio promedio: el de la lista sale de los precios cargados,
+        el <b>cobrado real</b> sale de la plata facturada dividida los kilos que salieron
+        (ahí ya están adentro el mix, las ofertas y los descuentos).
+        El <b>costo máximo</b> es hasta cuánto podés pagar ese kilo para que, después de la
+        estructura ({pctTxt(d.coef.cargaPct)}) y las comisiones ({pctTxt(parseNumero(comis))}),
+        te quede {pctTxt(parseNumero(rent))} limpio.
+        Solo entran los productos que se venden por kilo; los bultos se dividen por los kilos que traen.
       </div>
 
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
             <tr style={{ color: 'var(--muted)' }}>
-              <th style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 600 }}>Categoría</th>
-              {!esMovil && <th style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600 }}>Kg vendidos</th>}
-              <th style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600 }}>Minorista</th>
-              <th style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600 }}>Mayorista</th>
-              <th style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600 }}>Carnicería</th>
-              <th style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600 }}>Cobrado real</th>
+              <th style={{ ...th, textAlign: 'left' }}>Categoría</th>
+              {!esMovil && <th style={th}>Artículos</th>}
+              {!esMovil && <th style={th}>Kg vendidos</th>}
+              <th style={th}>🟢 Minorista</th>
+              <th style={th}>🟡 Mayorista</th>
+              <th style={th}>🔴 Carnicería</th>
+              <th style={th}>Cobrado real</th>
+              {!esMovil && <th style={th}>Costo máx. por kg</th>}
             </tr>
           </thead>
           <tbody>
             {filas.map(f => (
               <tr key={f.categoria} style={{ borderTop: '1px solid var(--border)' }}>
-                <td style={{ padding: '6px 8px' }}>{etiquetaCat(f.categoria)}</td>
-                {!esMovil && <td style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--muted)' }}>{f.kg > 0 ? fmtKg(f.kg, { decimales: 0 }) : '—'}</td>}
-                <td style={{ padding: '6px 8px', textAlign: 'right' }}>{f.min != null ? $(f.min) : '—'}</td>
-                <td style={{ padding: '6px 8px', textAlign: 'right' }}>{f.may != null ? $(f.may) : '—'}</td>
-                <td style={{ padding: '6px 8px', textAlign: 'right' }}>{f.carn != null ? $(f.carn) : '—'}</td>
-                <td style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--green)' }}>{f.realTotal != null ? $(f.realTotal) : '—'}</td>
+                <td style={{ padding: '7px 8px', fontWeight: 600 }}>{etiquetaCat(f.categoria)}</td>
+                {!esMovil && <td style={{ ...td, color: 'var(--muted)' }}>{f.productos || '—'}</td>}
+                {!esMovil && <td style={{ ...td, color: 'var(--muted)' }}>{f.kg > 0 ? fmtKg(f.kg, { decimales: 0 }) : '—'}</td>}
+                <td style={td}>{f.min != null ? $(f.min) : '—'}</td>
+                <td style={td}>{f.may != null ? $(f.may) : '—'}</td>
+                <td style={td}>{f.carn != null ? $(f.carn) : '—'}</td>
+                <td style={{ ...td, color: 'var(--green)', fontWeight: 700 }}>{f.realTotal != null ? $(f.realTotal) : '—'}</td>
+                {!esMovil && (
+                  <td style={{ ...td, color: 'var(--gold)' }}>
+                    {f.realTotal != null && libre > 0 ? $(f.realTotal * libre) : '—'}
+                  </td>
+                )}
               </tr>
             ))}
+            {filas.length === 0 && (
+              <tr><td colSpan={esMovil ? 5 : 8} style={{ padding: 20, textAlign: 'center', color: 'var(--muted)' }}>
+                Sin categorías con precio cargado.
+              </td></tr>
+            )}
           </tbody>
         </table>
+      </div>
+
+      {/* Pie: el precio real de cada lista. NO es promedio de categorías —
+          es la plata que entró por esa lista sobre los kilos que salieron. */}
+      <div style={{ marginTop: 14, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
+          Precio real del kilo por lista — plata facturada ÷ kilos despachados por esa lista:
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : 'repeat(3, 1fr)', gap: 10 }}>
+          {listas.map(l => (
+            <div key={l.codigo} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, padding: '8px 12px', background: 'var(--surface)', borderRadius: 8 }}>
+              <span style={{ fontSize: 12 }}>{l.label}</span>
+              <span style={{ textAlign: 'right' }}>
+                <b style={{ fontSize: 15, color: l.real != null ? 'var(--green)' : 'var(--muted)' }}>
+                  {l.real != null ? $(l.real) : '—'}
+                </b>
+                <div style={{ fontSize: 10, color: 'var(--muted)' }}>
+                  {l.kgVendidos > 0 ? fmtKg(l.kgVendidos, { decimales: 0 }) : 'sin salidas'}
+                </div>
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   )
