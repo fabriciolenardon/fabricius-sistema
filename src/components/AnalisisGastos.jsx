@@ -146,7 +146,7 @@ export default function AnalisisGastos({ gastos: gastosProp }) {
 // ────────────────────────────────────────────────────────────
 function Cascada({ d, esMovil }) {
   const filas = [
-    { l: '💵 FACTURACIÓN', v: d.facturacion, tipo: 'total', sub: `Mostrador $${$(d.ventas.minorista)} · Mayorista $${$(d.ventas.mayorista)}` },
+    { l: '💵 FACTURACIÓN', v: d.facturacion, tipo: 'total', sub: `Mostrador ${$(d.ventas.minorista)} · Mayorista ${$(d.ventas.mayorista)}` },
     { l: '🥩 Mercadería (compras)', v: -d.mercaderia, tipo: 'resta' },
     { l: 'MARGEN BRUTO', v: d.margenBruto, tipo: 'sub' },
     { l: '👷 Sueldos', v: -d.sueldos, tipo: 'resta' },
@@ -183,7 +183,7 @@ function Cascada({ d, esMovil }) {
                 )}
               </div>
               <div style={{ textAlign: 'right', fontWeight: esTotal || esSub ? 800 : 600, color, fontSize: esTotal ? 16 : 14, whiteSpace: 'nowrap' }}>
-                {f.v < 0 ? '−' : ''}${$(f.v)}
+                {f.v < 0 ? '−' : ''}{$(f.v)}
               </div>
               {!esMovil && (
                 <div style={{ textAlign: 'right', fontSize: 12, color: 'var(--muted)' }}>{pctTxt(p)}</div>
@@ -211,9 +211,9 @@ function Coeficientes({ d }) {
     { l: 'Carga estructural', v: pctTxt(c.cargaPct), sub: 'de cada $100 vendidos se van en sueldos + fijos + variables', color: 'var(--gold)' },
     { l: 'Margen bruto', v: pctTxt(c.margenBrutoPct), sub: 'lo que queda después de pagar la mercadería', color: 'var(--blue)' },
     { l: 'Ganancia neta', v: pctTxt(c.gananciaPct), sub: 'sobre la facturación del período', color: d.ganancia >= 0 ? 'var(--green)' : 'var(--red-light)' },
-    { l: 'Estructura por día', v: `$${$(c.estructuraPorDia)}`, sub: 'lo que cuesta abrir la persiana cada día' },
-    { l: 'Estructura por kg vendido', v: c.estructuraPorKg != null ? `$${$(c.estructuraPorKg)}` : '—', sub: d.kgVendidos > 0 ? `${d.kgVendidos.toFixed(0)} kg vendidos en el período` : 'sin kg vendidos cargados' },
-    { l: 'Punto de equilibrio', v: c.puntoEquilibrio != null ? `$${$(c.puntoEquilibrio)}` : '—', sub: c.puntoEquilibrioDia != null ? `hay que facturar $${$(c.puntoEquilibrioDia)} por día para no perder` : 'sin margen bruto no hay equilibrio', color: 'var(--gold)' },
+    { l: 'Estructura por día', v: $(c.estructuraPorDia), sub: 'lo que cuesta abrir la persiana cada día' },
+    { l: 'Estructura por kg vendido', v: c.estructuraPorKg != null ? $(c.estructuraPorKg) : '—', sub: d.kgVendidos > 0 ? `${d.kgVendidos.toFixed(0)} kg vendidos en el período` : 'sin kg vendidos cargados' },
+    { l: 'Punto de equilibrio', v: c.puntoEquilibrio != null ? $(c.puntoEquilibrio) : '—', sub: c.puntoEquilibrioDia != null ? `hay que facturar ${$(c.puntoEquilibrioDia)} por día para no perder` : 'sin margen bruto no hay equilibrio', color: 'var(--gold)' },
   ]
   return (
     <div className="card" style={{ marginBottom: 16 }}>
@@ -242,12 +242,12 @@ function TablaGastos({ d, abierta, setAbierta, esMovil }) {
       <td style={{ padding: '7px 8px', paddingLeft: hijo ? 26 : 8, fontWeight: hijo ? 500 : 700, fontSize: hijo ? 11 : 12 }}>
         {f.label}{hijo && f.veces > 1 ? <span style={{ color: 'var(--muted)', fontWeight: 400 }}> ×{f.veces}</span> : null}
       </td>
-      <td style={{ ...td, fontWeight: hijo ? 500 : 700 }}>${$(f.monto)}</td>
+      <td style={{ ...td, fontWeight: hijo ? 500 : 700 }}>{$(f.monto)}</td>
       <td style={{ ...td, color: 'var(--gold)' }}>{pctTxt(f.pctFacturacion, 2)}</td>
       <td style={{ ...td, color: 'var(--red-light)' }}>{pctTxt(f.pctGanancia)}</td>
       {!esMovil && <td style={{ ...td, color: 'var(--muted)' }}>{pctTxt(f.pctEstructura)}</td>}
-      {!esMovil && <td style={{ ...td, color: 'var(--muted)' }}>${$(f.porDia)}</td>}
-      {!esMovil && <td style={{ ...td, color: 'var(--muted)' }}>{f.porKg != null ? `$${$(f.porKg)}` : '—'}</td>}
+      {!esMovil && <td style={{ ...td, color: 'var(--muted)' }}>{$(f.porDia)}</td>}
+      {!esMovil && <td style={{ ...td, color: 'var(--muted)' }}>{f.porKg != null ? $(f.porKg) : '—'}</td>}
     </tr>
   )
 
@@ -387,12 +387,12 @@ function Calculadora({ d }) {
           <div className="grid4" style={{ marginBottom: 14 }}>
             <div className="stat">
               <div className="stat-label">Costo real por kg vendible</div>
-              <div className="stat-value" style={{ fontSize: 20 }}>${$(r.costoReal)}</div>
+              <div className="stat-value" style={{ fontSize: 20 }}>{$(r.costoReal)}</div>
               <div style={{ fontSize: 10, color: 'var(--muted)' }}>compra + merma</div>
             </div>
             <div className="stat">
               <div className="stat-label">Precio de venta sugerido</div>
-              <div className="stat-value" style={{ fontSize: 26, color: 'var(--gold)' }}>${$(r.precio)}</div>
+              <div className="stat-value" style={{ fontSize: 26, color: 'var(--gold)' }}>{$(r.precio)}</div>
               <div style={{ fontSize: 10, color: 'var(--muted)' }}>por kg, final al público</div>
             </div>
             <div className="stat">
@@ -402,7 +402,7 @@ function Calculadora({ d }) {
             </div>
             <div className="stat">
               <div className="stat-label">Te queda limpio</div>
-              <div className="stat-value" style={{ fontSize: 20, color: 'var(--green)' }}>${$(r.reparto.ganancia)}</div>
+              <div className="stat-value" style={{ fontSize: 20, color: 'var(--green)' }}>{$(r.reparto.ganancia)}</div>
               <div style={{ fontSize: 10, color: 'var(--muted)' }}>por cada kg vendido</div>
             </div>
           </div>
@@ -418,7 +418,7 @@ function Calculadora({ d }) {
             ].map((s, i) => {
               const p = (s.v / r.precio) * 100
               return (
-                <div key={i} title={`${s.l}: $${$(s.v)} (${pctTxt(p)})`}
+                <div key={i} title={`${s.l}: ${$(s.v)} (${pctTxt(p)})`}
                   style={{ width: `${Math.max(0, p)}%`, background: s.c, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: '#000', overflow: 'hidden', whiteSpace: 'nowrap' }}>
                   {p > 10 ? `${s.l} ${pctTxt(p, 0)}` : ''}
                 </div>
@@ -426,8 +426,8 @@ function Calculadora({ d }) {
             })}
           </div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 16 }}>
-            Mercadería ${$(r.reparto.mercaderia)} · Estructura ${$(r.reparto.estructura)} ·
-            Comisiones ${$(r.reparto.comisiones)} · Ganancia ${$(r.reparto.ganancia)}
+            Mercadería {$(r.reparto.mercaderia)} · Estructura {$(r.reparto.estructura)} ·
+            Comisiones {$(r.reparto.comisiones)} · Ganancia {$(r.reparto.ganancia)}
           </div>
 
           {/* Comparar con un precio de la lista */}
@@ -438,26 +438,26 @@ function Calculadora({ d }) {
             <select style={{ ...inp, maxWidth: 420 }} value={prodId} onChange={e => setProdId(e.target.value)}>
               <option value="">— elegí un producto —</option>
               {productos.map(p => (
-                <option key={p.id} value={p.id}>{p.nombre} — ${$(p.precio_minorista)}</option>
+                <option key={p.id} value={p.id}>{p.nombre} — {$(p.precio_minorista)}</option>
               ))}
             </select>
             {actual && (
               <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: esMovil ? '1fr' : 'repeat(3, 1fr)', gap: 12 }}>
                 <div className="stat">
                   <div className="stat-label">Precio de lista hoy</div>
-                  <div className="stat-value" style={{ fontSize: 20 }}>${$(precioActual)}</div>
+                  <div className="stat-value" style={{ fontSize: 20 }}>{$(precioActual)}</div>
                 </div>
                 <div className="stat">
                   <div className="stat-label">Rentabilidad real de ese precio</div>
                   <div className="stat-value" style={{ fontSize: 20, color: actual.ganancia >= 0 ? 'var(--green)' : 'var(--red-light)' }}>
-                    {actual.ganancia < 0 ? '−' : ''}${$(actual.ganancia)}
+                    {actual.ganancia < 0 ? '−' : ''}{$(actual.ganancia)}
                   </div>
                   <div style={{ fontSize: 10, color: 'var(--muted)' }}>{pctTxt(actual.gananciaPct)} del precio · por kg</div>
                 </div>
                 <div className="stat">
                   <div className="stat-label">Diferencia contra el sugerido</div>
                   <div className="stat-value" style={{ fontSize: 20, color: precioActual >= r.precio ? 'var(--green)' : 'var(--gold)' }}>
-                    {precioActual >= r.precio ? '+' : '−'}${$(precioActual - r.precio)}
+                    {precioActual >= r.precio ? '+' : '−'}{$(precioActual - r.precio)}
                   </div>
                   <div style={{ fontSize: 10, color: 'var(--muted)' }}>
                     {precioActual >= r.precio ? 'estás por encima del piso' : 'te falta para llegar a tu rentabilidad'}
