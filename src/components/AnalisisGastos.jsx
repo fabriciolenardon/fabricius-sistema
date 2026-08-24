@@ -99,6 +99,9 @@ export default function AnalisisGastos({ gastos: gastosProp }) {
       // (un período que termina en el futuro daría $/día y $/kg diluidos).
       const m = mesesOp.find(x => String(x.id) === String(mesOpId)) || mesesOpCerrados[0]
       if (!m) return { desde: hoy.slice(0, 8) + '01', hasta: hoy }
+      // Un mes que todavía no arrancó se muestra entero: cortarlo en "hoy"
+      // daría desde > hasta y la consulta volvería vacía sin decir por qué.
+      if (hoy < m.fecha_inicio) return { desde: m.fecha_inicio, hasta: m.fecha_cierre, etiqueta: m.etiqueta }
       return { desde: m.fecha_inicio, hasta: hoy < m.fecha_cierre ? hoy : m.fecha_cierre, etiqueta: m.etiqueta }
     }
     // mes operativo vigente (o el último cargado); si no hay ninguno, mes calendario
