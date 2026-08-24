@@ -445,15 +445,15 @@ export function Deposito() {
           // cuánto le queda: no recibe capones para despostar, recibe las
           // piezas ya hechas.
           { id: 'cerdo', label: '🐷 Cerdo y Embutidos' },
-          // Las fórmulas de los elaborados, que hasta ahora vivían en un
-          // papel pegado en la pared. Las ven las dos bocas; las edita
-          // sólo la central (la mig 104 lo aplica en la base).
-          { id: 'recetas', label: '📖 Recetas' },
           { id: 'cajas', label: '📦 Cajas Bovinas' },
           { id: 'pollo_cajones', label: '🍗 Pollo Cajones' },
           ...(isSucursal ? [] : [{ id: 'flujo', label: '📥 Flujo Depósito' }]),
           { id: 'remitos', label: '🧾 Remitos' },
           ...(puedeAjustar ? [{ id: 'ajuste', label: '🔧 Ajuste Stock' }] : []),
+          // Última de la fila: es material de consulta, no un paso del
+          // trabajo diario. Las ven las dos bocas; las edita sólo la
+          // central (la mig 104 lo aplica en la base).
+          { id: 'recetas', label: '📖 Recetas' },
         ].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
             style={{ padding: '8px 16px', borderRadius: 8, border: `1px solid ${tab === t.id ? 'var(--amber)' : 'var(--border)'}`, background: tab === t.id ? 'var(--amber)' : 'transparent', color: tab === t.id ? '#fff' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
