@@ -38,7 +38,8 @@ export default function AnalisisGastos({ gastos: gastosProp }) {
   const esMovil = useEsMovil()
   const [mesesOp, setMesesOp] = useState([])
   const [gastosPropios, setGastosPropios] = useState(null)
-  const [modo, setModo] = useState('mesop')   // mesop | mes | mesant | semana | rango
+  const [modo, setModo] = useState('mesop')   // mesop | mesophist | mes | mesant | semana | rango
+  const [mesOpId, setMesOpId] = useState('')  // mes operativo elegido en "Meses anteriores"
   const [rango, setRango] = useState({ desde: '', hasta: fechaHoyARG() })
   const [data, setData] = useState(null)
   const [cargando, setCargando] = useState(true)
@@ -54,7 +55,7 @@ export default function AnalisisGastos({ gastos: gastosProp }) {
   const gastos = gastosProp || gastosPropios
 
   useEffect(() => {
-    supabase.from('meses_operativos').select('mes,etiqueta,fecha_inicio,fecha_cierre')
+    supabase.from('meses_operativos').select('id,mes,etiqueta,fecha_inicio,fecha_cierre')
       .order('fecha_inicio', { ascending: false })
       .then(({ data }) => setMesesOp(data || []))
     if (!gastosProp) {
@@ -69,6 +70,17 @@ export default function AnalisisGastos({ gastos: gastosProp }) {
       .catch(() => setPrecios([]))
   }, [gastosProp])
 
+  // Los meses operativos ya cerrados (el vigente ya tiene su propio botón).
+  // Vienen ordenados por fecha_inicio desc, así que el primero es el último cerrado.
+  const mesesOpCerrados = useMemo(
+    () => mesesOp.filter(m => m.fecha_cierre && m.fecha_cierre < fechaHoyARG()),
+    [mesesOp])
+
+  // Apenas llegan los meses, dejamos preseleccionado el último cerrado.
+  useEffect(() => {
+    if (!mesOpId && mesesOpCerrados.length) setMesOpId(String(mesesOpCerrados[0].id))
+  }, [mesesOpCerrados, mesOpId])
+
   // Rango efectivo según el modo elegido
   const periodo = useMemo(() => {
     const hoy = fechaHoyARG()
@@ -81,11 +93,19 @@ export default function AnalisisGastos({ gastos: gastosProp }) {
       const fin = new Date(d); fin.setMonth(fin.getMonth() + 1); fin.setDate(0)
       return { desde: ini, hasta: fechaHoyARG(fin) }
     }
+    if (modo === 'mesophist') {
+      // Mes operativo elegido a mano: las fechas salen del inicio/cierre
+      // cargados en Cierre → Por Mes. Si todavía está en curso, cortamos hoy
+      // (un período que termina en el futuro daría $/día y $/kg diluidos).
+      const m = mesesOp.find(x => String(x.id) === String(mesOpId)) || mesesOpCerrados[0]
+      if (!m) return { desde: hoy.slice(0, 8) + '01', hasta: hoy }
+      return { desde: m.fecha_inicio, hasta: hoy < m.fecha_cierre ? hoy : m.fecha_cierre, etiqueta: m.etiqueta }
+    }
     // mes operativo vigente (o el último cargado); si no hay ninguno, mes calendario
     const vig = mesesOp.find(m => hoy >= m.fecha_inicio && hoy <= m.fecha_cierre) || mesesOp[0]
     if (!vig) return { desde: hoy.slice(0, 8) + '01', hasta: hoy }
     return { desde: vig.fecha_inicio, hasta: hoy < vig.fecha_cierre ? hoy : vig.fecha_cierre, etiqueta: vig.etiqueta }
-  }, [modo, rango, mesesOp])
+  }, [modo, rango, mesesOp, mesOpId, mesesOpCerrados])
 
   useEffect(() => {
     // Sin los gastos todavía cargados no calculamos: los totales saldrían
@@ -116,6 +136,7 @@ export default function AnalisisGastos({ gastos: gastosProp }) {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           {[
             { id: 'mesop', l: '📅 Mes operativo' },
+            ...(mesesOpCerrados.length ? [{ id: 'mesophist', l: '🗓️ Meses anteriores' }] : []),
             { id: 'mes', l: 'Mes calendario' },
             { id: 'mesant', l: 'Mes anterior' },
             { id: 'semana', l: 'Esta semana' },
@@ -123,6 +144,15 @@ export default function AnalisisGastos({ gastos: gastosProp }) {
           ].map(o => (
             <button key={o.id} style={btn(modo === o.id)} onClick={() => setModo(o.id)}>{o.l}</button>
           ))}
+          {modo === 'mesophist' && (
+            <select style={inp} value={mesOpId} onChange={e => setMesOpId(e.target.value)}>
+              {mesesOpCerrados.map(m => (
+                <option key={m.id} value={m.id}>
+                  {m.etiqueta || m.mes} ({fmtFechaCorta(m.fecha_inicio)} → {fmtFechaCorta(m.fecha_cierre)})
+                </option>
+              ))}
+            </select>
+          )}
           {modo === 'rango' && (
             <>
               <input type="date" style={inp} value={rango.desde} onChange={e => setRango(r => ({ ...r, desde: e.target.value }))} />
