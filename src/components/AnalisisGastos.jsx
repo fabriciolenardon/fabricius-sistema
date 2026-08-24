@@ -14,10 +14,11 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { supabase, fetchAllRows } from '../lib/supabase'
 import { fechaHoyARG } from '../lib/fechas'
-import { fmtPrecio, parseNumero } from '../lib/formatos'
+import { fmtPrecio, fmtKg, parseNumero } from '../lib/formatos'
 import { useEsMovil } from '../lib/useEsMovil'
 import { lunesDeLaSemana } from '../lib/cierreAuto'
-import { calcularEstructura, precioSugerido, rentabilidadDe } from '../lib/analisisGastos'
+import { calcularEstructura, precioSugerido, rentabilidadDe, promediosDeListas } from '../lib/analisisGastos'
+import { CATEGORIAS_SISTEMA } from '../lib/categoriasPrecios'
 
 const $ = n => fmtPrecio(Math.abs(Number(n) || 0))
 // Los % se muestran con coma (es-AR) y "—" cuando no se pueden calcular
@@ -43,6 +44,12 @@ export default function AnalisisGastos({ gastos: gastosProp }) {
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState('')
   const [abierta, setAbierta] = useState(null) // categoría expandida en la tabla
+  const [precios, setPrecios] = useState([])
+  // Comisiones y rentabilidad viven acá arriba porque los usan los DOS
+  // bloques de abajo: el promedio de cada lista y la calculadora. Si cada
+  // uno tuviera los suyos, dirían cosas distintas en la misma pantalla.
+  const [comis, setComis] = useState('3')
+  const [rent, setRent] = useState('15')
 
   const gastos = gastosProp || gastosPropios
 
@@ -55,6 +62,11 @@ export default function AnalisisGastos({ gastos: gastosProp }) {
         .then(({ data }) => setGastosPropios(data || []))
         .catch(() => setGastosPropios([]))
     }
+    fetchAllRows(() => supabase.from('precios')
+      .select('id, nombre, categoria, pesable, kg_por_unidad, precio_minorista, precio_mayorista, precio_carniceria')
+      .order('nombre'))
+      .then(({ data }) => setPrecios(data || []))
+      .catch(() => setPrecios([]))
   }, [gastosProp])
 
   // Rango efectivo según el modo elegido
@@ -134,7 +146,9 @@ export default function AnalisisGastos({ gastos: gastosProp }) {
           <Cascada d={data} esMovil={esMovil} />
           <Coeficientes d={data} />
           <TablaGastos d={data} abierta={abierta} setAbierta={setAbierta} esMovil={esMovil} />
-          <Calculadora d={data} />
+          <PromedioListas d={data} precios={precios} esMovil={esMovil} comis={comis} rent={rent} />
+          <Calculadora d={data} precios={precios} esMovil={esMovil}
+            comis={comis} setComis={setComis} rent={rent} setRent={setRent} />
         </>
       )}
     </div>
@@ -299,18 +313,126 @@ function TablaGastos({ d, abierta, setAbierta, esMovil }) {
 }
 
 // ────────────────────────────────────────────────────────────
-// 4) CALCULADORA — cuánto tiene que salir un producto
+// 4) PROMEDIO DEL KILO EN CADA LISTA
 // ────────────────────────────────────────────────────────────
-function Calculadora({ d }) {
-  const esMovil = useEsMovil()
+// Tres números por lista, de menos a más honesto:
+//   simple    → sumar todos los precios y dividir por la cantidad
+//   ponderado → el mismo promedio pesado por los kg que vendés de cada
+//               categoría (el hueso deja de valer lo mismo que el lomo)
+//   real      → facturación ÷ kg del período: lo que de verdad cobrás
+function PromedioListas({ d, precios, esMovil, comis, rent }) {
+  const listas = useMemo(() => promediosDeListas(precios, d.vendidoPorCategoria), [precios, d])
+
+  // Lo máximo que puede costarte el kilo promedio para que, después de la
+  // estructura y las comisiones, quede la rentabilidad buscada.
+  const libre = 1 - (d.coef.cargaPct + parseNumero(comis) + parseNumero(rent)) / 100
+
+  const etiquetaCat = c => CATEGORIAS_SISTEMA.find(x => x.clave === c)?.label || c
+
+  // Filas por categoría: kg vendidos + promedio en cada lista
+  const filas = useMemo(() => {
+    const m = new Map()
+    for (const l of listas) {
+      for (const c of l.categorias) {
+        const row = m.get(c.categoria) || { categoria: c.categoria, kg: 0 }
+        row.kg = Math.max(row.kg, c.kg || 0)
+        row[l.codigo] = c.promedio
+        m.set(c.categoria, row)
+      }
+    }
+    return [...m.values()].sort((a, b) => b.kg - a.kg)
+  }, [listas])
+
+  if (!precios.length) return null
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card-title">📋 A cuánto vendés el kilo, en promedio, en cada lista</div>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 12, lineHeight: 1.5 }}>
+        El <b>promedio de lista</b> suma el precio de todos los artículos y lo divide por la cantidad:
+        te dice cómo está parada la lista, pero trata igual al hueso que al lomo.
+        El <b>promedio real</b> es lo que de verdad cobraste: la facturación del período dividida los
+        kilos que salieron — ahí ya está adentro el mix, las ofertas y los descuentos.
+        Se cuentan solo los productos que se venden por kilo (almacén, bebidas e insumos quedan afuera).
+      </div>
+
+      <div className="grid3" style={{ marginBottom: 14 }}>
+        {listas.map(l => {
+          const real = l.canal ? d.realPorKg[l.canal] : null
+          const dif = real != null && l.ponderado != null ? real - l.ponderado : null
+          return (
+            <div className="stat" key={l.codigo}>
+              <div className="stat-label">{l.label}</div>
+              <div className="stat-value" style={{ fontSize: 22 }}>
+                {l.simple != null ? $(l.simple) : '—'}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--muted)' }}>
+                promedio de lista · {l.productos} producto{l.productos !== 1 ? 's' : ''} por kilo
+              </div>
+              <div style={{ marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 6, display: 'grid', gap: 3, fontSize: 11 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'var(--muted)' }}>Pesado por lo que vendés</span>
+                  <b>{l.ponderado != null ? $(l.ponderado) : '—'}</b>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'var(--muted)' }}>Lo que realmente cobrás</span>
+                  <b style={{ color: real != null ? 'var(--green)' : 'var(--muted)' }}>{real != null ? $(real) : '—'}</b>
+                </div>
+                {dif != null && (
+                  <div style={{ color: 'var(--muted)', fontSize: 10 }}>
+                    Cobrás {dif >= 0 ? '+' : '−'}{$(dif)} por kilo {dif >= 0 ? 'arriba' : 'abajo'} de tu lista
+                  </div>
+                )}
+                {libre > 0 && l.ponderado != null && (
+                  <div style={{ color: 'var(--gold)', fontSize: 10, marginTop: 2 }}>
+                    Con esta lista, el kilo no te puede costar más de <b>{$(l.ponderado * libre)}</b> para
+                    dejarte {pctTxt(parseNumero(rent))} limpio.
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ color: 'var(--muted)' }}>
+              <th style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 600 }}>Categoría</th>
+              {!esMovil && <th style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600 }}>Kg vendidos</th>}
+              <th style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600 }}>Minorista</th>
+              <th style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600 }}>Mayorista</th>
+              <th style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600 }}>Carnicería</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filas.map(f => (
+              <tr key={f.categoria} style={{ borderTop: '1px solid var(--border)' }}>
+                <td style={{ padding: '6px 8px' }}>{etiquetaCat(f.categoria)}</td>
+                {!esMovil && <td style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--muted)' }}>{f.kg > 0 ? fmtKg(f.kg, { decimales: 0 }) : '—'}</td>}
+                <td style={{ padding: '6px 8px', textAlign: 'right' }}>{f.min != null ? $(f.min) : '—'}</td>
+                <td style={{ padding: '6px 8px', textAlign: 'right' }}>{f.may != null ? $(f.may) : '—'}</td>
+                <td style={{ padding: '6px 8px', textAlign: 'right' }}>{f.carn != null ? $(f.carn) : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────────────────
+// 5) CALCULADORA — cuánto tiene que salir un producto
+// ────────────────────────────────────────────────────────────
+function Calculadora({ d, precios, esMovil, comis, setComis, rent, setRent }) {
   const [costo, setCosto] = useState('')
   const [merma, setMerma] = useState('0')
   const [carga, setCarga] = useState(String((d.coef.cargaPct || 0).toFixed(1)).replace('.', ','))
-  const [comis, setComis] = useState('3')
-  const [rent, setRent] = useState('15')
   const [incluirSocios, setIncluirSocios] = useState(false)
-  const [productos, setProductos] = useState([])
   const [prodId, setProdId] = useState('')
+  const productos = precios
 
   // Al cambiar el período (o el interruptor de socios) recalculamos la carga
   // sugerida. Queda editable: es un punto de partida, no una imposición.
@@ -319,11 +441,6 @@ function Calculadora({ d }) {
     return d.facturacion > 0 ? (base / d.facturacion) * 100 : 0
   }, [d, incluirSocios])
   useEffect(() => { setCarga(cargaReal.toFixed(1).replace('.', ',')) }, [cargaReal])
-
-  useEffect(() => {
-    supabase.from('precios').select('id, nombre, categoria, precio_minorista').order('nombre')
-      .then(({ data }) => setProductos(data || []))
-  }, [])
 
   const prod = productos.find(p => String(p.id) === prodId) || null
   const precioActual = prod ? Number(prod.precio_minorista) || 0 : 0
