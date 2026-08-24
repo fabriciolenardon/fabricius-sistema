@@ -6,9 +6,16 @@
 //
 //   1. medias_kilo  — media res despostada a cortes POR KILO
 //   2. medias_pieza — media res despostada A PIEZAS
-//   3. piezas       — pieza bovina convertida a cortes
+//   3. piezas       — pieza BOVINA convertida a cortes
 //   4. capones      — capón de cerdo despostado
 //   5. elaborados   — embutidos + hamburguesas (subcategorías aparte)
+//
+// ── LAS PIEZAS DE CERDO NO LLEVAN MERMA ─────────────────────
+// Regla de Fabricio (23/08/2026). La pierna, la paleta, el carré, etc.
+// se venden tal como salen del capón: no se las vuelve a romper con un
+// % encima. Su única merma es la del capón, que ya se cuenta en la
+// categoría 4. Por eso la categoría 3 es solo BOVINA — y hay un filtro
+// explícito para que una pieza de cerdo no entre ahí ni por accidente.
 //
 // ── MEDIDA vs CALCULADA ─────────────────────────────────────
 // La distinción más importante del informe. No todas las mermas
@@ -64,6 +71,16 @@ export const ORDEN_CATEGORIAS = ['medias_kilo', 'medias_pieza', 'piezas', 'capon
 
 // Suma los kg realmente pesados que salieron de un desposte.
 const kgSalida = d => (Array.isArray(d.piezas) ? d.piezas : []).reduce((s, p) => s + n(p.kg), 0)
+
+// ¿Es una pieza de cerdo? Los nombres de las piezas bovinas son un set
+// cerrado (los modelos A/B/C); cualquier otra cosa que suene a cerdo queda
+// afuera de la categoría de piezas. Ver la regla en la cabecera.
+const PIEZAS_BOVINAS = new Set(['Pierna', 'Cortito', 'Costeletal con Lomo', 'Costillar Completo', 'Cuarto Pistola', 'Parrillero', 'Paleta'])
+function esPiezaDeCerdo(nombre) {
+  if (!nombre) return false
+  if (PIEZAS_BOVINAS.has(nombre)) return false
+  return /cerdo|cap[oó]n|bondiola|carr[eé]|pechito|matambre|tocino|cuero/i.test(nombre)
+}
 
 // Nombre legible de la pieza/animal de cada fila.
 function etiquetaDesposte(d, categoria) {
@@ -145,6 +162,9 @@ export async function calcularMermasPeriodo(desde, hasta, mermaConfig = {}) {
   for (const d of (despostes || [])) {
     const cat = CATEGORIA_DE_DESPOSTE[d.tipo_desposte]
     if (!cat) continue
+    // Las piezas de cerdo no llevan merma propia (ver cabecera). Hoy nunca
+    // pasan por esta conversión, pero si alguna vez pasan, no inventamos una.
+    if (cat === 'piezas' && esPiezaDeCerdo(d.piezas?.[0]?.nombre)) continue
     const kgEntra = n(d.kg_media_res)
     // Medida (se pesó lo que salió) vs calculada (se aplicó un %).
     const medida = cat === 'medias_pieza' || cat === 'capones'
@@ -161,6 +181,9 @@ export async function calcularMermasPeriodo(desde, hasta, mermaConfig = {}) {
       kgMerma,
       pct: kgEntra > 0 ? r2((kgMerma / kgEntra) * 100) : 0,
       precioKg,
+      // Lo que termina costando el kilo vendible: la misma plata repartida
+      // entre menos kilos. Ver el comentario de totalizar().
+      precioReal: kgSale > 0 ? Math.round((kgEntra * precioKg) / kgSale) : 0,
       costo: Math.round(kgMerma * precioKg),
       medida,
     }
@@ -191,6 +214,7 @@ export async function calcularMermasPeriodo(desde, hasta, mermaConfig = {}) {
       kgMerma,
       pct: kgEntra > 0 ? r2((kgMerma / kgEntra) * 100) : 0,
       precioKg,
+      precioReal: kgSale > 0 ? Math.round((kgEntra * precioKg) / kgSale) : 0,
       // Una elaboración que RINDE (hamburguesas: +23%) no es plata perdida.
       // El costo solo cuenta cuando se perdieron kilos de verdad.
       costo: kgMerma > 0 ? Math.round(kgMerma * precioKg) : 0,
@@ -212,17 +236,39 @@ export async function calcularMermasPeriodo(desde, hasta, mermaConfig = {}) {
 }
 
 function filaVacia() {
-  return { kgEntra: 0, kgSale: 0, kgMerma: 0, pct: 0, costo: 0, n: 0 }
+  return { kgEntra: 0, kgSale: 0, kgMerma: 0, pct: 0, costo: 0, n: 0, precioIngreso: 0, precioReal: 0 }
 }
 
+// ── COSTO REAL POR KILO ─────────────────────────────────────
+// La plata que se pagó no cambia con la merma; lo que cambia es entre
+// cuántos kilos se reparte. Si entran 100 kg a $10.000 y salen 78
+// vendibles, esos $1.000.000 se reparten entre 78 kg → $12.821/kg.
+//
+//   costo real = precio de compra ÷ (1 − merma)     ✅
+//   costo real = precio de compra × (1 + merma)     ❌ subdeclara
+//
+// Con 22% de merma la diferencia es $12.821 contra $12.200: $621 por
+// kilo que no estarían en el costo. Es la misma cuenta que ya hace el
+// desposte al costear los cortes (Deposito.jsx: precio_kg / (1 - merma)).
+//
+// Acá se calcula sobre los totales (plata total ÷ kilos vendibles), que
+// da lo mismo y además pondera solo con las filas que tienen precio:
+// una fila sin precio de compra hundiría el promedio a la mitad.
 function totalizar(filas) {
-  const t = filas.reduce((a, f) => ({
-    kgEntra: a.kgEntra + f.kgEntra,
-    kgSale: a.kgSale + f.kgSale,
-    kgMerma: a.kgMerma + f.kgMerma,
-    costo: a.costo + f.costo,
-    n: a.n + 1,
-  }), { kgEntra: 0, kgSale: 0, kgMerma: 0, costo: 0, n: 0 })
+  const t = filas.reduce((a, f) => {
+    const conPrecio = f.precioKg > 0
+    return {
+      kgEntra: a.kgEntra + f.kgEntra,
+      kgSale: a.kgSale + f.kgSale,
+      kgMerma: a.kgMerma + f.kgMerma,
+      costo: a.costo + f.costo,
+      n: a.n + 1,
+      // Denominadores del costo real: solo lo que tiene precio conocido.
+      pagado: a.pagado + (conPrecio ? f.kgEntra * f.precioKg : 0),
+      kgEntraPag: a.kgEntraPag + (conPrecio ? f.kgEntra : 0),
+      kgSalePag: a.kgSalePag + (conPrecio ? f.kgSale : 0),
+    }
+  }, { kgEntra: 0, kgSale: 0, kgMerma: 0, costo: 0, n: 0, pagado: 0, kgEntraPag: 0, kgSalePag: 0 })
   return {
     kgEntra: r2(t.kgEntra),
     kgSale: r2(t.kgSale),
@@ -232,6 +278,10 @@ function totalizar(filas) {
     n: t.n,
     // $ por kilo de merma: cuánto cuesta, en promedio, cada kilo que se pierde.
     costoPorKg: t.kgMerma > 0 ? Math.round(t.costo / t.kgMerma) : 0,
+    // Lo que se pagó por kilo al comprar.
+    precioIngreso: t.kgEntraPag > 0 ? Math.round(t.pagado / t.kgEntraPag) : 0,
+    // Lo que termina costando cada kilo VENDIBLE, ya con la merma encima.
+    precioReal: t.kgSalePag > 0 ? Math.round(t.pagado / t.kgSalePag) : 0,
   }
 }
 
