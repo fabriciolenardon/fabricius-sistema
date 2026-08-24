@@ -198,10 +198,11 @@ function TablaFilas({ filas, total, esMovil }) {
             <th style={th}>Fecha</th>
             <th style={th}>Producto</th>
             <th style={numTh}>Kg entrante</th>
-            <th style={numTh}>Kg obtenido</th>
+            <th style={numTh}>Neto vendible</th>
             <th style={numTh}>Merma</th>
             <th style={numTh}>%</th>
-            <th style={numTh}>$/kg</th>
+            <th style={numTh}>$/kg ingreso</th>
+            <th style={numTh}>$/kg real</th>
             <th style={numTh}>Costo merma</th>
           </tr>
         </thead>
@@ -230,7 +231,7 @@ function TablaFilas({ filas, total, esMovil }) {
                 {f.detalle && <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>{f.detalle}</div>}
               </td>
               <td style={num}>{fmtKg(f.kgEntra, { decimales: 1 })}</td>
-              <td style={num}>{fmtKg(f.kgSale, { decimales: 1 })}</td>
+              <td style={{ ...num, color: 'var(--green)' }}>{fmtKg(f.kgSale, { decimales: 1 })}</td>
               <td style={{ ...num, color: f.rinde ? 'var(--green)' : 'var(--red-light)', fontWeight: 700 }}>
                 {f.rinde ? `+${fmtKg(-f.kgMerma, { decimales: 1 })}` : fmtKg(f.kgMerma, { decimales: 1 })}
               </td>
@@ -238,6 +239,7 @@ function TablaFilas({ filas, total, esMovil }) {
                 {f.rinde ? `+${fmtNumero(-f.pct, 2)}%` : `${fmtNumero(f.pct, 2)}%`}
               </td>
               <td style={{ ...num, color: 'var(--muted)' }}>{f.precioKg > 0 ? fmtPrecio(f.precioKg, { decimales: 0 }) : '—'}</td>
+              <td style={{ ...num, color: 'var(--gold)', fontWeight: 700 }}>{f.precioReal > 0 ? fmtPrecio(f.precioReal, { decimales: 0 }) : '—'}</td>
               <td style={{ ...num, color: f.costo > 0 ? 'var(--red-light)' : 'var(--muted)' }}>{f.costo > 0 ? fmtPrecio(f.costo, { decimales: 0 }) : '—'}</td>
             </tr>
           ))}
@@ -246,10 +248,11 @@ function TablaFilas({ filas, total, esMovil }) {
           <tr style={{ background: 'var(--surface2)' }}>
             <td style={{ ...td, fontWeight: 800 }} colSpan={2}>TOTAL ({total.n})</td>
             <td style={{ ...num, fontWeight: 800 }}>{fmtKg(total.kgEntra, { decimales: 1 })}</td>
-            <td style={{ ...num, fontWeight: 800 }}>{fmtKg(total.kgSale, { decimales: 1 })}</td>
+            <td style={{ ...num, fontWeight: 800, color: 'var(--green)' }}>{fmtKg(total.kgSale, { decimales: 1 })}</td>
             <td style={{ ...num, fontWeight: 800, color: 'var(--red-light)' }}>{fmtKg(total.kgMerma, { decimales: 1 })}</td>
             <td style={{ ...num, fontWeight: 800, color: 'var(--amber)' }}>{fmtNumero(total.pct, 2)}%</td>
-            <td style={num}></td>
+            <td style={{ ...num, color: 'var(--muted)' }}>{total.precioIngreso > 0 ? fmtPrecio(total.precioIngreso, { decimales: 0 }) : '—'}</td>
+            <td style={{ ...num, fontWeight: 800, color: 'var(--gold)' }}>{total.precioReal > 0 ? fmtPrecio(total.precioReal, { decimales: 0 }) : '—'}</td>
             <td style={{ ...num, fontWeight: 800, color: 'var(--red-light)' }}>{fmtPrecio(total.costo, { decimales: 0 })}</td>
           </tr>
         </tfoot>
@@ -258,66 +261,55 @@ function TablaFilas({ filas, total, esMovil }) {
   )
 }
 
-// Dónde duele más la merma: no siempre es la categoría que más kilos pierde.
+// El cierre del informe: de lo que entró, cuánto queda vendible y a qué
+// precio termina saliendo ese kilo una vez que la merma se le carga encima.
 function TablaRelacion({ categorias, totales, esMovil }) {
   const conDatos = categorias.filter(c => c.total.n > 0)
   if (conDatos.length === 0) return null
+  const Fila = ({ c, est, total, esTotal }) => (
+    <tr style={esTotal ? { background: 'var(--surface2)' } : undefined}>
+      <td style={{ ...td, fontWeight: esTotal ? 800 : 400 }}>
+        {esTotal ? 'TOTAL SEMANA' : <strong style={{ color: est.color }}>{est.icono} {c.label}</strong>}
+      </td>
+      <td style={{ ...num, fontWeight: esTotal ? 800 : 400 }}>{fmtKg(total.kgEntra, { decimales: 1 })}</td>
+      <td style={{ ...num, color: 'var(--red-light)', fontWeight: esTotal ? 800 : 400 }}>{fmtKg(total.kgMerma, { decimales: 1 })}</td>
+      <td style={{ ...num, color: 'var(--amber)', fontWeight: esTotal ? 800 : 400 }}>{fmtNumero(total.pct, 2)}%</td>
+      <td style={{ ...num, color: 'var(--green)', fontWeight: 700 }}>{fmtKg(total.kgSale, { decimales: 1 })}</td>
+      <td style={{ ...num, color: 'var(--muted)' }}>{total.precioIngreso > 0 ? fmtPrecio(total.precioIngreso, { decimales: 0 }) : '—'}</td>
+      <td style={{ ...num, color: 'var(--gold)', fontWeight: 800 }}>{total.precioReal > 0 ? fmtPrecio(total.precioReal, { decimales: 0 }) : '—'}</td>
+    </tr>
+  )
   return (
     <div className="card" style={{ borderColor: 'var(--amber)' }}>
-      <div className="card-title" style={{ color: 'var(--amber)' }}>💸 Relación costo / merma por categoría</div>
-      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
-        Dónde duele más la merma. No es siempre la categoría que más kilos pierde:
-        un kilo de media res vale muy distinto que uno de capón.
+      <div className="card-title" style={{ color: 'var(--amber)' }}>💸 Costo real por kilo vendible</div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12, lineHeight: 1.6 }}>
+        De lo que entró, cuántos kilos quedan para vender y a cuánto sale de verdad ese kilo.
+        La plata que pagaste no cambia con la merma: <strong style={{ color: 'var(--text)' }}>cambia entre cuántos
+        kilos se reparte</strong>. Por eso el costo real es <strong style={{ color: 'var(--text)' }}>precio ÷ (1 − merma)</strong>,
+        no precio + merma — con 22% son $12.821 y no $12.200 sobre un kilo de $10.000.
       </div>
       <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: esMovil ? 560 : 0 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: esMovil ? 620 : 0 }}>
           <thead>
             <tr>
               <th style={th}>Categoría</th>
               <th style={numTh}>Kg procesados</th>
               <th style={numTh}>Kg merma</th>
               <th style={numTh}>% merma</th>
-              <th style={numTh}>$/kg merma</th>
-              <th style={numTh}>Costo</th>
-              <th style={numTh}>% del costo total</th>
+              <th style={numTh}>Neto vendible</th>
+              <th style={numTh}>$/kg ingreso</th>
+              <th style={numTh}>$/kg REAL</th>
             </tr>
           </thead>
           <tbody>
-            {conDatos.map(c => {
-              const est = ESTILO_CAT[c.id] || {}
-              const share = totales.costo > 0 ? (c.total.costo / totales.costo) * 100 : 0
-              return (
-                <tr key={c.id}>
-                  <td style={td}><strong style={{ color: est.color }}>{est.icono} {c.label}</strong></td>
-                  <td style={num}>{fmtKg(c.total.kgEntra, { decimales: 1 })}</td>
-                  <td style={{ ...num, color: 'var(--red-light)' }}>{fmtKg(c.total.kgMerma, { decimales: 1 })}</td>
-                  <td style={num}>{fmtNumero(c.total.pct, 2)}%</td>
-                  <td style={num}>{c.total.costoPorKg > 0 ? fmtPrecio(c.total.costoPorKg, { decimales: 0 }) : '—'}</td>
-                  <td style={{ ...num, color: 'var(--red-light)', fontWeight: 700 }}>{fmtPrecio(c.total.costo, { decimales: 0 })}</td>
-                  <td style={num}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
-                      <div style={{ width: 60, height: 6, background: 'var(--surface2)', borderRadius: 3, overflow: 'hidden' }}>
-                        <div style={{ width: `${Math.min(100, share)}%`, height: '100%', background: est.color || 'var(--muted)' }} />
-                      </div>
-                      {fmtNumero(share, 1)}%
-                    </div>
-                  </td>
-                </tr>
-              )
-            })}
+            {conDatos.map(c => <Fila key={c.id} c={c} est={ESTILO_CAT[c.id] || {}} total={c.total} />)}
           </tbody>
-          <tfoot>
-            <tr style={{ background: 'var(--surface2)' }}>
-              <td style={{ ...td, fontWeight: 800 }}>TOTAL SEMANA</td>
-              <td style={{ ...num, fontWeight: 800 }}>{fmtKg(totales.kgEntra, { decimales: 1 })}</td>
-              <td style={{ ...num, fontWeight: 800, color: 'var(--red-light)' }}>{fmtKg(totales.kgMerma, { decimales: 1 })}</td>
-              <td style={{ ...num, fontWeight: 800, color: 'var(--amber)' }}>{fmtNumero(totales.pct, 2)}%</td>
-              <td style={{ ...num, fontWeight: 800 }}>{totales.costoPorKg > 0 ? fmtPrecio(totales.costoPorKg, { decimales: 0 }) : '—'}</td>
-              <td style={{ ...num, fontWeight: 800, color: 'var(--red-light)' }}>{fmtPrecio(totales.costo, { decimales: 0 })}</td>
-              <td style={{ ...num, fontWeight: 800 }}>100%</td>
-            </tr>
-          </tfoot>
+          <tfoot><Fila total={totales} est={{}} esTotal /></tfoot>
         </table>
+      </div>
+      <div style={{ marginTop: 10, fontSize: 11, color: 'var(--muted)', lineHeight: 1.5 }}>
+        🐷 Las <strong>piezas de cerdo no llevan merma propia</strong>: se venden como salen del capón.
+        Su única merma es la del capón, que ya está contada arriba.
       </div>
     </div>
   )
