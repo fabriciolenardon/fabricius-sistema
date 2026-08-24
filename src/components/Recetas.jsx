@@ -272,7 +272,11 @@ export default function Recetas({ puedeEditar = false }) {
           <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 1, fontWeight: 700, marginBottom: 8 }}>
             {labelCategoria(cat).toUpperCase()}
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : 'repeat(auto-fit, minmax(340px, 1fr))', gap: 12 }}>
+          {/* minmax(380px) y no 340: con tres tarjetas al lado quedaban muy
+              angostas y el nombre del ingrediente le comía el lugar al número.
+              `minWidth: 0` en el ítem para que la grilla pueda achicarlo en
+              vez de desbordar (el default `auto` no deja). */}
+          <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : 'repeat(auto-fit, minmax(380px, 1fr))', gap: 12 }}>
             {lista.map(r => (
               <TarjetaReceta key={r.id} receta={r} puedeEditar={puedeEditar}
                 est={estado[r.id]}
@@ -316,7 +320,7 @@ function TarjetaReceta({ receta, puedeEditar, est, setKg, formulas, recetas, vin
   const fuente = vinculadoA ? recetas.find(r => r.id === vinculadoA) : null
 
   return (
-    <div className="card" style={{ borderColor: escalada || fuente ? 'var(--gold)' : 'var(--border)' }}>
+    <div className="card" style={{ borderColor: escalada || fuente ? 'var(--gold)' : 'var(--border)', minWidth: 0 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 10 }}>
         <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)', letterSpacing: 1, lineHeight: 1.1 }}>
           {receta.nombre}
@@ -390,7 +394,15 @@ function TarjetaReceta({ receta, puedeEditar, est, setKg, formulas, recetas, vin
         </div>
       )}
 
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      {/* `tableLayout: fixed` + colgroup: sin esto la tabla se ensancha con el
+          contenido y la columna de cantidades se sale de la tarjeta — los
+          números salían cortados ("8,C" en vez de "8,00 kg"). Con el ancho
+          fijado, el que se acomoda es el nombre, que sí puede cortar línea. */}
+      <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+        <colgroup>
+          <col />
+          <col style={{ width: 124 }} />
+        </colgroup>
         <tbody>
           {/* La base va como primer renglón: es un ingrediente más para el que
               lee, y así entra en la columna "cada kilo lleva". */}
@@ -422,26 +434,26 @@ function FilaIngrediente({ nombre, nota, cantidad, unidad, factor, totalBase, es
   const unitario = mostrarPorKilo && cantidad != null ? porKilo(cantidad, unidad, totalBase) : null
   return (
     <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-      <td style={{ padding: '6px 4px', fontSize: 13, fontWeight: destacado ? 700 : 400 }}>
+      <td style={{ padding: '6px 4px', fontSize: 13, fontWeight: destacado ? 700 : 400, overflowWrap: 'anywhere' }}>
         {nombre}
         {/* La nota es la parte que no se puede escalar: se muestra igual
             siempre y se avisa cuando la receta está escalada. */}
         {nota && (
-          <div style={{ fontSize: 10, color: 'var(--muted)' }}>
+          <div style={{ fontSize: 10, color: 'var(--muted)', lineHeight: 1.4 }}>
             {nota}{escalada && cantidad == null ? ' · no escala' : ''}
           </div>
         )}
       </td>
-      <td style={{ padding: '6px 4px', textAlign: 'right', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+      <td style={{ padding: '6px 4px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
         {cantidad != null ? (
           <>
-            <div>
+            <div style={{ whiteSpace: 'nowrap' }}>
               <strong style={{ fontSize: 15, color: escalada ? 'var(--gold)' : 'var(--text)' }}>
                 {fmtCant(Number(cantidad) * factor)}
               </strong>
               <span style={{ fontSize: 11, color: 'var(--muted)' }}> {unidad || ''}</span>
             </div>
-            {unitario && <div style={{ fontSize: 10, color: 'var(--muted)' }}>{unitario} por kg</div>}
+            {unitario && <div style={{ fontSize: 10, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{unitario} por kg</div>}
           </>
         ) : <span style={{ fontSize: 11, color: 'var(--muted)' }}>—</span>}
       </td>
