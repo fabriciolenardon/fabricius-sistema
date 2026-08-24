@@ -498,6 +498,11 @@ function Calculadora({ d, precios, esMovil, mermaConfig, comis, setComis, rent, 
   const [costo, setCosto] = useState('')
   const [merma, setMerma] = useState('0')
   const [mermaFuente, setMermaFuente] = useState('')
+  // Cómo se vende ESA compra. La misma pieza no rinde igual según qué le
+  // hagas: si el cortito se desposta hay 27% de merma, pero si se revende
+  // entero salen los mismos kilos que entraron y no hay merma ninguna.
+  const [modoVenta, setModoVenta] = useState('cortes')   // cortes | entero
+  const [mermaCargada, setMermaCargada] = useState(null) // {pct, fuente} del producto
   const [carga, setCarga] = useState(String((d.coef.cargaPct || 0).toFixed(1)).replace('.', ','))
   const [incluirSocios, setIncluirSocios] = useState(false)
 
@@ -515,8 +520,10 @@ function Calculadora({ d, precios, esMovil, mermaConfig, comis, setComis, rent, 
   // editable: una compra puntual puede rendir distinto que la tabla.
   useEffect(() => {
     const p = precios.find(x => String(x.id) === prodId)
-    if (!p) { setMermaFuente(''); return }
+    setModoVenta('cortes')
+    if (!p) { setMermaCargada(null); setMermaFuente(''); return }
     const m = mermaDeProducto(p, mermaConfig)
+    setMermaCargada(m)
     if (m) {
       setMerma(String(m.pct).replace('.', ','))
       setMermaFuente(m.fuente)
@@ -525,6 +532,19 @@ function Calculadora({ d, precios, esMovil, mermaConfig, comis, setComis, rent, 
       setMermaFuente('sin merma cargada para este producto — elegí una de abajo o ponela a mano')
     }
   }, [prodId, precios, mermaConfig])
+
+  // El interruptor "lo desposto / lo revendo entero". Revenderlo entero no
+  // es merma 0 por descuido: es que salen los mismos kilos que entraron.
+  const elegirModo = modo => {
+    setModoVenta(modo)
+    if (modo === 'entero') {
+      setMerma('0')
+      setMermaFuente('lo revendés entero: salen los mismos kilos que entraron, no hay merma')
+    } else if (mermaCargada) {
+      setMerma(String(mermaCargada.pct).replace('.', ','))
+      setMermaFuente(mermaCargada.fuente)
+    }
+  }
 
   // Las mermas cargadas, para ponerlas de un click aunque no haya producto elegido.
   const chips = useMemo(() => mermasCargadas(mermaConfig), [mermaConfig])
@@ -632,6 +652,38 @@ function Calculadora({ d, precios, esMovil, mermaConfig, comis, setComis, rent, 
         )}
       </div>
 
+      {/* La misma pieza son dos negocios distintos. Despostarla tiene la merma
+          cargada; revenderla entera no tiene ninguna, porque salen los mismos
+          kilos que entraron. Sin esto había que acordarse de poner 0 a mano. */}
+      {prod && mermaCargada && (
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 5 }}>
+            ¿Qué hacés con esta compra?
+          </label>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {[
+              { id: 'cortes', l: '🔪 La convierto a cortes', sub: `merma ${pctTxt(mermaCargada.pct)}` },
+              { id: 'entero', l: '📦 La revendo entera', sub: 'sin merma: salen los kilos que entraron' },
+            ].map(o => {
+              const activo = modoVenta === o.id
+              return (
+                <button key={o.id} type="button" onClick={() => elegirModo(o.id)}
+                  style={{
+                    textAlign: 'left', padding: '7px 14px', borderRadius: 10, cursor: 'pointer',
+                    fontFamily: "'DM Sans',sans-serif",
+                    border: `2px solid ${activo ? 'var(--gold)' : 'var(--border)'}`,
+                    background: activo ? 'var(--gold)' : 'var(--surface)',
+                    color: activo ? '#000' : 'var(--muted)',
+                  }}>
+                  <div style={{ fontWeight: 700, fontSize: 12 }}>{o.l}</div>
+                  <div style={{ fontSize: 10, opacity: 0.8 }}>{o.sub}</div>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : 'repeat(5, 1fr)', gap: 12, marginBottom: 10 }}>
         {campo('Costo de compra por kg', costo, setCosto, 'lo que te sale el kilo al proveedor', '$')}
         {campo('Merma / rendimiento', merma, setMerma,
@@ -647,7 +699,7 @@ function Calculadora({ d, precios, esMovil, mermaConfig, comis, setComis, rent, 
           <span style={{ fontSize: 10, color: 'var(--muted)' }}>Mermas cargadas:</span>
           {chips.map(c => (
             <button key={c.label} type="button" title={c.detalle}
-              onClick={() => { setMerma(String(c.pct).replace('.', ',')); setMermaFuente(`${c.label}: ${c.detalle}`) }}
+              onClick={() => { setModoVenta('cortes'); setMerma(String(c.pct).replace('.', ',')); setMermaFuente(`${c.label}: ${c.detalle}`) }}
               style={{
                 padding: '3px 9px', borderRadius: 999, cursor: 'pointer', fontSize: 10,
                 fontFamily: "'DM Sans',sans-serif", fontWeight: 600,
@@ -672,14 +724,19 @@ function Calculadora({ d, precios, esMovil, mermaConfig, comis, setComis, rent, 
           {prod && (
             <div style={{ fontSize: 12, marginBottom: 8 }}>
               <b style={{ color: 'var(--gold)' }}>{prod.nombre}</b>
-              <span style={{ color: 'var(--muted)' }}> — costo {$(parseNumero(costo))}/kg, merma {pctTxt(parseNumero(merma))}</span>
+              <span style={{ color: 'var(--muted)' }}>
+                {' '}— costo {$(parseNumero(costo))}/kg, merma {pctTxt(parseNumero(merma))}
+                {mermaCargada ? (modoVenta === 'entero' ? ' · se revende entero' : ' · se convierte a cortes') : ''}
+              </span>
             </div>
           )}
           <div className="grid4" style={{ marginBottom: 14 }}>
             <div className="stat">
               <div className="stat-label">Costo real por kg vendible</div>
               <div className="stat-value" style={{ fontSize: 20 }}>{$(r.costoReal)}</div>
-              <div style={{ fontSize: 10, color: 'var(--muted)' }}>compra + merma</div>
+              <div style={{ fontSize: 10, color: 'var(--muted)' }}>
+                {parseNumero(merma) > 0 ? 'compra + merma' : 'sin merma: es el costo de compra'}
+              </div>
             </div>
             <div className="stat">
               <div className="stat-label">Precio de venta sugerido</div>
