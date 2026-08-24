@@ -37,6 +37,9 @@ export default function DesposteLayout() {
         <NavLinkBig to="/desposte/capones" icono="🐷" label="Capones" />
         <NavLinkBig to="/desposte/media-res" icono="🐄" label="Media Res" />
         <NavLinkBig to="/desposte/historial" icono="📋" label="Historial" />
+        {/* Las fórmulas de los elaborados: el desposte las consulta mientras
+            elabora. Sólo lectura — las define la central (mig 104). */}
+        <NavLinkBig to="/desposte/recetas" icono="📖" label="Recetas" />
       </nav>
 
       {/* Main */}

@@ -19,6 +19,7 @@ import CajasTab from './CajasTab'
 import PolloCajonesTab from './PolloCajonesTab'
 import StockPiezasTab from './StockPiezasTab'
 import MermasHistorial from './MermasHistorial'
+import Recetas from '../../components/Recetas'
 import { cargarCategoriasPrecios, labelsDeCategorias } from '../../lib/categoriasPrecios'
 import { estadoBloqueoCliente } from '../../lib/moraClientes'
 import { logAuditoria } from '../../lib/auditoria'
@@ -444,6 +445,10 @@ export function Deposito() {
           // cuánto le queda: no recibe capones para despostar, recibe las
           // piezas ya hechas.
           { id: 'cerdo', label: '🐷 Cerdo y Embutidos' },
+          // Las fórmulas de los elaborados, que hasta ahora vivían en un
+          // papel pegado en la pared. Las ven las dos bocas; las edita
+          // sólo la central (la mig 104 lo aplica en la base).
+          { id: 'recetas', label: '📖 Recetas' },
           { id: 'cajas', label: '📦 Cajas Bovinas' },
           { id: 'pollo_cajones', label: '🍗 Pollo Cajones' },
           ...(isSucursal ? [] : [{ id: 'flujo', label: '📥 Flujo Depósito' }]),
@@ -464,6 +469,7 @@ export function Deposito() {
 {tab === 'elaborar' && <DesposteTab key={tab} onSaved={() => {}} soloElaborar />}
 {tab === 'piezas' && <PiezasTab key={tab} />}
 {tab === 'cerdo' && <StockPiezasTab key={tab} />}
+{tab === 'recetas' && <Recetas key={tab} puedeEditar={!isSucursal} />}
 {tab === 'cajas' && <CajasTab key={tab} />}
 {tab === 'pollo_cajones' && <PolloCajonesTab key={tab} />}
 {tab === 'remitos' && <RemitosTab remitoActual={remitoActual} />}
