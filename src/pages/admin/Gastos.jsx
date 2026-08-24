@@ -8,6 +8,7 @@ import { useEsMovil } from '../../lib/useEsMovil'
 import { useAuth } from '../../context/AuthContext'
 import { cargarSocios, cargarTopeNegocio, guardarTopeNegocio } from '../../lib/socios'
 import SociosEditor from '../../components/SociosEditor'
+import AnalisisGastos from '../../components/AnalisisGastos'
 
 // Display de precio con formato AR (incluye centavos si tiene)
 import { fmtPrecio } from '../../lib/formatos'
@@ -493,6 +494,7 @@ export default function Gastos() {
         {[
           { id: 'todos', label: '📋 Todos los gastos' },
           { id: 'facturas', label: `🧾 Con factura (${conFactura.length})` },
+          { id: 'analisis', label: '📊 Análisis' },
         ].map(t => (
           <button key={t.id} onClick={() => setVista(t.id)}
             style={{ padding: '9px 18px', borderRadius: 8, border: `2px solid ${vista === t.id ? 'var(--gold)' : 'var(--border)'}`, background: vista === t.id ? 'var(--gold)' : 'transparent', color: vista === t.id ? '#000' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 700, fontSize: 13 }}>
@@ -501,7 +503,9 @@ export default function Gastos() {
         ))}
       </div>
 
-      {vista === 'facturas'
+      {vista === 'analisis'
+        ? <AnalisisGastos gastos={gastos} />
+        : vista === 'facturas'
         ? <VistaFacturas
             meses={mesesFacturaOrden} mapa={mesesFactura}
             onVer={verFactura} onEditar={editar} onEliminar={eliminar}
