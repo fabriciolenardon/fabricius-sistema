@@ -17,7 +17,7 @@ import { fechaHoyARG } from '../lib/fechas'
 import { fmtPrecio, fmtKg, parseNumero } from '../lib/formatos'
 import { useEsMovil } from '../lib/useEsMovil'
 import { lunesDeLaSemana } from '../lib/cierreAuto'
-import { calcularEstructura, precioSugerido, rentabilidadDe, promediosDeListas } from '../lib/analisisGastos'
+import { calcularEstructura, precioSugerido, rentabilidadDe, promediosDeListas, mermaDeProducto, mermasCargadas } from '../lib/analisisGastos'
 import { CATEGORIAS_SISTEMA } from '../lib/categoriasPrecios'
 
 const $ = n => fmtPrecio(Math.abs(Number(n) || 0))
@@ -51,6 +51,10 @@ export default function AnalisisGastos({ gastos: gastosProp }) {
   // uno tuviera los suyos, dirían cosas distintas en la misma pantalla.
   const [comis, setComis] = useState('3')
   const [rent, setRent] = useState('15')
+  // Merma por producto: la MISMA config que usa el desposte
+  // (Depósito → Merma por producto). La calculadora la lee para
+  // autocompletar el % — no se carga una merma aparte acá.
+  const [mermaConfig, setMermaConfig] = useState(null)
 
   const gastos = gastosProp || gastosPropios
 
@@ -68,6 +72,8 @@ export default function AnalisisGastos({ gastos: gastosProp }) {
       .order('nombre'))
       .then(({ data }) => setPrecios(data || []))
       .catch(() => setPrecios([]))
+    supabase.from('config_sistema').select('valor').eq('clave', 'merma_conversion').maybeSingle()
+      .then(({ data }) => setMermaConfig(data?.valor || null))
   }, [gastosProp])
 
   // Los meses operativos ya cerrados (el vigente ya tiene su propio botón).
@@ -180,7 +186,7 @@ export default function AnalisisGastos({ gastos: gastosProp }) {
           <Coeficientes d={data} />
           <TablaGastos d={data} abierta={abierta} setAbierta={setAbierta} esMovil={esMovil} />
           <PromedioListas d={data} precios={precios} esMovil={esMovil} comis={comis} rent={rent} />
-          <Calculadora d={data} precios={precios} esMovil={esMovil}
+          <Calculadora d={data} precios={precios} esMovil={esMovil} mermaConfig={mermaConfig}
             comis={comis} setComis={setComis} rent={rent} setRent={setRent} />
         </>
       )}
@@ -478,15 +484,22 @@ function PromedioListas({ d, precios, esMovil, comis, rent }) {
 }
 
 // ────────────────────────────────────────────────────────────
-// 5) CALCULADORA — cuánto tiene que salir un producto
+// 5) CALCULADORA — cuánto tiene que salir el kilo de UN producto
 // ────────────────────────────────────────────────────────────
-function Calculadora({ d, precios, esMovil, comis, setComis, rent, setRent }) {
+// Se arranca eligiendo el producto: el que quieras, sea o no el que
+// acabás de comprar. El costo lo ponés a mano (es lo que te salió ESA
+// compra) y la merma se completa sola con la que ya tenés cargada en
+// Depósito → Merma por producto — la misma que usa el desposte, no una
+// aparte. Encima van la carga estructural del negocio, las comisiones e
+// impuestos y la rentabilidad que buscás, y sale el precio de ese
+// producto en particular, comparado contra lo que hoy cobrás en cada lista.
+function Calculadora({ d, precios, esMovil, mermaConfig, comis, setComis, rent, setRent }) {
+  const [prodId, setProdId] = useState('')
   const [costo, setCosto] = useState('')
   const [merma, setMerma] = useState('0')
+  const [mermaFuente, setMermaFuente] = useState('')
   const [carga, setCarga] = useState(String((d.coef.cargaPct || 0).toFixed(1)).replace('.', ','))
   const [incluirSocios, setIncluirSocios] = useState(false)
-  const [prodId, setProdId] = useState('')
-  const productos = precios
 
   // Al cambiar el período (o el interruptor de socios) recalculamos la carga
   // sugerida. Queda editable: es un punto de partida, no una imposición.
@@ -496,8 +509,49 @@ function Calculadora({ d, precios, esMovil, comis, setComis, rent, setRent }) {
   }, [d, incluirSocios])
   useEffect(() => { setCarga(cargaReal.toFixed(1).replace('.', ',')) }, [cargaReal])
 
-  const prod = productos.find(p => String(p.id) === prodId) || null
-  const precioActual = prod ? Number(prod.precio_minorista) || 0 : 0
+  const prod = precios.find(p => String(p.id) === prodId) || null
+
+  // Elegir el producto completa la merma con la que YA está cargada. Queda
+  // editable: una compra puntual puede rendir distinto que la tabla.
+  useEffect(() => {
+    const p = precios.find(x => String(x.id) === prodId)
+    if (!p) { setMermaFuente(''); return }
+    const m = mermaDeProducto(p, mermaConfig)
+    if (m) {
+      setMerma(String(m.pct).replace('.', ','))
+      setMermaFuente(m.fuente)
+    } else {
+      setMerma('0')
+      setMermaFuente('sin merma cargada para este producto — elegí una de abajo o ponela a mano')
+    }
+  }, [prodId, precios, mermaConfig])
+
+  // Las mermas cargadas, para ponerlas de un click aunque no haya producto elegido.
+  const chips = useMemo(() => mermasCargadas(mermaConfig), [mermaConfig])
+
+  // El selector agrupado por categoría, con la carne primero (es lo que se
+  // costea todos los días) y el resto en el orden del catálogo.
+  const grupos = useMemo(() => {
+    const orden = CATEGORIAS_SISTEMA.map(c => c.clave)
+    const m = new Map()
+    for (const p of precios) {
+      const k = p.categoria || 'otros'
+      if (!m.has(k)) m.set(k, [])
+      m.get(k).push(p)
+    }
+    const idx = k => { const i = orden.indexOf(k); return i < 0 ? 99 : i }
+    return [...m.entries()]
+      .sort((a, b) => idx(a[0]) - idx(b[0]))
+      .map(([clave, items]) => ({
+        clave,
+        label: CATEGORIAS_SISTEMA.find(c => c.clave === clave)?.label || clave,
+        items,
+      }))
+  }, [precios])
+
+  // Los bultos (cajones) tienen el precio por bulto: la cuenta va por kilo.
+  const kgPorUnidad = Number(prod?.kg_por_unidad) || 0
+  const aKg = v => (kgPorUnidad > 0 ? v / kgPorUnidad : v)
 
   const r = precioSugerido({
     costoKg: parseNumero(costo),
@@ -506,13 +560,28 @@ function Calculadora({ d, precios, esMovil, comis, setComis, rent, setRent }) {
     comisionesPct: parseNumero(comis),
     rentabilidadPct: parseNumero(rent),
   })
-  const actual = precioActual > 0 ? rentabilidadDe({
-    precio: precioActual,
-    costoKg: parseNumero(costo),
-    mermaPct: parseNumero(merma),
-    cargaPct: parseNumero(carga),
-    comisionesPct: parseNumero(comis),
-  }) : null
+
+  // Lo que deja HOY cada lista para ese producto, con el mismo costo y la
+  // misma merma. Las tres juntas: el mismo kilo no rinde igual en cada una.
+  const LISTAS_CMP = [
+    { campo: 'precio_minorista', label: '🟢 Minorista' },
+    { campo: 'precio_mayorista', label: '🟡 Mayorista' },
+    { campo: 'precio_carniceria', label: '🔴 Carnicería' },
+  ]
+  const comparacion = prod ? LISTAS_CMP.map(l => {
+    const precioKg = aKg(Number(prod[l.campo]) || 0)
+    return {
+      ...l,
+      precioKg,
+      res: precioKg > 0 ? rentabilidadDe({
+        precio: precioKg,
+        costoKg: parseNumero(costo),
+        mermaPct: parseNumero(merma),
+        cargaPct: parseNumero(carga),
+        comisionesPct: parseNumero(comis),
+      }) : null,
+    }
+  }) : []
 
   const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '9px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }
   const campo = (l, v, set, ayuda, sufijo) => (
@@ -525,25 +594,70 @@ function Calculadora({ d, precios, esMovil, comis, setComis, rent, setRent }) {
       {ayuda && <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 3, lineHeight: 1.3 }}>{ayuda}</div>}
     </div>
   )
+  const th = { padding: '6px 8px', textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap', color: 'var(--muted)' }
+  const td = { padding: '7px 8px', textAlign: 'right', whiteSpace: 'nowrap' }
 
   return (
     <div className="card">
       <div className="card-title">🧮 Cuánto tiene que salir el kilo</div>
       <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 12, lineHeight: 1.5 }}>
-        Al costo de compra se le suma la merma, y encima se le carga la estructura real del negocio
-        ({pctTxt(cargaReal)} de todo lo que vendés) más las comisiones. La cuenta <b>divide, no suma</b>:
-        para que después de pagar todo quede tu rentabilidad, el precio es
+        Elegí el producto, poné lo que te costó <b>esa</b> compra y, si es una pieza o una media res,
+        la merma sale sola de la que tenés cargada en <b>Depósito → Merma por producto</b> (para el
+        resto la elegís de un click ahí abajo). Encima se le carga la estructura real
+        del negocio ({pctTxt(cargaReal)} de todo lo que vendés) más las comisiones. La cuenta
+        <b> divide, no suma</b>: para que después de pagar todo quede tu rentabilidad, el precio es
         <i> costo ÷ (1 − estructura − comisiones − rentabilidad)</i>. Multiplicar el costo por 1,40 para
         "ganar 40%" deja mucho menos de lo que parece.
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : 'repeat(5, 1fr)', gap: 12, marginBottom: 14 }}>
+      {/* El producto manda: define la merma que se autocompleta y contra qué
+          precios se compara el resultado. El costo va suelto — es el de la
+          compra de hoy, no tiene por qué ser el del producto elegido. */}
+      <div style={{ marginBottom: 14 }}>
+        <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>
+          ¿A qué producto le sacás la cuenta?
+        </label>
+        <select style={{ ...inp, maxWidth: esMovil ? '100%' : 460 }} value={prodId} onChange={e => setProdId(e.target.value)}>
+          <option value="">— elegí un producto (o dejalo suelto y cargá la merma a mano) —</option>
+          {grupos.map(g => (
+            <optgroup key={g.clave} label={g.label}>
+              {g.items.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            </optgroup>
+          ))}
+        </select>
+        {kgPorUnidad > 0 && (
+          <div style={{ fontSize: 10, color: 'var(--gold)', marginTop: 4 }}>
+            Se vende por bulto de {fmtKg(kgPorUnidad, { decimales: 0 })} — toda la cuenta va por kilo.
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : 'repeat(5, 1fr)', gap: 12, marginBottom: 10 }}>
         {campo('Costo de compra por kg', costo, setCosto, 'lo que te sale el kilo al proveedor', '$')}
-        {campo('Merma / rendimiento', merma, setMerma, 'hueso, grasa, goteo: % que se pierde', '%')}
+        {campo('Merma / rendimiento', merma, setMerma,
+          mermaFuente || 'hueso, grasa, goteo: % que se pierde', '%')}
         {campo('Carga estructural', carga, setCarga, `sugerido por tus números: ${pctTxt(cargaReal)}`, '%')}
         {campo('Comisiones e impuestos', comis, setComis, 'posnet, tarjetas, IIBB, impuesto al cheque', '%')}
         {campo('Rentabilidad buscada', rent, setRent, 'lo que querés que quede limpio', '%')}
       </div>
+
+      {/* Las mermas que ya están cargadas, a un click. */}
+      {chips.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
+          <span style={{ fontSize: 10, color: 'var(--muted)' }}>Mermas cargadas:</span>
+          {chips.map(c => (
+            <button key={c.label} type="button" title={c.detalle}
+              onClick={() => { setMerma(String(c.pct).replace('.', ',')); setMermaFuente(`${c.label}: ${c.detalle}`) }}
+              style={{
+                padding: '3px 9px', borderRadius: 999, cursor: 'pointer', fontSize: 10,
+                fontFamily: "'DM Sans',sans-serif", fontWeight: 600,
+                border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--muted)',
+              }}>
+              {c.label} {pctTxt(c.pct, 1)}
+            </button>
+          ))}
+        </div>
+      )}
 
       <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: 'var(--muted)', marginBottom: 14, cursor: 'pointer' }}>
         <input type="checkbox" checked={incluirSocios} onChange={e => setIncluirSocios(e.target.checked)} />
@@ -555,6 +669,12 @@ function Calculadora({ d, precios, esMovil, comis, setComis, rent, setRent }) {
 
       {r.precio != null && parseNumero(costo) > 0 && (
         <>
+          {prod && (
+            <div style={{ fontSize: 12, marginBottom: 8 }}>
+              <b style={{ color: 'var(--gold)' }}>{prod.nombre}</b>
+              <span style={{ color: 'var(--muted)' }}> — costo {$(parseNumero(costo))}/kg, merma {pctTxt(parseNumero(merma))}</span>
+            </div>
+          )}
           <div className="grid4" style={{ marginBottom: 14 }}>
             <div className="stat">
               <div className="stat-label">Costo real por kg vendible</div>
@@ -601,42 +721,51 @@ function Calculadora({ d, precios, esMovil, comis, setComis, rent, setRent }) {
             Comisiones {$(r.reparto.comisiones)} · Ganancia {$(r.reparto.ganancia)}
           </div>
 
-          {/* Comparar con un precio de la lista */}
-          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
-            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>
-              Compararlo con un producto de tu lista
-            </label>
-            <select style={{ ...inp, maxWidth: 420 }} value={prodId} onChange={e => setProdId(e.target.value)}>
-              <option value="">— elegí un producto —</option>
-              {productos.map(p => (
-                <option key={p.id} value={p.id}>{p.nombre} — {$(p.precio_minorista)}</option>
-              ))}
-            </select>
-            {actual && (
-              <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: esMovil ? '1fr' : 'repeat(3, 1fr)', gap: 12 }}>
-                <div className="stat">
-                  <div className="stat-label">Precio de lista hoy</div>
-                  <div className="stat-value" style={{ fontSize: 20 }}>{$(precioActual)}</div>
-                </div>
-                <div className="stat">
-                  <div className="stat-label">Rentabilidad real de ese precio</div>
-                  <div className="stat-value" style={{ fontSize: 20, color: actual.ganancia >= 0 ? 'var(--green)' : 'var(--red-light)' }}>
-                    {actual.ganancia < 0 ? '−' : ''}{$(actual.ganancia)}
-                  </div>
-                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>{pctTxt(actual.gananciaPct)} del precio · por kg</div>
-                </div>
-                <div className="stat">
-                  <div className="stat-label">Diferencia contra el sugerido</div>
-                  <div className="stat-value" style={{ fontSize: 20, color: precioActual >= r.precio ? 'var(--green)' : 'var(--gold)' }}>
-                    {precioActual >= r.precio ? '+' : '−'}{$(precioActual - r.precio)}
-                  </div>
-                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>
-                    {precioActual >= r.precio ? 'estás por encima del piso' : 'te falta para llegar a tu rentabilidad'}
-                  </div>
-                </div>
+          {/* Contra lo que hoy cobrás por ese producto, en las tres listas */}
+          {prod && (
+            <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
+                Lo que <b>{prod.nombre}</b> te deja hoy en cada lista, con este costo y esta merma:
               </div>
-            )}
-          </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ ...th, textAlign: 'left' }}>Lista</th>
+                      <th style={th}>Precio hoy por kg</th>
+                      <th style={th}>Te queda limpio</th>
+                      {!esMovil && <th style={th}>% del precio</th>}
+                      <th style={th}>Contra el sugerido</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {comparacion.map(c => (
+                      <tr key={c.campo} style={{ borderTop: '1px solid var(--border)' }}>
+                        <td style={{ padding: '7px 8px', fontWeight: 600 }}>{c.label}</td>
+                        <td style={td}>{c.precioKg > 0 ? $(c.precioKg) : '—'}</td>
+                        <td style={{ ...td, fontWeight: 700, color: c.res ? (c.res.ganancia >= 0 ? 'var(--green)' : 'var(--red-light)') : 'var(--muted)' }}>
+                          {c.res ? `${c.res.ganancia < 0 ? '−' : ''}${$(c.res.ganancia)}` : '—'}
+                        </td>
+                        {!esMovil && (
+                          <td style={{ ...td, color: 'var(--muted)' }}>
+                            {c.res ? pctTxt(c.res.gananciaPct) : '—'}
+                          </td>
+                        )}
+                        <td style={{ ...td, color: c.precioKg >= r.precio ? 'var(--green)' : 'var(--gold)' }}>
+                          {c.precioKg > 0
+                            ? `${c.precioKg >= r.precio ? '+' : '−'}${$(c.precioKg - r.precio)}`
+                            : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 6 }}>
+                En verde estás por encima del piso que te deja tu rentabilidad; en dorado te falta para llegar.
+              </div>
+            </div>
+          )}
         </>
       )}
 

@@ -29,6 +29,10 @@
 // ============================================================
 import { calcularCierreAuto } from './cierreAuto'
 import { calcularControlSemanal } from './controlSemanal'
+import {
+  MERMA_PIEZA_DEFAULT, MERMA_PIEZA_GENERICA,
+  MERMA_MEDIA_RES_DEFAULT, MERMA_FRIO_DEFAULT,
+} from './modelosDesposte'
 
 const n = v => Number(v) || 0
 const pct = (parte, total) => (total > 0 ? (n(parte) / total) * 100 : null)
@@ -358,4 +362,87 @@ export function rentabilidadDe({ precio, costoKg, mermaPct = 0, cargaPct = 0, co
   const comisiones = p * (n(comisionesPct) / 100)
   const ganancia = p - costoReal - estructura - comisiones
   return { costoReal, estructura, comisiones, ganancia, gananciaPct: (ganancia / p) * 100 }
+}
+
+// ============================================================
+// LA MERMA QUE YA TENÉS CARGADA
+// ============================================================
+// La calculadora no inventa la merma: sale de la MISMA tabla que usa el
+// desposte (config_sistema.merma_conversion, editable en Depósito →
+// Desposte → Merma por producto). Elegís el producto y el % se completa
+// solo; queda editable porque una compra puntual puede rendir distinto.
+//
+//   · PIEZA bovina → su % propio (Cortito 27%, Pierna 29%, Costeletal 6%…).
+//     NO se le suma el frío: la pieza se pesa después de la cámara, esa
+//     merma ya está hecha.
+//   · MEDIA RES    → la merma del tipo de animal MÁS la de frío, igual que
+//     el desposte por kilo (novillito 22% + 2,5% = 24,5%).
+//   · El resto     → NO se autocompleta. La tabla es de bovino: aplicarla a
+//     una pierna de cerdo o a un corte ya deshuesado sería inventar. Se pone
+//     a mano, o de un click con las mermas cargadas que se ofrecen al lado.
+
+// Normaliza para comparar nombres: "CORTITO ( PIEZA )" → "CORTITO PIEZA".
+const normNombre = s => String(s || '')
+  .toUpperCase()
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^A-Z0-9]+/g, ' ')
+  .trim()
+
+const mermaFrioDe = cfg => {
+  const v = Number(cfg?.merma_frio)
+  return Number.isFinite(v) ? v : MERMA_FRIO_DEFAULT
+}
+const tiposMediaRes = cfg =>
+  (cfg?.media_res && cfg.media_res.length ? cfg.media_res : MERMA_MEDIA_RES_DEFAULT)
+const piezasDe = cfg => ({ ...MERMA_PIEZA_DEFAULT, ...(cfg?.piezas || {}) })
+
+/**
+ * Merma cargada para un producto de la lista de precios.
+ * @returns {{pct:number, fuente:string}|null} null si no hay ninguna cargada.
+ */
+export function mermaDeProducto(producto, cfg) {
+  if (!producto) return null
+  const nombre = normNombre(producto.nombre)
+  const frio = mermaFrioDe(cfg)
+
+  // La tabla de mermas es de BOVINO: solo se autocompleta para la media res
+  // y las piezas bovinas. Si no, "PIERNA CERDO ( POR PIEZA )" se llevaría el
+  // 29% de la pierna bovina, y un corte ya deshuesado una merma que no tiene.
+  const esMediaRes = producto.categoria === 'bovino_mr' || nombre.includes('MEDIA RES')
+  if (!esMediaRes && producto.categoria !== 'bovino_pieza') return null
+
+  // Media res: el nombre no dice si es novillito o vaca, así que tomamos el
+  // tipo que MÁS merma tiene. Quedarse corto con la merma infla la ganancia.
+  if (esMediaRes) {
+    const t = tiposMediaRes(cfg).reduce((a, b) => (n(b.merma) > n(a.merma) ? b : a))
+    return {
+      pct: n(t.merma) + frio,
+      fuente: `${t.label}: ${n(t.merma)}% + ${frio}% de frío — la más alta de las cargadas`,
+    }
+  }
+
+  // Piezas: el nombre del producto trae agregados ("PIERNA BOVINA - MOCHO
+  // ( PIEZA )"), así que buscamos la pieza adentro. Del match más largo al
+  // más corto, para que "Costillar Completo" gane antes que "Costillar".
+  const piezas = piezasDe(cfg)
+  const hit = Object.keys(piezas)
+    .sort((a, b) => b.length - a.length)
+    .find(k => nombre.includes(normNombre(k)))
+  if (hit) return { pct: n(piezas[hit]), fuente: `${hit}: merma cargada en Depósito` }
+
+  // Pieza bovina sin % propio (ej. "Costillar con Vacío"): la genérica, igual
+  // que hace el desposte. Se avisa que es genérica para que se revise.
+  return { pct: MERMA_PIEZA_GENERICA, fuente: 'pieza sin % propio — merma genérica, revisala' }
+}
+
+/** Todas las mermas cargadas, para ofrecerlas a un click. */
+export function mermasCargadas(cfg) {
+  const frio = mermaFrioDe(cfg)
+  const medias = tiposMediaRes(cfg).map(t => ({
+    label: t.label, pct: n(t.merma) + frio, detalle: `${n(t.merma)}% de desposte + ${frio}% de frío`,
+  }))
+  const piezas = Object.entries(piezasDe(cfg))
+    .map(([label, v]) => ({ label, pct: n(v), detalle: 'merma de la pieza al convertirla a cortes' }))
+    .sort((a, b) => b.pct - a.pct)
+  return [...medias, ...piezas]
 }
