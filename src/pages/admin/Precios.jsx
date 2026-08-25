@@ -1471,10 +1471,19 @@ function FormatoBalanzaCard({ precios }) {
   async function guardar() {
     setGuardando(true)
     const nuevo = conModoDeSucursal(valor, sucSel, modo)
-    const { error } = await supabase.from('config_sistema')
-      .update({ valor: nuevo }).eq('clave', 'ean13_formato')
+    // `.select()` no es decorativo: `config_sistema` sólo la escribe la
+    // central (mig 100). Para una sucursal el UPDATE no falla — actualiza
+    // CERO filas y vuelve sin error, así que sin mirar lo que volvió la
+    // pantalla decía "✅ Formato guardado" y no había guardado nada. Con la
+    // balanza ya cambiada eso es una mañana perdida buscando el fantasma.
+    const { data, error } = await supabase.from('config_sistema')
+      .update({ valor: nuevo }).eq('clave', 'ean13_formato').select('clave')
     setGuardando(false)
     if (error) { setMsg({ tipo: 'error', texto: '❌ No se pudo guardar: ' + error.message }); return }
+    if (!data || data.length === 0) {
+      setMsg({ tipo: 'error', texto: '❌ No se guardó: el formato de la balanza lo cambia la central. Pedíselo a Fabricio — él lo hace desde su usuario eligiendo esta boca.' })
+      return
+    }
     setValor(nuevo)
     setModoSel(null)
     setMsg({ tipo: 'ok', texto: '✅ Formato guardado. La Caja de esa boca ya lee con el modo nuevo.' })
