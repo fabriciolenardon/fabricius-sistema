@@ -37,6 +37,11 @@ import TabBalance from './BalanceEjercicio'
 const fmt$ = n => fmtPrecio(Math.abs(Number(n) || 0))
 const fmtPct = n => (n || 0).toFixed(1) + '%'
 const fmtFecha = d => d ? new Date(d).toLocaleDateString('es-AR') : '—'
+// Nombre del mes en curso en hora ARG. Con la TZ del navegador, el último día
+// del mes después de las 21 el título ya decía el mes siguiente.
+const mesActualARG = () => new Date()
+  .toLocaleDateString('es-AR', { month: 'long', timeZone: 'America/Argentina/Buenos_Aires' })
+  .toUpperCase()
 // Hora local ARG (no UTC) — antes después de las 21hs el filtro "hoy"
 // quedaba con la fecha del día siguiente.
 const hoyISO = () => fechaHoyARG()
@@ -107,13 +112,18 @@ export default function Facturacion() {
   const [impuestos, setImpuestos] = useState([])
   const [contrapartes, setContrapartes] = useState([])
   const [facturacionPorCuenta, setFacturacionPorCuenta] = useState({})
+  // null = el RPC del mes no existe todavía (migración 120 sin correr)
+  const [facturacionMesPorCuenta, setFacturacionMesPorCuenta] = useState({})
   const [loading, setLoading] = useState(true)
 
   useEffect(() => { cargarTodo() }, [])
 
   async function cargarTodo() {
     setLoading(true)
-    const [{ data: cs }, { data: fs }, { data: ps }, { data: kp }, { data: fac12 }] = await Promise.all([
+    const [
+      { data: cs }, { data: fs }, { data: ps }, { data: kp },
+      { data: fac12 }, { data: facMes, error: errMes },
+    ] = await Promise.all([
       supabase.from('cuentas_fiscales').select('*').order('nombre'),
       supabase.from('facturas').select('*').order('fecha', { ascending: false }),
       supabase.from('impuestos_pagados').select('*').order('fecha_pago', { ascending: false }),
@@ -121,6 +131,9 @@ export default function Facturacion() {
       // Facturado últimos 12 meses por cuenta — calculado en el servidor (no depende
       // del tope de 1.000 filas), clave para el semáforo de tope del monotributo.
       supabase.rpc('facturado_cuentas_12m'),
+      // Compras y ventas del MES en curso, también en el servidor: agosto solo
+      // ya trae más de 1.000 facturas, así que sumado acá no cerraría.
+      supabase.rpc('facturado_cuentas_mes'),
     ])
     setCuentas(cs || [])
     setFacturas(fs || [])
@@ -135,6 +148,26 @@ export default function Facturacion() {
       }
     })
     setFacturacionPorCuenta(map)
+
+    // Si la migración 120 todavía no corrió, el RPC no existe. Dejamos null
+    // para avisarlo en la tarjeta, en vez de mostrar $0 y hacerle creer que
+    // en el mes no se facturó nada.
+    if (errMes) {
+      setFacturacionMesPorCuenta(null)
+    } else {
+      const mapMes = {}
+      ;(cs || []).forEach(c => {
+        mapMes[c.id] = { ventas: 0, compras: 0, cantVentas: 0, cantCompras: 0, ventasAnt: 0, comprasAnt: 0 }
+      })
+      ;(facMes || []).forEach(r => {
+        mapMes[r.cuenta_id] = {
+          ventas: Number(r.ventas) || 0, compras: Number(r.compras) || 0,
+          cantVentas: Number(r.cant_ventas) || 0, cantCompras: Number(r.cant_compras) || 0,
+          ventasAnt: Number(r.ventas_ant) || 0, comprasAnt: Number(r.compras_ant) || 0,
+        }
+      })
+      setFacturacionMesPorCuenta(mapMes)
+    }
     setLoading(false)
   }
 
@@ -175,6 +208,7 @@ export default function Facturacion() {
           facturas={facturas}
           impuestos={impuestos}
           facturacionPorCuenta={facturacionPorCuenta}
+          facturacionMesPorCuenta={facturacionMesPorCuenta}
           onChange={cargarTodo}
         />
       )}
@@ -203,7 +237,7 @@ export default function Facturacion() {
 // ============================================================
 // TAB CUENTAS — listado de cuentas con semáforo + alta/edición
 // ============================================================
-function TabCuentas({ cuentas, facturas, impuestos, facturacionPorCuenta, onChange }) {
+function TabCuentas({ cuentas, facturas, impuestos, facturacionPorCuenta, facturacionMesPorCuenta, onChange }) {
   const [editando, setEditando] = useState(null)
   const [mostrarForm, setMostrarForm] = useState(false)
   const [mostrarSimulador, setMostrarSimulador] = useState(false)
@@ -265,6 +299,8 @@ function TabCuentas({ cuentas, facturas, impuestos, facturacionPorCuenta, onChan
               key={c.id}
               cuenta={c}
               datos={facturacionPorCuenta[c.id] || { emitido: 0, recibido: 0 }}
+              datosMes={facturacionMesPorCuenta ? facturacionMesPorCuenta[c.id] : null}
+              mesDisponible={facturacionMesPorCuenta !== null}
               facturasCuenta={facturas.filter(f => f.cuenta_id === c.id && f.tipo === 'emitida')}
               onEditar={() => editar(c)}
               onEliminar={() => eliminar(c)}
@@ -335,7 +371,7 @@ function AlertasGlobales({ cuentas, facturacionPorCuenta }) {
   )
 }
 
-function CuentaCard({ cuenta, datos, facturasCuenta, onEditar, onEliminar, onConfigArca }) {
+function CuentaCard({ cuenta, datos, datosMes, mesDisponible, facturasCuenta, onEditar, onEliminar, onConfigArca }) {
   const esMono = cuenta.tipo === 'monotributo'
   const tope = esMono ? TOPE_MAX_ABSOLUTO : null
   const pct = esMono && tope ? (datos.emitido / tope) * 100 : 0
@@ -347,6 +383,8 @@ function CuentaCard({ cuenta, datos, facturasCuenta, onEditar, onEliminar, onCon
   // Proyección de facturación a 12 meses con ritmo actual
   const proyeccion = esMono ? proyectarFacturacionAnual(facturasCuenta || []) : 0
   const pctProyeccion = esMono && tope ? (proyeccion / tope) * 100 : 0
+  // Mes en curso (lo suma el RPC facturado_cuentas_mes, migración 120)
+  const mes = datosMes || { ventas: 0, compras: 0, cantVentas: 0, cantCompras: 0, ventasAnt: 0, comprasAnt: 0 }
 
   return (
     <div className="card" style={{ padding: 14, borderColor: sem?.color || 'var(--border)' }}>
@@ -449,6 +487,61 @@ function CuentaCard({ cuenta, datos, facturasCuenta, onEditar, onEliminar, onCon
             </div>
           )}
         </>
+      )}
+
+      {/* ------------------------------------------------------------------
+          MES EN CURSO — pedido de Fabricio (25/08/2026): debajo del tope,
+          del mismo modo, cómo vienen las ventas y las compras del mes.
+          Las suma el servidor: agosto solo ya trae más de 1.000 facturas.
+      ------------------------------------------------------------------- */}
+      <div style={{ marginTop: 10 }}>
+        <div style={{ fontSize: 10, color: 'var(--muted)', letterSpacing: 1, marginBottom: 6 }}>
+          📅 {mesActualARG()} — MES EN CURSO
+        </div>
+        {!mesDisponible ? (
+          <div style={{ fontSize: 11, color: '#ffd17a', background: 'var(--surface2)', borderRadius: 6, padding: 8 }}>
+            Falta correr la migración <strong>120</strong> en el SQL Editor de Supabase
+            para ver las compras y ventas del mes.
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>
+            <BloqueMes titulo="🧾 VENTAS" monto={mes.ventas} cant={mes.cantVentas} anterior={mes.ventasAnt} colorear />
+            <BloqueMes titulo="🛒 COMPRAS" monto={mes.compras} cant={mes.cantCompras} anterior={mes.comprasAnt} />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Un bloque de plata del mes en curso, con el mismo look que el de los 12
+// meses. La comparación va contra el MISMO DÍA del mes anterior (la calcula el
+// RPC): un mes a medio andar contra uno entero siempre daría rojo.
+// Las ventas se pintan verde/rojo; las compras no, porque comprar más no es
+// ni bueno ni malo por sí solo.
+function BloqueMes({ titulo, monto, cant, anterior, colorear }) {
+  const n = Number(monto) || 0
+  const ant = Number(anterior) || 0
+  const delta = ant !== 0 ? ((n - ant) / Math.abs(ant)) * 100 : null
+  const subio = delta !== null && delta >= 0
+  const colorDelta = !colorear ? 'var(--muted)' : subio ? '#7dff7d' : '#ff8b8b'
+  const cantidad = Number(cant) || 0
+
+  return (
+    <div style={{ padding: 10, background: 'var(--surface2)', borderRadius: 8 }}>
+      <div style={{ fontSize: 10, color: 'var(--muted)', letterSpacing: 1, marginBottom: 4 }}>{titulo}</div>
+      <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--gold)', fontFamily: "'Bebas Neue',cursive" }}>
+        {n < 0 ? '−' : ''}{fmt$(n)}
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+        {cantidad} comprobante{cantidad === 1 ? '' : 's'}
+      </div>
+      {delta === null ? (
+        <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>sin dato del mes pasado</div>
+      ) : (
+        <div style={{ fontSize: 10, color: colorDelta, marginTop: 2 }}>
+          {subio ? '▲' : '▼'} {fmtPct(Math.abs(delta))} vs. mismo día del mes pasado
+        </div>
       )}
     </div>
   )
