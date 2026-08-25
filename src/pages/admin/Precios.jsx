@@ -22,6 +22,7 @@ import {
 import {
   cargarCategoriasPrecios, guardarCategoriasPrecios, categoriasDefault,
   labelsDeCategorias, claveDesdeNombre, categoriasParaVender, productosQueVende,
+  puedeAdministrarProducto,
 } from '../../lib/categoriasPrecios'
 
 // Subgrupos dentro de Insumos (como en el PDF original)
@@ -84,6 +85,10 @@ export default function Precios() {
   const [catGuardando, setCatGuardando] = useState(false)
   const [loading, setLoading] = useState(true)
   const [form, setForm] = useState(VACIO)
+  // El form en blanco arranca donde el usuario PUEDE crear: una sucursal sólo
+  // da de alta almacén y bebidas, así que ofrecerle 'bovino_corte' por defecto
+  // es mandarla derecho al mensaje de error.
+  const formEnBlanco = () => (esSucursal ? { ...VACIO, categoria: 'almacen', pesable: false } : VACIO)
   const [editando, setEditando] = useState(null)
   const [msg, setMsg] = useState('')
   const [chatMsgs, setChatMsgs] = useState([{ rol: 'ia', texto: '¡Hola! 🥩 Soy el asistente de Carnicerías Fabricius. Consultame precios, productos o lo que necesites.' }])
@@ -234,17 +239,33 @@ export default function Precios() {
 
     let error
     if (esSucursal) {
-      // Una sucursal edita SU precio, no el catálogo: el producto, su
-      // `stock_origen` y su PLU son de la central. Guarda en precios_sucursal.
-      if (!editando) {
-        mostrarMsg('❌ Los productos los da de alta la central. Acá se cargan los precios.')
+      // Dos caminos bien distintos para una sucursal:
+      //
+      // · Almacén y bebidas son SUYOS (mig 113): la mercadería la compra ella,
+      //   así que da de alta, edita y borra el producto de verdad, marcado con
+      //   su `sucursal_id`. El PLU va en null: el código de balanza vive en el
+      //   catálogo compartido y no queremos que choque con uno de la central.
+      // · Todo lo demás es de la central: sólo puede cargar SU precio, que va
+      //   a `precios_sucursal` y no toca el catálogo.
+      const original = editando ? precios.find(p => p.id === editando) : null
+      const esPropio = original ? original.sucursal_id === sucursalId : puedeAdministrarProducto(true, datos.categoria)
+
+      if (esPropio) {
+        const fila = { ...datos, sucursal_id: sucursalId, codigo_balanza: null }
+        const r = editando
+          ? await supabase.from('precios').update(fila).eq('id', editando)
+          : await supabase.from('precios').insert(fila)
+        error = r.error
+      } else if (!editando) {
+        mostrarMsg('❌ Los productos los da de alta la central. Vos administrás almacén y bebidas; del resto cargás el precio.')
         setLoading(false); return
+      } else {
+        const r = await guardarPrecioDeSucursal(sucursalId, editando, {
+          precio_minorista: datos.precio_minorista,
+          precio_mayorista: datos.precio_mayorista,
+        })
+        error = r.error
       }
-      const r = await guardarPrecioDeSucursal(sucursalId, editando, {
-        precio_minorista: datos.precio_minorista,
-        precio_mayorista: datos.precio_mayorista,
-      })
-      error = r.error
     } else if (editando) {
       const r = await supabase.from('precios').update(datos).eq('id', editando)
       error = r.error
@@ -258,13 +279,17 @@ export default function Precios() {
       return
     }
     mostrarMsg(editando ? '✅ Precio actualizado' : '✅ Producto agregado')
-    setForm(VACIO); setEditando(null)
+    setForm(formEnBlanco()); setEditando(null)
     await cargar(); setLoading(false)
   }
 
   async function eliminar(id) {
-    // El catálogo es de la central: una sucursal no da de baja productos.
-    if (esSucursal) { mostrarMsg('❌ Los productos los administra la central.'); return }
+    // El catálogo es de la central, salvo almacén y bebidas: esos son de cada
+    // boca y los da de baja quien los cargó (mig 113).
+    if (esSucursal && precios.find(p => p.id === id)?.sucursal_id !== sucursalId) {
+      mostrarMsg('❌ Ese producto lo administra la central. Vos das de baja los de almacén y bebidas.')
+      return
+    }
     if (!confirm('¿Seguro que querés eliminar este producto? También se borrarán sus ofertas.')) return
     // Antes el error se tragaba: si el borrado fallaba (p. ej. el producto estaba
     // en una oferta) parecía que "no pasaba nada". Ahora se muestra el motivo.
@@ -704,6 +729,22 @@ export default function Precios() {
 
       {tab === 'admin' && (
         <div>
+          {/* Para una sucursal la solapa hace DOS cosas distintas según el
+              producto, y sin decirlo parece que la mitad de los botones fallan. */}
+          {esSucursal && (
+            <div className="card" style={{ marginBottom: 16, borderColor: 'var(--gold)' }}>
+              <div className="card-title" style={{ color: 'var(--gold)' }}>🛒 Almacén y bebidas son tuyos</div>
+              <div style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.6 }}>
+                Esa mercadería la comprás y la vendés vos, así que armás tu propia lista:
+                <strong style={{ color: 'var(--text)' }}> agregás, editás y borrás</strong> los productos que quieras.
+                La central no los ve ni te los toca.
+                <div style={{ marginTop: 8 }}>
+                  Del <strong style={{ color: 'var(--text)' }}>resto del catálogo</strong> —carne, embutidos, pollo— acá
+                  cargás <strong style={{ color: 'var(--text)' }}>solo el precio</strong>: los productos los da de alta la central.
+                </div>
+              </div>
+            </div>
+          )}
           {(() => {
             const orfanos = precios.filter(p => CATEGORIAS_CON_STOCK_ORIGEN.has(p.categoria) && !p.stock_origen && !p.stock_no_aplica)
             if (orfanos.length === 0) return null
@@ -845,7 +886,7 @@ export default function Precios() {
                 {loading ? 'Guardando...' : editando ? '💾 Guardar cambios' : '➕ Agregar'}
               </button>
               {editando && (
-                <button onClick={() => { setEditando(null); setForm(VACIO) }}
+                <button onClick={() => { setEditando(null); setForm(formEnBlanco()) }}
                   style={{ padding: '10px 20px', background: 'transparent', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 8, fontWeight: 600, cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>
                   Cancelar
                 </button>
