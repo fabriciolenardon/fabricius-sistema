@@ -417,7 +417,12 @@ export default function Precios() {
       grupo_id: grupoId,
     }
     const { error } = await supabase.from('ofertas').insert(
-      destinos.map(sid => ({ ...base, sucursal_id: sid }))
+      // Carnicería sólo en la central: en una sucursal esa lista no existe
+      // (la base también lo fuerza, mig 116).
+      destinos.map(sid => ({
+        ...base, sucursal_id: sid,
+        aplica_carniceria: sid === SUCURSAL_CENTRAL ? base.aplica_carniceria : false,
+      }))
     )
     setOfertaLoading(false)
     if (error) {
@@ -470,7 +475,12 @@ export default function Precios() {
       // `sucursal_id` los pone la base; el resto se clona tal cual para que
       // las dos bocas tengan exactamente la misma promo.
       const { id, created_at, sucursal_id, origen, bocas, ...campos } = o
-      const r = await supabase.from('ofertas').insert({ ...campos, grupo_id: grupo, sucursal_id: sid })
+      const r = await supabase.from('ofertas').insert({
+        ...campos, grupo_id: grupo, sucursal_id: sid,
+        // Una sucursal no tiene lista Carnicería: esa es con la que la central
+        // le vende a las carnicerías. La base también lo fuerza (mig 116).
+        aplica_carniceria: sid === SUCURSAL_CENTRAL ? campos.aplica_carniceria : false,
+      })
       error = r.error
     }
     setTocandoBoca(null)
@@ -1258,7 +1268,10 @@ export default function Precios() {
                 <tbody>
                   {ofertasAgrupadas.map(o => {
                     const listas = []
-                    if (o.aplica_carniceria !== false) listas.push({ l: '🔴 Carn', c: '#ff6b6b' })
+                    // Carnicería es la lista con la que la CENTRAL le vende a las
+                    // carnicerías: una sucursal no la tiene. Mostrarle el chip era
+                    // ofrecerle una lista inexistente (la base ya lo fuerza, mig 116).
+                    if (!esSucursal && o.aplica_carniceria !== false) listas.push({ l: '🔴 Carn', c: '#ff6b6b' })
                     if (o.aplica_mayorista  !== false) listas.push({ l: '🟡 May',  c: 'var(--amber)' })
                     if (o.aplica_minorista  !== false) listas.push({ l: '🟢 Min',  c: 'var(--green)' })
                     const esPct = o.descuento_pct != null && Number(o.descuento_pct) > 0
