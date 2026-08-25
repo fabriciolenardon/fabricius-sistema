@@ -121,6 +121,22 @@ export default function CombosEditor({ precios = [] }) {
 
   useEffect(() => { cargar() }, [])
 
+  // Realtime: el combo es UNA fila que comparten todas las bocas, así que
+  // cuando la central le cambia el precio, la sucursal que tiene esta
+  // pantalla abierta tiene que verlo sin apretar F5. Mismo canal que usa la
+  // Caja. No hace falta filtrar por boca: la RLS ya decide qué filas le
+  // llegan a cada uno.
+  useEffect(() => {
+    let timer = null
+    const canal = supabase.channel('combos-editor-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'combos_venta' }, () => {
+        clearTimeout(timer)
+        timer = setTimeout(() => cargar(), 400)
+      })
+      .subscribe()
+    return () => { clearTimeout(timer); supabase.removeChannel(canal) }
+  }, [])
+
   function mostrarMsg(t) { setMsg(t); setTimeout(() => setMsg(''), 3500) }
 
   async function cargar() {
