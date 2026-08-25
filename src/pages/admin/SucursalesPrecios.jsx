@@ -16,11 +16,22 @@ import { supabase } from '../../lib/supabase'
 import { fmtPrecio } from '../../lib/formatos'
 import { SUCURSAL_CENTRAL } from '../../lib/permisos'
 import { overlayDeSucursal, desviosDeSucursal, preciosPropiosFaltantes, empujarListaASucursal } from '../../lib/preciosSucursal'
+import { productosQueVende } from '../../lib/categoriasPrecios'
 
 const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
 
-// Los ZZ_ son productos dados de baja: no se les manda precio a nadie.
-const vendibles = (productos) => (productos || []).filter(p => !String(p.nombre || '').startsWith('ZZ_'))
+// Lo que esa boca vende DE VERDAD. Los tres contadores, la tabla de desvíos y
+// el botón de empujar tienen que mirar exactamente este conjunto: cualquier
+// producto que sobre acá aparece como "sin cargar" o "distinto a tu lista"
+// sin que haya nada que hacer al respecto.
+//
+//   · ZZ_          → productos dados de baja
+//   · insumos      → los vende la central A ELLA; no los revende
+//   · con dueño    → almacén y bebidas son de cada boca (mig 113). Los de la
+//                    central ni los ve; mandarle un precio es basura.
+const vendibles = (productos) =>
+  productosQueVende(productos || [], true)
+    .filter(p => !String(p.nombre || '').startsWith('ZZ_') && p.sucursal_id == null)
 
 export default function SucursalesPrecios({ productos }) {
   const [sucursales, setSucursales] = useState([])
@@ -28,6 +39,7 @@ export default function SucursalesPrecios({ productos }) {
   const [desvios, setDesvios] = useState([])
   const [faltantes, setFaltantes] = useState(0)
   const [conPrecio, setConPrecio] = useState(0)
+  const [totalVendible, setTotalVendible] = useState(0)
   const [cargando, setCargando] = useState(true)
   // Empujar la lista: confirmación INLINE (en iOS/PWA los confirm() del
   // navegador se suprimen sin error y la acción se pierde en silencio).
@@ -50,14 +62,22 @@ export default function SucursalesPrecios({ productos }) {
     let vivo = true
     setCargando(true)
     ;(async () => {
+      // `vendibles` también acá: si se compara contra el catálogo entero, los
+      // insumos y el almacén de la central salen como desvíos que no se pueden
+      // arreglar (fue justo lo que pasó: 4 "distintos" que eran bobinas de papel).
+      const lista = vendibles(productos)
       const [overlay, d] = await Promise.all([
         overlayDeSucursal(elegida),
-        desviosDeSucursal(elegida, productos),
+        desviosDeSucursal(elegida, lista),
       ])
       if (!vivo) return
       setDesvios(d)
-      setFaltantes(preciosPropiosFaltantes(productos, overlay))
-      setConPrecio(overlay ? Object.keys(overlay).length : 0)
+      setFaltantes(preciosPropiosFaltantes(lista, overlay))
+      // Sobre `lista` y no sobre el overlay entero: el overlay puede tener
+      // filas viejas de productos que ella ya no vende, y contarlas hacía que
+      // "con precio propio" superara a lo que realmente hay para cargar.
+      setConPrecio(overlay ? lista.filter(p => overlay[p.id]).length : 0)
+      setTotalVendible(lista.length)
       setCargando(false)
     })()
     return () => { vivo = false }
@@ -110,6 +130,7 @@ export default function SucursalesPrecios({ productos }) {
         <div className="card" style={{ padding: '14px 16px' }}>
           <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Con precio propio</div>
           <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 28, color: 'var(--text)' }}>{conPrecio}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>de {totalVendible} que te compran</div>
         </div>
         <div className="card" style={{ padding: '14px 16px' }}>
           <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Sin cargar</div>
