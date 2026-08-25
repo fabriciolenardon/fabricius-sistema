@@ -114,6 +114,8 @@ export default function Facturacion() {
   const [facturacionPorCuenta, setFacturacionPorCuenta] = useState({})
   // null = el RPC del mes no existe todavía (migración 120 sin correr)
   const [facturacionMesPorCuenta, setFacturacionMesPorCuenta] = useState({})
+  // null = el RPC de la proyección no existe todavía (migración 121 sin correr)
+  const [proyeccionPorCuenta, setProyeccionPorCuenta] = useState({})
   const [loading, setLoading] = useState(true)
 
   useEffect(() => { cargarTodo() }, [])
@@ -123,6 +125,7 @@ export default function Facturacion() {
     const [
       { data: cs }, { data: fs }, { data: ps }, { data: kp },
       { data: fac12 }, { data: facMes, error: errMes },
+      { data: facProy, error: errProy },
     ] = await Promise.all([
       supabase.from('cuentas_fiscales').select('*').order('nombre'),
       supabase.from('facturas').select('*').order('fecha', { ascending: false }),
@@ -134,6 +137,11 @@ export default function Facturacion() {
       // Compras y ventas del MES en curso, también en el servidor: agosto solo
       // ya trae más de 1.000 facturas, así que sumado acá no cerraría.
       supabase.rpc('facturado_cuentas_mes'),
+      // Emitido de los últimos 90 días por cuenta — la base de la proyección a
+      // 12 meses. También en el servidor: con las 1.000 filas que trae
+      // `facturas` entran unas 3 semanas, no 90 días, y la proyección salía
+      // corta (el aviso de tope avisaba tarde).
+      supabase.rpc('proyeccion_cuentas_90d'),
     ])
     setCuentas(cs || [])
     setFacturas(fs || [])
@@ -167,6 +175,25 @@ export default function Facturacion() {
         }
       })
       setFacturacionMesPorCuenta(mapMes)
+    }
+
+    // Igual que arriba: sin la migración 121 el RPC no existe. Antes de
+    // mostrar una proyección calculada con 3 semanas de facturas (la que se
+    // pasaba de largo del tope sin avisar), preferimos decir que falta correr
+    // la migración.
+    if (errProy) {
+      setProyeccionPorCuenta(null)
+    } else {
+      const mapProy = {}
+      ;(cs || []).forEach(c => { mapProy[c.id] = { emitido90: 0, cant90: 0, emitido365: 0 } })
+      ;(facProy || []).forEach(r => {
+        mapProy[r.cuenta_id] = {
+          emitido90: Number(r.emitido_90d) || 0,
+          cant90: Number(r.cant_90d) || 0,
+          emitido365: Number(r.emitido_365d) || 0,
+        }
+      })
+      setProyeccionPorCuenta(mapProy)
     }
     setLoading(false)
   }
@@ -205,10 +232,10 @@ export default function Facturacion() {
       {!loading && tab === 'cuentas' && (
         <TabCuentas
           cuentas={cuentas}
-          facturas={facturas}
           impuestos={impuestos}
           facturacionPorCuenta={facturacionPorCuenta}
           facturacionMesPorCuenta={facturacionMesPorCuenta}
+          proyeccionPorCuenta={proyeccionPorCuenta}
           onChange={cargarTodo}
         />
       )}
@@ -237,7 +264,7 @@ export default function Facturacion() {
 // ============================================================
 // TAB CUENTAS — listado de cuentas con semáforo + alta/edición
 // ============================================================
-function TabCuentas({ cuentas, facturas, impuestos, facturacionPorCuenta, facturacionMesPorCuenta, onChange }) {
+function TabCuentas({ cuentas, impuestos, facturacionPorCuenta, facturacionMesPorCuenta, proyeccionPorCuenta, onChange }) {
   const [editando, setEditando] = useState(null)
   const [mostrarForm, setMostrarForm] = useState(false)
   const [mostrarSimulador, setMostrarSimulador] = useState(false)
@@ -301,7 +328,8 @@ function TabCuentas({ cuentas, facturas, impuestos, facturacionPorCuenta, factur
               datos={facturacionPorCuenta[c.id] || { emitido: 0, recibido: 0 }}
               datosMes={facturacionMesPorCuenta ? facturacionMesPorCuenta[c.id] : null}
               mesDisponible={facturacionMesPorCuenta !== null}
-              facturasCuenta={facturas.filter(f => f.cuenta_id === c.id && f.tipo === 'emitida')}
+              proy={proyeccionPorCuenta ? proyeccionPorCuenta[c.id] : null}
+              proyDisponible={proyeccionPorCuenta !== null}
               onEditar={() => editar(c)}
               onEliminar={() => eliminar(c)}
               onConfigArca={() => setConfigArca(c)}
@@ -371,7 +399,7 @@ function AlertasGlobales({ cuentas, facturacionPorCuenta }) {
   )
 }
 
-function CuentaCard({ cuenta, datos, datosMes, mesDisponible, facturasCuenta, onEditar, onEliminar, onConfigArca }) {
+function CuentaCard({ cuenta, datos, datosMes, mesDisponible, proy, proyDisponible, onEditar, onEliminar, onConfigArca }) {
   const esMono = cuenta.tipo === 'monotributo'
   const tope = esMono ? TOPE_MAX_ABSOLUTO : null
   const pct = esMono && tope ? (datos.emitido / tope) * 100 : 0
@@ -380,8 +408,11 @@ function CuentaCard({ cuenta, datos, datosMes, mesDisponible, facturasCuenta, on
   const cuotaActual = esMono && cuenta.categoria_monotributo
     ? cuotaMensual(cuenta.categoria_monotributo, cuenta.actividad || 'comercio')
     : 0
-  // Proyección de facturación a 12 meses con ritmo actual
-  const proyeccion = esMono ? proyectarFacturacionAnual(facturasCuenta || []) : 0
+  // Proyección de facturación a 12 meses con ritmo actual. Los últimos 90 días
+  // los suma el RPC proyeccion_cuentas_90d (migración 121): filtrando acá el
+  // array `facturas` entraban 3 semanas (Supabase corta en 1.000 filas) y la
+  // proyección salía muy por debajo de la real.
+  const proyeccion = esMono ? proyectarFacturacionAnual(proy) : 0
   const pctProyeccion = esMono && tope ? (proyeccion / tope) * 100 : 0
   // Mes en curso (lo suma el RPC facturado_cuentas_mes, migración 120)
   const mes = datosMes || { ventas: 0, compras: 0, cantVentas: 0, cantCompras: 0, ventasAnt: 0, comprasAnt: 0 }
@@ -469,8 +500,15 @@ function CuentaCard({ cuenta, datos, datosMes, mesDisponible, facturasCuenta, on
             </div>
           )}
 
-          {/* Proyección a 12 meses */}
-          {proyeccion > 0 && (
+          {/* Proyección a 12 meses (la base la suma el RPC de la migración 121) */}
+          {!proyDisponible ? (
+            <div style={{ marginTop: 8, padding: 8, background: 'var(--surface2)', borderRadius: 6, fontSize: 11, color: '#ffd17a' }}>
+              <div style={{ fontSize: 10, color: 'var(--muted)', letterSpacing: 1, marginBottom: 2 }}>📈 PROYECCIÓN A 12 MESES</div>
+              Falta correr la migración <strong>121</strong> en el SQL Editor de Supabase.
+              Hasta entonces no se muestra: calculada en la pantalla salía corta
+              (entran 3 semanas de facturas, no 90 días) y el aviso de tope llegaba tarde.
+            </div>
+          ) : proyeccion > 0 ? (
             <div style={{ marginTop: 8, padding: 8, background: 'var(--surface2)', borderRadius: 6, fontSize: 12 }}>
               <div style={{ fontSize: 10, color: 'var(--muted)', letterSpacing: 1, marginBottom: 2 }}>📈 PROYECCIÓN A 12 MESES</div>
               <div>
@@ -485,7 +523,7 @@ function CuentaCard({ cuenta, datos, datosMes, mesDisponible, facturasCuenta, on
                 </div>
               )}
             </div>
-          )}
+          ) : null}
         </>
       )}
 

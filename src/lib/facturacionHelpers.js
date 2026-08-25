@@ -5,30 +5,29 @@
 // módulo de facturación multi-cuenta.
 // ============================================================
 import { TOPE_MAX_ABSOLUTO, topeAnual, proximaRecategorizacion } from './monotributo2026'
-import { fechaHoyARG } from './fechas'
 import { fmtPrecio } from './formatos'
 
 // ─────────────────────────────────────────────────────────────
 // PROYECCIÓN: estima cuánto va a facturar la cuenta en los
 // próximos 12 meses según el ritmo de los últimos 3 meses.
+//
+// Los totales los suma el SERVIDOR (RPC `proyeccion_cuentas_90d`,
+// migración 121), no la pantalla: `facturas` tiene ~18.000 filas y
+// Supabase corta en 1.000, así que filtrando el array del cliente
+// entraban unas 3 semanas y no los 90 días. Se dividía por 3 un
+// total de 3 semanas → proyección corta y aviso de tope tardío.
+//
+// totales = { emitido90, cant90, emitido365 } (ya con las notas de
+// crédito restadas, igual que el tope de 12 meses).
 // ─────────────────────────────────────────────────────────────
-export function proyectarFacturacionAnual(facturasEmitidas) {
-  if (!facturasEmitidas || facturasEmitidas.length === 0) return 0
-  // Tomar últimos 90 días (3 meses) como referencia. fechaHoyARG (no UTC)
-  // evita corrimientos cerca de la medianoche.
-  const hace90 = new Date(); hace90.setDate(hace90.getDate() - 90)
-  const hace90ISO = fechaHoyARG(hace90)
-  const recientes = facturasEmitidas.filter(f => f.fecha >= hace90ISO)
-  if (recientes.length === 0) {
-    // Si no hubo nada en 3 meses, proyectar con últimos 12 meses
-    const hace365 = new Date(); hace365.setDate(hace365.getDate() - 365)
-    const hace365ISO = fechaHoyARG(hace365)
-    const ultimoAno = facturasEmitidas.filter(f => f.fecha >= hace365ISO)
-    return ultimoAno.reduce((s, f) => s + (Number(f.monto_total) || 0), 0)
-  }
-  const total90 = recientes.reduce((s, f) => s + (Number(f.monto_total) || 0), 0)
+export function proyectarFacturacionAnual(totales) {
+  if (!totales) return 0
+  // Si en 3 meses no emitió NADA (cuenta dormida o recién dada de
+  // alta), proyectar 0 × 12 = 0 escondería el bloque: se usa lo
+  // facturado en los últimos 12 meses.
+  if (!Number(totales.cant90)) return Number(totales.emitido365) || 0
   // Promedio mensual × 12 meses
-  return (total90 / 3) * 12
+  return ((Number(totales.emitido90) || 0) / 3) * 12
 }
 
 // ─────────────────────────────────────────────────────────────
