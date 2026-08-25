@@ -128,6 +128,29 @@ En el asistente:
 **0**, no inicies — el cartel *"Importación finalizada con éxito"* aparece igual habiendo importado
 cero. Verificá después en Secciones → Cantidad.
 
+#### Probá el mapeo con DOS productos antes de importar los 128
+
+El punto 4 del mapeo —**Configuración EAN = columna 29**— es lo que evita tener que pasar cada
+producto a "EAN General" a mano. Si el asistente lo ignorara, no te enterás hasta imprimir una
+etiqueta, y arreglarlo producto por producto es una mañana (pasó en Río Primero el 21/07).
+
+Sale barato descubrirlo antes:
+
+1. Copiá **las dos primeras líneas** del CSV a un archivo aparte. Ojo: si lo editás en un editor
+   que guarde en LF o meta BOM, la prueba falla por otro motivo y te confunde. Lo más seguro es
+   generarlo con el mismo código que exporta el grande.
+2. Importalo con el mapeo completo. Tiene que decir **2 registros a importar**.
+3. Abrí la ficha de uno → pestaña **Configuración EAN** → tiene que decir **EAN General**.
+4. Si dice "EAN del PLU", el mapeo no tomó: revisá que la columna 29 esté asignada y volvé a probar.
+5. Cuando dé bien: **Productos → seleccionar todo → Borrar**, y ahora sí importá los 128.
+
+El borrado del paso 5 no es opcional: Qendra **no pisa** productos existentes, así que si dejás
+los 2 de prueba y encima importás los 128, esos 2 quedan salteados con lo que ya tenían.
+
+> ⚠️ **Sin verificar todavía (25/08/2026).** El mapeo de la columna 29 se dedujo del problema de
+> Río Primero pero nunca se ejecutó: allá se arregló a mano. Monte Cristo es la primera vez que se
+> usa. **Si funciona, borrá esta advertencia; si no, anotá acá qué pasó.**
+
 ### 4.2 Configurar el código de barras
 
 **Qendra → Configuración → Códigos de barras** (nodo Equipos). Para modo peso, en la sección
@@ -159,7 +182,8 @@ Pesá 1 kg conocido → imprimí → escaneá en el probador → tiene que decir
 
 | Síntoma | Causa | Solución |
 |---|---|---|
-| El código del ticket sale **todo en ceros** | los productos quedaron en "EAN del PLU" con patrón vacío | cada producto debe estar en **"EAN General"**. Mapear la **columna 29** al importar lo deja bien de entrada. Señal delatora: el código del TOTAL sí imprime |
+| El código del ticket sale **todo en ceros** | los productos quedaron en "EAN del PLU" con patrón vacío | cada producto debe estar en **"EAN General"**. Mapear la **columna 29** al importar lo deja bien de entrada — probalo con 2 productos primero (§4.1). Señal delatora: el código del TOTAL sí imprime |
+| Quedaron en "EAN del PLU" igual, ya con los 128 adentro | el mapeo de la columna 29 no tomó | **no los arregles a mano**: Productos → seleccionar todo → Borrar → reimportar con el mapeo bien. Son minutos contra una mañana |
 | "0 registros a importar, 1 con errores" | el CSV tiene saltos de línea Unix (LF) | tiene que ser **CRLF**. Se ve en el Bloc de notas, barra de estado |
 | Importa y los precios siguen viejos | Qendra **no pisa** productos existentes, los saltea en silencio | borrar todos los productos en Qendra y reimportar en limpio |
 | "Ya existe código/descripción/número" | se renumeraron los PLU en el sistema | ídem: borrar todo e importar de nuevo |
@@ -233,8 +257,9 @@ autoadhesivos) o simplemente convivir con eso, que en modo peso ya no cuesta pla
 ## 9. Checklist de instalación nueva
 
 - [ ] PLU asignados en el sistema y coincidentes con Qendra
+- [ ] Mapeo de la columna 29 probado con **2 productos** antes de importar los 128 (§4.1)
 - [ ] Productos importados en Qendra — verificado el "N registros a importar" y Secciones → Cantidad
-- [ ] Todos los productos en **"EAN General"** (columna 29 mapeada al importar)
+- [ ] Todos los productos en **"EAN General"** — abierta la ficha de uno para confirmarlo
 - [ ] Los tres formatos de código de barras con 12 posiciones, el de Peso en **"Imprimir Peso"**
 - [ ] Config enviada a la balanza (el equipo ya no figura amarillo)
 - [ ] Formato guardado en el sistema para **esa sucursal**
