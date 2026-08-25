@@ -91,6 +91,23 @@ export async function guardarCategoriasPrecios(lista) {
 // aplicada en todos lados.
 export const CATEGORIAS_SOLO_CENTRAL = new Set(['insumos'])
 
+// ============================================================
+// Almacén y bebidas NO son del catálogo compartido: la mercadería la compra
+// y la vende cada boca por su cuenta, así que cada una arma y mantiene su
+// propia lista (decisión de Fabricio, 25/08/2026 — mig 113).
+//
+// En la base esto es `precios.sucursal_id`: NULL = compartido, un número =
+// propio de esa boca. La RLS ya impide que una sucursal toque nada fuera de
+// estas dos categorías; lo de acá es para que la pantalla no le ofrezca algo
+// que le va a rebotar.
+export const CATEGORIAS_PROPIAS_DE_BOCA = new Set(['almacen', 'bebidas'])
+
+// ¿Este usuario puede dar de alta/baja el PRODUCTO (no sólo su precio)?
+// La central siempre; una sucursal, sólo en sus dos categorías.
+export function puedeAdministrarProducto(esSucursal, categoria) {
+  return !esSucursal || CATEGORIAS_PROPIAS_DE_BOCA.has(categoria)
+}
+
 // Filtra el catálogo de categorías: saca las ocultas y, si es una sucursal,
 // también las que solo vende la central.
 export function categoriasParaVender(lista, esSucursal) {
