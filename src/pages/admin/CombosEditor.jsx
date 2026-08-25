@@ -16,6 +16,8 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fmtPrecio } from '../../lib/formatos'
+import { useAuth } from '../../context/AuthContext'
+import { SUCURSAL_CENTRAL } from '../../lib/permisos'
 
 const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
 const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }
@@ -101,6 +103,12 @@ function matchProducto(precios, kw) {
 }
 
 export default function CombosEditor({ precios = [] }) {
+  // Los combos de la central los ve toda boca (mig 118): son bolsones de la
+  // marca, con el precio armado por la central. Una sucursal los vende pero no
+  // los toca — y puede armar los suyos, que sólo ve ella.
+  const { isSucursal: esSucursal } = useAuth()
+  const esDeLaCentral = c => c.sucursal_id === SUCURSAL_CENTRAL
+  const puedeTocar = c => !esSucursal || !esDeLaCentral(c)
   const [combos, setCombos] = useState([])
   const [loading, setLoading] = useState(true)
   const [editando, setEditando] = useState(null)   // id | 'nuevo' | null
@@ -388,6 +396,11 @@ export default function CombosEditor({ precios = [] }) {
                   <div style={{ fontSize: 16, fontWeight: 800 }}>{c.emoji} {c.nombre}</div>
                   <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 28, color: 'var(--gold)', lineHeight: 1 }}>{fmt(c.precio)}</div>
                 </div>
+                {esSucursal && esDeLaCentral(c) && (
+                  <span style={{ fontSize: 10, color: 'var(--gold)', fontWeight: 700, background: 'rgba(201,168,76,0.12)', border: '1px solid var(--gold)', borderRadius: 6, padding: '3px 8px', whiteSpace: 'nowrap' }}>
+                    🔒 de la central
+                  </span>
+                )}
                 {!c.disponible && <span style={{ fontSize: 10, color: '#ff6b6b', fontWeight: 700, background: '#3a1a1a', borderRadius: 6, padding: '3px 7px' }}>NO DISP.</span>}
               </div>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
@@ -395,6 +408,13 @@ export default function CombosEditor({ precios = [] }) {
                   <div key={i}>• {Number(it.kg)} kg — {it.nombre}</div>
                 ))}
               </div>
+              {/* Un combo de la central lo vende la sucursal pero no lo toca:
+                  sin botones, para no ofrecer algo que la base va a rebotar. */}
+              {!puedeTocar(c) ? (
+                <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>
+                  Lo arma la central. Vos lo vendés desde la Caja.
+                </div>
+              ) : (
               <div style={{ display: 'flex', gap: 6 }}>
                 <button onClick={() => editar(c)} style={{ flex: 1, padding: '7px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 7, color: 'var(--text)', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>✏️ Editar</button>
                 <button onClick={() => toggleDisponible(c)} style={{ flex: 1, padding: '7px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 7, color: c.disponible ? '#ffb86b' : '#7dff7d', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
@@ -402,6 +422,7 @@ export default function CombosEditor({ precios = [] }) {
                 </button>
                 <button onClick={() => borrar(c)} style={{ padding: '7px 10px', background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 7, color: '#ff6b6b', cursor: 'pointer', fontSize: 12 }}>🗑️</button>
               </div>
+              )}
             </div>
           ))}
         </div>
