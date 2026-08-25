@@ -18,7 +18,16 @@ import Paginador, { usePaginacion } from '../../components/Paginador'
 const PORTAL_URL = 'https://fabricius-sistema.vercel.app/login'
 
 export function Clientes() {
-  const { isSucursal: esSucursal } = useAuth()
+  const { isSucursal: esSucursal, sucursalId } = useAuth()
+  // Datos de la boca para encabezar el remito impreso. Estaban clavados con
+  // la dirección de Río Primero (mismo bug que en Depósito, mig 117).
+  const [boca, setBoca] = useState(null)
+  useEffect(() => {
+    if (!sucursalId) return
+    supabase.from('sucursales').select('id, nombre, direccion, telefono, tipo')
+      .eq('id', sucursalId).maybeSingle()
+      .then(({ data }) => setBoca(data || null))
+  }, [sucursalId])
   const [clientes, setClientes] = useState([])
   const [seleccionado, setSeleccionado] = useState(null)
   const [movimientos, setMovimientos] = useState([])
@@ -450,8 +459,8 @@ async function eliminarMovimiento(mov) {
           <div>
             <div class="logo-title">FABRICIUS</div>
             <div class="logo-sub">CARNICERÍAS · PREMIUM QUALITY</div>
-            <div style="font-size:10px;color:#444;margin-top:4px">📍 Casa Central: Av. Mitre 670 - Río Primero, Córdoba</div>
-            <div style="font-size:11px;font-weight:700;background:#000;color:#fff;padding:3px 8px;display:inline-block;border-radius:4px;margin-top:4px">📱 3574 400346</div>
+            ${boca?.direccion ? `<div style="font-size:10px;color:#444;margin-top:4px">📍 ${boca.tipo === 'central' ? 'Casa Central' : `Sucursal ${boca.nombre}`}: ${boca.direccion}</div>` : ''}
+            ${boca?.telefono ? `<div style="font-size:11px;font-weight:700;background:#000;color:#fff;padding:3px 8px;display:inline-block;border-radius:4px;margin-top:4px">📱 ${boca.telefono}</div>` : ''}
           </div>
           <div style="text-align:right">
             <div class="doc-no-valido">X — DOCUMENTO NO VÁLIDO COMO FACTURA</div>

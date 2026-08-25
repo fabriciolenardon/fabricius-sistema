@@ -5235,6 +5235,10 @@ for (const item of items) {
 
 export function RemitosTab({ remitoActual }) {
   const { sucursalId, isSucursal: esSucursal } = useAuth()
+  // Los datos que encabezan el remito impreso. Estaban clavados con la
+  // dirección y el teléfono de Río Primero, así que Monte Cristo emitía
+  // remitos con los datos de la central. Salen de `sucursales` (mig 117).
+  const [boca, setBoca] = useState(null)
   const [remitos, setRemitos] = useState([])
   const [seleccionado, setSeleccionado] = useState(remitoActual)
   const [anulando, setAnulando] = useState(false)
@@ -5310,6 +5314,15 @@ export function RemitosTab({ remitoActual }) {
     })
     cargarCategoriasPrecios().then(l => setLabelsCatalogo(labelsDeCategorias(l)))
   }, [])
+
+  // Depende de sucursalId: el perfil llega un instante después del primer
+  // render, y sin esto el remito saldría con el encabezado de la boca vieja.
+  useEffect(() => {
+    if (!sucursalId) return
+    supabase.from('sucursales').select('id, nombre, direccion, telefono, tipo')
+      .eq('id', sucursalId).maybeSingle()
+      .then(({ data }) => setBoca(data || null))
+  }, [sucursalId])
 
   useEffect(() => { if (remitoActual) setSeleccionado(remitoActual) }, [remitoActual])
 
@@ -5617,10 +5630,22 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
     const saldoHtml = (remito.cliente_id && saldoCta != null)
       ? `<div style="margin-top:8px;text-align:right"><span style="font-size:12px;border:1px dashed #000;padding:5px 12px;display:inline-block">Saldo cuenta corriente: <strong>$${Math.round(Number(saldoCta)).toLocaleString('es-AR')}</strong></span></div>`
       : ''
+    // Encabezado por boca. "Casa Central" sólo si lo es; una franquicia sale
+    // como "Sucursal <nombre>". El teléfono se omite entero cuando la boca
+    // todavía no tiene uno cargado — mejor sin línea que con el de otro local.
+    const rotuloBoca = boca
+      ? (boca.tipo === 'central' ? 'Casa Central' : `Sucursal ${boca.nombre}`)
+      : 'Casa Central'
+    const lineaDireccion = boca?.direccion
+      ? `<div style="font-size:10px;color:#444;margin-top:4px">📍 ${rotuloBoca}: ${boca.direccion}</div>`
+      : ''
+    const lineaTelefono = boca?.telefono
+      ? `<div style="font-size:11px;font-weight:700;background:#000;color:#fff;padding:3px 8px;display:inline-block;border-radius:4px;margin-top:4px">📱 ${boca.telefono}</div>`
+      : ''
     const html = `<html><head><title>${tituloPdf}</title>
       <style>* { margin: 0; padding: 0; box-sizing: border-box; } body { font-family: Arial, sans-serif; font-size: 12px; padding: 20px; max-width: 400px; margin: 0 auto; } .header { display: flex; justify-content: space-between; margin-bottom: 16px; border-bottom: 2px solid #000; padding-bottom: 12px; } table { width: 100%; border-collapse: collapse; margin: 12px 0; } th { border: 1px solid #000; padding: 4px; text-align: center; font-size: 10px; font-weight: 700; background: #f0f0f0; } td { border: 1px solid #000; padding: 4px; text-align: center; font-size: 11px; } td.desc { text-align: left; } .total-box { border: 1px solid #000; padding: 6px 12px; font-size: 13px; font-weight: 700; } .firma { margin-top: 40px; border-top: 1px solid #000; padding-top: 4px; text-align: center; font-size: 10px; } @media print { body { padding: 10px; } }</style></head>
       <body>
-        <div class="header"><div><div style="font-size:22px;font-weight:900;letter-spacing:2px">FABRICIUS</div><div style="font-size:9px;color:#555">CARNICERÍAS · PREMIUM QUALITY</div><div style="font-size:10px;color:#444;margin-top:4px">📍 Casa Central: Av. Mitre 670 - Río Primero, Córdoba</div><div style="font-size:11px;font-weight:700;background:#000;color:#fff;padding:3px 8px;display:inline-block;border-radius:4px;margin-top:4px">📱 3574 400346</div></div><div style="text-align:right"><div style="font-size:10px;font-weight:700;border:1px solid #000;padding:2px 6px;margin-bottom:4px;text-align:center">X — DOCUMENTO NO VÁLIDO COMO FACTURA</div><div style="font-size:24px;font-weight:900;font-style:italic">REMITO</div><div style="font-size:13px;font-weight:700">N° ${String(remito.numero).padStart(5, '0')}</div></div></div>
+        <div class="header"><div><div style="font-size:22px;font-weight:900;letter-spacing:2px">FABRICIUS</div><div style="font-size:9px;color:#555">CARNICERÍAS · PREMIUM QUALITY</div>${lineaDireccion}${lineaTelefono}</div><div style="text-align:right"><div style="font-size:10px;font-weight:700;border:1px solid #000;padding:2px 6px;margin-bottom:4px;text-align:center">X — DOCUMENTO NO VÁLIDO COMO FACTURA</div><div style="font-size:24px;font-weight:900;font-style:italic">REMITO</div><div style="font-size:13px;font-weight:700">N° ${String(remito.numero).padStart(5, '0')}</div></div></div>
         <div style="font-size:11px;margin-bottom:8px">Fecha: <strong>${remito.fecha}</strong></div>
         <div style="border-bottom:1px solid #000;margin-bottom:8px;padding-bottom:2px"><span style="font-size:10px;font-weight:700;margin-right:6px">Señor/a:</span>${remito.cliente_nombre || ''}</div>
         <table><thead><tr><th style="width:40%">DESCRIPCIÓN</th><th style="width:15%">KG</th><th style="width:22%">PRECIO UNITARIO</th><th style="width:23%">IMPORTE</th></tr></thead>
