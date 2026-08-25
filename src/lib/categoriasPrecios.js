@@ -119,7 +119,18 @@ export function categoriasParaVender(lista, esSucursal) {
 // remito ni en el de un presupuesto.
 export function productosQueVende(productos, esSucursal) {
   if (!esSucursal) return productos
-  return (productos || []).filter(p => !CATEGORIAS_SOLO_CENTRAL.has(p.categoria))
+  return (productos || [])
+    .filter(p => !CATEGORIAS_SOLO_CENTRAL.has(p.categoria))
+    // `precio_carniceria` es la lista con la que la CENTRAL le vende a las
+    // carnicerías — o sea, el precio al que la franquicia COMPRA. Que le
+    // aparezca en su lista de venta es mostrarle a un tercero el margen del
+    // negocio, y en la media res es directo el precio con el que se la
+    // compran a Fabricio.
+    //
+    // Se corta acá y no en cada pantalla a propósito: por esta función pasa
+    // TODO lo que ve una sucursal (Precios, Caja, Depósito, Presupuestos),
+    // así que ninguna futura se puede olvidar de ocultarlo.
+    .map(p => (p.precio_carniceria == null ? p : { ...p, precio_carniceria: null }))
 }
 
 // { clave: label } de TODA la lista (ocultas incluidas — sirve para mostrar

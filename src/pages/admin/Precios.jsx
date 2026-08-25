@@ -907,7 +907,10 @@ export default function Precios() {
               <thead><tr>
                 <th>Producto</th>
                 <th style={{ width: 70 }}>⚖️ PLU</th>
-                <th style={{ color: 'var(--red-light)' }}>🔴 Carn.</th>
+                {/* Carnicería es el precio con el que la central le vende a las
+                    carnicerías: para una sucursal es su precio de COMPRA, no
+                    de venta. Era la única tabla que todavía lo mostraba. */}
+                {!esSucursal && <th style={{ color: 'var(--red-light)' }}>🔴 Carn.</th>}
                 <th style={{ color: 'var(--amber)' }}>🟡 May.</th>
                 <th style={{ color: 'var(--green)' }}>🟢 Min.</th>
                 <th>Acciones</th>
@@ -917,7 +920,7 @@ export default function Precios() {
                   <tr key={p.id}>
                     <td style={{ fontWeight: 500 }}>{p.nombre}</td>
                     <td>{p.codigo_balanza ? <span style={{ background: 'var(--gold)', color: '#000', padding: '2px 8px', borderRadius: 4, fontFamily: 'monospace', fontSize: 12, fontWeight: 700 }}>{p.codigo_balanza}</span> : <span style={{ color: 'var(--muted)', fontSize: 11 }}>—</span>}</td>
-                    <td style={{ color: 'var(--red-light)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_carniceria)}</td>
+                    {!esSucursal && <td style={{ color: 'var(--red-light)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_carniceria)}</td>}
                     <td style={{ color: 'var(--amber)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_mayorista)}</td>
                     <td style={{ color: 'var(--green)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_minorista)}</td>
                     <td>
