@@ -624,8 +624,11 @@ export default function AdminLayout() {
       {/* MENÚ MOBILE DRAWER */}
       {menuAbierto && <MenuMobile onClose={() => setMenuAbierto(false)} />}
 
-      {/* Widget de actividad en vivo (conversaciones + pedidos) con notificaciones */}
-      <CentroActividad />
+      {/* Widget de actividad en vivo: rota las conversaciones de WhatsApp sin
+          leer y los pedidos pendientes. Una sucursal no tiene WhatsApp ni recibe
+          pedidos por Iris, así que el globito le suena y le muestra movimiento
+          de la central — que ni siquiera puede abrir. Sólo central. */}
+      {!isSucursal && <CentroActividad />}
 
       {/* Recordatorio JUE/VIE/SÁB/DOM para que el CEO cargue los pagos a proveedores */}
       {user?.email === 'fabriciolenardon@gmail.com' && <RecordatorioPagos />}

@@ -104,7 +104,7 @@ export default function Precios() {
 
   // Ofertas
   const [ofertas, setOfertas] = useState([])
-  const [ofertaForm, setOfertaForm] = useState({ precio_id: '', tipo: 'fijo', precio_oferta: '', descuento_pct: '', fecha_inicio: fechaHoyARG(), fecha_fin: '', notas: '', aplica_carniceria: true, aplica_mayorista: true, aplica_minorista: true, sucursales: [SUCURSAL_CENTRAL] })
+  const [ofertaForm, setOfertaForm] = useState({ precio_id: '', tipo: 'fijo', precio_oferta: '', descuento_pct: '', fecha_inicio: fechaHoyARG(), fecha_fin: '', notas: '', aplica_carniceria: !esSucursal, aplica_mayorista: !esSucursal, aplica_minorista: true, sucursales: [SUCURSAL_CENTRAL] })
   const [ofertaLoading, setOfertaLoading] = useState(false)
   const [busquedaOferta, setBusquedaOferta] = useState('')
   const [mostrarDropdown, setMostrarDropdown] = useState(false)
@@ -256,15 +256,11 @@ export default function Precios() {
           ? await supabase.from('precios').update(fila).eq('id', editando)
           : await supabase.from('precios').insert(fila)
         error = r.error
-      } else if (!editando) {
-        mostrarMsg('❌ Los productos los da de alta la central. Vos administrás almacén y bebidas; del resto cargás el precio.')
-        setLoading(false); return
       } else {
-        const r = await guardarPrecioDeSucursal(sucursalId, editando, {
-          precio_minorista: datos.precio_minorista,
-          precio_mayorista: datos.precio_mayorista,
-        })
-        error = r.error
+        // Ni el producto ni su precio: la lista la manda la central (mig 114).
+        // Lo único suyo es almacén y bebidas, que entra por la rama de arriba.
+        mostrarMsg('❌ La lista la maneja la central. Vos administrás almacén y bebidas.')
+        setLoading(false); return
       }
     } else if (editando) {
       const r = await supabase.from('precios').update(datos).eq('id', editando)
@@ -430,7 +426,7 @@ export default function Precios() {
       return
     }
     mostrarMsg('✅ Oferta registrada correctamente')
-    setOfertaForm({ precio_id: '', tipo: 'fijo', precio_oferta: '', descuento_pct: '', fecha_inicio: fechaHoyARG(), fecha_fin: '', notas: '', aplica_carniceria: true, aplica_mayorista: true, aplica_minorista: true, sucursales: destinos })
+    setOfertaForm({ precio_id: '', tipo: 'fijo', precio_oferta: '', descuento_pct: '', fecha_inicio: fechaHoyARG(), fecha_fin: '', notas: '', aplica_carniceria: !esSucursal, aplica_mayorista: !esSucursal, aplica_minorista: true, sucursales: destinos })
     setBusquedaOferta(''); setProductoSeleccionado(null)
     await cargarOfertas()
   }
@@ -587,22 +583,20 @@ export default function Precios() {
       <div className="page-title">PRECIOS</div>
       <div className="page-sub">
         {esSucursal
-          ? 'Cargá tus precios de venta. Los productos y sus datos los administra la central.'
+          ? 'La lista te la manda la central. Almacén y bebidas los cargás vos.'
           : 'Consultá, administrá y usá la IA para gestionar tus precios'}
       </div>
-      {/* Los productos sin precio propio muestran el de la central para que el
-          sistema arranque usable. Pero son de OTRO negocio, así que conviene
-          avisar cuántos faltan en vez de dejarlo pasar en silencio. */}
-      {esSucursal && preciosPropiosFaltantes(precios, overlay) > 0 && (
-        <div className="alert alert-error" style={{ marginBottom: 16 }}>
-          ⚠️ Te faltan cargar {preciosPropiosFaltantes(precios, overlay)} de {precios.length} precios.
-          Mientras tanto esos productos se venden al precio de la central, que puede no ser el tuyo.
-        </div>
-      )}
+      {/* Antes acá iba un aviso de "te faltan cargar N precios", de cuando la
+          sucursal cargaba su propia lista. Ya no corresponde: los precios de la
+          lista los manda la central (mig 114) y no hay nada que ella pueda
+          cargar — el aviso sólo la mandaría a buscar un botón que no existe. */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap' }}>
         {tabBtn('ver', '📋 Ver Precios')}
         {tabBtn('admin', '✏️ Administrar')}
-        {tabBtn('masivo', '🚀 Actualización masiva')}
+        {/* El aumento masivo corre sobre la lista, que ahora es de la central
+            (mig 114). Para una sucursal la base lo rechaza, así que mejor que
+            ni aparezca a que apriete y no pase nada. */}
+        {!esSucursal && tabBtn('masivo', '🚀 Actualización masiva')}
         {tabBtn('ofertas', `🏷️ Ofertas${ofertasVigentes.length > 0 ? ` (${ofertasVigentes.length})` : ''}`)}
         {tabBtn('combos', '🍱 Combos')}
         {/* Categorías, Limpieza e Importar PLUs escriben el CATÁLOGO COMPARTIDO
@@ -1142,8 +1136,14 @@ export default function Precios() {
               <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 8 }}>📋 Aplicar esta oferta a las listas:</label>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 {[
-                  ...(esSucursal ? [] : [{ key: 'aplica_carniceria', label: '🔴 Carnicería', color: '#ff6b6b' }]),
-                  { key: 'aplica_mayorista',  label: '🟡 Mayorista',  color: 'var(--amber)' },
+                  // En una sucursal la oferta va SOLO a la lista minorista: la
+                  // mayorista y la de carnicerías son de la central, que le vende
+                  // A ELLA. La base también lo fuerza (mig 114), esto es para que
+                  // no ofrezca un tilde que no va a tener efecto.
+                  ...(esSucursal ? [] : [
+                    { key: 'aplica_carniceria', label: '🔴 Carnicería', color: '#ff6b6b' },
+                    { key: 'aplica_mayorista',  label: '🟡 Mayorista',  color: 'var(--amber)' },
+                  ]),
                   { key: 'aplica_minorista',  label: '🟢 Minorista',  color: 'var(--green)' },
                 ].map(opt => {
                   const checked = !!ofertaForm[opt.key]
@@ -1177,8 +1177,10 @@ export default function Precios() {
                 return null
               }
               const filas = [
-                ...(esSucursal ? [] : [{ key: 'aplica_carniceria', label: '🔴 Carnicería', base: productoSeleccionado.precio_carniceria }]),
-                { key: 'aplica_mayorista',  label: '🟡 Mayorista',  base: productoSeleccionado.precio_mayorista },
+                ...(esSucursal ? [] : [
+                  { key: 'aplica_carniceria', label: '🔴 Carnicería', base: productoSeleccionado.precio_carniceria },
+                  { key: 'aplica_mayorista',  label: '🟡 Mayorista',  base: productoSeleccionado.precio_mayorista },
+                ]),
                 { key: 'aplica_minorista',  label: '🟢 Minorista',  base: productoSeleccionado.precio_minorista },
               ].filter(f => ofertaForm[f.key])
               return (
