@@ -4565,6 +4565,14 @@ const item = {
   async function emitirDespacho() {
     if (items.length === 0) { showAlert({ type: 'error', msg: 'Agregá al menos un producto' }); return }
     if (!form.destino) { showAlert({ type: 'error', msg: 'Elegí un destino antes de despachar' }); return }
+    // Candado además de esconder el <option>: el destino es un string del
+    // estado del form, y sacar la opción del desplegable no garantiza que el
+    // valor no llegue por otra vía. Una franquicia despachándose a sí misma se
+    // imputaría el remito a su propia cuenta corriente.
+    if (esSucursal && esFranquicia) {
+      showAlert({ type: 'error', msg: '⛔ Los despachos a las sucursales los hace la central. Elegí un cliente carnicería o mayorista.' })
+      return
+    }
     if (esFechaFutura(form.fecha)) { showAlert({ type: 'error', msg: `⛔ La fecha no puede ser futura (hoy es ${fechaHoyARG()})` }); return }
     // Venta a CUENTA CORRIENTE: exige un cliente REGISTRADO elegido de la lista.
     // Si se tipea el nombre sin seleccionarlo del buscador, el remito queda con
@@ -4834,7 +4842,12 @@ for (const item of items) {
     // perfil del cliente que se elija. Si se arrastrara, el próximo remito
     // saldría con la lista de excepción sin que nadie lo pida.
     setListaRemito('')
-    setForm({ destino: 'MITRE', clienteId: '', clienteNombre: '', domicilio: '', fecha: fechaHoyARG(), categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
+    // destino: '' — igual que el estado inicial del form. Antes se reseteaba a
+    // 'MITRE', que NO es una opción de este desplegable: del segundo remito en
+    // adelante el destino quedaba inválido y en blanco en pantalla, y el guard
+    // `!form.destino` no saltaba porque el string no estaba vacío. Se colaba un
+    // despacho sin destino elegido.
+    setForm({ destino: '', clienteId: '', clienteNombre: '', domicilio: '', fecha: fechaHoyARG(), categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
     setPagosSplit([{ metodo: 'efectivo', monto: '' }, { metodo: 'transferencia', monto: '' }])
     // Refrescar el stockMap para que las cajas/almacén/bebidas reflejen la
     // resta inmediatamente — sin esto, el cajero ve disponibilidad vieja
@@ -4857,8 +4870,18 @@ for (const item of items) {
           <div className="form-group"><label>Destino</label>
             <select value={form.destino} onChange={e => { setAvisoDuplicado(null); setOverrideDuplicado(false); setForm(f => ({ ...f, destino: e.target.value, clienteId: '', clienteNombre: '' })) }}>
               <option value="">— Seleccioná destino —</option>
-              <option value="CENTRO">🏪 Suc. Alvear (franquicia)</option>
-              <option value="MONTE CRISTO">🏪 Suc. Monte Cristo (franquicia)</option>
+              {/* DESPACHAR A UNA FRANQUICIA ES COSA DE LA CENTRAL. Las
+                  franquicias son bocas de Fabricius y la central es la que les
+                  manda mercadería: entre ellas no se venden, y menos a sí
+                  mismas — a Monte Cristo le aparecía "Suc. Monte Cristo" en su
+                  propio desplegable, y elegirlo le habría imputado el remito a
+                  su propia cuenta corriente.
+                  Estaba hardcodeado para todos. Mismo patrón que ya mordió en
+                  Sueldos (#354) y en el encabezado del remito (#394): la RLS
+                  puede estar perfecta y la pantalla igual ofrecer datos de la
+                  central. */}
+              {!esSucursal && <option value="CENTRO">🏪 Suc. Alvear (franquicia)</option>}
+              {!esSucursal && <option value="MONTE CRISTO">🏪 Suc. Monte Cristo (franquicia)</option>}
               <option value="carniceria">Cliente Carnicería / Minorista</option>
               <option value="mayorista">Cliente Mayorista / Gastronómico</option>
             </select>
