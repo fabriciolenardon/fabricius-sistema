@@ -3088,6 +3088,17 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     if (!esCajaIndividual && !esSoloUnid && kgInput < 0) {
       showAlert({ type: 'error', msg: 'Los kilos no pueden ser negativos' }); return
     }
+    // ⛔ TECHO GENERAL — la coma comida. Los chequeos de abajo son por tipo y
+    // dejaban pasar todo lo demás: el 25/08/2026 entró una bondiola de "5,500
+    // kg" como 5500 kg / $43.725.000 porque `cerdo_bondiola` no tenía regla.
+    // El techo sale de los datos: en toda la historia el ingreso más grande en
+    // una línea fue de 500 kg, y ninguno superó los 1000. Bloquea en vez de
+    // preguntar — los confirm() de abajo iOS los suprime sin avisar (ver la
+    // regla del proyecto sobre window.confirm).
+    if (!esSoloUnid && kgInput > 1000) {
+      showAlert({ type: 'error', msg: `⛔ ${fmtKg(kgInput, { decimales: 0 })} en una sola línea es casi seguro un error de tipeo — el ingreso más grande de la historia fue de 500 kg. Si lo que querés poner es ${fmtKg(kgInput / 1000, { decimales: 3 })}, escribilo con la coma.` })
+      return
+    }
     // Pollo por cajón: rango real Fabricius 10-30 kg por cajón.
     // > 40 kg = sospechoso (probablemente sobra un dígito).
     if (form.tipo === 'pollo' && kgInput > 40) {
@@ -3781,10 +3792,15 @@ async function ejecutarAnulacion(entrada) {
         {!esSoloUnidades && !esCajaIndividual && (
           <div className="form-row">
             <div className="form-group"><label>{TIPOS_EN_UNIDADES.includes(form.tipo) ? 'Kg por unidad' : 'Kg'}</label>
-              <input type="number" step="0.1" placeholder="0" value={form.kg} onChange={e => setForm(f => ({ ...f, kg: e.target.value }))} />
+              {/* type="text": el type="number" se come la coma decimal según el
+                  idioma del navegador. El 25/08/2026 Monte Cristo cargó una
+                  bondiola de "5,500 kg" y entró como 5500 kg / $43.725.000 (lo
+                  detectó y lo eliminó ella misma). Ver el comentario largo en
+                  el input de Kg del despacho. */}
+              <input type="text" inputMode="decimal" placeholder="0,000" value={form.kg} onChange={e => setForm(f => ({ ...f, kg: e.target.value }))} />
             </div>
             <div className="form-group"><label>Precio/kg ($)</label>
-              <input type="number" value={form.precioKg} onChange={e => setForm(f => ({ ...f, precioKg: e.target.value }))} placeholder="Precio por kg" />
+              <input type="text" inputMode="decimal" value={form.precioKg} onChange={e => setForm(f => ({ ...f, precioKg: e.target.value }))} placeholder="Precio por kg" />
             </div>
           </div>
         )}
@@ -4404,6 +4420,25 @@ async function agregarItem() {
       if (!form.precio) { showAlert({ type: 'error', msg: 'Cargá el precio/kg' }); return }
     } else {
       if (!form.kg || !form.precio) { showAlert({ type: 'error', msg: `Completá ${unidadLabel} y precio` }); return }
+    }
+    // ⛔ FRENO AL KG ABSURDO — la coma comida.
+    // El 26/08/2026 Monte Cristo emitió el remito 1916 con "TAPA DE NALGA 2755
+    // kg" y "NALGA 4715 kg": eran 2,755 y 4,715 kg. El <input type="number">
+    // se tragaba la coma (ver el comentario en el input) y multiplicaba por
+    // 1000. Le cargó $136.720.037 a la cuenta corriente de ME GUSTA y dejó el
+    // stock en −7.234 kg.
+    // El umbral sale de los datos, no de una corazonada: en 5.736 líneas de
+    // remito el máximo real es 129 kg (una media res) y NO hay una sola línea
+    // entre 129 y 1000. 300 kg deja el triple de margen sobre lo más pesado
+    // que se despachó en la historia del sistema.
+    // Sólo aplica al peso: las categorías por unidad (almacén, bebidas,
+    // cajones) sí pueden llevar cantidades altas.
+    if (!esUnidadLocal && !esCajaLocal) {
+      const kgCargado = parseNumero(form.kg)
+      if (kgCargado > 300) {
+        showAlert({ type: 'error', msg: `⛔ ${fmtKg(kgCargado, { decimales: 0 })} en una sola línea es casi seguro un error de tipeo — lo más pesado que se despachó alguna vez fueron 129 kg. Si lo que querés poner es ${fmtKg(kgCargado / 1000, { decimales: 3 })}, escribilo con la coma: ${String(kgCargado).slice(0, 1)},${String(kgCargado).slice(1)}` })
+        return
+      }
     }
     // pieza_entera NO requiere producto: el precio se autocompleta al elegir la
     // pieza (si hay match en PIEZAS BOVINAS) pero también puede ponerse a mano.
@@ -5177,11 +5212,20 @@ for (const item of items) {
 
         <div className="form-row">
           <div className="form-group"><label>{esCaja ? 'Kg (auto desde la caja seleccionada)' : esUnidad ? 'Cantidad de unidades' : 'Kg'}</label>
+            {/* type="text" + inputMode="decimal", NO type="number".
+                `type="number"` acepta la coma o la tira según el IDIOMA DEL
+                NAVEGADOR: en un Chrome en español "2,755" queda 2.755, pero en
+                uno en inglés —el default de una PC recién instalada, como la de
+                Monte Cristo— la coma se descarta SIN AVISAR y queda 2755. Así
+                salió el remito 1916 con 4.715 kg de nalga.
+                En texto el valor llega entero a parseNumero(), que entiende
+                coma y punto igual. Verificado en navegador con 1.795 · 5,500 ·
+                4,715: los tres dan el número correcto.
+                inputMode="decimal" mantiene el teclado numérico en el celular. */}
             <input
-              type="number"
-              step={esUnidad && !esCaja ? '1' : '0.01'}
-              min={esUnidad && !esCaja ? '1' : '0'}
-              placeholder={esUnidad && !esCaja ? '1' : '0'}
+              type="text"
+              inputMode="decimal"
+              placeholder={esUnidad && !esCaja ? '1' : '0,000'}
               value={form.kg}
               onChange={e => setForm(f => ({ ...f, kg: e.target.value }))}
               disabled={esCaja && !!cajaSeleccionada}
@@ -5189,7 +5233,8 @@ for (const item of items) {
             />
           </div>
           <div className="form-group"><label>{esCaja ? 'Precio por kg ($)' : esUnidad ? 'Precio por unidad' : 'Precio/kg'}</label>
-            <input type="number" value={form.precio} onChange={e => setForm(f => ({ ...f, precio: e.target.value }))} style={{ borderColor: 'var(--gold)' }} />
+            {/* Mismo motivo que el kg: acá también se come la coma. */}
+            <input type="text" inputMode="decimal" value={form.precio} onChange={e => setForm(f => ({ ...f, precio: e.target.value }))} style={{ borderColor: 'var(--gold)' }} />
             {(() => {
               // Indicador de oferta: si el producto seleccionado tiene oferta vigente
               // para la lista del despacho y el precio cargado es el de oferta.
