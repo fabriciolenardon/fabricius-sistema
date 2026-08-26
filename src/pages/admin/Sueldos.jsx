@@ -460,16 +460,20 @@ export default function Sueldos() {
     setTimeout(() => setAlert(null), 4000)
   }
 
-  // Imprime un resumen de pago simple (sin logos) para un empleado: horas,
-  // valor hora, sueldo bruto, adelantos (resta), boletas (resta) y neto.
-  function imprimirResumen(emp) {
-    const { bruto, neto, h, b, a, v, vOn } = calcNeto(emp)
-    if (h <= 0) { setAlert({ type: 'error', msg: 'Cargá las horas de ese empleado antes de imprimir el resumen' }); return }
-    const fmtF = d => d ? new Date(d + 'T12:00').toLocaleDateString('es-AR') : ''
-    const periodo = inicio && fin ? `${fmtF(inicio)} al ${fmtF(fin)}` : ''
+  // Fecha corta dd/mm/aaaa. El 'T12:00' es a propósito: con la fecha pelada,
+  // el navegador la lee como UTC y en Argentina imprime el día anterior.
+  const fmtFechaCorta = d => d ? new Date(d + 'T12:00').toLocaleDateString('es-AR') : ''
+
+  // Arma e imprime el resumen de pago (sin logos): horas, valor hora, bruto,
+  // viáticos (suma), adelantos y boletas (restan) y neto.
+  // Lo usan los DOS lados: la liquidación que se está por confirmar y una ya
+  // guardada que se reimprime desde el historial.
+  function abrirResumen({ nombre, periodo, horas, valorHora, bruto, viaticos, adelantos, boletas, neto }) {
+    const h = Number(horas) || 0, v = Number(viaticos) || 0
+    const a = Number(adelantos) || 0, b = Number(boletas) || 0
     const fila = (label, valor, opts = {}) =>
       `<tr class="${opts.cls || ''}"><td style="padding:6px 0;color:#444">${label}</td><td style="padding:6px 0;text-align:right;font-weight:700;${opts.color ? `color:${opts.color};` : ''}">${valor}</td></tr>`
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Resumen — ${emp.apellido}</title>
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Resumen — ${nombre}</title>
       <style>
         @page { margin: 12mm; }
         body { font-family: Arial, Helvetica, sans-serif; color:#111; margin:0; padding:16px; }
@@ -481,13 +485,13 @@ export default function Sueldos() {
         tr.neto td { border-top: 2px solid #111; font-size: 19px; padding-top: 10px; }
       </style></head><body onload="window.print()">
       <div class="box">
-        <div class="nombre">${emp.apellido}, ${emp.nombre}</div>
+        <div class="nombre">${nombre}</div>
         <div class="periodo">Liquidación ${periodo}</div>
         <table>
-          ${fila('Horas trabajadas', h + ' h')}
-          ${fila('Valor hora', fmt(emp.valor_hora))}
+          ${h > 0 ? fila('Horas trabajadas', h + ' h') : ''}
+          ${h > 0 ? fila('Valor hora', fmt(valorHora)) : ''}
           ${fila('Sueldo (bruto)', fmt(bruto), { cls: 'sep' })}
-          ${vOn && v > 0 ? fila('Viáticos', '+ ' + fmt(v), { color: '#1e7e34' }) : ''}
+          ${v > 0 ? fila('Viáticos', '+ ' + fmt(v), { color: '#1e7e34' }) : ''}
           ${a > 0 ? fila('Adelantos', '− ' + fmt(a), { color: '#c0392b' }) : ''}
           ${b > 0 ? fila('Boletas', '− ' + fmt(b), { color: '#c0392b' }) : ''}
           ${fila('NETO A COBRAR', fmt(neto), { cls: 'neto' })}
@@ -496,6 +500,40 @@ export default function Sueldos() {
     const w = window.open('', '_blank', 'width=440,height=600')
     if (!w) { setAlert({ type: 'error', msg: 'Habilitá las ventanas emergentes para poder imprimir' }); return }
     w.document.write(html); w.document.close()
+  }
+
+  // Resumen de la liquidación que se está cargando ahora (pestaña Liquidar).
+  function imprimirResumen(emp) {
+    const { bruto, neto, h, b, a, v, vOn } = calcNeto(emp)
+    if (h <= 0) { setAlert({ type: 'error', msg: 'Cargá las horas de ese empleado antes de imprimir el resumen' }); return }
+    abrirResumen({
+      nombre: `${emp.apellido}, ${emp.nombre}`,
+      periodo: inicio && fin ? `${fmtFechaCorta(inicio)} al ${fmtFechaCorta(fin)}` : '',
+      horas: h, valorHora: emp.valor_hora, bruto,
+      viaticos: vOn ? v : 0, adelantos: a, boletas: b, neto,
+    })
+  }
+
+  // Reimprime el resumen de una liquidación YA GUARDADA, desde el historial —
+  // para cuando se emitió el sueldo y quedó sin imprimir.
+  // Sale tal como quedó esa semana, no como estaría hoy: el valor hora no se
+  // guarda en la liquidación, así que se saca de lo que se pagó (bruto ÷ horas).
+  // Tomar el valor hora actual del empleado imprimiría un número que no cierra
+  // con el bruto si desde entonces hubo aumento.
+  function imprimirResumenLiq(l) {
+    const h = Number(l.horas) || 0
+    const bruto = Number(l.bruto) || 0
+    abrirResumen({
+      nombre: l.empleado_nombre || '—',
+      periodo: `${fmtFechaCorta(l.semana_inicio)} al ${fmtFechaCorta(l.semana_fin)}`,
+      horas: h,
+      valorHora: h > 0 ? bruto / h : 0,
+      bruto,
+      viaticos: Number(l.viaticos) || 0,
+      adelantos: Number(l.adelantos) || 0,
+      boletas: Number(l.boletas) || 0,
+      neto: Number(l.neto) || 0,
+    })
   }
 
   // Historial agrupado por MES (mismo calendario que el Cierre mensual) y,
@@ -1104,8 +1142,12 @@ export default function Sueldos() {
                                 <td style={{ color: 'var(--red-light)' }}>{l.adelantos > 0 ? '-' + fmt(l.adelantos) : '—'}</td>
                                 <td style={{ color: 'var(--red-light)' }}>{l.boletas > 0 ? '-' + fmt(l.boletas) : '—'}</td>
                                 <td style={{ color: 'var(--gold)', fontWeight: 700 }}>{fmt(l.neto)}</td>
-                                <td><button onClick={() => empezarEditarLiq(l)} title="Editar liquidación"
-                                  style={{ padding: '4px 8px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>✏️</button></td>
+                                <td style={{ whiteSpace: 'nowrap' }}>
+                                  <button onClick={() => imprimirResumenLiq(l)} title="Imprimir resumen de pago"
+                                    style={{ padding: '4px 8px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', fontSize: 13, marginRight: 4 }}>🖨️</button>
+                                  <button onClick={() => empezarEditarLiq(l)} title="Editar liquidación"
+                                    style={{ padding: '4px 8px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>✏️</button>
+                                </td>
                               </tr>
                             )
                           })}
