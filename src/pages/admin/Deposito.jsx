@@ -8,7 +8,7 @@ import { cargarCajasDisponibles, crearCajasIngreso, venderCaja, revertirVentaCaj
 import { fmtPrecio, fmtKg, parseNumero } from '../../lib/formatos'
 import { imprimirHTML } from '../../lib/imprimir'
 import { recomputarSaldoCliente } from '../../lib/ctaCorriente'
-import { getCampoPrecio } from '../../lib/listasPrecios'
+import { getCampoPrecio, LISTAS, listasDeVenta } from '../../lib/listasPrecios'
 import CuentaCorrienteProveedor from './CuentaCorrienteProveedor'
 import { agregarMovimiento, eliminarMovimiento, registrarCompraDesdeEntrada, revertirCompraDeEntrada } from '../../lib/ctaProveedores'
 import Paginador, { usePaginacion } from '../../components/Paginador'
@@ -4036,6 +4036,18 @@ export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   // explícita (queda en auditoría).
   const [bloqueo, setBloqueo] = useState(null)          // { saldo, vencido, bloqueado, motivo }
   const [overrideBloqueo, setOverrideBloqueo] = useState(false)
+  // 🏷️ LISTA SÓLO PARA ESTE REMITO. '' = usar la del perfil del cliente.
+  //
+  // Un mayorista que viene a comprar para su consumo lleva precio minorista, y
+  // a un minorista que hace una compra grande a veces se le remita a mayorista.
+  // Antes había que entrar a la ficha, cambiarle la lista, remitar y volver a
+  // cambiarla — con el riesgo obvio de olvidarse y dejarle la lista cambiada
+  // para siempre.
+  //
+  // Esto NO toca `clientes.lista_precios`: la lista madre sigue siendo la del
+  // perfil y vuelve sola en el próximo remito. El override se resetea al
+  // cambiar de cliente y después de emitir.
+  const [listaRemito, setListaRemito] = useState('')
   // 🔁 Aviso anti-remito DUPLICADO: si en los últimos días ya salió un remito
   // igual o casi igual al MISMO cliente, el guardado se frena y pide
   // confirmación inline (nada de window.confirm — iOS/PWA lo suprime).
@@ -4229,11 +4241,38 @@ const CATEGORIAS = {
   // Esto permite que un cliente cuenta-corriente cargado como minorista
   // reciba precios minoristas aunque el despacho sea por "carnicería".
   function getLista(dest, clienteId = null) {
+    // La lista elegida a mano para ESTE remito gana sobre la del perfil. Va
+    // primero a propósito: es una excepción puntual y consciente.
+    if (listaRemito) return getCampoPrecio(listaRemito)
     if (clienteId) {
       const cli = clientes.find(c => c.id === clienteId)
       if (cli?.lista_precios) return getCampoPrecio(cli.lista_precios)
     }
     return dest === 'mayorista' ? 'precio_mayorista' : 'precio_carniceria'
+  }
+
+  // Código de la lista que rige el remito ahora mismo (para mostrarla).
+  const listaDelCliente = clientes.find(c => c.id === form.clienteId)?.lista_precios || ''
+
+  // Cambiar la lista del remito tiene que reprecificar el producto que esté
+  // elegido en el form. Si no, el selector dice "Minorista" y el campo
+  // Precio/kg sigue con el precio de la otra lista — y ese precio es el que
+  // termina en el remito.
+  // Los ítems YA agregados no se tocan: el item no guarda producto_id (sólo la
+  // descripción) y hay líneas que no vienen del catálogo (media res, piezas,
+  // cajas, combos, ítems manuales), así que recalcularlos sería adivinar. Por
+  // eso el cartel avisa que quedan con el precio con el que entraron.
+  function cambiarListaRemito(codigo) {
+    setListaRemito(codigo)
+    if (!form.productoId) return
+    const prod = todosPrecios.find(p => p.id === form.productoId)
+    if (!prod) return
+    const campo = codigo
+      ? getCampoPrecio(codigo)
+      : (listaDelCliente ? getCampoPrecio(listaDelCliente)
+                         : (form.destino === 'mayorista' ? 'precio_mayorista' : 'precio_carniceria'))
+    const precio = precioConOferta(prod, campo)
+    setForm(f => ({ ...f, precio }))
   }
 
   // Mapa campo de lista → flag de la oferta que indica si aplica a esa lista
@@ -4268,6 +4307,9 @@ const CATEGORIAS = {
     setForm(f => ({ ...f, clienteId: c.id, clienteNombre: c.nombre, domicilio: c.domicilio || '' }))
     setBusqueda(c.nombre)
     setMostrarClientes(false)
+    // La lista puntual es de ESE remito para ESE cliente: si se cambia de
+    // cliente, vuelve a mandar la del perfil del nuevo.
+    setListaRemito('')
     // Chequear saldo vencido del cliente recién elegido (bloqueo a 15 días)
     setBloqueo(null)
     setOverrideBloqueo(false)
@@ -4306,7 +4348,11 @@ const CATEGORIAS = {
       if (form.productoId) {
         const prod = todosPrecios.find(p => p.id === form.productoId)
         if (prod) {
-          const lista = getCampoPrecio(actualizado.lista_precios) || getLista(form.destino, null)
+          // La lista puntual del remito sigue mandando aunque se edite la
+          // ficha: es una excepción elegida a mano para esta venta.
+          const lista = listaRemito
+            ? getCampoPrecio(listaRemito)
+            : (getCampoPrecio(actualizado.lista_precios) || getLista(form.destino, null))
           const precio = precioConOferta(prod, lista)
           setForm(f => ({ ...f, clienteNombre: actualizado.nombre, domicilio: actualizado.domicilio || '', precio }))
         }
@@ -4784,6 +4830,10 @@ for (const item of items) {
     onRemito(remitoData)
     setItems([])
     setBusqueda('')
+    // La lista puntual muere con el remito: el siguiente arranca con la del
+    // perfil del cliente que se elija. Si se arrastrara, el próximo remito
+    // saldría con la lista de excepción sin que nadie lo pida.
+    setListaRemito('')
     setForm({ destino: 'MITRE', clienteId: '', clienteNombre: '', domicilio: '', fecha: fechaHoyARG(), categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
     setPagosSplit([{ metodo: 'efectivo', monto: '' }, { metodo: 'transferencia', monto: '' }])
     // Refrescar el stockMap para que las cajas/almacén/bebidas reflejen la
@@ -4906,13 +4956,56 @@ for (const item of items) {
               </div>
             )}
             {form.clienteId && (
-              <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 ✅ Cliente vinculado
                 <button
                   onClick={() => { const c = clientes.find(x => x.id === form.clienteId); if (c) setClienteEditando(c) }}
                   style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text2)', cursor: 'pointer', fontSize: 11, padding: '2px 8px' }}>
                   ✏️ Editar cliente
                 </button>
+
+                {/* LISTA SÓLO PARA ESTE REMITO. No toca la ficha del cliente:
+                    su lista madre sigue siendo la del perfil y vuelve sola en
+                    el próximo remito. Ver el comentario de `listaRemito`. */}
+                <span style={{ color: 'var(--muted)' }}>·</span>
+                <label style={{ color: 'var(--muted)' }}>Lista</label>
+                <select
+                  value={listaRemito}
+                  onChange={e => cambiarListaRemito(e.target.value)}
+                  title="Lista de precios sólo para este remito — no cambia la del cliente"
+                  style={{
+                    background: listaRemito ? LISTAS[listaRemito].bg : 'var(--surface)',
+                    border: `1px solid ${listaRemito ? LISTAS[listaRemito].color : 'var(--border)'}`,
+                    color: listaRemito ? LISTAS[listaRemito].color : 'var(--text2)',
+                    borderRadius: 6, fontSize: 11, padding: '2px 6px', cursor: 'pointer',
+                    fontWeight: listaRemito ? 700 : 400,
+                  }}>
+                  <option value="">
+                    La del cliente{listaDelCliente ? ` (${LISTAS[listaDelCliente]?.label || listaDelCliente})` : ''}
+                  </option>
+                  {listasDeVenta(esSucursal).map(l => (
+                    <option key={l.codigo} value={l.codigo}>Sólo este remito: {l.label}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Aviso cuando la lista puntual está activa. Dice explícitamente
+                que la ficha no se toca — es la duda que genera el selector. */}
+            {form.clienteId && listaRemito && (
+              <div style={{ marginTop: 6, background: LISTAS[listaRemito].bg, border: `1px solid ${LISTAS[listaRemito].color}`, borderRadius: 8, padding: '8px 12px' }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: LISTAS[listaRemito].color }}>
+                  🏷️ Este remito sale con precios {LISTAS[listaRemito].label.toUpperCase()}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3, lineHeight: 1.5 }}>
+                  Es sólo para esta venta. La ficha del cliente <b>no se toca</b>: sigue en{' '}
+                  {LISTAS[listaDelCliente]?.label || 'la de siempre'} y el próximo remito vuelve a esa.
+                  {items.length > 0 && (
+                    <> <b style={{ color: '#ffd17a' }}>Ojo:</b> los {items.length} ítem(s) que ya cargaste
+                    mantienen el precio con el que entraron — si querés que tomen esta lista,
+                    quitalos y agregalos de nuevo.</>
+                  )}
+                </div>
               </div>
             )}
             {/* BLOQUEO de cta cte (flag manual de la ficha): cartel apenas se
