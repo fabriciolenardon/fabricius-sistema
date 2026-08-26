@@ -193,6 +193,10 @@ export default function App() {
           <Route path="ctacte" element={<FranquiciaCtaCte />} />
           <Route path="remitos" element={<FranquiciaRemitos />} />
           <Route path="precios" element={<FranquiciaPrecios />} />
+          {/* Misma pantalla que usan la central y Monte Cristo: la franquicia
+              liquida SUS sueldos. Que vea sólo los suyos lo garantiza la RLS
+              (supabase/122), no esta ruta. */}
+          <Route path="sueldos" element={<Sueldos />} />
         </Route>
         <Route path="/cliente" element={<ProtectedRoute requiredRole="cliente_mayorista"><ClienteLayout /></ProtectedRoute>}>
           <Route path="dashboard" element={<ClienteDashboard />} />

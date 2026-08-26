@@ -8,6 +8,7 @@ export default function FranquiciaLayout() {
     { to: '/franquicia/ctacte', icon: '💳', label: 'Cuenta corriente' },
     { to: '/franquicia/remitos', icon: '📋', label: 'Mis remitos' },
     { to: '/franquicia/precios', icon: '💲', label: 'Lista de precios' },
+    { to: '/franquicia/sueldos', icon: '💰', label: 'Sueldos' },
   ]
   return (
     <div style={{ minHeight: '100vh' }}>

@@ -158,7 +158,7 @@ export default function Sueldos() {
   const [loading, setLoading] = useState(false)
   const [importando, setImportando] = useState(false)
   const [detalleImport, setDetalleImport] = useState([])
-  // Empleados cargados de la base (valor_hora editable). Fallback al hardcode.
+  // Empleados de la base (valor_hora editable), aislados por sucursal vía RLS.
   const [empleados, setEmpleados] = useState([])
   const [editHora, setEditHora] = useState({})     // valor_hora tipeado en la pestaña Empleados
   const [guardandoEmp, setGuardandoEmp] = useState(null)
@@ -232,8 +232,7 @@ export default function Sueldos() {
     setTimeout(() => setAlert(null), 3500)
   }
 
-  // Alta de un nuevo empleado (pestaña Empleados). La tabla empleados_sueldos
-  // no tiene default en `id`, así que calculamos el próximo a mano (max+1).
+  // Alta de un nuevo empleado (pestaña Empleados).
   async function agregarEmpleado() {
     const apellido = nuevoEmp.apellido.trim().toUpperCase()
     const nombre = nuevoEmp.nombre.trim().toUpperCase()
