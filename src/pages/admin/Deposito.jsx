@@ -19,6 +19,7 @@ import CajasTab from './CajasTab'
 import PolloCajonesTab from './PolloCajonesTab'
 import StockPiezasTab from './StockPiezasTab'
 import MermasHistorial from './MermasHistorial'
+import PlanillasRinde from '../../components/PlanillasRinde'
 import Recetas from '../../components/Recetas'
 import { cargarCategoriasPrecios, labelsDeCategorias } from '../../lib/categoriasPrecios'
 import { estadoBloqueoCliente } from '../../lib/moraClientes'
@@ -585,6 +586,11 @@ const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(n
     const { data } = await supabase.from('config_sistema').select('valor').eq('clave', 'merma_conversion').maybeSingle()
     if (data?.valor) {
       setMermaConfig({
+        // El spread va PRIMERO para no perder las claves que esta pantalla no
+        // conoce (hoy `capon`, que lo escriben las planillas de rinde). Antes
+        // se armaba el objeto desde cero con 3 claves fijas y guardar acá
+        // borraba en silencio todo lo demás.
+        ...data.valor,
         piezas: { ...MERMA_PIEZA_DEFAULT, ...(data.valor.piezas || {}) },
         media_res: (data.valor.media_res && data.valor.media_res.length) ? data.valor.media_res : MERMA_MEDIA_RES_DEFAULT,
         // Si la config es vieja (sin merma_frio), vale el 2,5% de siempre.
@@ -2286,6 +2292,10 @@ async function confirmarDesposteCerdo() {
       </div>
     </div>
     <EditorMerma config={mermaConfig} onSave={guardarMermaConfig} inicialAbierto />
+    {/* De acá SALEN los % de arriba: se cargan los kilos reales de un desposte
+        y la última planilla de cada producto pisa su merma. Va pegado al
+        editor a propósito — es la fuente del número que está justo arriba. */}
+    <PlanillasRinde config={mermaConfig} onConfigChange={setMermaConfig} />
     {/* Los % de arriba son la CONFIGURACIÓN; esto de abajo es lo que pasó de
         verdad con esos % en la semana, en kilos y en plata. */}
     <div style={{ marginTop: 24 }}>
