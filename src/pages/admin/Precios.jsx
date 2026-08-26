@@ -653,7 +653,12 @@ export default function Precios() {
             sucursal la base ya las rechaza (mig 100) — mejor que ni aparezcan
             a que tiren un error. */}
         {!esSucursal && tabBtn('categorias', '🗂️ Categorías')}
-        {tabBtn('chat', '🤖 Asistente IA')}
+        {/* El Asistente IA es de la central. Las franquicias no lo tienen:
+            Alvear entra por FranquiciaPrecios, que nunca lo tuvo, y Monte
+            Cristo cae en ESTA pantalla — era el único lugar donde le aparecía.
+            Aparte de que no le corresponde, la consulta le manda la lista de
+            precios entera al modelo. */}
+        {!esSucursal && tabBtn('chat', '🤖 Asistente IA')}
 {tabBtn('plu', '🏷️ PLU / Balanza')}
 {!esSucursal && tabBtn('limpieza', '🧹 Limpieza duplicados')}
 {!esSucursal && tabBtn('importar_plu', '📥 Importar PLUs CSV')}
@@ -1377,7 +1382,10 @@ export default function Precios() {
         </div>
       )}
 
-      {tab === 'chat' && (
+      {/* `&& !esSucursal` además de esconder la pestaña: la pestaña que no
+          existe no se puede apretar, pero la vista sí se puede pedir si `tab`
+          queda en 'chat' por cualquier vía. */}
+      {tab === 'chat' && !esSucursal && (
         <div className="card" style={{ display: 'flex', flexDirection: 'column', height: 520 }}>
           <div className="card-title">🤖 Asistente IA — Carnicerías Fabricius</div>
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16, paddingRight: 4 }}>
