@@ -490,6 +490,10 @@ export default Deposito
 function DesposteTab({ onSaved, soloElaborar = false }) {
   const { isSucursal: esSucursal } = useAuth()
   const [subtab, setSubtab] = useState(soloElaborar ? 'embutidos' : 'piezas')
+  // Dentro de Mermas hay dos cosas distintas y la pantalla quedaba larguísima
+  // con las dos apiladas: los % configurados, y las planillas de rinde de
+  // donde salen esos %.
+  const [tabMerma, setTabMerma] = useState('config')
   const [mediasRes, setMediasRes] = useState([])
   const [piezasStock, setPiezasStock] = useState({})
   const [despostes, setDespostes] = useState([])
@@ -600,14 +604,23 @@ const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(n
   }
 
   // Persiste la config de merma editada y refresca el estado local.
+  // DEVUELVE true/false: el editor mostraba "✅ Guardado" sin esperar el
+  // resultado, así que decía lo mismo hubiera guardado o no. Fabricio perdió
+  // 8 tipos de media res sin enterarse.
   async function guardarMermaConfig(nueva) {
-    setMermaConfig(nueva)
-    const { error } = await supabase.from('config_sistema').upsert({
+    const { data, error } = await supabase.from('config_sistema').upsert({
       clave: 'merma_conversion',
       valor: nueva,
       descripcion: 'Merma por producto al convertir a cortes: % por pieza individual y por tipo de media res. Editable desde Depósito → Desposte.',
-    }, { onConflict: 'clave' })
-    if (error) showAlert('No se pudo guardar la merma: ' + error.message, 'error')
+    }, { onConflict: 'clave' }).select('clave')
+    // Con RLS bloqueando, supabase devuelve error null y CERO filas. Hay que
+    // mirar las filas, no el error, o se festeja un guardado que no pasó.
+    if (error || !data || data.length === 0) {
+      showAlert('❌ NO se guardó la merma' + (error ? ': ' + error.message : ' (la base rechazó el cambio). Copiá los números antes de recargar.'))
+      return false
+    }
+    setMermaConfig(nueva)
+    return true
   }
 
   // Realtime: cuando OTRO usuario (admin desde otra pestaña, desposte
@@ -2268,6 +2281,25 @@ async function confirmarDesposteCerdo() {
     clavado en 2,5% en el código. */}
 {subtab === 'mermas' && (
   <div>
+    {/* Sub-pestañas: los % configurados por un lado, las planillas de donde
+        salen esos % por el otro. Apiladas la pantalla quedaba interminable. */}
+    <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+      {[
+        { id: 'config', label: '⚙️ Mermas por producto' },
+        { id: 'planillas', label: '📋 Planillas de rinde' },
+        { id: 'historial', label: '📊 Historial semanal' },
+      ].map(t => (
+        <button key={t.id} onClick={() => setTabMerma(t.id)}
+          style={{
+            padding: '9px 18px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 700,
+            border: `1px solid ${tabMerma === t.id ? 'var(--gold)' : 'var(--border)'}`,
+            background: tabMerma === t.id ? 'var(--gold)' : 'transparent',
+            color: tabMerma === t.id ? '#000' : 'var(--muted)',
+          }}>{t.label}</button>
+      ))}
+    </div>
+
+    {tabMerma === 'config' && (<>
     <div className="card" style={{ marginBottom: 16 }}>
       <div className="card-title">⚙️ Mermas de conversión</div>
       <div style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.6 }}>
@@ -2292,15 +2324,17 @@ async function confirmarDesposteCerdo() {
       </div>
     </div>
     <EditorMerma config={mermaConfig} onSave={guardarMermaConfig} inicialAbierto />
-    {/* De acá SALEN los % de arriba: se cargan los kilos reales de un desposte
-        y la última planilla de cada producto pisa su merma. Va pegado al
-        editor a propósito — es la fuente del número que está justo arriba. */}
-    <PlanillasRinde config={mermaConfig} onConfigChange={setMermaConfig} />
-    {/* Los % de arriba son la CONFIGURACIÓN; esto de abajo es lo que pasó de
-        verdad con esos % en la semana, en kilos y en plata. */}
-    <div style={{ marginTop: 24 }}>
-      <MermasHistorial mermaConfig={mermaConfig} />
-    </div>
+    </>)}
+
+    {/* De acá SALEN los % de la otra pestaña: se cargan los kilos reales de un
+        desposte y la última planilla de cada producto pisa su merma. */}
+    {tabMerma === 'planillas' && (
+      <PlanillasRinde config={mermaConfig} onConfigChange={setMermaConfig} />
+    )}
+
+    {/* Los % configurados son una cosa; esto es lo que pasó de VERDAD con esos
+        % en la semana, en kilos y en plata. */}
+    {tabMerma === 'historial' && <MermasHistorial mermaConfig={mermaConfig} />}
   </div>
 )}
 
@@ -7212,7 +7246,14 @@ function EditorMerma({ config, onSave, inicialAbierto = false }) {
 
   const clamp = v => Math.max(0, Math.min(50, Number(v) || 0))
 
-  function guardar() {
+  // ¿El borrador difiere de lo guardado? Comparación por CONTENIDO: los
+  // objetos siempre son distintos por identidad, así que === no sirve acá.
+  const hayCambios = useMemo(
+    () => JSON.stringify(draft || {}) !== JSON.stringify(config || {}),
+    [draft, config],
+  )
+
+  async function guardar() {
     const piezas = {}
     Object.entries(draft.piezas || {}).forEach(([k, v]) => { piezas[k] = clamp(v) })
     // media_res: descartar filas sin nombre; generar id único a partir del label.
@@ -7225,8 +7266,13 @@ function EditorMerma({ config, onSave, inicialAbierto = false }) {
         usados.add(id)
         return { id, label: m.label.trim(), merma: clamp(m.merma) }
       })
-    onSave({ piezas, media_res, merma_frio: clamp(draft.merma_frio ?? MERMA_FRIO_DEFAULT) })
-    setOk(true); setTimeout(() => setOk(false), 2500)
+    // El spread de `config` va PRIMERO para no perder las claves que este
+    // editor no conoce — hoy `capon`, que lo escriben las planillas de rinde.
+    // Sin eso, guardar acá le borraba la merma del capón en silencio.
+    const ok = await onSave({ ...config, piezas, media_res, merma_frio: clamp(draft.merma_frio ?? MERMA_FRIO_DEFAULT) })
+    // Sólo se canta "guardado" si LA BASE dijo que sí. Antes se mostraba
+    // siempre, aunque el guardado no hubiera pasado.
+    if (ok !== false) { setOk(true); setTimeout(() => setOk(false), 2500) }
   }
 
   return (
@@ -7304,6 +7350,14 @@ function EditorMerma({ config, onSave, inicialAbierto = false }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
             <button type="button" className="btn btn-gold" onClick={guardar}>💾 Guardar merma</button>
             {ok && <span style={{ fontSize: 13, color: 'var(--green)', fontWeight: 700 }}>✅ Guardado</span>}
+            {/* Cambios sin guardar. El 26/08/2026 Fabricio cargó 8 tipos de
+                media res, no apretó Guardar, recargó la página y los perdió:
+                nada en pantalla le avisaba que lo que veía era un borrador. */}
+            {!ok && hayCambios && (
+              <span style={{ fontSize: 13, color: '#ffd17a', fontWeight: 700 }}>
+                ⚠️ Tenés cambios sin guardar — si recargás se pierden
+              </span>
+            )}
           </div>
         </div>
       )}
