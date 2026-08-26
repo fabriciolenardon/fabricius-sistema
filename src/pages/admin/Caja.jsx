@@ -845,14 +845,21 @@ export default function Caja() {
           : 'Historial de ventas minoristas con desglose por categoría y forma de pago'}
       </div>
 
-      {/* Tabs Vender / Historial / Arqueo */}
+      {/* Tabs Vender / Historial / Arqueo
+          EL HISTORIAL NO ES DEL CAJERO. Esa pestaña abre las ventas de
+          CUALQUIER rango (hoy, ayer, 7 días, el mes) con el facturado total y
+          el desglose efectivo/débito/transferencia. O sea: además de ser el
+          historial del negocio, era la puerta de atrás del arqueo ciego —
+          pedía "hoy" y leía el efectivo esperado de un vistazo.
+          Las ventas del día una por una las sigue viendo abajo del carrito,
+          que es lo que necesita para anular un error. */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, marginTop: 8, flexWrap: 'wrap' }}>
         {[
           { id: 'vender',    label: '💵 Vender' },
           { id: 'historial', label: '📊 Historial' },
           { id: 'arqueo',    label: '🧾 Arqueo' },
           { id: 'ticket_manual', label: '📝 Ticket manual' },
-        ].map(t => (
+        ].filter(t => !(esCajero && t.id === 'historial')).map(t => (
           <button key={t.id} onClick={() => setVistaCaja(t.id)}
             style={{
               padding: '9px 20px', borderRadius: 8, border: 'none',
@@ -865,7 +872,11 @@ export default function Caja() {
         ))}
       </div>
 
-      {vistaCaja === 'historial' && <HistorialCaja />}
+      {/* El `&& !esCajero` no es redundante con sacarle el botón: sin esto,
+          alcanza con que `vistaCaja` quede en 'historial' por cualquier vía
+          para que el componente se monte igual. La pestaña que no existe no
+          se puede apretar, pero la vista sí se puede pedir. */}
+      {vistaCaja === 'historial' && !esCajero && <HistorialCaja />}
       {vistaCaja === 'arqueo' && <ArqueoCaja />}
       {vistaCaja === 'ticket_manual' && <TicketManualCaja onGuardado={cargarTodo} />}
       {/* Vista vender: se oculta con display:none para no desmontar el estado/foco */}

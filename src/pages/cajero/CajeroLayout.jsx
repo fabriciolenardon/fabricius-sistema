@@ -3,9 +3,13 @@
 // ============================================================
 // Layout minimalista para usuarios con rol "cajero". Solo muestra:
 //   - Header con logo, nombre del cajero y botón salir
-//   - Pantalla de Caja Rápida en pleno (Vender / Historial / Arqueo)
+//   - Pantalla de Caja Rápida en pleno (Vender / Arqueo / Ticket manual)
 //
-// No tiene menú lateral ni acceso a otras páginas del sistema.
+// No tiene menú lateral ni acceso a otras páginas del sistema: la única ruta
+// del rol es /cajero/caja (ver App.jsx).
+//
+// SIN pestaña Historial — esa abre las ventas de cualquier rango con el
+// facturado y el desglose por forma de pago. Ver el comentario en Caja.jsx.
 // ============================================================
 import { Outlet } from 'react-router-dom'
 import UserDropdown from '../../components/UserDropdown'

@@ -891,7 +891,12 @@ export default function ArqueoCaja() {
         </div>
       </div>
 
-      {/* HISTORIAL */}
+      {/* HISTORIAL — no es del cajero: es la lista de TODOS los cierres del
+          negocio, día por día, con el esperado y la diferencia de cada uno.
+          Ella ve el suyo en el panel de revelación al terminar de contar.
+          Ojo: `historial` se sigue cargando aunque no se muestre — de ahí sale
+          la detección de arqueo duplicado, que tiene que seguir avisando. */}
+      {!ciego && (
       <div className="card" style={{ marginTop: 8 }}>
         <div className="card-title">📋 Arqueos anteriores</div>
         {loading && <p style={{ color: 'var(--muted)' }}>Cargando...</p>}
@@ -916,6 +921,7 @@ export default function ArqueoCaja() {
           </p>
         )}
       </div>
+      )}
     </div>
   )
 }
