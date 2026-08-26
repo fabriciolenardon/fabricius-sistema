@@ -117,9 +117,9 @@ export default function PlanillasRinde({ config, onConfigChange }) {
   useEffect(() => {
     if (!destinos.length) { setDestinoId(''); return }
     if (!destinos.some(d => d.id === destinoId)) setDestinoId(destinos[0].id)
-  }, [destinos]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [destinos])
 
-  useEffect(() => { cargarHistorial() }, [tipo, destinoId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { cargarHistorial() }, [tipo, destinoId])
 
   async function cargarHistorial() {
     if (!destinoId) { setHistorial([]); return }
