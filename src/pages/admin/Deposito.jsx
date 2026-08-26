@@ -577,6 +577,17 @@ const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(n
     return (t ? t.merma : 0) + mermaFrio
   }
 
+  // LA CLASIFICACIÓN VIENE DEL INGRESO. Al elegir una media para despostar a
+  // kilo, se toma la clasificación con la que se la cargó (mig 124) y se
+  // aplica esa merma sola. Antes había que elegirla acá, con la media ya en
+  // cámara y sin nadie que se acordara de qué animal era.
+  // Si la media es vieja (sin clasificación) o el tipo ya no existe en la
+  // config, no se toca nada y el operario elige a mano como siempre.
+  useEffect(() => {
+    const id = seleccionada?.merma_tipo_id
+    if (id && MERMAS_KILO[id]) setTipoAnimal(id)
+  }, [seleccionada])
+
   useEffect(() => { cargarDatos(); cargarMermaConfig() }, [])
 
   // Si el tipo de animal seleccionado ya no existe en la config (ej. se
@@ -1562,7 +1573,21 @@ async function confirmarDesposteCerdo() {
             <div className="card" style={{ borderColor: 'var(--blue)' }}>
               <div className="card-title">⚖️ Configurar desposte por kilo</div>
               <div style={{ marginBottom: 16 }}>
-                <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Tipo de animal</label>
+                <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>
+                  Tipo de animal
+                  {/* Que se vea que NO lo eligió el operario: vino del ingreso.
+                      Si lo cambia acá, manda lo que elige acá. */}
+                  {seleccionada?.merma_tipo_id && MERMAS_KILO[seleccionada.merma_tipo_id] && (
+                    <span style={{ marginLeft: 8, color: 'var(--gold)', textTransform: 'none', letterSpacing: 0, fontWeight: 700 }}>
+                      · viene del ingreso: {MERMAS_KILO[seleccionada.merma_tipo_id].label}
+                    </span>
+                  )}
+                  {seleccionada && !seleccionada.merma_tipo_id && (
+                    <span style={{ marginLeft: 8, color: 'var(--muted)', textTransform: 'none', letterSpacing: 0 }}>
+                      · esta media se cargó sin clasificación, elegila a mano
+                    </span>
+                  )}
+                </label>
                 <div style={{ display: 'flex', gap: 8 }}>
                   {Object.entries(MERMAS_KILO).map(([id, m]) => (
                     <button key={id} onClick={() => setTipoAnimal(id)}
@@ -2961,6 +2986,15 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, onEditarProd
 }
 
 function EntradaForm({ onSaved, showAlert, proveedores }) {
+  // Las clasificaciones de merma se leen ACA y no por prop: `mermaConfig` vive
+  // en DesposteTab, que es un componente hermano — pasarlo desde el padre
+  // referenciaba una variable inexistente (pantalla negra en runtime; el build
+  // no lo ve, lo agarro el eslint no-undef).
+  const [tiposMerma, setTiposMerma] = useState([])
+  useEffect(() => {
+    supabase.from('config_sistema').select('valor').eq('clave', 'merma_conversion').maybeSingle()
+      .then(({ data }) => setTiposMerma(data?.valor?.media_res || []))
+  }, [])
   // precioKg arranca VACÍO, no con un precio puesto. Antes venía con 9800
   // (precio viejo de media res): en los tipos donde ese campo se ignoraba se
   // guardaba ese 9800 en entradas_deposito y ensuciaba el costo, y desde que
@@ -3239,7 +3273,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
         descripcion: descripcionCajas, entradaId: entradaIns?.id,
       })
       showAlert({ type: 'success', msg: `✅ ${cantPesperada} cajas de ${productoCaja?.nombre || 'sin nombre'} registradas — ${kgTotalCajas.toFixed(1)} kg en total` })
-      setForm(f => ({ ...f, descripcion: '', kg: '', importe: '', precioKg: '', cantidad: '1', cajaProductoId: '' }))
+      setForm(f => ({ ...f, mermaTipoId: '', descripcion: '', kg: '', importe: '', precioKg: '', cantidad: '1', cajaProductoId: '' }))
       setCajasPesos([])
       onSaved()
       cargarHistorial()
@@ -3328,6 +3362,9 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     const { data: entradaInsertada, error } = await supabase.from('entradas_deposito').insert({
       fecha: form.fecha, tipo: tipoEntrada, proveedor_nombre: form.proveedor,
       descripcion: descripcionFinal, kg: kgTotal, kg_real: kgReal,
+      // La clasificación elegida al ingresar: el desposte a kilo la lee de
+      // acá y aplica esa merma sin volver a preguntar.
+      merma_tipo_id: form.tipo === 'bovino_mr' ? (form.mermaTipoId || null) : null,
       merma_pct: parseNumero(form.merma), precio_kg: parseNumero(form.precioKg),
       importe, destino: form.destino, cantidad
     }).select().single()
@@ -3357,6 +3394,8 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
           precio_costo_kg: parseNumero(form.precioKg),
           descripcion: descripcionFinal,
           estado: 'disponible',
+          // Trazabilidad de la media individual: con qué clasificación entró.
+          merma_tipo_id: form.mermaTipoId || null,
         })
       }
       const { error: errMedias } = await supabase.from('medias_stock').insert(filasMedias)
@@ -3410,7 +3449,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
       ? `✅ ${cantidad} unidades de ${descripcionBase} registradas — ${kgTotal.toFixed(1)} kg al stock`
       : '✅ Entrada registrada — Stock actualizado'
     showAlert({ type: 'success', msg: msgOK })
-    setForm(f => ({ ...f, descripcion: '', kg: '', importe: '', precioKg: '', cantidad: '1', polloProductoId: '', embutidoProductoId: '', brosaProductoId: '' }))
+    setForm(f => ({ ...f, mermaTipoId: '', descripcion: '', kg: '', importe: '', precioKg: '', cantidad: '1', polloProductoId: '', embutidoProductoId: '', brosaProductoId: '' }))
     onSaved()
     cargarHistorial()
     setTimeout(() => showAlert(null), 3000)
@@ -3682,6 +3721,37 @@ async function ejecutarAnulacion(entrada) {
             )}
           </div>
         </div>
+
+        {/* ── CLASIFICACIÓN PARA LA MERMA ──────────────────────────────
+            El tipo comercial de arriba (NT-VQ Premium / Overo Chico) NO dice
+            cuánto rinde: eso lo define la clasificación de Mermas por
+            producto (Novillito A-1, Vaquillona B-2, etc.).
+            Hasta ahora esto se elegía RECIÉN AL DESPOSTAR, con la media ya en
+            la cámara y sin nadie que se acordara de qué animal era. Ahora se
+            elige al ingresarla —que es cuando se la está mirando— y el
+            desposte lo toma solo. */}
+        {form.tipo === 'bovino_mr' && (
+          <div className="form-row">
+            <div className="form-group" style={{ flex: 1 }}>
+              <label>Clasificación (define la merma al despostar)</label>
+              <select value={form.mermaTipoId || ''}
+                onChange={e => setForm(f => ({ ...f, mermaTipoId: e.target.value }))}
+                style={{ borderColor: form.mermaTipoId ? 'var(--border)' : 'var(--gold)' }}>
+                <option value="">— Elegí la clasificación —</option>
+                {tiposMerma.map(t => (
+                  <option key={t.id} value={t.id}>{t.label} — {t.merma}% de merma</option>
+                ))}
+              </select>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, lineHeight: 1.5 }}>
+                {tiposMerma.length === 0
+                  ? <>⚠️ No hay clasificaciones cargadas. Cargalas en Mermas → Mermas por producto.</>
+                  : form.mermaTipoId
+                    ? <>Cuando se desposte a Bovino Cortes se le va a descontar esta merma sola, sin volver a preguntar.</>
+                    : <>Si la dejás vacía, al despostar hay que elegir el tipo a mano.</>}
+              </div>
+            </div>
+          </div>
+        )}
         {/* Selector de producto específico para Pollo/Rebozado por cajones —
             así sabemos qué tipo de pollo (entero, pechuga, pata muslo, etc.)
             se está ingresando y autocompletamos kg_por_unidad de la lista. */}
