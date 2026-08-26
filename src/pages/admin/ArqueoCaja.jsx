@@ -31,7 +31,7 @@
 // agregás un aviso nuevo que cite un monto del sistema, ponelo detrás de
 // `ciego` o estás abriendo el agujero de nuevo por la ventana.
 // ============================================================
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase, fetchAllRows } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import { fechaHoyARG, horaHoyARG } from '../../lib/fechas'
@@ -98,21 +98,33 @@ export default function ArqueoCaja() {
   // de cerrarlo. Es una foto: se congela con los valores del guardado, así
   // el formulario se puede limpiar sin que la revelación se borre.
   const [revelado, setRevelado] = useState(null)
+  // Para llevar el foco al campo del nombre cuando frena el guardado: un
+  // cartel de error arriba se pasa por alto, el cursor parpadeando no.
+  const cajeroRef = useRef(null)
 
   // Recargar ventas cuando cambia la fecha seleccionada (y cerrar la
   // confirmacion pendiente para no guardar contra datos de otro dia)
   useEffect(() => { setConfirmandoGuardar(false); setRevelado(null); cargar() }, [fechaArqueo])
 
-  // QUIÉN CONTÓ. El campo se pedía a mano y venía vacío en 48 de los últimos
-  // 51 arqueos — el aviso "no pusiste el nombre del cajero" se ignoraba. Con
-  // el arqueo ciego, saber quién contó deja de ser un detalle: una diferencia
-  // sin dueño no se puede seguir. Se precarga con el usuario logueado y se
-  // puede sobrescribir (a veces cuenta uno y carga otro).
-  // Dep sólo [profile] a propósito: si dependiera de `cajero`, borrar el
-  // campo para escribir otro nombre lo volvería a llenar en el acto.
+  // QUIÉN CIERRA LA CAJA. El campo se pedía a mano y venía vacío en 48 de los
+  // últimos 51 arqueos — el aviso se ignoraba. Ahora es obligatorio (ver
+  // guardarArqueo).
+  //
+  // EN LA CAJA NO SE PRECARGA, a propósito: `caja2` es una cuenta COMPARTIDA
+  // por todas las chicas del mostrador, así que el nombre del perfil
+  // ("Cajera") no identifica a nadie. Precargarlo convertiría el campo
+  // obligatorio en un trámite — se aprieta guardar y listo, y seguiríamos sin
+  // saber quién contó. Tiene que escribir su nombre.
+  //
+  // A los admin sí se les precarga: cada uno tiene su cuenta personal, y ahí
+  // el nombre del perfil ES la persona.
+  const nombrePorDefecto = () => (ciego ? '' : (profile?.nombre || ''))
+
+  // Dep sin `cajero` a propósito: si dependiera de él, borrar el campo para
+  // escribir otro nombre lo volvería a llenar en el acto.
   useEffect(() => {
-    if (!editandoId && !cajero && profile?.nombre) setCajero(profile.nombre)
-  }, [profile])
+    if (!ciego && !editandoId && !cajero && profile?.nombre) setCajero(profile.nombre)
+  }, [profile, ciego])
 
   async function cargar() {
     setLoading(true)
@@ -200,7 +212,7 @@ export default function ArqueoCaja() {
     setTransferenciaReal('')
     setEfectivoContadoRapido('')
     setNotas('')
-    setCajero(profile?.nombre || '')  // vuelve al usuario logueado, no a vacío
+    setCajero(nombrePorDefecto())  // admin: su nombre · caja: vacío, lo escribe
     setModoRapido(false)
     setFechaArqueo(fechaHoyARG())
   }
@@ -309,8 +321,27 @@ export default function ArqueoCaja() {
     // ignoraba: 48 de los últimos 51 arqueos quedaron sin nombre. Una
     // diferencia sin dueño no se puede preguntar — y con el arqueo ciego el
     // dato pasa a ser la mitad del control, así que acá se frena.
-    if (!cajero.trim()) {
+    const pedirNombre = () => {
+      cajeroRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      cajeroRef.current?.focus()
+    }
+    const quienCierra = cajero.trim()
+    if (!quienCierra) {
       showMsg('❌ Poné quién está cerrando la caja. Sin nombre el arqueo no se guarda.', 'error')
+      pedirNombre()
+      return
+    }
+    // Que no zafe poniendo el nombre de la cuenta: `caja2` la comparten todas,
+    // así que "Cajera" identifica tan poco como dejarlo vacío.
+    if (profile?.nombre && quienCierra.toLowerCase() === String(profile.nombre).trim().toLowerCase() && ciego) {
+      showMsg(`❌ "${profile.nombre}" es el nombre de la cuenta, no de una persona. Poné tu nombre.`, 'error')
+      pedirNombre()
+      return
+    }
+    // Ni con una inicial. Dos letras no sirven para preguntarle a nadie.
+    if (quienCierra.length < 3) {
+      showMsg('❌ Escribí tu nombre completo, no una inicial.', 'error')
+      pedirNombre()
       return
     }
     // Los tres valores REALES en 0 = no se cargó nada. Antes esto se
@@ -386,7 +417,7 @@ export default function ArqueoCaja() {
     setTransferenciaReal('')
     setEfectivoContadoRapido('')
     setNotas('')
-    setCajero(profile?.nombre || '')  // vuelve al usuario logueado, no a vacío
+    setCajero(nombrePorDefecto())  // admin: su nombre · caja: vacío, lo escribe
     setEditandoId(null)
     await cargar()
   }
@@ -765,7 +796,8 @@ export default function ArqueoCaja() {
               <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>
                 QUIÉN CIERRA LA CAJA <span style={{ color: 'var(--red-light, #ff8b8b)' }}>*</span>
               </label>
-              <input value={cajero} onChange={e => setCajero(e.target.value)} placeholder="Nombre y apellido — obligatorio"
+              <input ref={cajeroRef} value={cajero} onChange={e => setCajero(e.target.value)}
+                placeholder={ciego ? 'Tu nombre y apellido' : 'Nombre y apellido'}
                 style={{
                   width: '100%', background: 'var(--surface2)', color: 'var(--text)',
                   border: `1px solid ${cajero.trim() ? 'var(--border)' : '#ff8b8b'}`,
@@ -800,6 +832,11 @@ export default function ArqueoCaja() {
                     cajero. Nada de esperados ni diferencias: si estuvieran
                     acá, taparlos arriba no habría servido de nada. */}
                 <div style={{ fontSize: 12, lineHeight: 1.8 }}>
+                  {/* Quién cierra, a la vista justo antes de apretar: queda
+                      asentado con su nombre y lo sabe. */}
+                  <div style={{ marginBottom: 4, paddingBottom: 4, borderBottom: '1px dashed var(--border)' }}>
+                    👤 Cierra la caja: <b style={{ color: 'var(--gold)' }}>{cajero.trim()}</b>
+                  </div>
                   {ciego ? (
                     <>
                       <div>💵 Efectivo contado: <b>{fmt$(totalContado)}</b></div>
