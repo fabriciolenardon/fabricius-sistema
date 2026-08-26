@@ -5,6 +5,31 @@
 // del día y compararlos con el efectivo esperado (suma de ventas en
 // efectivo del día). Guarda el arqueo en la tabla arqueos_caja con
 // la diferencia (sobrante, faltante o cuadrado).
+//
+// ── ARQUEO CIEGO (rol cajero) ────────────────────────────────
+// Al CAJERO no se le muestra cuánto tendría que haber hasta DESPUÉS de
+// guardar. Cuenta, guarda, y recién ahí ve la diferencia.
+//
+// Por qué. Si ve el objetivo, el conteo deja de ser una medición y pasa a
+// ser una copia de lo ticketeado: se cuenta hasta llegar al número. Y en
+// Fabricius eso es caro por partida doble —
+//   1. El minorista SALE del arqueo, no de los tickets (ver el Dashboard
+//      Ejecutivo). O sea que el arqueo no es un control sobre la
+//      facturación: ES la facturación. Si se acomoda, se acomoda el número
+//      con el que se calculan los márgenes y el mes.
+//   2. AlertasAnomalias vigila faltantes > $5.000 del día y > $20.000 de la
+//      semana. Con el esperado a la vista, esa alarma no suena nunca.
+// Es el mismo criterio de la planilla CIEGA del conteo de stock: se cuenta
+// sin la cantidad del sistema al lado.
+//
+// Los admin (Fabricio, Ariel, Giuliana) y el personal de sucursal ven todo
+// siempre: son los que controlan, no los controlados.
+//
+// TRAMPA al tocar esta pantalla: el esperado no se filtra sólo por los
+// carteles grandes. También se escapa por los avisos previos a confirmar
+// ("el día tiene $X en efectivo") y por el resumen de confirmación. Si
+// agregás un aviso nuevo que cite un monto del sistema, ponelo detrás de
+// `ciego` o estás abriendo el agujero de nuevo por la ventana.
 // ============================================================
 import { useState, useEffect, useMemo } from 'react'
 import { supabase, fetchAllRows } from '../../lib/supabase'
@@ -67,11 +92,27 @@ export default function ArqueoCaja() {
   const [confirmandoBorrar, setConfirmandoBorrar] = useState(null)
   // Permiso de dueño centralizado en lib/permisos.js (antes se comparaba
   // el email a mano acá).
-  const { isCEO: esCEO } = useAuth()
+  // `ciego` = arqueo a ciegas para el rol cajero (ver cabecera del archivo).
+  const { isCEO: esCEO, isCajero: ciego, profile } = useAuth()
+  // Resultado del arqueo recién guardado, para revelárselo al cajero DESPUÉS
+  // de cerrarlo. Es una foto: se congela con los valores del guardado, así
+  // el formulario se puede limpiar sin que la revelación se borre.
+  const [revelado, setRevelado] = useState(null)
 
   // Recargar ventas cuando cambia la fecha seleccionada (y cerrar la
   // confirmacion pendiente para no guardar contra datos de otro dia)
-  useEffect(() => { setConfirmandoGuardar(false); cargar() }, [fechaArqueo])
+  useEffect(() => { setConfirmandoGuardar(false); setRevelado(null); cargar() }, [fechaArqueo])
+
+  // QUIÉN CONTÓ. El campo se pedía a mano y venía vacío en 48 de los últimos
+  // 51 arqueos — el aviso "no pusiste el nombre del cajero" se ignoraba. Con
+  // el arqueo ciego, saber quién contó deja de ser un detalle: una diferencia
+  // sin dueño no se puede seguir. Se precarga con el usuario logueado y se
+  // puede sobrescribir (a veces cuenta uno y carga otro).
+  // Dep sólo [profile] a propósito: si dependiera de `cajero`, borrar el
+  // campo para escribir otro nombre lo volvería a llenar en el acto.
+  useEffect(() => {
+    if (!editandoId && !cajero && profile?.nombre) setCajero(profile.nombre)
+  }, [profile])
 
   async function cargar() {
     setLoading(true)
@@ -159,7 +200,7 @@ export default function ArqueoCaja() {
     setTransferenciaReal('')
     setEfectivoContadoRapido('')
     setNotas('')
-    setCajero('')
+    setCajero(profile?.nombre || '')  // vuelve al usuario logueado, no a vacío
     setModoRapido(false)
     setFechaArqueo(fechaHoyARG())
   }
@@ -169,8 +210,17 @@ export default function ArqueoCaja() {
     setTimeout(() => setMsg(null), 4000)
   }
 
+  // Empezar a contar de nuevo tapa la revelación del arqueo anterior: si
+  // quedara en pantalla, el cajero tendría el esperado a la vista mientras
+  // cuenta — exactamente lo que este modo evita.
   function setCantidad(valor, cant) {
+    setRevelado(null)
     setConteo(c => ({ ...c, [valor]: cant }))
+  }
+
+  function setContadoRapido(v) {
+    setRevelado(null)
+    setEfectivoContadoRapido(v)
   }
 
   // === Cálculos en vivo ===
@@ -209,37 +259,60 @@ export default function ArqueoCaja() {
     const out = []
     const push = (nivel, texto) => out.push({ nivel, texto })
 
+    // Los avisos que citan un monto del sistema van con dos redacciones: la
+    // completa para quien puede ver el esperado, y una SIN NÚMERO para el
+    // cajero. El aviso tiene que seguir sonando igual — lo que no puede es
+    // soplarle el objetivo justo cuando está por confirmar el conteo.
     if (arqueoDuplicado) {
       const d = Number(arqueoDuplicado.diferencia) || 0
-      push('alto', `Ya hay un arqueo del ${fechaArqueo}${arqueoDuplicado.hora ? ` a las ${String(arqueoDuplicado.hora).slice(0, 5)}` : ''} (${d >= 0 ? '+' : '−'}${fmt$(d)}). Si guardás este, quedan los DOS y el día va a mostrar un sobrante y un faltante a la vez. Para corregir el que ya está, cancelá y usá ✏️ en el historial.`)
+      const hora = arqueoDuplicado.hora ? ` a las ${String(arqueoDuplicado.hora).slice(0, 5)}` : ''
+      const cuanto = ciego ? '' : ` (${d >= 0 ? '+' : '−'}${fmt$(d)})`
+      push('alto', `Ya hay un arqueo del ${fechaArqueo}${hora}${cuanto}. Si guardás este, quedan los DOS y el día va a mostrar un sobrante y un faltante a la vez. Para corregir el que ya está, cancelá y usá ✏️ en el historial.`)
     }
     if (totalContado === 0 && efectivoEsperado > 0) {
-      push('alto', `Estás guardando $0 de efectivo contado, pero el día tiene ${fmt$(efectivoEsperado)} de ventas en efectivo. Va a quedar como un faltante de todo el día.`)
+      push('alto', ciego
+        ? 'Estás guardando $0 de efectivo contado y el día tiene ventas cobradas en efectivo. Va a quedar como un faltante de todo el día.'
+        : `Estás guardando $0 de efectivo contado, pero el día tiene ${fmt$(efectivoEsperado)} de ventas en efectivo. Va a quedar como un faltante de todo el día.`)
     }
     if (debitoRealNum === 0 && debitoEsperado > 0) {
-      push('alto', `Débito/QR en $0 con ${fmt$(debitoEsperado)} esperados. ¿Te falta cargar el cierre del posnet?`)
+      push('alto', ciego
+        ? 'Débito/QR en $0 y el día tiene cobros con posnet registrados. ¿Te falta cargar el cierre del posnet?'
+        : `Débito/QR en $0 con ${fmt$(debitoEsperado)} esperados. ¿Te falta cargar el cierre del posnet?`)
     }
     if (transferenciaRealNum === 0 && transferenciaEsperada > 0) {
-      push('alto', `Transferencias en $0 con ${fmt$(transferenciaEsperada)} esperadas. ¿Te falta cargar el resumen del banco?`)
+      push('alto', ciego
+        ? 'Transferencias en $0 y el día tiene cobros por transferencia registrados. ¿Te falta cargar el resumen del banco?'
+        : `Transferencias en $0 con ${fmt$(transferenciaEsperada)} esperadas. ¿Te falta cargar el resumen del banco?`)
     }
     if (totalEsperadoDia === 0 && (totalContado > 0 || debitoRealNum > 0 || transferenciaRealNum > 0)) {
       push('alto', `El ${fechaArqueo} no tiene NINGUNA venta cargada en el sistema y estás arqueando plata. Fijate que la fecha sea la correcta.`)
     }
     // Diferencia grande: relativa al día y con piso en pesos, para no
     // avisar por monedas en un día flojo ni callarse en uno grande.
-    if (totalEsperadoDia > 0 && Math.abs(difTotal) > 20000 && Math.abs(difTotal) > totalEsperadoDia * 0.1) {
+    // AL CAJERO NO SE LE MUESTRA, ni siquiera sin el monto: un aviso que
+    // aparece y desaparece según cuánto cargó es un termómetro — probando
+    // valores hasta que se apaga, deduce el esperado igual.
+    if (!ciego && totalEsperadoDia > 0 && Math.abs(difTotal) > 20000 && Math.abs(difTotal) > totalEsperadoDia * 0.1) {
       push('medio', `La diferencia total (${difTotal >= 0 ? '+' : '−'}${fmt$(difTotal)}) es más del 10% de lo esperado del día. Vale la pena recontar antes de dejarlo asentado.`)
     }
-    if (!cajero.trim()) {
-      push('medio', 'No pusiste el nombre del cajero. Sin eso después no se sabe quién contó.')
-    }
+    // (El nombre de quien cierra NO va acá: dejó de ser un aviso y pasó a ser
+    // un requisito — se bloquea en guardarArqueo(), así que nunca se llega a
+    // esta pantalla con el campo vacío.)
     return out
   }, [arqueoDuplicado, fechaArqueo, totalContado, efectivoEsperado, debitoRealNum, debitoEsperado,
-      transferenciaRealNum, transferenciaEsperada, totalEsperadoDia, difTotal, cajero])
+      transferenciaRealNum, transferenciaEsperada, totalEsperadoDia, difTotal, cajero, ciego])
 
   const hayAvisosAltos = avisos.some(a => a.nivel === 'alto')
 
   function guardarArqueo() {
+    // QUIÉN CIERRA LA CAJA ES OBLIGATORIO. Antes era un aviso amarillo y se
+    // ignoraba: 48 de los últimos 51 arqueos quedaron sin nombre. Una
+    // diferencia sin dueño no se puede preguntar — y con el arqueo ciego el
+    // dato pasa a ser la mitad del control, así que acá se frena.
+    if (!cajero.trim()) {
+      showMsg('❌ Poné quién está cerrando la caja. Sin nombre el arqueo no se guarda.', 'error')
+      return
+    }
     // Los tres valores REALES en 0 = no se cargó nada. Antes esto se
     // guardaba igual si el día tenía ventas (porque el esperado no era 0)
     // y el arqueo quedaba con un "faltante" del total esperado — un
@@ -298,12 +371,22 @@ export default function ArqueoCaja() {
       return
     }
     showMsg(`✅ Arqueo del ${fechaArqueo} ${editandoId ? 'actualizado' : 'guardado'}`, 'success')
+    // REVELACIÓN: el conteo ya quedó asentado, así que ahora sí se puede
+    // mostrar contra qué se comparó. Antes de este punto el cajero no vio
+    // ningún esperado. Se congela una foto porque abajo se limpia el form.
+    setRevelado({
+      fecha: fechaArqueo,
+      efectivoEsperado, totalContado, diferencia,
+      debitoEsperado, debitoRealNum, debitoDif,
+      transferenciaEsperada, transferenciaRealNum, transferenciaDif,
+      difTotal,
+    })
     setConteo({})
     setDebitoReal('')
     setTransferenciaReal('')
     setEfectivoContadoRapido('')
     setNotas('')
-    setCajero('')
+    setCajero(profile?.nombre || '')  // vuelve al usuario logueado, no a vacío
     setEditandoId(null)
     await cargar()
   }
@@ -330,6 +413,57 @@ export default function ArqueoCaja() {
           borderRadius: 8, padding: '10px 16px', marginBottom: 16,
           color: msg.tipo === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600,
         }}>{msg.texto}</div>
+      )}
+
+      {/* ============================================================
+          REVELACIÓN — el arqueo ya quedó asentado, recién ahora se
+          muestra contra qué se comparó. El cajero cerró a ciegas y acá
+          ve cómo le fue; ya no puede cambiar el conteo de ese arqueo.
+          ============================================================ */}
+      {revelado && (
+        <div style={{
+          background: revelado.difTotal === 0 ? 'rgba(125,255,125,0.06)' : 'rgba(255,209,122,0.06)',
+          border: `2px solid ${revelado.difTotal === 0 ? '#7dff7d' : 'var(--gold)'}`,
+          borderRadius: 10, padding: 16, marginBottom: 16,
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.5, color: 'var(--gold)' }}>
+              🔓 ARQUEO DEL {revelado.fecha} CERRADO — ASÍ TE FUE
+            </div>
+            <button onClick={() => setRevelado(null)}
+              style={{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+              ✕ Cerrar
+            </button>
+          </div>
+
+          <div style={{
+            fontSize: 30, fontWeight: 800, fontFamily: "'Bebas Neue',cursive", marginBottom: 10,
+            color: revelado.diferencia === 0 ? '#7dff7d' : revelado.diferencia > 0 ? '#ffd17a' : '#ff8b8b',
+          }}>
+            {revelado.diferencia === 0
+              ? '✅ Efectivo cuadrado'
+              : revelado.diferencia > 0
+                ? `⚠️ Sobrante en efectivo: +${fmt$(revelado.diferencia)}`
+                : `❌ Faltante en efectivo: ${fmt$(revelado.diferencia)}`}
+          </div>
+
+          <div style={{ fontSize: 12, lineHeight: 1.9 }}>
+            <div>💵 Efectivo — esperado {fmt$(revelado.efectivoEsperado)} · contaste <b>{fmt$(revelado.totalContado)}</b></div>
+            <div>💳 Débito/QR — esperado {fmt$(revelado.debitoEsperado)} · cargaste <b>{fmt$(revelado.debitoRealNum)}</b> · dif {revelado.debitoDif >= 0 ? '+' : ''}{fmt$(revelado.debitoDif)}</div>
+            <div>🔄 Transfer. — esperada {fmt$(revelado.transferenciaEsperada)} · cargaste <b>{fmt$(revelado.transferenciaRealNum)}</b> · dif {revelado.transferenciaDif >= 0 ? '+' : ''}{fmt$(revelado.transferenciaDif)}</div>
+            <div style={{ marginTop: 6, fontWeight: 800, color: revelado.difTotal === 0 ? '#7dff7d' : '#ffd17a' }}>
+              DIFERENCIA TOTAL: {revelado.difTotal >= 0 ? '+' : ''}{fmt$(revelado.difTotal)}
+            </div>
+          </div>
+
+          {ciego && revelado.diferencia !== 0 && (
+            <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed var(--border)', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
+              {revelado.diferencia > 0
+                ? 'Sobró plata: fijate si alguien pagó y no se cargó la venta, o si te dieron de más y no diste el vuelto completo.'
+                : 'Faltó plata: suele ser un vuelto mal dado o una venta cobrada sin registrar. Si te acordás de cuál fue, dejalo escrito en las notas del arqueo.'}
+            </div>
+          )}
+        </div>
       )}
 
       {/* BANNER DE EDICION CEO */}
@@ -421,7 +555,7 @@ export default function ArqueoCaja() {
               <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>💵 EFECTIVO CONTADO TOTAL</label>
               <input type="text" inputMode="decimal"
                 value={efectivoContadoRapido}
-                onChange={e => setEfectivoContadoRapido(e.target.value)}
+                onChange={e => setContadoRapido(e.target.value)}
                 placeholder="Ej: 50000 o 50.000,50"
                 autoFocus
                 style={{ width: '100%', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '14px 16px', fontSize: 20, fontWeight: 700, fontFamily: "'Bebas Neue',cursive" }} />
@@ -486,7 +620,9 @@ export default function ArqueoCaja() {
           <div className="card" style={{ marginBottom: 16 }}>
             <div className="card-title">📊 Resultado del arqueo</div>
 
-            {/* RESUMEN DEL DIA POR MEDIO DE PAGO */}
+            {/* RESUMEN DEL DIA POR MEDIO DE PAGO — el esperado en crudo.
+                Es lo primero que se tapa en modo ciego. */}
+            {!ciego && (
             <div style={{ padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: 8, marginBottom: 12, border: '1px solid var(--border)' }}>
               <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>
                 💼 Ventas registradas {fechaArqueo === fechaHoyARG() ? 'hoy' : `el ${fechaArqueo}`} ({ventasHoy})
@@ -517,24 +653,37 @@ export default function ArqueoCaja() {
                 </span>
               </div>
             </div>
+            )}
 
             {/* ARQUEO FISICO (SOLO EFECTIVO) */}
             <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>
-              Comparación física (solo efectivo)
+              {ciego ? 'Conteo a ciegas (solo efectivo)' : 'Comparación física (solo efectivo)'}
             </div>
 
-            <div style={{ padding: '10px 12px', background: 'rgba(125,255,125,0.04)', borderRadius: 8, marginBottom: 10, border: '1px solid #2d5a2d' }}>
-              <div style={{ fontSize: 11, color: 'var(--muted)' }}>💵 EFECTIVO ESPERADO EN CAJA</div>
-              <div style={{ fontSize: 24, fontWeight: 700, color: '#7dff7d', fontFamily: "'Bebas Neue',cursive" }}>{fmt$(efectivoEsperado)}</div>
-              <div style={{ fontSize: 11, color: 'var(--muted)' }}>Suma de las {ventasEfectivo} venta(s) cobradas en efectivo</div>
-            </div>
+            {ciego ? (
+              <div style={{ padding: '10px 12px', background: 'var(--surface2)', borderRadius: 8, marginBottom: 10, border: '1px dashed var(--border)' }}>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>🙈 EFECTIVO ESPERADO EN CAJA</div>
+                <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--muted)', fontFamily: "'Bebas Neue',cursive" }}>OCULTO HASTA GUARDAR</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.5, marginTop: 2 }}>
+                  Contá la caja como esté y guardá. La diferencia aparece
+                  enseguida — pero después, para que el conteo sea el de verdad
+                  y no el que "tenía que dar".
+                </div>
+              </div>
+            ) : (
+              <div style={{ padding: '10px 12px', background: 'rgba(125,255,125,0.04)', borderRadius: 8, marginBottom: 10, border: '1px solid #2d5a2d' }}>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>💵 EFECTIVO ESPERADO EN CAJA</div>
+                <div style={{ fontSize: 24, fontWeight: 700, color: '#7dff7d', fontFamily: "'Bebas Neue',cursive" }}>{fmt$(efectivoEsperado)}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>Suma de las {ventasEfectivo} venta(s) cobradas en efectivo</div>
+              </div>
+            )}
 
             <div style={{ padding: '10px 12px', background: 'rgba(255,209,122,0.05)', borderRadius: 8, marginBottom: 10, border: '1px solid #6a5a2a' }}>
               <div style={{ fontSize: 11, color: 'var(--muted)' }}>📦 TOTAL CONTADO (físico)</div>
               <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--gold)', fontFamily: "'Bebas Neue',cursive" }}>{fmt$(totalContado)}</div>
             </div>
 
-            {totalContado === 0 ? (
+            {ciego ? null : totalContado === 0 ? (
               <div style={{ padding: '14px 16px', background: 'var(--surface2)', borderRadius: 8, border: '2px dashed var(--border)', marginBottom: 14 }}>
                 <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>DIFERENCIA EFECTIVO</div>
                 <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--muted)', marginTop: 4 }}>
@@ -568,21 +717,23 @@ export default function ArqueoCaja() {
             <div style={{ padding: '12px', background: 'rgba(122,157,255,0.04)', borderRadius: 8, marginBottom: 10, border: '1px solid #2d3a5a' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <div style={{ fontSize: 11, color: 'var(--muted)' }}>💳 DÉBITO / QR</div>
-                <div style={{ fontSize: 12, color: '#7a9dff' }}>Sistema: <b>{fmt$(debitoEsperado)}</b></div>
+                {!ciego && <div style={{ fontSize: 12, color: '#7a9dff' }}>Sistema: <b>{fmt$(debitoEsperado)}</b></div>}
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, alignItems: 'center' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: ciego ? '1fr' : '1fr 1fr', gap: 8, alignItems: 'center' }}>
                 <input type="text" inputMode="decimal"
                   value={debitoReal} onChange={e => setDebitoReal(e.target.value)}
-                  placeholder="Real desde banco/MP"
+                  placeholder={ciego ? 'Total del cierre del posnet' : 'Real desde banco/MP'}
                   style={{ width: '100%', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '8px 10px', fontSize: 14, fontWeight: 600 }} />
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>Diferencia</div>
-                  <div style={{ fontSize: 16, fontWeight: 700,
-                    color: debitoReal === '' ? 'var(--muted)' : debitoDif === 0 ? '#7dff7d' : debitoDif > 0 ? '#ffd17a' : '#ff8b8b',
-                    fontFamily: "'Bebas Neue',cursive" }}>
-                    {debitoReal === '' ? '—' : (debitoDif >= 0 ? '+' : '') + fmt$(debitoDif)}
+                {!ciego && (
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 10, color: 'var(--muted)' }}>Diferencia</div>
+                    <div style={{ fontSize: 16, fontWeight: 700,
+                      color: debitoReal === '' ? 'var(--muted)' : debitoDif === 0 ? '#7dff7d' : debitoDif > 0 ? '#ffd17a' : '#ff8b8b',
+                      fontFamily: "'Bebas Neue',cursive" }}>
+                      {debitoReal === '' ? '—' : (debitoDif >= 0 ? '+' : '') + fmt$(debitoDif)}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             </div>
 
@@ -590,28 +741,41 @@ export default function ArqueoCaja() {
             <div style={{ padding: '12px', background: 'rgba(255,209,122,0.04)', borderRadius: 8, marginBottom: 14, border: '1px solid #6a5a2a' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <div style={{ fontSize: 11, color: 'var(--muted)' }}>🔄 TRANSFERENCIA</div>
-                <div style={{ fontSize: 12, color: '#ffd17a' }}>Sistema: <b>{fmt$(transferenciaEsperada)}</b></div>
+                {!ciego && <div style={{ fontSize: 12, color: '#ffd17a' }}>Sistema: <b>{fmt$(transferenciaEsperada)}</b></div>}
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, alignItems: 'center' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: ciego ? '1fr' : '1fr 1fr', gap: 8, alignItems: 'center' }}>
                 <input type="text" inputMode="decimal"
                   value={transferenciaReal} onChange={e => setTransferenciaReal(e.target.value)}
-                  placeholder="Real desde banco"
+                  placeholder={ciego ? 'Total del resumen del banco' : 'Real desde banco'}
                   style={{ width: '100%', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '8px 10px', fontSize: 14, fontWeight: 600 }} />
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>Diferencia</div>
-                  <div style={{ fontSize: 16, fontWeight: 700,
-                    color: transferenciaReal === '' ? 'var(--muted)' : transferenciaDif === 0 ? '#7dff7d' : transferenciaDif > 0 ? '#ffd17a' : '#ff8b8b',
-                    fontFamily: "'Bebas Neue',cursive" }}>
-                    {transferenciaReal === '' ? '—' : (transferenciaDif >= 0 ? '+' : '') + fmt$(transferenciaDif)}
+                {!ciego && (
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 10, color: 'var(--muted)' }}>Diferencia</div>
+                    <div style={{ fontSize: 16, fontWeight: 700,
+                      color: transferenciaReal === '' ? 'var(--muted)' : transferenciaDif === 0 ? '#7dff7d' : transferenciaDif > 0 ? '#ffd17a' : '#ff8b8b',
+                      fontFamily: "'Bebas Neue',cursive" }}>
+                      {transferenciaReal === '' ? '—' : (transferenciaDif >= 0 ? '+' : '') + fmt$(transferenciaDif)}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             </div>
 
             <div style={{ marginTop: 12 }}>
-              <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>CAJERO</label>
-              <input value={cajero} onChange={e => setCajero(e.target.value)} placeholder="Nombre del cajero"
-                style={{ width: '100%', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '8px 10px', fontSize: 13, marginBottom: 10 }} />
+              <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>
+                QUIÉN CIERRA LA CAJA <span style={{ color: 'var(--red-light, #ff8b8b)' }}>*</span>
+              </label>
+              <input value={cajero} onChange={e => setCajero(e.target.value)} placeholder="Nombre y apellido — obligatorio"
+                style={{
+                  width: '100%', background: 'var(--surface2)', color: 'var(--text)',
+                  border: `1px solid ${cajero.trim() ? 'var(--border)' : '#ff8b8b'}`,
+                  borderRadius: 6, padding: '8px 10px', fontSize: 13, marginBottom: cajero.trim() ? 10 : 4,
+                }} />
+              {!cajero.trim() && (
+                <div style={{ fontSize: 11, color: '#ff8b8b', marginBottom: 10 }}>
+                  Sin esto el arqueo no se guarda: si aparece una diferencia, hay que saber a quién preguntarle.
+                </div>
+              )}
 
               <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>NOTAS (opcional)</label>
               <textarea value={notas} onChange={e => setNotas(e.target.value)} placeholder="Ej: faltó $500 por error de vuelto en venta #45"
@@ -632,13 +796,29 @@ export default function ArqueoCaja() {
             {confirmandoGuardar && (
               <div style={{ marginTop: 12, padding: 14, background: 'rgba(255,209,122,0.06)', border: '1px solid var(--gold)', borderRadius: 8 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--gold)', marginBottom: 8 }}>📋 CONFIRMAR ARQUEO DEL {fechaArqueo}</div>
+                {/* En modo ciego el resumen repite SOLO lo que cargó el
+                    cajero. Nada de esperados ni diferencias: si estuvieran
+                    acá, taparlos arriba no habría servido de nada. */}
                 <div style={{ fontSize: 12, lineHeight: 1.8 }}>
-                  <div>💵 Efectivo — esperado {fmt$(efectivoEsperado)} · contado <b>{fmt$(totalContado)}</b> · dif {diferencia >= 0 ? '+' : ''}{fmt$(diferencia)}</div>
-                  <div>💳 Débito/QR — esperado {fmt$(debitoEsperado)} · real <b>{fmt$(debitoRealNum)}</b> · dif {debitoDif >= 0 ? '+' : ''}{fmt$(debitoDif)}</div>
-                  <div>🔄 Transfer. — esperada {fmt$(transferenciaEsperada)} · real <b>{fmt$(transferenciaRealNum)}</b> · dif {transferenciaDif >= 0 ? '+' : ''}{fmt$(transferenciaDif)}</div>
-                  <div style={{ marginTop: 6, fontWeight: 800, color: difTotal === 0 ? '#7dff7d' : '#ffd17a' }}>
-                    DIFERENCIA TOTAL: {difTotal >= 0 ? '+' : ''}{fmt$(difTotal)}
-                  </div>
+                  {ciego ? (
+                    <>
+                      <div>💵 Efectivo contado: <b>{fmt$(totalContado)}</b></div>
+                      <div>💳 Débito/QR: <b>{fmt$(debitoRealNum)}</b></div>
+                      <div>🔄 Transferencias: <b>{fmt$(transferenciaRealNum)}</b></div>
+                      <div style={{ marginTop: 6, color: 'var(--muted)' }}>
+                        Al guardar se compara con el sistema y te muestra la diferencia.
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div>💵 Efectivo — esperado {fmt$(efectivoEsperado)} · contado <b>{fmt$(totalContado)}</b> · dif {diferencia >= 0 ? '+' : ''}{fmt$(diferencia)}</div>
+                      <div>💳 Débito/QR — esperado {fmt$(debitoEsperado)} · real <b>{fmt$(debitoRealNum)}</b> · dif {debitoDif >= 0 ? '+' : ''}{fmt$(debitoDif)}</div>
+                      <div>🔄 Transfer. — esperada {fmt$(transferenciaEsperada)} · real <b>{fmt$(transferenciaRealNum)}</b> · dif {transferenciaDif >= 0 ? '+' : ''}{fmt$(transferenciaDif)}</div>
+                      <div style={{ marginTop: 6, fontWeight: 800, color: difTotal === 0 ? '#7dff7d' : '#ffd17a' }}>
+                        DIFERENCIA TOTAL: {difTotal >= 0 ? '+' : ''}{fmt$(difTotal)}
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {/* Avisos: lo que hace pensar que este arqueo no es bueno.

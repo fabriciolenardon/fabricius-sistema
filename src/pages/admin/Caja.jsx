@@ -54,7 +54,10 @@ const CATEGORIAS = {
 }
 
 export default function Caja() {
-  const { sucursalId, isSucursal: esSucursal } = useAuth()
+  // ARQUEO CIEGO: al cajero no se le muestra la plata facturada del día.
+  // Si la ve, a la noche cuenta contra ese número en vez de contar la caja
+  // de verdad. Ver el comentario largo en ArqueoCaja.jsx.
+  const { sucursalId, isSucursal: esSucursal, isCajero: esCajero } = useAuth()
   const [precios, setPrecios] = useState([])
   const [ofertas, setOfertas] = useState([])
   const [listaPrecio, setListaPrecio] = useState('minorista') // 'minorista' | 'mayorista'
@@ -1089,7 +1092,7 @@ export default function Caja() {
           {/* Resumen del turno */}
           <div className="card" style={{ padding: 16 }}>
             <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 1, marginBottom: 6 }}>📊 TURNO ACTUAL (CAJA)</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: esCajero ? '1fr 1fr' : '1fr 1fr 1fr', gap: 6 }}>
               <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 10, textAlign: 'center' }}>
                 <div style={{ fontSize: 9, color: 'var(--muted)' }}>Operaciones</div>
                 <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--amber)' }}>{cantHoy}</div>
@@ -1098,10 +1101,15 @@ export default function Caja() {
                 <div style={{ fontSize: 9, color: 'var(--muted)' }}>Kg total</div>
                 <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--green)' }}>{fmtKg(kgTotalHoy)}</div>
               </div>
-              <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 10, textAlign: 'center' }}>
-                <div style={{ fontSize: 9, color: 'var(--muted)' }}>Facturado</div>
-                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{fmt(totalHoy)}</div>
-              </div>
+              {/* Los kilos quedan: sirven para operar y no alcanzan para
+                  deducir la plata esperada en el cajón. La facturación sí,
+                  y por eso el cajero no la ve. */}
+              {!esCajero && (
+                <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 10, textAlign: 'center' }}>
+                  <div style={{ fontSize: 9, color: 'var(--muted)' }}>Facturado</div>
+                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{fmt(totalHoy)}</div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1148,7 +1156,12 @@ export default function Caja() {
                       <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {idx === 0 && '🥇 '}{idx === 1 && '🥈 '}{idx === 2 && '🥉 '}{p.nombre}
                       </div>
-                      <div style={{ fontSize: 10, color: 'var(--muted)' }}>{p.ops} {p.ops === 1 ? 'venta' : 'ventas'} · {fmt(p.importe)}</div>
+                      {/* El importe por producto no se le muestra al cajero:
+                          son 15 números que sumados dan casi el total del
+                          día, o sea el esperado del arqueo por la ventana. */}
+                      <div style={{ fontSize: 10, color: 'var(--muted)' }}>
+                        {p.ops} {p.ops === 1 ? 'venta' : 'ventas'}{esCajero ? '' : ` · ${fmt(p.importe)}`}
+                      </div>
                     </div>
                     <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: 'var(--green)', marginLeft: 8 }}>{fmtKg(p.kg, { decimales: 2 })}</div>
                   </div>
