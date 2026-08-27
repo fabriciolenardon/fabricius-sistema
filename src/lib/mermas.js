@@ -69,8 +69,40 @@ export const LABEL_CATEGORIA = {
 
 export const ORDEN_CATEGORIAS = ['medias_kilo', 'medias_pieza', 'piezas', 'capones', 'elaborados']
 
+// ── EN EL CAPÓN, HUESO / GRASA / TOCINO / CUERO SON MERMA ───
+// Regla de Fabricio (26/08/2026). Salen del capón y se pesan, pero no son
+// carne vendible: no pueden sumar al neto. Sumándolos el capón daba una merma
+// cercana a CERO, cuando la real está en el orden del 25-30%, y ese número es
+// el que define el costo del kilo de cerdo.
+// OJO: esto cambia SÓLO EL CÁLCULO DE LA MERMA. El hueso, el tocino y el cuero
+// se siguen acreditando a su bucket de stock igual que siempre — no se toca
+// nada de stock acá.
+// La CABEZA no entra: se vende (existe el producto CABEZA DE CERDO).
+const MERMA_CERDO = ['hueso', 'grasa', 'tocino', 'cuero']
+// Se EXPORTA a propósito: el desposte de capón (Deposito.jsx) tiene que usar
+// exactamente la misma regla que este historial. Si cada uno tuviera la suya,
+// el % guardado en el desposte y el que muestra el historial se irían
+// separando sin que nadie se entere.
+//
+// Se compara con startsWith y NO con includes: "Bondiola s/hueso" contiene
+// "hueso" y con includes se habría descontado del neto una de las piezas más
+// caras del capón, inflando la merma. Los renglones de merma se llaman por lo
+// que son ("Huesos", "Tocino", "Cuero", "HUESOS, PATAS, CUERO"), así que
+// alcanza con mirar cómo EMPIEZA el nombre.
+export const esMermaDeCerdo = (nombre) => {
+  const t = String(nombre || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')  // saca acentos
+    .trim()
+  return MERMA_CERDO.some(p => t.startsWith(p))
+}
+
 // Suma los kg realmente pesados que salieron de un desposte.
-const kgSalida = d => (Array.isArray(d.piezas) ? d.piezas : []).reduce((s, p) => s + n(p.kg), 0)
+// `soloVendible` descuenta los renglones que son merma (hoy sólo el capón).
+const kgSalida = (d, soloVendible = false) =>
+  (Array.isArray(d.piezas) ? d.piezas : [])
+    .filter(p => !(soloVendible && esMermaDeCerdo(p.nombre)))
+    .reduce((s, p) => s + n(p.kg), 0)
 
 // ¿Es una pieza de cerdo? Los nombres de las piezas bovinas son un set
 // cerrado (los modelos A/B/C); cualquier otra cosa que suene a cerdo queda
@@ -168,7 +200,10 @@ export async function calcularMermasPeriodo(desde, hasta, mermaConfig = {}) {
     const kgEntra = n(d.kg_media_res)
     // Medida (se pesó lo que salió) vs calculada (se aplicó un %).
     const medida = cat === 'medias_pieza' || cat === 'capones'
-    const kgSale = medida ? kgSalida(d) : n(d.kg_neto)
+    // En el capón el neto es SÓLO lo vendible: hueso, grasa, tocino y cuero
+    // salen del animal pero no se cuentan como rinde (ver esMermaDeCerdo).
+    // En medias → piezas todas las piezas son vendibles, así que suman todas.
+    const kgSale = medida ? kgSalida(d, cat === 'capones') : n(d.kg_neto)
     const kgMerma = r2(kgEntra - kgSale)
     const precioKg = precioPorEntrada[d.entrada_id] || 0
     const fila = {

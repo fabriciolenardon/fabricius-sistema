@@ -19,6 +19,7 @@ import CajasTab from './CajasTab'
 import PolloCajonesTab from './PolloCajonesTab'
 import StockPiezasTab from './StockPiezasTab'
 import MermasHistorial from './MermasHistorial'
+import { esMermaDeCerdo } from '../../lib/mermas'
 import PlanillasRinde from '../../components/PlanillasRinde'
 import Recetas from '../../components/Recetas'
 import { cargarCategoriasPrecios, labelsDeCategorias } from '../../lib/categoriasPrecios'
@@ -1280,12 +1281,27 @@ async function confirmarDesposteCerdo() {
     if (!confirm(`⚠️ ${kgCapon} kg es muy bajo para un capón (rango real: 70-150 kg). ¿Continuar?`)) return
   }
 
+  // ── LA MERMA REAL DEL CAPÓN ──────────────────────────────────────────
+  // Antes se guardaba `merma_pct: 0` y `kg_neto: kgCapon` — o sea, el capón
+  // figuraba sin merma. Hueso, grasa, tocino y cuero salen del animal y se
+  // pesan, pero NO son carne vendible: sumándolos el rinde daba casi 100% y
+  // el costo del kilo de cerdo salía más barato de lo que realmente es.
+  // La cabeza NO entra acá: se vende (existe el producto CABEZA DE CERDO).
+  // Esto NO toca el stock: hueso, tocino y cuero se siguen acreditando a su
+  // bucket igual que siempre, unas líneas más abajo.
+  const kgVendibleCapon = piezasRegistradas
+    .filter(p => !esMermaDeCerdo(p.nombre))
+    .reduce((s, p) => s + p.kg, 0)
+  const mermaPctCapon = kgCapon > 0
+    ? Math.round(((kgCapon - kgVendibleCapon) / kgCapon) * 10000) / 100
+    : 0
+
   setLoading(true)
   try {
     await supabase.from('despostes').insert({
       fecha, entrada_id: caponSeleccionado.id, modelo: 'CERDO',
       tipo_desposte: 'cerdo', tipo_animal: 'cerdo',
-      kg_media_res: kgCapon, merma_pct: 0, kg_neto: kgCapon,
+      kg_media_res: kgCapon, merma_pct: mermaPctCapon, kg_neto: kgVendibleCapon,
       piezas: piezasRegistradas.map(p => ({ nombre: p.nombre, kg: p.kg, tipo_stock: p.stock })),
       notas
     })
