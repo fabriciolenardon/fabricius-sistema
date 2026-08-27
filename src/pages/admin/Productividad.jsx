@@ -18,6 +18,7 @@ import { kgPorUnidadDeProducto } from '../../lib/stockHelpers'
 import { nombreTipo } from '../../lib/controlSemanal'
 import { useEsMovil } from '../../lib/useEsMovil'
 import AnalisisGastos from '../../components/AnalisisGastos'
+import MargenReventa from '../../components/MargenReventa'
 
 const n = v => Number(v) || 0
 const fmt = v => fmtPrecio(n(v), { decimales: 0 })
@@ -630,7 +631,13 @@ export default function Productividad() {
       {tab === 'hora' && <TabPorHora periodo={periodo} esMovil={esMovil} />}
       {tab === 'deposito' && <TabDeposito periodo={periodo} esMovil={esMovil} />}
       {tab === 'semanas' && <TabSemanas esMovil={esMovil} />}
-      {tab === 'franquicias' && <TabFranquicias esMovil={esMovil} />}
+      {/* El margen de reventa va PRIMERO y como hermano (no adentro de
+          TabFranquicias): esa tab tiene returns tempranos de carga/vacío y el
+          módulo tiene que verse igual. */}
+      {tab === 'franquicias' && (<>
+        <MargenReventa esMovil={esMovil} />
+        <TabFranquicias esMovil={esMovil} />
+      </>)}
       {/* Trae sus gastos solos y tiene su propio selector de período
           (mes operativo / calendario / semana / rango), por eso no usa
           el `rango` de arriba. */}
