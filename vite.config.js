@@ -15,8 +15,29 @@
 // ============================================================
 import react from '@vitejs/plugin-react'
 
+// ── ID de build para detectar pestañas viejas ─────────────────────────
+// Cada deploy genera un id nuevo, embebido en el bundle (__BUILD_ID__) y
+// publicado en /version.json. VersionWatcher (App.jsx) compara los dos: si no
+// coinciden, esta pestaña corre código viejo. Nació del 27/08/2026: la caja
+// de Monte Cristo estuvo un día entero escribiendo débitos inflados con un
+// bug YA ARREGLADO, porque la pestaña nunca se refrescó y ningún deploy
+// llega a un navegador que no recarga.
+const BUILD_ID = String(Date.now())
+
 export default {
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      name: 'version-json',
+      apply: 'build',
+      generateBundle() {
+        this.emitFile({ type: 'asset', fileName: 'version.json', source: JSON.stringify({ v: BUILD_ID }) })
+      },
+    },
+  ],
+  define: {
+    __BUILD_ID__: JSON.stringify(BUILD_ID),
+  },
   build: {
     // El chunk principal se mantiene chico; lo que pasa el umbral
     // de 500 KB suele ser vendor (estables, no molestan).
