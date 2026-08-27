@@ -5,13 +5,21 @@
 // (una media res, un capón, una pierna, un parrillero), se pesa cada corte
 // que sale, y la diferencia es la merma.
 //
+// EL CAPÓN ES DISTINTO: su planilla saca el rinde y lo deja en el historial,
+// pero NO ajusta ningún %. Al despostarlo ya se pesa pieza por pieza (Desposte
+// Cerdo), así que su merma es MEDIDA en cada animal — dejar que una planilla
+// suelta le pisara ese número sería reemplazar lo que se pesó de verdad por
+// una muestra. Los otros tres no tienen esa trazabilidad: ahí la planilla es
+// la única fuente, y por eso sí ajustan.
+//
 // Hasta ahora ese número se sacaba a mano y se tipeaba en "Mermas por
 // producto". Ahora la planilla lo calcula sola y, al guardarla, la ÚLTIMA de
 // cada destino es la que manda el % a `config_sistema.merma_conversion`.
 //
 // QUÉ CUENTA COMO MERMA (confirmado por Fabricio):
 //   · Bovino (media res, pierna, parrillero): HUESOS y GRASA son merma.
-//   · Cerdo (capón): TOCINO, GRASA, HUESOS/PATAS/CUERO son merma.
+//   · Cerdo (capón): TOCINO, GRASA, HUESOS/PATAS/CUERO son merma. La misma
+//     regla, para el desposte, vive en `esMermaDeCerdo` de lib/mermas.js.
 //   · RECORTES y CABEZA NO son merma — se venden, así que suman al neto.
 // El renglón marcado como merma sigue estando en la planilla (hay que pesarlo
 // igual, es el control de que la cuenta cierre), pero no suma al neto vendible.
@@ -45,7 +53,12 @@ const PLANILLAS = {
   },
   capon: {
     label: '🐷 Capón', bruto: 'Kilos capón bruto',
-    destino: 'capon',
+    // AJUSTA NADA = false. El capón se pesa pieza por pieza al despostarlo
+    // (Desposte Cerdo), así que su merma es MEDIDA en cada animal y no se
+    // estima de una muestra. Esta planilla sirve igual para sacar el rinde y
+    // dejarlo en el historial, pero NO le pisa el % a nada: si lo hiciera,
+    // una sola planilla mandaría por encima de lo que se pesó de verdad.
+    destino: null,
     cortes: [
       'MATAMBRE', 'BOCADO DESHUESADO', 'VACIO', 'COSTILLA', 'FALDA DESHUESADA',
       'COSTELETA', 'LOMO', 'BONDIOLA', 'NALGA', 'TAPA DE NALGA', 'PECETO',
@@ -104,9 +117,7 @@ export default function PlanillasRinde({ config, onConfigChange }) {
     if (plan.destino === 'media_res') {
       return (config.media_res || []).map(m => ({ id: m.id, label: m.label, actual: m.merma }))
     }
-    if (plan.destino === 'capon') {
-      return [{ id: 'capon', label: 'Capón', actual: config.capon }]
-    }
+    if (!plan.destino) return []   // el capón no ajusta ningún %
     // pieza: las de la lista, con la que da nombre a la planilla primero
     const preferida = tipo === 'pierna' ? 'Pierna' : 'Parrillero'
     const todas = Object.entries(config.piezas || {}).map(([n, v]) => ({ id: n, label: n, actual: v }))
@@ -122,9 +133,11 @@ export default function PlanillasRinde({ config, onConfigChange }) {
   useEffect(() => { cargarHistorial() }, [tipo, destinoId])
 
   async function cargarHistorial() {
-    if (!destinoId) { setHistorial([]); return }
-    const { data } = await supabase.from('planillas_rinde').select('*')
-      .eq('tipo', tipo).eq('destino_id', destinoId)
+    // El capón no tiene destino: su historial se lista sólo por tipo.
+    if (plan.destino && !destinoId) { setHistorial([]); return }
+    let q = supabase.from('planillas_rinde').select('*').eq('tipo', tipo)
+    if (plan.destino) q = q.eq('destino_id', destinoId)
+    const { data } = await q
       .order('fecha', { ascending: false }).order('created_at', { ascending: false })
       .limit(30)
     setHistorial(data || [])
@@ -163,13 +176,13 @@ export default function PlanillasRinde({ config, onConfigChange }) {
   const sinExplicar = kgBruto > 0 ? kgBruto - kgPesado : 0
 
   const destinoActual = destinos.find(d => d.id === destinoId)
-  const puedeGuardar = kgBruto > 0 && kgNeto > 0 && destinoId && !guardando
+  const puedeGuardar = kgBruto > 0 && kgNeto > 0 && (!plan.destino || destinoId) && !guardando
 
   async function guardar() {
     if (kgBruto <= 0) { mostrar('Poné los kilos brutos que entraron', 'error'); return }
     if (kgNeto <= 0) { mostrar('Cargá los kilos de al menos un corte', 'error'); return }
     if (kgNeto > kgBruto) { mostrar('Los cortes suman más que el bruto — revisá los pesos', 'error'); return }
-    if (!destinoId) { mostrar('Elegí a qué producto le corresponde esta planilla', 'error'); return }
+    if (plan.destino && !destinoId) { mostrar('Elegí a qué producto le corresponde esta planilla', 'error'); return }
     setGuardando(true)
     try {
       const cortes = filas
@@ -179,20 +192,31 @@ export default function PlanillasRinde({ config, onConfigChange }) {
 
       const { error } = await supabase.from('planillas_rinde').insert({
         fecha, tipo,
-        destino_tipo: plan.destino, destino_id: destinoId,
-        destino_label: destinoActual?.label || destinoId,
+        // Sin destino (capón) igual hay que guardar algo: la tabla los pide
+        // NOT NULL y así el historial se sigue agrupando por producto.
+        destino_tipo: plan.destino || 'capon',
+        destino_id: plan.destino ? destinoId : 'capon',
+        destino_label: plan.destino ? (destinoActual?.label || destinoId) : 'Capón',
         kg_bruto: kgBruto, cortes, kg_neto: kgNeto, kg_merma: kgMerma,
         merma_pct: pct, notas: notas || null,
         creado_por: profile?.nombre || null,
       })
       if (error) throw error
 
+      // El capón no ajusta ningún %: se guarda en el historial y listo. Su
+      // merma sale MEDIDA de cada desposte, que pesa pieza por pieza.
+      if (!plan.destino) {
+        mostrar(`✅ Rinde guardado en el historial: ${pct}% de merma. (El capón no ajusta ningún %.)`)
+        setBruto(''); setNotas('')
+        setFilas(PLANILLAS[tipo].cortes.map(filaNueva))
+        await cargarHistorial()
+        return
+      }
+
       // La ÚLTIMA planilla es la que manda: se pisa el % en Mermas por producto.
       const nuevo = JSON.parse(JSON.stringify(config || {}))
       if (plan.destino === 'media_res') {
         nuevo.media_res = (nuevo.media_res || []).map(m => (m.id === destinoId ? { ...m, merma: pct } : m))
-      } else if (plan.destino === 'capon') {
-        nuevo.capon = pct
       } else {
         nuevo.piezas = { ...(nuevo.piezas || {}), [destinoId]: pct }
       }
@@ -265,6 +289,7 @@ export default function PlanillasRinde({ config, onConfigChange }) {
 
       {/* Destino + fecha + bruto */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 14 }}>
+        {plan.destino && (
         <div>
           <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>
             ¿A QUÉ PRODUCTO LE CORRESPONDE?
@@ -276,6 +301,7 @@ export default function PlanillasRinde({ config, onConfigChange }) {
             ))}
           </select>
         </div>
+        )}
         <div>
           <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>FECHA</label>
           <input type="date" value={fecha} max={fechaHoyARG()} onChange={e => setFecha(e.target.value)} style={inp} />
@@ -374,7 +400,17 @@ export default function PlanillasRinde({ config, onConfigChange }) {
           </div>
         )}
 
-        {destinoActual && kgBruto > 0 && (
+        {/* El capón no ajusta nada: que se vea, para que nadie espere que le
+            mueva el % de ningún lado. */}
+        {!plan.destino && kgBruto > 0 && (
+          <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed var(--border)', fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>
+            Este rinde queda <b style={{ color: 'var(--text)' }}>sólo en el historial</b>: el capón
+            no ajusta ningún % de Mermas por producto. Su merma sale medida de cada desposte, que
+            pesa pieza por pieza.
+          </div>
+        )}
+
+        {plan.destino && destinoActual && kgBruto > 0 && (
           <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed var(--border)', fontSize: 12, color: 'var(--muted)' }}>
             Al guardar, <b style={{ color: 'var(--text)' }}>{destinoActual.label}</b> pasa
             de {destinoActual.actual != null ? `${destinoActual.actual}%` : '—'} a{' '}
@@ -401,11 +437,11 @@ export default function PlanillasRinde({ config, onConfigChange }) {
         <button onClick={() => setVerHistorial(v => !v)}
           style={{ background: 'none', border: 'none', color: 'var(--gold)', cursor: 'pointer', fontSize: 13, fontWeight: 700, padding: 0 }}>
           {verHistorial ? '▾' : '▸'} Historial de {plan.label.replace(/^\S+\s/, '').toLowerCase()}
-          {destinoActual ? ` — ${destinoActual.label}` : ''} ({historial.length})
+          {plan.destino && destinoActual ? ` — ${destinoActual.label}` : ''} ({historial.length})
         </button>
 
         {verHistorial && (historial.length === 0
-          ? <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>Todavía no hay planillas cargadas para este producto.</div>
+          ? <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>Todavía no hay planillas cargadas.</div>
           : (
             <div style={{ overflowX: 'auto', marginTop: 10 }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
@@ -424,7 +460,9 @@ export default function PlanillasRinde({ config, onConfigChange }) {
                     <tr key={p.id} style={{ borderTop: '1px solid var(--border)', background: i === 0 ? 'rgba(201,168,76,0.07)' : 'transparent' }}>
                       <td style={{ padding: '6px 4px' }}>
                         {p.fecha}
-                        {i === 0 && <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--gold)', fontWeight: 700 }}>← la que rige</span>}
+                        {/* "La que rige" sólo tiene sentido donde la planilla ajusta el %.
+                            En el capón no rige nada: es historial puro. */}
+                        {i === 0 && plan.destino && <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--gold)', fontWeight: 700 }}>← la que rige</span>}
                       </td>
                       <td style={{ padding: '6px 4px', textAlign: 'right' }}>{fmtKg(p.kg_bruto, { decimales: 3 })}</td>
                       <td style={{ padding: '6px 4px', textAlign: 'right', color: 'var(--green)' }}>{fmtKg(p.kg_neto, { decimales: 3 })}</td>
