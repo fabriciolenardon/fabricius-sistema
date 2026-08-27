@@ -1798,6 +1798,11 @@ function PLUTab({ precios, ofertas = [], onRecargar, categoriasOrden = [], esSuc
       precio_id: p.id,
       pesable: p.pesable !== false, // false → se vende por Unidad en la balanza
     }))
+  // La tabla de abajo va paginada: son 128+ PLUs y la lista entera hacía la
+  // pestaña interminable. OJO: los exports (CSV simple, Qendra, PDF) siguen
+  // usando `plus` COMPLETO — la paginación es solo de pantalla, jamás del
+  // archivo que va a la balanza.
+  const pagPlus = usePaginacion(plus, 25)
     .sort((a, b) => a.codigoNum - b.codigoNum)
 
   // Precio para la BALANZA: SIEMPRE el precio de lista normal, SIN ofertas.
@@ -2030,7 +2035,7 @@ function PLUTab({ precios, ofertas = [], onRecargar, categoriasOrden = [], esSuc
               </tr>
             </thead>
             <tbody>
-              {plus.map((p) => (
+              {pagPlus.items.map((p) => (
                 <tr key={p.precio_id}>
                   <td>
                     <span style={{ background: 'var(--gold)', color: '#000', padding: '3px 10px', borderRadius: 4, fontFamily: 'monospace', fontSize: 12, fontWeight: 700 }}>
@@ -2047,6 +2052,7 @@ function PLUTab({ precios, ofertas = [], onRecargar, categoriasOrden = [], esSuc
             </tbody>
           </table>
         )}
+        {plus.length > 0 && <Paginador {...pagPlus.controles} label="PLUs" />}
       </div>
     </div>
   )
