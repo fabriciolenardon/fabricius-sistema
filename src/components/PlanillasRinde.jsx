@@ -265,10 +265,10 @@ export default function PlanillasRinde({ config, onConfigChange }) {
       })
       if (error) throw error
 
-      // El capón no ajusta ningún %: se guarda en el historial y listo. Su
+      // Capón y paleta no ajustan ningún %: se guarda en el historial y listo. Su
       // merma sale MEDIDA de cada desposte, que pesa pieza por pieza.
       if (!plan.destino) {
-        mostrar(`✅ Rinde guardado en el historial: ${pct}% de merma. (El capón no ajusta ningún %.)`)
+        mostrar(`✅ Rinde guardado en el historial: ${pct}% de merma. (Esta planilla no ajusta ningún %.)`)
         setBruto(''); setNotas('')
         setFilas(PLANILLAS[tipo].cortes.map(filaNueva))
         await cargarHistorial()
@@ -317,9 +317,12 @@ export default function PlanillasRinde({ config, onConfigChange }) {
     <div className="card" style={{ marginTop: 24 }}>
       <div className="card-title">📋 Planillas de rinde</div>
       <div style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.6, marginBottom: 14 }}>
-        Cargá los kilos que entraron y lo que pesó cada corte. El sistema saca la merma solo,
-        y <strong style={{ color: 'var(--text)' }}>la última planilla de cada producto es la que
-        manda</strong> el % a Mermas por producto.
+        Cargá los kilos que entraron y lo que pesó cada corte. El sistema saca la merma solo
+        {plan.destino
+          ? <>, y <strong style={{ color: 'var(--text)' }}>la última planilla de cada producto es
+              la que manda</strong> el % a Mermas por producto.</>
+          : <>. <strong style={{ color: 'var(--text)' }}>Esta planilla no ajusta ningún %</strong>:
+              el rinde queda en el historial, para conocer el costo real del corte.</>}
         <div style={{ marginTop: 6, fontSize: 12 }}>
           Los renglones marcados <span style={{ color: '#ff8b8b' }}>merma</span> (hueso, grasa,
           tocino, cuero) se pesan igual pero no suman al neto vendible. Recortes y cabeza sí suman:
@@ -490,7 +493,12 @@ export default function PlanillasRinde({ config, onConfigChange }) {
             color: puedeGuardar ? '#000' : 'var(--muted)',
             cursor: puedeGuardar ? 'pointer' : 'not-allowed', fontWeight: 800, fontSize: 14,
           }}>
-          {guardando ? 'Guardando…' : '💾 Guardar planilla y actualizar la merma'}
+          {/* El botón dice lo que de verdad va a pasar: capón y paleta no
+              ajustan ningún % (destino null), así que prometer "actualizar la
+              merma" ahí era mentirle al que aprieta. */}
+          {guardando ? 'Guardando…' : plan.destino
+            ? '💾 Guardar planilla y actualizar la merma'
+            : '💾 Guardar planilla en el historial'}
         </button>
       </div>
 
