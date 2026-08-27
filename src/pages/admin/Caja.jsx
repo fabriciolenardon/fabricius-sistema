@@ -571,6 +571,19 @@ export default function Caja() {
       showMsg(`❌ Falta cobrar ${fmt(totalACobrar - cobrado)}`, 'error')
       return
     }
+    // ── CON TARJETA NO HAY VUELTO ────────────────────────────────────────
+    // Débito y transferencia no pueden superar lo que falta cobrar: nadie pasa
+    // el posnet por más del total. Si llega un número más grande es un error
+    // de tipeo — el 27/08 Monte Cristo cargó "9960,30" de débito en una
+    // pestaña sin refrescar (input viejo que se comía la coma) y quedó
+    // $996.030 cobrado en una venta de $9.960: el arqueo del día mostró
+    // $1,35M de débito con $834 mil vendidos.
+    const debitoNum = parseNumero(pago.debito)
+    const transfNum = parseNumero(pago.transferencia)
+    if (debitoNum + transfNum > totalACobrar + 1) {
+      showMsg(`❌ Débito + transferencia (${fmt(debitoNum + transfNum)}) superan el total a cobrar (${fmt(totalACobrar)}). Con tarjeta o transferencia no hay vuelto — revisá el monto.`, 'error', 6000)
+      return
+    }
     // TOPE de seguridad: una venta de mostrador de más de $1.000.000 pide el CÓDIGO
     // de seguridad (240697) para confirmar. Cubre tanto ventas grandes legítimas (se
     // confirman con el código) como errores de tipeo en el monto (ej. $2.000.000.000
@@ -639,9 +652,17 @@ export default function Caja() {
       convenio: blangino.activo ? 'blangino' : null,
       convenio_empleado: blangino.activo ? blangino.empleado.trim() : null,
       convenio_legajo: blangino.activo ? blangino.legajo.trim() : null,
-      efectivo: parseNumero(pago.efectivo),
-      debito: parseNumero(pago.debito),
-      transferencia: parseNumero(pago.transferencia),
+      // EL EFECTIVO SE GUARDA NETO: lo que queda en el cajón después del
+      // vuelto (total − débito − transferencia), no el billete que entregó el
+      // cliente. La cajera de la central tipea el monto justo y no cambia
+      // nada; la de Monte Cristo tipea el billete ($20.000 por una venta de
+      // $7.761) y eso inflaba el "efectivo esperado" del arqueo con todos los
+      // vueltos del día. El vuelto ya se muestra en pantalla al cobrar.
+      efectivo: parseNumero(pago.efectivo) > 0
+        ? Math.max(0, totalACobrar - debitoNum - transfNum)
+        : 0,
+      debito: debitoNum,
+      transferencia: transfNum,
     }
 
     const { data, error } = await supabase
