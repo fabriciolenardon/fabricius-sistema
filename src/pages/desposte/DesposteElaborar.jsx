@@ -48,7 +48,7 @@ function CampoKg({ label, valor, onChange }) {
     <div style={{ padding: 14, background: 'var(--surface)', borderRadius: 12, border: '1px solid var(--border)' }}>
       <label style={{ fontSize: 14, color: 'var(--muted)', display: 'block', marginBottom: 6, fontWeight: 600 }}>{label}</label>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <input type="number" inputMode="decimal" step="0.01" min="0" value={valor || ''} onChange={e => onChange(e.target.value)} placeholder="0" style={inp} />
+        <input type="text" inputMode="decimal" value={valor || ''} onChange={e => onChange(e.target.value)} placeholder="0" style={inp} />
         <span style={{ fontSize: 14, color: 'var(--muted)', fontWeight: 700 }}>kg</span>
       </div>
     </div>

@@ -224,7 +224,7 @@ export default function DesposteCapones() {
                   {p.nombre}
                 </label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <input type="number" inputMode="decimal" step="0.01" min="0"
+                  <input type="text" inputMode="decimal"
                     value={piezas[p.key] || ''}
                     onChange={e => setKg(p.key, e.target.value)}
                     placeholder="0"

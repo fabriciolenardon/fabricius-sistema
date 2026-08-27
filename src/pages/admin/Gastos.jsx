@@ -648,7 +648,7 @@ export default function Gastos() {
 
           <div className="form-row">
             <div className="form-group"><label>{form.tieneFactura ? 'Total c/ IVA ($)' : 'Monto ($)'}</label>
-              <input type="number" value={form.monto} onChange={e => setForm(f => ({ ...f, monto: e.target.value }))}
+              <input type="text" inputMode="decimal" value={form.monto} onChange={e => setForm(f => ({ ...f, monto: e.target.value }))}
                 style={{ ...inp, borderColor: form.monto ? 'var(--gold)' : 'var(--border)' }} />
             </div>
             <div className="form-group"><label>Forma de pago</label>

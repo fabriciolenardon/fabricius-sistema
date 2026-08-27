@@ -21,6 +21,7 @@ import Paginador, { usePaginacion } from '../../components/Paginador'
 import { logAuditoria } from '../../lib/auditoria'
 import { EPSILON_STOCK, stockNormalizado, redondearStock, excedeTopeStock, TOPE_STOCK } from '../../lib/stockHelpers'
 import { imprimirHTML } from '../../lib/imprimir'
+import { parseNumero } from '../../lib/formatos'
 
 // Etiquetas legibles para cada tipo. Si llega un tipo desconocido se muestra
 // el `tipo` crudo como fallback.
@@ -448,7 +449,8 @@ export default function AjusteStock() {
     const actual = stockNormalizado(s.kg_disponible)
     const contadoStr = contados[s.tipo]
     const tieneInput = contadoStr !== undefined && contadoStr !== ''
-    const contado = tieneInput ? Number(contadoStr) : null
+    // parseNumero: el input es type=text para que no se coma la coma decimal.
+    const contado = tieneInput ? parseNumero(contadoStr) : null
     const diferencia = tieneInput ? (contado - actual) : null
     return {
       ...s,
@@ -753,7 +755,7 @@ export default function AjusteStock() {
                       </td>
                       <td style={{ padding: '6px 12px' }}>
                         <input
-                          type="number" step="0.01"
+                          type="text" inputMode="decimal"
                           value={contados[f.tipo] ?? ''}
                           onChange={e => setContado(f.tipo, e.target.value)}
                           placeholder={String(fmt(f.actual))}

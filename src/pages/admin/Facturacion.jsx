@@ -607,8 +607,8 @@ function FormCuenta({ cuenta, onCerrar, onGuardado }) {
     setGuardando(true)
     const datos = {
       ...form,
-      alicuota_iibb_pct: form.alicuota_iibb_pct === '' ? null : Number(form.alicuota_iibb_pct),
-      alicuota_municipal_pct: form.alicuota_municipal_pct === '' ? null : Number(form.alicuota_municipal_pct),
+      alicuota_iibb_pct: form.alicuota_iibb_pct === '' ? null : parseNumero(form.alicuota_iibb_pct),
+      alicuota_municipal_pct: form.alicuota_municipal_pct === '' ? null : parseNumero(form.alicuota_municipal_pct),
       fecha_inicio_actividad: form.fecha_inicio_actividad || null,
       categoria_monotributo: form.tipo === 'monotributo' ? form.categoria_monotributo : null,
       updated_at: new Date().toISOString(),
@@ -701,7 +701,7 @@ function FormCuenta({ cuenta, onCerrar, onGuardado }) {
                   <option value="simplificado">Simplificado</option>
                 </select>
               </Campo>
-              <Campo label="Alícuota IIBB %"><input type="number" step="0.01" value={form.alicuota_iibb_pct} onChange={e => set('alicuota_iibb_pct', e.target.value)} placeholder="Ej: 3.50" style={inp} /></Campo>
+              <Campo label="Alícuota IIBB %"><input type="text" inputMode="decimal" value={form.alicuota_iibb_pct} onChange={e => set('alicuota_iibb_pct', e.target.value)} placeholder="Ej: 3.50" style={inp} /></Campo>
             </div>
           )}
         </div>
@@ -713,7 +713,7 @@ function FormCuenta({ cuenta, onCerrar, onGuardado }) {
             Paga Contribución Comercio e Industria / Tasa Municipal
           </label>
           {form.inscripto_municipal && (
-            <Campo label="Alícuota municipal %"><input type="number" step="0.01" value={form.alicuota_municipal_pct} onChange={e => set('alicuota_municipal_pct', e.target.value)} placeholder="Ej: 0.60" style={inp} /></Campo>
+            <Campo label="Alícuota municipal %"><input type="text" inputMode="decimal" value={form.alicuota_municipal_pct} onChange={e => set('alicuota_municipal_pct', e.target.value)} placeholder="Ej: 0.60" style={inp} /></Campo>
           )}
         </div>
 
@@ -1861,9 +1861,9 @@ function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInici
 
   // Auto-calcular total si dejaron el campo en blanco
   function calcularTotal() {
-    const n = Number(form.monto_neto) || 0
-    const i = Number(form.monto_iva) || 0
-    const o = Number(form.monto_otros) || 0
+    const n = parseNumero(form.monto_neto) || 0
+    const i = parseNumero(form.monto_iva) || 0
+    const o = parseNumero(form.monto_otros) || 0
     set('monto_total', String(Math.round((n + i + o) * 100) / 100))
   }
 
@@ -1890,7 +1890,7 @@ function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInici
   const totalesItems = useMemo(() => {
     let neto = 0, iva = 0
     ;(form.items || []).forEach(it => {
-      const n = (Number(it.cantidad) || 0) * (Number(it.precio_unit) || 0)
+      const n = (parseNumero(it.cantidad) || 0) * (parseNumero(it.precio_unit) || 0)
       neto += n
       if (!esFacturaC) iva += n * ((IVA_ALICUOTAS.find(a => a.id === Number(it.iva_id))?.pct) || 0) / 100
     })
@@ -1901,7 +1901,7 @@ function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInici
   async function guardar() {
     if (!form.cuenta_id) return alert('Elegí una cuenta')
     if (!form.fecha) return alert('Fecha obligatoria')
-    const total = Number(form.monto_total) || 0
+    const total = parseNumero(form.monto_total) || 0
     if (total <= 0) return alert('El total debe ser mayor a 0')
     setGuardando(true)
     const datos = {
@@ -1913,9 +1913,9 @@ function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInici
       punto_venta: form.punto_venta || null,
       numero: form.numero || null,
       tipo_comprobante: form.tipo_comprobante || null,
-      monto_neto: Number(form.monto_neto) || 0,
-      monto_iva: Number(form.monto_iva) || 0,
-      monto_otros: Number(form.monto_otros) || 0,
+      monto_neto: parseNumero(form.monto_neto) || 0,
+      monto_iva: parseNumero(form.monto_iva) || 0,
+      monto_otros: parseNumero(form.monto_otros) || 0,
       monto_total: total,
       contraparte_id: form.contraparte_id || null,
       contraparte_nombre: form.contraparte_nombre || null,
@@ -1935,7 +1935,7 @@ function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInici
   // Emitir electrónicamente: pide el CAE a ARCA vía edge function
   async function emitir() {
     if (!form.cuenta_id) return alert('Elegí una cuenta')
-    const itemsValidos = (form.items || []).filter(it => Number(it.cantidad) > 0 && Number(it.precio_unit) > 0)
+    const itemsValidos = (form.items || []).filter(it => parseNumero(it.cantidad) > 0 && parseNumero(it.precio_unit) > 0)
     if (itemsValidos.length === 0) return alert('Cargá al menos un ítem con cantidad y precio')
     const total = totalesItems.total
     if (total <= 0) return alert('El total debe ser mayor a 0')
@@ -1967,8 +1967,8 @@ function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInici
       iva_id: Number(form.iva_id) || 4,
       items: itemsValidos.map(it => ({
         descripcion: it.descripcion || '',
-        cantidad: Number(it.cantidad) || 0,
-        precio_unit: Number(it.precio_unit) || 0,
+        cantidad: parseNumero(it.cantidad) || 0,
+        precio_unit: parseNumero(it.precio_unit) || 0,
         iva_id: esFacturaC ? null : (Number(it.iva_id) || 4),
       })),
       descripcion: form.concepto || null,
@@ -2040,8 +2040,8 @@ function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInici
                 monto_neto: totalesItems.neto,
                 monto_iva: esFacturaC ? 0 : totalesItems.iva,
                 monto_total: resultadoCae.importe_total,
-                items: (form.items || []).filter(it => Number(it.cantidad) > 0 && Number(it.precio_unit) > 0)
-                  .map(it => ({ descripcion: it.descripcion, cantidad: Number(it.cantidad), precio_unit: Number(it.precio_unit), iva_id: esFacturaC ? null : Number(it.iva_id) })),
+                items: (form.items || []).filter(it => parseNumero(it.cantidad) > 0 && parseNumero(it.precio_unit) > 0)
+                  .map(it => ({ descripcion: it.descripcion, cantidad: parseNumero(it.cantidad), precio_unit: parseNumero(it.precio_unit), iva_id: esFacturaC ? null : Number(it.iva_id) })),
               }, cuentaSel || {})
             }}
               style={{ flex: 1, padding: 12, background: 'var(--surface2)', border: '1px solid var(--gold)', color: 'var(--gold)', borderRadius: 8, cursor: 'pointer', fontWeight: 700 }}>
@@ -2280,7 +2280,7 @@ function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInici
                   </thead>
                   <tbody>
                     {(form.items || []).map((it, idx) => {
-                      const sub = round2((Number(it.cantidad) || 0) * (Number(it.precio_unit) || 0))
+                      const sub = round2((parseNumero(it.cantidad) || 0) * (parseNumero(it.precio_unit) || 0))
                       return (
                         <tr key={idx} style={{ borderTop: '1px solid var(--border)' }}>
                           <td style={{ padding: '4px 6px' }}>
@@ -2288,11 +2288,11 @@ function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInici
                               placeholder="Ej: Asado x kg" style={{ ...inp, padding: '6px 8px' }} />
                           </td>
                           <td style={{ padding: '4px 6px' }}>
-                            <input type="number" step="0.001" value={it.cantidad} onChange={e => setItem(idx, 'cantidad', e.target.value)}
+                            <input type="text" inputMode="decimal" value={it.cantidad} onChange={e => setItem(idx, 'cantidad', e.target.value)}
                               style={{ ...inp, padding: '6px 8px', textAlign: 'right' }} />
                           </td>
                           <td style={{ padding: '4px 6px' }}>
-                            <input type="number" step="0.01" value={it.precio_unit} onChange={e => setItem(idx, 'precio_unit', e.target.value)}
+                            <input type="text" inputMode="decimal" value={it.precio_unit} onChange={e => setItem(idx, 'precio_unit', e.target.value)}
                               style={{ ...inp, padding: '6px 8px', textAlign: 'right' }} />
                           </td>
                           {!esFacturaC && (
@@ -2332,10 +2332,10 @@ function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInici
           ) : (
             <>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10 }}>
-                <Campo label="Neto"><input type="number" step="0.01" value={form.monto_neto} onChange={e => set('monto_neto', e.target.value)} onBlur={calcularTotal} style={inp} /></Campo>
-                <Campo label="IVA"><input type="number" step="0.01" value={form.monto_iva} onChange={e => set('monto_iva', e.target.value)} onBlur={calcularTotal} style={inp} /></Campo>
-                <Campo label="Otros"><input type="number" step="0.01" value={form.monto_otros} onChange={e => set('monto_otros', e.target.value)} onBlur={calcularTotal} style={inp} /></Campo>
-                <Campo label="Total *"><input type="number" step="0.01" value={form.monto_total} onChange={e => set('monto_total', e.target.value)} style={{ ...inp, borderColor: 'var(--gold)', fontWeight: 700 }} /></Campo>
+                <Campo label="Neto"><input type="text" inputMode="decimal" value={form.monto_neto} onChange={e => set('monto_neto', e.target.value)} onBlur={calcularTotal} style={inp} /></Campo>
+                <Campo label="IVA"><input type="text" inputMode="decimal" value={form.monto_iva} onChange={e => set('monto_iva', e.target.value)} onBlur={calcularTotal} style={inp} /></Campo>
+                <Campo label="Otros"><input type="text" inputMode="decimal" value={form.monto_otros} onChange={e => set('monto_otros', e.target.value)} onBlur={calcularTotal} style={inp} /></Campo>
+                <Campo label="Total *"><input type="text" inputMode="decimal" value={form.monto_total} onChange={e => set('monto_total', e.target.value)} style={{ ...inp, borderColor: 'var(--gold)', fontWeight: 700 }} /></Campo>
               </div>
               <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
                 Al salir del campo "Otros" se autocalcula Total = Neto + IVA + Otros. Podés editarlo manualmente si querés.
@@ -2597,7 +2597,7 @@ function FormImpuesto({ cuentas, cuentaInicial, onCerrar, onGuardado }) {
             </select>
           </Campo>
           <Campo label="Monto *">
-            <input type="number" step="0.01" value={form.monto} onChange={e => set('monto', e.target.value)} style={{ ...inp, borderColor: 'var(--gold)', fontWeight: 700 }} />
+            <input type="text" inputMode="decimal" value={form.monto} onChange={e => set('monto', e.target.value)} style={{ ...inp, borderColor: 'var(--gold)', fontWeight: 700 }} />
           </Campo>
           <Campo label="Fecha de pago *">
             <input type="date" value={form.fecha_pago} onChange={e => set('fecha_pago', e.target.value)} style={inp} />
@@ -2845,7 +2845,7 @@ function SimuladorDistribucion({ cuentas, facturacionPorCuenta, onCerrar }) {
           para que todos queden al mismo % del tope (criterio: nivelar el riesgo).
         </div>
         <Campo label="💰 Monto a distribuir">
-          <input type="number" step="1000" value={monto} onChange={e => setMonto(e.target.value)}
+          <input type="text" inputMode="decimal" value={monto} onChange={e => setMonto(e.target.value)}
             placeholder="Ej: 5000000" autoFocus
             style={{ ...inp, fontSize: 18, fontWeight: 700, borderColor: 'var(--gold)' }} />
         </Campo>

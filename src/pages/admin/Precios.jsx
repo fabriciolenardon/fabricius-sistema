@@ -55,7 +55,7 @@ const CATEGORIAS_CON_KG_POR_UNIDAD = new Set(['pollo_cajon', 'rebozado_cajon'])
 // Las piezas bovinas son las únicas donde se vende un objeto físico único
 // (cada pierna, cuarto pistola, costillar, etc. con su peso propio).
 const CATEGORIAS_CON_PIEZA_ENTERA = new Set(['bovino_pieza'])
-import { fmtPrecio } from '../../lib/formatos'
+import { fmtPrecio, parseNumero } from '../../lib/formatos'
 // Precio en formato AR (35.600,50 con decimales si tiene)
 const fmt = n => n != null ? fmtPrecio(Number(n) || 0) : '—'
 const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }
@@ -157,7 +157,7 @@ export default function Precios() {
     // DEBEN tener kg_por_unidad cargado, sino el sistema no sabe cuántos kg
     // descontar del stock base al venderse → bugs silenciosos de stock negativo.
     if (CATEGORIAS_CON_KG_POR_UNIDAD.has(form.categoria)) {
-      const kpu = Number(form.kg_por_unidad) || 0
+      const kpu = parseNumero(form.kg_por_unidad)
       if (kpu <= 0) {
         return mostrarMsg('❌ Cargá los "Kg por cajón / unidad" — es obligatorio para esta categoría')
       }
@@ -186,9 +186,9 @@ export default function Precios() {
     const datos = {
       categoria: form.categoria, nombre: form.nombre,
       subcategoria: form.categoria === 'insumos' ? (form.subcategoria || 'descartables') : null,
-      precio_carniceria: form.precio_carniceria === '' ? null : Number(form.precio_carniceria),
-      precio_mayorista: form.precio_mayorista === '' ? null : Number(form.precio_mayorista),
-      precio_minorista: form.precio_minorista === '' ? null : Number(form.precio_minorista),
+      precio_carniceria: form.precio_carniceria === '' ? null : parseNumero(form.precio_carniceria),
+      precio_mayorista: form.precio_mayorista === '' ? null : parseNumero(form.precio_mayorista),
+      precio_minorista: form.precio_minorista === '' ? null : parseNumero(form.precio_minorista),
       codigo_balanza: nuevoPlu,
       dias_vencimiento: form.dias_vencimiento === '' ? 3 : Number(form.dias_vencimiento),
       descripcion_etiqueta: form.descripcion_etiqueta || null,
@@ -198,7 +198,7 @@ export default function Precios() {
       // vender una unidad. NULL si no aplica (el sistema cae al parseo del nombre).
       kg_por_unidad: form.kg_por_unidad === '' || form.kg_por_unidad == null
         ? null
-        : Number(form.kg_por_unidad),
+        : parseNumero(form.kg_por_unidad),
       // Marca productos que se venden como pieza entera individual (no por kg).
       // Cuando el cajero los elige en Caja Rápida (o Mayorista), aparece el
       // selector de piezas_stock para elegir cuál pieza específica vender.
@@ -317,7 +317,7 @@ export default function Precios() {
 
   // Masivo
   function calcularPreview() {
-    const pct = parseFloat(masivoPct)
+    const pct = parseNumero(masivoPct)
     if (!pct) return setMasivoPreview([])
     const filtrados = masivoCat === 'todas' ? precios : precios.filter(p => p.categoria === masivoCat)
     setMasivoPreview(filtrados.map(p => ({
@@ -405,8 +405,8 @@ export default function Precios() {
       precio_original_carniceria: productoSeleccionado?.precio_carniceria,
       precio_original_mayorista: productoSeleccionado?.precio_mayorista,
       precio_original_minorista: productoSeleccionado?.precio_minorista,
-      precio_oferta: ofertaForm.tipo === 'fijo' ? parseFloat(ofertaForm.precio_oferta) : null,
-      descuento_pct: ofertaForm.tipo === 'porcentaje' ? parseFloat(ofertaForm.descuento_pct) : null,
+      precio_oferta: ofertaForm.tipo === 'fijo' ? parseNumero(ofertaForm.precio_oferta) : null,
+      descuento_pct: ofertaForm.tipo === 'porcentaje' ? parseNumero(ofertaForm.descuento_pct) : null,
       fecha_inicio: ofertaForm.fecha_inicio,
       fecha_fin: ofertaForm.fecha_fin,
       activa: true,
@@ -839,7 +839,7 @@ export default function Precios() {
                 // columnas para que el despacho lo tome con cualquier lista.
                 <div style={{ gridColumn: '1/-1' }}>
                   <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>🧰 Precio Franquicia (final, ya con el 10%)</label>
-                  <input type="number" value={form.precio_carniceria}
+                  <input type="text" inputMode="decimal" value={form.precio_carniceria}
                     onChange={e => setForm({ ...form, precio_carniceria: e.target.value, precio_mayorista: e.target.value, precio_minorista: e.target.value })}
                     placeholder="Ej: 5500" style={inp} />
                 </div>
@@ -852,7 +852,7 @@ export default function Precios() {
                 ).map(([campo, label]) => (
                   <div key={campo}>
                     <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>{label}</label>
-                    <input type="number" value={form[campo]} onChange={e => setForm({ ...form, [campo]: e.target.value })} placeholder="Vacío = —" style={inp} />
+                    <input type="text" inputMode="decimal" value={form[campo]} onChange={e => setForm({ ...form, [campo]: e.target.value })} placeholder="Vacío = —" style={inp} />
                   </div>
                 ))
               )}
@@ -870,7 +870,7 @@ export default function Precios() {
                     📦 Kg por cajón / unidad
                   </label>
                   <input
-                    type="number" step="0.1" min="0"
+                    type="text" inputMode="decimal"
                     value={form.kg_por_unidad}
                     onChange={e => setForm({ ...form, kg_por_unidad: e.target.value })}
                     placeholder="Ej: 20"
@@ -1011,7 +1011,7 @@ export default function Precios() {
               </div>
               <div>
                 <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Porcentaje (+ aumento / - reducción)</label>
-                <input type="number" step="0.5" placeholder="Ej: 10 para +10%" value={masivoPct} onChange={e => { setMasivoPct(e.target.value); setMasivoPreview([]) }} style={{ ...inp, borderColor: masivoPct ? 'var(--gold)' : 'var(--border)' }} />
+                <input type="text" inputMode="decimal" placeholder="Ej: 10 para +10%" value={masivoPct} onChange={e => { setMasivoPct(e.target.value); setMasivoPreview([]) }} style={{ ...inp, borderColor: masivoPct ? 'var(--gold)' : 'var(--border)' }} />
               </div>
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
@@ -1124,12 +1124,12 @@ export default function Precios() {
               {ofertaForm.tipo === 'fijo' ? (
                 <div>
                   <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>💥 Precio de oferta ($)</label>
-                  <input type="number" value={ofertaForm.precio_oferta} onChange={e => setOfertaForm(f => ({ ...f, precio_oferta: e.target.value }))} placeholder="Ej: 16000" style={{ ...inp, borderColor: 'var(--green)' }} />
+                  <input type="text" inputMode="decimal" value={ofertaForm.precio_oferta} onChange={e => setOfertaForm(f => ({ ...f, precio_oferta: e.target.value }))} placeholder="Ej: 16000" style={{ ...inp, borderColor: 'var(--green)' }} />
                 </div>
               ) : (
                 <div>
                   <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>📉 % de descuento</label>
-                  <input type="number" min="1" max="99" step="1" value={ofertaForm.descuento_pct} onChange={e => setOfertaForm(f => ({ ...f, descuento_pct: e.target.value }))} placeholder="Ej: 20" style={{ ...inp, borderColor: 'var(--gold)' }} />
+                  <input type="text" inputMode="decimal" max="99" value={ofertaForm.descuento_pct} onChange={e => setOfertaForm(f => ({ ...f, descuento_pct: e.target.value }))} placeholder="Ej: 20" style={{ ...inp, borderColor: 'var(--gold)' }} />
                 </div>
               )}
               <div>
@@ -1843,7 +1843,7 @@ function PLUTab({ precios, ofertas = [], onRecargar, categoriasOrden = [], esSuc
   // posición (col 1 sección, 2 nro PLU, 3 descripción, 4 código, 5 lista 1,
   // 6 lista 2, 7 tipo de venta), resto sin asignar; sección por NOMBRE.
   function exportarQendra() {
-    const pct = Number(lista2Pct) || 0
+    const pct = parseNumero(lista2Pct)
     const f = fechaHoyARG()
     const fechaQendra = `${f.slice(8, 10)}/${f.slice(5, 7)}/${f.slice(0, 4)} 12:00:00`
     const conComa = n => `${n},00`
@@ -1963,7 +1963,7 @@ function PLUTab({ precios, ofertas = [], onRecargar, categoriasOrden = [], esSuc
           )}
           <label style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
             Lista 2: −
-            <input type="number" min="0" max="50" step="0.5" value={lista2Pct}
+            <input type="text" inputMode="decimal" max="50" value={lista2Pct}
               onChange={e => setLista2Pct(e.target.value)}
               style={{ width: 55, background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '4px 8px', fontSize: 12 }} />
             % (0 = igual a Lista 1)
