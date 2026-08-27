@@ -339,7 +339,7 @@ export default function DesposteMediaRes() {
                     {p.nombre}
                   </label>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <input type="number" inputMode="decimal" step="0.01" min="0"
+                    <input type="text" inputMode="decimal"
                       value={piezasKg[p.nombre] || ''}
                       onChange={e => setPiezasKg(pk => ({ ...pk, [p.nombre]: e.target.value }))}
                       placeholder="0"
@@ -383,7 +383,7 @@ export default function DesposteMediaRes() {
           ⚖️ Kg de la media res
         </label>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <input type="number" inputMode="decimal" step="0.01" min="0"
+          <input type="text" inputMode="decimal"
             value={kgManual} onChange={e => setKgManual(e.target.value)}
             placeholder="Ej: 95.5" autoFocus
             style={{ ...inp, fontSize: 28, borderColor: 'var(--gold)' }} />

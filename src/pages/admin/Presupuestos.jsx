@@ -5,7 +5,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { fechaHoyARG } from '../../lib/fechas'
-import { fmtPrecio, fmtKg, fmtUnidades } from '../../lib/formatos'
+import { fmtPrecio, fmtKg, fmtUnidades, parseNumero } from '../../lib/formatos'
 import { LISTAS, getLista, getCampoPrecio, listasDeVenta } from '../../lib/listasPrecios'
 import { abrirVentanaImprimible } from '../../lib/pdfPrintable'
 import { useEsMovil } from '../../lib/useEsMovil'
@@ -110,8 +110,10 @@ export default function Presupuestos() {
 
   function agregarItem() {
     if (!productoSel) return mostrarMsg('❌ Elegí un producto del listado')
-    const cant = Number(cantidad)
-    const precio = Number(precioInput)
+    // parseNumero y no Number(): el input es type=text para que no se coma la
+    // coma decimal, y Number("2,5") es NaN.
+    const cant = parseNumero(cantidad)
+    const precio = parseNumero(precioInput)
     if (!cant || cant <= 0) return mostrarMsg('❌ Cargá la cantidad')
     if (!precio || precio <= 0) return mostrarMsg('❌ Cargá el precio unitario')
     const item = {
@@ -306,7 +308,7 @@ export default function Presupuestos() {
               </div>
               <div>
                 <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Cantidad</label>
-                <input type="number" step="0.01" min="0" value={cantidad} onChange={e => setCantidad(e.target.value)} placeholder="0" style={inp} />
+                <input type="text" inputMode="decimal" value={cantidad} onChange={e => setCantidad(e.target.value)} placeholder="0" style={inp} />
               </div>
               <div>
                 <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Unidad</label>
@@ -317,7 +319,7 @@ export default function Presupuestos() {
               </div>
               <div>
                 <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Precio unit.</label>
-                <input type="number" step="0.01" min="0" value={precioInput} onChange={e => setPrecioInput(e.target.value)} placeholder="0" style={inp} />
+                <input type="text" inputMode="decimal" value={precioInput} onChange={e => setPrecioInput(e.target.value)} placeholder="0" style={inp} />
               </div>
               <button onClick={agregarItem}
                 style={{ padding: '10px 18px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", whiteSpace: 'nowrap' }}>

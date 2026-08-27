@@ -752,11 +752,11 @@ setElaboraciones(elaboracionesData || [])
   }
 
   function editarKg(idx, valor) {
-    setPiezas(prev => prev.map((p, i) => i === idx ? { ...p, kg_editado: parseFloat(valor) || 0 } : p))
+    setPiezas(prev => prev.map((p, i) => i === idx ? { ...p, kg_editado: parseNumero(valor) } : p))
   }
 
   function editarPrecio(idx, valor) {
-    setPiezas(prev => prev.map((p, i) => i === idx ? { ...p, precio_venta: parseFloat(valor) || 0 } : p))
+    setPiezas(prev => prev.map((p, i) => i === idx ? { ...p, precio_venta: parseNumero(valor) } : p))
   }
 
   async function confirmarDespostePiezas() {
@@ -872,7 +872,7 @@ setElaboraciones(elaboracionesData || [])
     setLoading(false)
   }
 async function confirmarElaboracionEmbutido() {
-  const kgCerdo = Object.values(piezasEmbutido).reduce((s, v) => s + (parseFloat(v) || 0), 0)
+  const kgCerdo = Object.values(piezasEmbutido).reduce((s, v) => s + parseNumero(v), 0)
   if (kgCerdo === 0) { showAlert('Ingresá al menos una pieza de cerdo', 'error'); return }
   setLoading(true)
   try {
@@ -890,8 +890,8 @@ async function confirmarElaboracionEmbutido() {
     // A qué bucket de stock va cada kg elaborado
     const destinosStock = usaReal ? productosFinales : [{ tipo: tipoEmbutido, kg: kgFinal }]
     const piezasUsadas = Object.entries(piezasEmbutido)
-      .filter(([, v]) => parseFloat(v) > 0)
-      .map(([tipo, v]) => ({ tipo, kg: parseFloat(v) }))
+      .filter(([, v]) => parseNumero(v) > 0)
+      .map(([tipo, v]) => ({ tipo, kg: parseNumero(v) }))
     await supabase.from('elaboraciones_embutidos').insert({
       fecha, tipo: 'embutido', tipo_embutido: tipoEmbutido,
       piezas_usadas: piezasUsadas,
@@ -905,8 +905,8 @@ async function confirmarElaboracionEmbutido() {
       kg_final: kgFinal, maduracion_completa: true, notas
     })
     for (const [tipo, v] of Object.entries(piezasEmbutido)) {
-      if (parseFloat(v) > 0) {
-        const { error } = await actualizarStock(tipo, -parseFloat(v))
+      if (parseNumero(v) > 0) {
+        const { error } = await actualizarStock(tipo, -parseNumero(v))
         if (error) throw new Error(`No se descontó ${tipo}: ${error.message}`)
       }
     }
@@ -957,7 +957,7 @@ async function confirmarElaboracionEmbutido() {
 async function confirmarElaboracionHamburguesa() {
   const esCerdo = tipoHamburguesa === 'hamburguesa_cerdo'
   const piezasUsadas = esCerdo
-    ? Object.entries(piezasEmbutido).filter(([, v]) => parseFloat(v) > 0).map(([tipo, v]) => ({ tipo, kg: parseFloat(v) }))
+    ? Object.entries(piezasEmbutido).filter(([, v]) => parseNumero(v) > 0).map(([tipo, v]) => ({ tipo, kg: parseNumero(v) }))
     : [{ tipo: ORIGEN_HAMBURGUESA[tipoHamburguesa].bucket, kg: parseNumero(kgOrigenHamb) }]
   const kgOrigen = piezasUsadas.reduce((s, p) => s + p.kg, 0)
   if (kgOrigen <= 0) {
@@ -1066,7 +1066,7 @@ async function confirmarElaboracionMilanesa() {
 }
 
 async function confirmarElaboracionSalame() {
-    const kgCerdo = Object.values(piezasEmbutido).reduce((s, v) => s + (parseFloat(v) || 0), 0)
+    const kgCerdo = Object.values(piezasEmbutido).reduce((s, v) => s + parseNumero(v), 0)
     if (kgCerdo === 0) { showAlert('Ingresá al menos una pieza de cerdo', 'error'); return }
     // Variedades de salame de esta tanda (kg netos que entran al secado por cada una)
     const variedades = Object.entries(salameNeto)
@@ -1080,8 +1080,8 @@ async function confirmarElaboracionSalame() {
       // secado (varía mucho cuánto tarda, así que no se fija una fecha).
       const kgTotal = kgCerdo + (parseNumero(kgCarneBovinaEmbutido)) + (parseNumero(kgQuesoEmbutido))
       const piezasUsadas = Object.entries(piezasEmbutido)
-        .filter(([, v]) => parseFloat(v) > 0)
-        .map(([tipo, v]) => ({ tipo, kg: parseFloat(v) }))
+        .filter(([, v]) => parseNumero(v) > 0)
+        .map(([tipo, v]) => ({ tipo, kg: parseNumero(v) }))
       await supabase.from('elaboraciones_embutidos').insert({
         // tipo_embutido = variedad principal (compat con vistas viejas); el
         // detalle por variedad va en productos_finales [{tipo, kg_neto}].
@@ -1097,8 +1097,8 @@ async function confirmarElaboracionSalame() {
         notas
       })
       for (const [tipo, v] of Object.entries(piezasEmbutido)) {
-        if (parseFloat(v) > 0) {
-          const { error } = await actualizarStock(tipo, -parseFloat(v))
+        if (parseNumero(v) > 0) {
+          const { error } = await actualizarStock(tipo, -parseNumero(v))
           if (error) throw new Error(`No se descontó ${tipo}: ${error.message}`)
         }
       }
@@ -1338,13 +1338,13 @@ async function confirmarDesposteCerdo() {
 }
   async function confirmarConversionPieza() {
   if (!kgPiezaConvertir || !nombrePieza) { showAlert('Completa todos los campos', 'error'); return }
-  const kg = parseFloat(kgPiezaConvertir)
+  const kg = parseNumero(kgPiezaConvertir)
   const merma = mermaPieza / 100
   const kgNeto = parseFloat((kg * (1 - merma)).toFixed(2))
   // COSTO REAL: el costo bruto de la pieza (kg × precio/kg) se reparte sobre los
   // kg NETOS (con merma), así el corte resultante refleja su costo real por kg.
   // Ej: 39,8 kg × $10.500 = $417.900 ÷ 29,05 kg (con merma) = $14.385/kg.
-  const costoBasePieza = parseFloat(precioCostoPieza) || piezaIndividualSeleccionada?.precio_costo_kg || 0
+  const costoBasePieza = parseNumero(precioCostoPieza) || piezaIndividualSeleccionada?.precio_costo_kg || 0
   const costoRealKg = (kgNeto > 0 && costoBasePieza > 0)
     ? parseFloat(((kg * costoBasePieza) / kgNeto).toFixed(2))
     : costoBasePieza
@@ -1518,9 +1518,9 @@ async function confirmarDesposteCerdo() {
                       <td style={{ fontWeight: 600 }}>{p.nombre}</td>
                       <td style={{ color: 'var(--muted)', fontSize: 11 }}>{(MODELOS_DESPOSTE[modelo].piezas[i]?.pct * 100).toFixed(1)}%</td>
                       <td style={{ color: 'var(--muted)', fontSize: 11 }}>{fmtKg(p.kg, { decimales: 2 })}</td>
-                      <td><input type="number" step="0.1" value={p.kg_editado} onChange={e => editarKg(i, e.target.value)} style={{ ...inp, width: 75, borderColor: Math.abs(p.kg_editado - p.kg) > 2 ? 'var(--amber)' : 'var(--border)' }} /></td>
+                      <td><input type="text" inputMode="decimal" value={p.kg_editado} onChange={e => editarKg(i, e.target.value)} style={{ ...inp, width: 75, borderColor: Math.abs(p.kg_editado - p.kg) > 2 ? 'var(--amber)' : 'var(--border)' }} /></td>
                       <td style={{ color: 'var(--gold)', fontSize: 11, fontWeight: 600 }}>{pctReal.toFixed(1)}%</td>
-                      <td><input type="number" value={p.precio_venta} onChange={e => editarPrecio(i, e.target.value)} style={{ ...inp, width: 100, borderColor: 'var(--gold)' }} /></td>
+                      <td><input type="text" inputMode="decimal" value={p.precio_venta} onChange={e => editarPrecio(i, e.target.value)} style={{ ...inp, width: 100, borderColor: 'var(--gold)' }} /></td>
                       <td style={{ color: 'var(--green)', fontWeight: 600, fontSize: 12 }}>{fmtPrecio((p.kg_editado || 0) * (p.precio_venta || 0))}</td>
                     </tr>
                   )})}
@@ -1707,12 +1707,12 @@ async function confirmarDesposteCerdo() {
       </div>
       <div className="form-group" style={{ marginBottom: 12 }}>
         <label>Kg a convertir</label>
-        <input type="number" step="0.1" value={kgPiezaConvertir} onChange={e => setKgPiezaConvertir(e.target.value)} placeholder="0" style={{ ...inp, borderColor: 'var(--gold)' }} />
+        <input type="text" inputMode="decimal" value={kgPiezaConvertir} onChange={e => setKgPiezaConvertir(e.target.value)} placeholder="0" style={{ ...inp, borderColor: 'var(--gold)' }} />
       </div>
       <div style={{ marginBottom: 14 }}>
         <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>% de merma de la pieza</label>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <input type="number" step="0.5" min="0" max="50" value={mermaPieza} onChange={e => setMermaPieza(parseFloat(e.target.value) || 0)}
+          <input type="text" inputMode="decimal" value={mermaPieza} onChange={e => setMermaPieza(parseNumero(e.target.value) || 0)}
             style={{ ...inp, width: 80, borderColor: 'var(--gold)', textAlign: 'center', fontSize: 18, fontWeight: 700 }} />
           {(() => {
             const linked = nombrePieza ? mermaConfig.piezas?.[nombrePieza] : undefined
@@ -1732,7 +1732,7 @@ async function confirmarDesposteCerdo() {
       {kgPiezaConvertir > 0 && (
         <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, marginBottom: 14 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
-            <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg pieza</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{fmtKg(parseFloat(kgPiezaConvertir), { decimales: 2 })}</div></div>
+            <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg pieza</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{fmtKg(parseNumero(kgPiezaConvertir), { decimales: 2 })}</div></div>
             <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Merma {mermaPieza}%</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--red-light)' }}>-{fmtKg(parseFloat(kgPiezaConvertir) * mermaPieza / 100, { decimales: 2 })}</div></div>
             <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg a cortes</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--green)' }}>{fmtKg(parseFloat(kgPiezaConvertir) * (1 - mermaPieza / 100), { decimales: 2 })}</div></div>
           </div>
@@ -1740,13 +1740,13 @@ async function confirmarDesposteCerdo() {
       )}
       <div className="form-group" style={{ marginBottom: 12 }}>
         <label>Precio costo/kg de la pieza</label>
-        <input type="number" value={precioCostoPieza} onChange={e => setPrecioCostoPieza(e.target.value)} placeholder="Ej: 10500" style={inp} />
+        <input type="text" inputMode="decimal" value={precioCostoPieza} onChange={e => setPrecioCostoPieza(e.target.value)} placeholder="Ej: 10500" style={inp} />
         {(() => {
-          const base = parseFloat(precioCostoPieza) || 0
-          const kgN = parseFloat(kgPiezaConvertir) * (1 - mermaPieza / 100)
-          const costoReal = (base > 0 && kgN > 0) ? (parseFloat(kgPiezaConvertir) * base) / kgN : 0
+          const base = parseNumero(precioCostoPieza)
+          const kgN = parseNumero(kgPiezaConvertir) * (1 - mermaPieza / 100)
+          const costoReal = (base > 0 && kgN > 0) ? (parseNumero(kgPiezaConvertir) * base) / kgN : 0
           if (!(costoReal > 0)) return null
-          const bruto = parseFloat(kgPiezaConvertir) * base
+          const bruto = parseNumero(kgPiezaConvertir) * base
           return (
             <div style={{ marginTop: 8, padding: '10px 12px', background: 'rgba(201,168,76,0.1)', border: '1px solid var(--amber)', borderRadius: 8 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1754,7 +1754,7 @@ async function confirmarDesposteCerdo() {
                 <span style={{ fontSize: 22, fontWeight: 700, color: 'var(--amber)', fontFamily: "'Bebas Neue',cursive" }}>{fmtPrecio(costoReal)}/kg</span>
               </div>
               <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
-                {fmtKg(parseFloat(kgPiezaConvertir), { decimales: 2 })} × {fmtPrecio(base)} = {fmtPrecio(bruto)} ÷ {fmtKg(kgN, { decimales: 2 })} kg
+                {fmtKg(parseNumero(kgPiezaConvertir), { decimales: 2 })} × {fmtPrecio(base)} = {fmtPrecio(bruto)} ÷ {fmtKg(kgN, { decimales: 2 })} kg
               </div>
             </div>
           )
@@ -1837,7 +1837,7 @@ async function confirmarDesposteCerdo() {
           ].map(p => (
             <div key={p.id}>
               <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>{p.label}</label>
-              <input type="number" step="0.1" placeholder="0" value={piezasCerdo[p.id]} onChange={e => setPiezasCerdo(prev => ({ ...prev, [p.id]: e.target.value }))}
+              <input type="text" inputMode="decimal" placeholder="0" value={piezasCerdo[p.id]} onChange={e => setPiezasCerdo(prev => ({ ...prev, [p.id]: e.target.value }))}
                 style={{ ...inp, borderColor: piezasCerdo[p.id] ? 'var(--amber)' : 'var(--border)' }} />
             </div>
           ))}
@@ -1850,7 +1850,7 @@ async function confirmarDesposteCerdo() {
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span style={{ fontSize: 12, color: 'var(--muted)' }}>Kg registrados:</span>
             <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: 'var(--amber)' }}>
-              {Object.values(piezasCerdo).reduce((s, v) => s + (parseFloat(v) || 0), 0).toFixed(1)} kg
+              {Object.values(piezasCerdo).reduce((s, v) => s + parseNumero(v), 0).toFixed(1)} kg
             </span>
           </div>
         </div>
@@ -1901,7 +1901,7 @@ async function confirmarDesposteCerdo() {
             </select>
             <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>% de merma (−) o aumento (+)</label>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-              <input type="number" step="0.5" min="-50" max="30" value={pctAumentoEmbutido} onChange={e => setPctAumentoEmbutido(parseFloat(e.target.value) || 0)}
+              <input type="text" inputMode="decimal" value={pctAumentoEmbutido} onChange={e => setPctAumentoEmbutido(parseFloat(e.target.value) || 0)}
                 style={{ ...inp, width: 90, borderColor: 'var(--gold)', textAlign: 'center', fontSize: 18, fontWeight: 700 }} />
               <span style={{ fontSize: 12, color: 'var(--muted)' }}>% — <strong style={{ color: '#ff8b8b' }}>negativo = merma</strong> · positivo = agregados (vino, tripas, especias)</span>
             </div>
@@ -1933,7 +1933,7 @@ async function confirmarDesposteCerdo() {
             ].map(s => (
               <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 8 }}>
                 <span style={{ fontSize: 13 }}>{s.label}</span>
-                <input type="number" step="0.1" min="0" placeholder="0 kg"
+                <input type="text" inputMode="decimal" placeholder="0 kg"
                   value={salameNeto[s.id]}
                   onChange={e => setSalameNeto(prev => ({ ...prev, [s.id]: e.target.value }))}
                   style={{ ...inp, width: 120, borderColor: salameNeto[s.id] ? 'var(--gold)' : 'var(--border)' }} />
@@ -2080,7 +2080,7 @@ async function confirmarDesposteCerdo() {
 
             <div className="form-group" style={{ marginBottom: 12 }}>
               <label>{esCerdoMila ? 'Kg de la pieza que se usaron' : ORIGEN_MILANESA[tipoMilanesa].label}</label>
-              <input type="number" step="0.01" value={kgOrigenMila} onChange={e => setKgOrigenMila(e.target.value)}
+              <input type="text" inputMode="decimal" value={kgOrigenMila} onChange={e => setKgOrigenMila(e.target.value)}
                 placeholder="0" style={{ ...inp, borderColor: kgIn > dispon ? 'var(--red-light)' : 'var(--border)' }} />
               {kgIn > dispon && (
                 <div style={{ fontSize: 11, color: 'var(--red-light)', marginTop: 4, fontWeight: 600 }}>
@@ -2091,7 +2091,7 @@ async function confirmarDesposteCerdo() {
 
             <div className="form-group" style={{ marginBottom: 12 }}>
               <label>🍗 Kg de milanesas que salieron (peso final)</label>
-              <input type="number" step="0.01" value={kgFinalMila} onChange={e => setKgFinalMila(e.target.value)}
+              <input type="text" inputMode="decimal" value={kgFinalMila} onChange={e => setKgFinalMila(e.target.value)}
                 placeholder="0" style={{ ...inp, borderColor: kgOut > 0 ? 'var(--green)' : 'var(--border)' }} />
             </div>
 
@@ -2153,7 +2153,7 @@ async function confirmarDesposteCerdo() {
         ].map(p => (
           <div key={p.id}>
             <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>{p.label}</label>
-            <input type="number" step="0.1" placeholder="0" value={piezasEmbutido[p.id]} onChange={e => setPiezasEmbutido(prev => ({ ...prev, [p.id]: e.target.value }))}
+            <input type="text" inputMode="decimal" placeholder="0" value={piezasEmbutido[p.id]} onChange={e => setPiezasEmbutido(prev => ({ ...prev, [p.id]: e.target.value }))}
               style={{ ...inp, borderColor: piezasEmbutido[p.id] ? 'var(--gold)' : 'var(--border)' }} />
           </div>
         ))}
@@ -2162,13 +2162,13 @@ async function confirmarDesposteCerdo() {
       {tipoElaboracion !== 'hamburguesa' && (
       <div className="form-group" style={{ marginBottom: 10 }}>
         <label>{tipoElaboracion === 'embutido' ? '🐷 Retazos cerdo (kg) — se descuentan de Cabezas de cerdo' : '🥩 Carne bovina (kg)'}</label>
-        <input type="number" step="0.1" placeholder="0" value={kgCarneBovinaEmbutido} onChange={e => setKgCarneBovinaEmbutido(e.target.value)} style={{ ...inp, borderColor: 'var(--gold)' }} />
+        <input type="text" inputMode="decimal" placeholder="0" value={kgCarneBovinaEmbutido} onChange={e => setKgCarneBovinaEmbutido(e.target.value)} style={{ ...inp, borderColor: 'var(--gold)' }} />
       </div>
       )}
       {tipoElaboracion === 'hamburguesa' && (() => {
         const esCerdoH = tipoHamburguesa === 'hamburguesa_cerdo'
         const kgOrigenH = esCerdoH
-          ? Object.values(piezasEmbutido).reduce((s, v) => s + (parseFloat(v) || 0), 0)
+          ? Object.values(piezasEmbutido).reduce((s, v) => s + parseNumero(v), 0)
           : parseNumero(kgOrigenHamb)
         const kgFinalH = parseNumero(kgFinalHamb)
         const pctH = (kgOrigenH > 0 && kgFinalH > 0) ? ((kgFinalH / kgOrigenH - 1) * 100) : null
@@ -2178,7 +2178,7 @@ async function confirmarDesposteCerdo() {
             {!esCerdoH && (
               <div className="form-group" style={{ marginBottom: 10 }}>
                 <label>{origenCfg.label}</label>
-                <input type="number" step="0.1" placeholder="0" value={kgOrigenHamb} onChange={e => setKgOrigenHamb(e.target.value)} style={{ ...inp, borderColor: 'var(--gold)' }} />
+                <input type="text" inputMode="decimal" placeholder="0" value={kgOrigenHamb} onChange={e => setKgOrigenHamb(e.target.value)} style={{ ...inp, borderColor: 'var(--gold)' }} />
                 <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 3 }}>
                   Disponible: {fmtKg(piezasStock[origenCfg.bucket] || 0, { decimales: 2 })}
                 </div>
@@ -2186,7 +2186,7 @@ async function confirmarDesposteCerdo() {
             )}
             <div className="form-group" style={{ marginBottom: 10 }}>
               <label>🍔 Kg de hamburguesas elaboradas (peso final)</label>
-              <input type="number" step="0.1" placeholder="0" value={kgFinalHamb} onChange={e => setKgFinalHamb(e.target.value)} style={{ ...inp, borderColor: 'var(--green)' }} />
+              <input type="text" inputMode="decimal" placeholder="0" value={kgFinalHamb} onChange={e => setKgFinalHamb(e.target.value)} style={{ ...inp, borderColor: 'var(--green)' }} />
             </div>
             <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, marginBottom: 14 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
@@ -2200,7 +2200,7 @@ async function confirmarDesposteCerdo() {
       })()}
 
       {tipoElaboracion === 'embutido' && (() => {
-        const kgCerdoB = Object.values(piezasEmbutido).reduce((s, v) => s + (parseFloat(v) || 0), 0)
+        const kgCerdoB = Object.values(piezasEmbutido).reduce((s, v) => s + parseNumero(v), 0)
         const kgTotB = kgCerdoB + parseNumero(kgCarneBovinaEmbutido)
         const totalElab = Object.values(pesoRealEmb).reduce((s, v) => s + parseNumero(v), 0)
         const mermaCalc = (kgTotB > 0 && totalElab > 0) ? ((totalElab / kgTotB - 1) * 100) : null
@@ -2218,7 +2218,7 @@ async function confirmarDesposteCerdo() {
               ].map(p => (
                 <div key={p.id}>
                   <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>{p.label}</label>
-                  <input type="number" step="0.1" placeholder="0" value={pesoRealEmb[p.id]} onChange={e => setPesoRealEmb(prev => ({ ...prev, [p.id]: e.target.value }))} style={{ ...inp, borderColor: pesoRealEmb[p.id] ? 'var(--gold)' : 'var(--border)' }} />
+                  <input type="text" inputMode="decimal" placeholder="0" value={pesoRealEmb[p.id]} onChange={e => setPesoRealEmb(prev => ({ ...prev, [p.id]: e.target.value }))} style={{ ...inp, borderColor: pesoRealEmb[p.id] ? 'var(--gold)' : 'var(--border)' }} />
                 </div>
               ))}
             </div>
@@ -2241,13 +2241,13 @@ async function confirmarDesposteCerdo() {
       {tipoElaboracion === 'salame' && parseNumero(salameNeto.salame_holanda) > 0 && (
         <div className="form-group" style={{ marginBottom: 10 }}>
           <label>🧀 Queso Holanda (kg)</label>
-          <input type="number" step="0.1" placeholder="0" value={kgQuesoEmbutido} onChange={e => setKgQuesoEmbutido(e.target.value)} style={{ ...inp, borderColor: 'var(--amber)' }} />
+          <input type="text" inputMode="decimal" placeholder="0" value={kgQuesoEmbutido} onChange={e => setKgQuesoEmbutido(e.target.value)} style={{ ...inp, borderColor: 'var(--amber)' }} />
         </div>
       )}
       {tipoElaboracion !== 'hamburguesa' && (
       <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, marginBottom: 14 }}>
         {(() => {
-          const kgCerdo = Object.values(piezasEmbutido).reduce((s, v) => s + (parseFloat(v) || 0), 0)
+          const kgCerdo = Object.values(piezasEmbutido).reduce((s, v) => s + parseNumero(v), 0)
           const kgBovino = parseNumero(kgCarneBovinaEmbutido)
           const kgQueso = parseNumero(kgQuesoEmbutido)
           const kgTotal = kgCerdo + kgBovino + kgQueso
@@ -2924,7 +2924,7 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, onEditarProd
                       <div key={v.tipo} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                         <span style={{ fontSize: 13 }}>{NOMBRE_EMBUTIDO[v.tipo] || v.tipo}{Number(v.kg_neto) > 0 ? ` · ${Number(v.kg_neto).toFixed(1)} kg netos` : ''}</span>
                         <input
-                          type="number" step="0.1" min="0"
+                          type="text" inputMode="decimal"
                           value={kgFinales[v.tipo] || ''}
                           onChange={ev => setKgFinales(prev => ({ ...prev, [v.tipo]: ev.target.value }))}
                           placeholder="kg finales"
@@ -2966,7 +2966,7 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, onEditarProd
                     <div key={tipo} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                       <span style={{ fontSize: 13 }}>{NOMBRE_EMBUTIDO[tipo] || tipo.replace(/_/g, ' ')}</span>
                       <input
-                        type="number" step="0.1" min="0"
+                        type="text" inputMode="decimal"
                         value={kgEdit[tipo] || ''}
                         onChange={ev => setKgEdit(prev => ({ ...prev, [tipo]: ev.target.value }))}
                         placeholder="0 kg"
@@ -3856,12 +3856,12 @@ async function ejecutarAnulacion(entrada) {
                   const cant = Math.max(1, parseInt(form.cantidad) || 1)
                   if (esSoloUnidades) return `📦 Se sumarán ${cant} unidades al stock`
                   if (esCajaIndividual) {
-                    const total = cajasPesos.reduce((s, p) => s + (parseFloat(p) || 0), 0)
+                    const total = cajasPesos.reduce((s, p) => s + parseNumero(p), 0)
                     return total > 0
                       ? `📦 Total: ${cant} cajas = ${total.toFixed(1)} kg`
                       : '📦 Cargá el peso de cada caja abajo'
                   }
-                  const kgU = parseFloat(form.kg) || 0
+                  const kgU = parseNumero(form.kg)
                   return kgU > 0 ? `📦 Total: ${cant} × ${kgU} kg = ${(cant * kgU).toFixed(1)} kg al stock` : '📦 Ingresá kg por unidad para ver el total'
                 })()}
               </div>
@@ -3905,7 +3905,7 @@ async function ejecutarAnulacion(entrada) {
                 <div key={idx}>
                   <label style={{ fontSize: 10, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Caja #{idx + 1} (kg)</label>
                   <input
-                    type="number" step="0.01" min="0" placeholder="0.0"
+                    type="text" inputMode="decimal" placeholder="0.0"
                     value={p}
                     onChange={e => setCajasPesos(prev => prev.map((v, i) => i === idx ? e.target.value : v))}
                     style={{ width: '100%', background: 'var(--surface)', border: `1px solid ${p ? 'var(--gold)' : 'var(--border)'}`, color: 'var(--text)', borderRadius: 6, padding: '6px 8px', fontSize: 14, fontWeight: 600, boxSizing: 'border-box' }}
@@ -3922,7 +3922,7 @@ async function ejecutarAnulacion(entrada) {
         {!esSoloUnidades && !esCajaIndividual && (
           <div className="form-row">
             <div className="form-group"><label>{TIPOS_EN_UNIDADES.includes(form.tipo) ? 'Kg por unidad' : 'Kg'}</label>
-              {/* type="text": el type="number" se come la coma decimal según el
+              {/* type="text": el type="text" inputMode="decimal" se come la coma decimal según el
                   idioma del navegador. El 25/08/2026 Monte Cristo cargó una
                   bondiola de "5,500 kg" y entró como 5500 kg / $43.725.000 (lo
                   detectó y lo eliminó ella misma). Ver el comentario largo en
@@ -3937,13 +3937,13 @@ async function ejecutarAnulacion(entrada) {
         {esSoloUnidades && (
           <div className="form-row">
             <div className="form-group"><label>Precio por unidad ($)</label>
-              <input type="number" value={form.precioKg} onChange={e => setForm(f => ({ ...f, precioKg: e.target.value }))} placeholder="Ej: 1200" />
+              <input type="text" inputMode="decimal" value={form.precioKg} onChange={e => setForm(f => ({ ...f, precioKg: e.target.value }))} placeholder="Ej: 1200" />
             </div>
             <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end' }}>
               <div style={{ fontSize: 12, color: 'var(--muted)', paddingBottom: 8 }}>
                 {(() => {
                   const cant = Math.max(1, parseInt(form.cantidad) || 1)
-                  const pu = parseFloat(form.precioKg) || 0
+                  const pu = parseNumero(form.precioKg)
                   return pu > 0 ? `💰 Sugerido: ${cant} × $${pu.toLocaleString('es-AR')} = $${(cant * pu).toLocaleString('es-AR')}` : 'Cargá el precio por unidad para ver el total sugerido'
                 })()}
               </div>
@@ -3953,7 +3953,7 @@ async function ejecutarAnulacion(entrada) {
         <div className="form-row">
           {form.tipo === 'bovino_mr' && (
             <div className="form-group"><label>Merma % (opcional)</label>
-              <input type="number" step="0.5" placeholder="2.5" value={form.merma} onChange={e => setForm(f => ({ ...f, merma: e.target.value }))} />
+              <input type="text" inputMode="decimal" placeholder="2.5" value={form.merma} onChange={e => setForm(f => ({ ...f, merma: e.target.value }))} />
             </div>
           )}
           {/* Los tipos que se compran por kg (media res, capón, piezas bovinas
@@ -3961,7 +3961,7 @@ async function ejecutarAnulacion(entrada) {
               no piden importe total — el campo solo aparece para el resto. */}
           {!TIPOS_COMPRA_POR_KG.has(form.tipo) && (
             <div className="form-group"><label>Importe total ($)</label>
-              <input type="number" placeholder="0" value={form.importe} onChange={e => setForm(f => ({ ...f, importe: e.target.value }))} />
+              <input type="text" inputMode="decimal" placeholder="0" value={form.importe} onChange={e => setForm(f => ({ ...f, importe: e.target.value }))} />
             </div>
           )}
           <div className="form-group"><label>Destino</label>
@@ -4045,8 +4045,8 @@ async function ejecutarAnulacion(entrada) {
                   <td style={{ color: 'var(--muted)', fontSize: 12 }}>{TIPOS[e.tipo] || e.tipo}</td>
                   <td><input value={formEdit.proveedor} onChange={x => setFormEdit(f => ({ ...f, proveedor: x.target.value }))} style={{ ...inp, width: 110 }} /></td>
                   <td><input value={formEdit.descripcion} onChange={x => setFormEdit(f => ({ ...f, descripcion: x.target.value }))} style={{ ...inp, width: 130 }} /></td>
-                  <td><input type="number" step="0.1" value={formEdit.kg} onChange={x => setFormEdit(f => ({ ...f, kg: x.target.value }))} style={{ ...inp, width: 70, borderColor: 'var(--gold)' }} /></td>
-                  <td><input type="number" value={formEdit.precioKg} onChange={x => setFormEdit(f => ({ ...f, precioKg: x.target.value }))} style={{ ...inp, width: 90 }} /></td>
+                  <td><input type="text" inputMode="decimal" value={formEdit.kg} onChange={x => setFormEdit(f => ({ ...f, kg: x.target.value }))} style={{ ...inp, width: 70, borderColor: 'var(--gold)' }} /></td>
+                  <td><input type="text" inputMode="decimal" value={formEdit.precioKg} onChange={x => setFormEdit(f => ({ ...f, precioKg: x.target.value }))} style={{ ...inp, width: 90 }} /></td>
                   <td>
                     <div style={{ display: 'flex', gap: 4 }}>
                       <button onClick={() => guardarEdicion(e)} style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>💾</button>
@@ -4553,7 +4553,7 @@ async function agregarItem() {
     }
     // ⛔ FRENO AL KG ABSURDO — la coma comida.
     // El 26/08/2026 Monte Cristo emitió el remito 1916 con "TAPA DE NALGA 2755
-    // kg" y "NALGA 4715 kg": eran 2,755 y 4,715 kg. El <input type="number">
+    // kg" y "NALGA 4715 kg": eran 2,755 y 4,715 kg. El <input type="text" inputMode="decimal">
     // se tragaba la coma (ver el comentario en el input) y multiplicaba por
     // 1000. Le cargó $136.720.037 a la cuenta corriente de ME GUSTA y dejó el
     // stock en −7.234 kg.
@@ -5342,8 +5342,8 @@ for (const item of items) {
 
         <div className="form-row">
           <div className="form-group"><label>{esCaja ? 'Kg (auto desde la caja seleccionada)' : esUnidad ? 'Cantidad de unidades' : 'Kg'}</label>
-            {/* type="text" + inputMode="decimal", NO type="number".
-                `type="number"` acepta la coma o la tira según el IDIOMA DEL
+            {/* type="text" +, NO type="text" inputMode="decimal".
+                `type="text" inputMode="decimal"` acepta la coma o la tira según el IDIOMA DEL
                 NAVEGADOR: en un Chrome en español "2,755" queda 2.755, pero en
                 uno en inglés —el default de una PC recién instalada, como la de
                 Monte Cristo— la coma se descarta SIN AVISAR y queda 2755. Así
@@ -5394,7 +5394,7 @@ for (const item of items) {
               <input placeholder="Ej: Bolsas N°2, Cinta, Bandejas..." value={formManual.descripcion} onChange={e => setFormManual(f => ({ ...f, descripcion: e.target.value }))} onKeyDown={e => e.key === 'Enter' && agregarItemManual()} />
             </div>
             <div className="form-group" style={{ flex: 1 }}><label>Importe $</label>
-              <input type="number" step="0.01" placeholder="0" value={formManual.importe} onChange={e => setFormManual(f => ({ ...f, importe: e.target.value }))} onKeyDown={e => e.key === 'Enter' && agregarItemManual()} />
+              <input type="text" inputMode="decimal" placeholder="0" value={formManual.importe} onChange={e => setFormManual(f => ({ ...f, importe: e.target.value }))} onKeyDown={e => e.key === 'Enter' && agregarItemManual()} />
             </div>
             <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end' }}>
               <button onClick={agregarItemManual} className="btn btn-ghost" style={{ whiteSpace: 'nowrap' }}>➕ Agregar al remito</button>
@@ -5469,7 +5469,7 @@ for (const item of items) {
                     <option value="cheque">Cheque</option>
                     <option value="echeq">E-cheq</option>
                   </select>
-                  <input type="number" step="0.01" placeholder="$ monto" value={p.monto}
+                  <input type="text" inputMode="decimal" placeholder="$ monto" value={p.monto}
                     onChange={e => setPagosSplit(arr => arr.map((x, j) => j === i ? { ...x, monto: e.target.value } : x))}
                     style={{ width: 150 }} />
                   <button type="button" title="Autocompletar con lo que falta"
@@ -5746,9 +5746,9 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
   function editarItem(idx, campo, valor) {
     setItemsEdit(prev => {
       const items = [...prev]
-      items[idx] = { ...items[idx], [campo]: parseFloat(valor) || valor }
+      items[idx] = { ...items[idx], [campo]: parseNumero(valor) || valor }
       if (campo === 'kg' || campo === 'precio') {
-        items[idx].importe = (parseFloat(items[idx].kg) || 0) * (parseFloat(items[idx].precio) || 0)
+        items[idx].importe = parseNumero(items[idx].kg) * parseNumero(items[idx].precio)
       }
       return items
     })
@@ -5761,9 +5761,9 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
     const prod = todosPrecios.find(p => p.id === nuevoProductoId)
     const item = {
       descripcion: prod?.nombre || '',
-      kg: parseFloat(nuevoKg),
-      precio: parseFloat(nuevoPrecio),
-      importe: parseFloat(nuevoKg) * parseFloat(nuevoPrecio),
+      kg: parseNumero(nuevoKg),
+      precio: parseNumero(nuevoPrecio),
+      importe: parseNumero(nuevoKg) * parseNumero(nuevoPrecio),
       tipo: nuevaCategoria
     }
     setItemsEdit(prev => [...prev, item])
@@ -5774,7 +5774,7 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
     if (itemsEdit.length === 0) { showAlert('Debe tener al menos un producto', 'error'); return }
     if (!fechaEdit) { showAlert('La fecha de emisión no puede estar vacía', 'error'); return }
     if (esFechaFutura(fechaEdit)) { showAlert(`⛔ La fecha no puede ser futura (hoy es ${fechaHoyARG()})`, 'error'); return }
-    const nuevoTotal = itemsEdit.reduce((s, i) => s + (parseFloat(i.importe) || 0), 0)
+    const nuevoTotal = itemsEdit.reduce((s, i) => s + parseNumero(i.importe), 0)
     const diferencia = nuevoTotal - (editando.total || 0)
     const fechaAnterior = editando.fecha
     const fechaCambio = fechaEdit !== fechaAnterior
@@ -5953,7 +5953,7 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
   const productosFiltrados = todosPrecios.filter(p => p.categoria === nuevaCategoria)
 
   if (editando) {
-    const nuevoTotal = itemsEdit.reduce((s, i) => s + (parseFloat(i.importe) || 0), 0)
+    const nuevoTotal = itemsEdit.reduce((s, i) => s + parseNumero(i.importe), 0)
     return (
       <div>
         {alert && <div style={{ background: alert.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${alert.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: alert.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>{alert.msg}</div>}
@@ -5996,8 +5996,8 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
               {itemsEdit.map((item, i) => (
                 <tr key={i}>
                   <td style={{ fontWeight: 500 }}>{item.descripcion}</td>
-                  <td><input type="number" step="0.1" value={item.kg} onChange={e => editarItem(i, 'kg', e.target.value)} style={{ ...inp, width: 70 }} /></td>
-                  <td><input type="number" value={item.precio} onChange={e => editarItem(i, 'precio', e.target.value)} style={{ ...inp, width: 100 }} /></td>
+                  <td><input type="text" inputMode="decimal" value={item.kg} onChange={e => editarItem(i, 'kg', e.target.value)} style={{ ...inp, width: 70 }} /></td>
+                  <td><input type="text" inputMode="decimal" value={item.precio} onChange={e => editarItem(i, 'precio', e.target.value)} style={{ ...inp, width: 100 }} /></td>
                   <td style={{ color: 'var(--gold)', fontWeight: 600 }}>${Math.round(item.importe || 0).toLocaleString('es-AR')}</td>
                   <td><button onClick={() => quitarItemEdit(i)} style={{ background: 'none', border: 'none', color: 'var(--red-light)', cursor: 'pointer', fontSize: 16 }}>🗑️</button></td>
                 </tr>
@@ -6021,8 +6021,8 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
                   {productosFiltrados.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
                 </select>
               </div>
-              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Kg</label><input type="number" step="0.1" placeholder="0" value={nuevoKg} onChange={e => setNuevoKg(e.target.value)} style={{ ...inp, width: '100%' }} /></div>
-              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Precio/kg</label><input type="number" placeholder="0" value={nuevoPrecio} onChange={e => setNuevoPrecio(e.target.value)} style={{ ...inp, width: '100%', borderColor: 'var(--gold)' }} /></div>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Kg</label><input type="text" inputMode="decimal" placeholder="0" value={nuevoKg} onChange={e => setNuevoKg(e.target.value)} style={{ ...inp, width: '100%' }} /></div>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Precio/kg</label><input type="text" inputMode="decimal" placeholder="0" value={nuevoPrecio} onChange={e => setNuevoPrecio(e.target.value)} style={{ ...inp, width: '100%', borderColor: 'var(--gold)' }} /></div>
               <button onClick={agregarItemEdit} className="btn btn-ghost" style={{ whiteSpace: 'nowrap', alignSelf: 'flex-end' }}>➕</button>
             </div>
           </div>
@@ -6595,8 +6595,8 @@ export function ProveedoresTab() {
               <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Proveedor</label><select value={formCompra.proveedor_nombre} onChange={e => setFormCompra(f => ({ ...f, proveedor_nombre: e.target.value }))} style={inp}><option value="">— Seleccioná —</option>{proveedoresNombres.map(p => <option key={p}>{p}</option>)}</select></div>
               <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Producto</label><input value={formCompra.producto} onChange={e => setFormCompra(f => ({ ...f, producto: e.target.value }))} placeholder="Ej: Bovino Media Res" style={inp} /></div>
               <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Fecha</label><input type="date" value={formCompra.fecha} max={fechaHoyARG()} onChange={e => setFormCompra(f => ({ ...f, fecha: e.target.value }))} style={inp} /></div>
-              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Kg</label><input type="number" value={formCompra.kg} onChange={e => setFormCompra(f => ({ ...f, kg: e.target.value }))} placeholder="0" style={inp} /></div>
-              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Importe ($)</label><input type="number" value={formCompra.importe} onChange={e => setFormCompra(f => ({ ...f, importe: e.target.value }))} placeholder="0" style={{ ...inp, borderColor: 'var(--gold)' }} /></div>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Kg</label><input type="text" inputMode="decimal" value={formCompra.kg} onChange={e => setFormCompra(f => ({ ...f, kg: e.target.value }))} placeholder="0" style={inp} /></div>
+              <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Importe ($)</label><input type="text" inputMode="decimal" value={formCompra.importe} onChange={e => setFormCompra(f => ({ ...f, importe: e.target.value }))} placeholder="0" style={{ ...inp, borderColor: 'var(--gold)' }} /></div>
               <div><label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Semana</label><div style={{ display: 'flex', gap: 4 }}><input type="date" value={formCompra.semana_inicio} onChange={e => setFormCompra(f => ({ ...f, semana_inicio: e.target.value }))} style={{ ...inp, fontSize: 11 }} /><input type="date" value={formCompra.semana_fin} onChange={e => setFormCompra(f => ({ ...f, semana_fin: e.target.value }))} style={{ ...inp, fontSize: 11 }} /></div></div>
             </div>
             <button className="btn btn-gold" onClick={guardarCompra} disabled={procesandoProv} style={{ opacity: procesandoProv ? 0.5 : 1, cursor: procesandoProv ? 'not-allowed' : 'pointer' }}>{procesandoProv ? '⏳ Registrando…' : '✅ Registrar compra'}</button>
@@ -7379,7 +7379,7 @@ function EditorMerma({ config, onSave, inicialAbierto = false }) {
             {Object.keys(draft.piezas || {}).map(nombre => (
               <div key={nombre} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface2)', borderRadius: 8, padding: '6px 10px' }}>
                 <span style={{ flex: 1, fontSize: 12 }}>{nombre}</span>
-                <input type="number" step="0.5" min="0" max="50" value={draft.piezas[nombre]} onChange={e => setPieza(nombre, e.target.value)} style={{ ...inp, width: 64, textAlign: 'center', fontWeight: 700 }} />
+                <input type="text" inputMode="decimal" value={draft.piezas[nombre]} onChange={e => setPieza(nombre, e.target.value)} style={{ ...inp, width: 64, textAlign: 'center', fontWeight: 700 }} />
                 <span style={{ fontSize: 12, color: 'var(--muted)' }}>%</span>
               </div>
             ))}
@@ -7403,7 +7403,7 @@ function EditorMerma({ config, onSave, inicialAbierto = false }) {
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface2)', borderRadius: 8, padding: '6px 10px' }}>
                 <input value={m.label} onChange={e => setMedia(i, 'label', e.target.value)} placeholder="Ej: Novillito (Nt)" style={{ ...inp, flex: 1 }} />
                 <div style={{ width: 96, display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
-                  <input type="number" step="0.5" min="0" max="50" value={m.merma} onChange={e => setMedia(i, 'merma', e.target.value)} style={{ ...inp, width: 64, textAlign: 'center', fontWeight: 700 }} />
+                  <input type="text" inputMode="decimal" value={m.merma} onChange={e => setMedia(i, 'merma', e.target.value)} style={{ ...inp, width: 64, textAlign: 'center', fontWeight: 700 }} />
                   <span style={{ fontSize: 12, color: 'var(--muted)' }}>%</span>
                 </div>
                 <button type="button" onClick={() => delMedia(i)} title="Eliminar" style={{ background: 'none', border: 'none', color: 'var(--red-light)', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}>✕</button>
@@ -7426,7 +7426,7 @@ function EditorMerma({ config, onSave, inicialAbierto = false }) {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface2)', borderRadius: 8, padding: '6px 10px', marginBottom: 4, maxWidth: 340 }}>
             <span style={{ flex: 1, fontSize: 12 }}>❄️ Frío (agua/sangre post-faena)</span>
-            <input type="number" step="0.5" min="0" max="50"
+            <input type="text" inputMode="decimal"
               value={draft.merma_frio ?? MERMA_FRIO_DEFAULT}
               onChange={e => setDraft(d => ({ ...d, merma_frio: e.target.value }))}
               style={{ ...inp, width: 64, textAlign: 'center', fontWeight: 700 }} />

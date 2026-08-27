@@ -260,7 +260,7 @@ export default function Cheques() {
             </select>
           </div>
           <div className="form-group"><label>Monto ($)</label>
-            <input type="number" value={form.monto} onChange={e => setForm(f => ({ ...f, monto: e.target.value }))} />
+            <input type="text" inputMode="decimal" value={form.monto} onChange={e => setForm(f => ({ ...f, monto: e.target.value }))} />
           </div>
           <div className="form-group"><label>¿Qué hacés con el cheque?</label>
             <select value={form.destino} onChange={e => setForm(f => ({ ...f, destino: e.target.value }))}>
@@ -344,7 +344,7 @@ export default function Cheques() {
             <input value={formEm.beneficiario} onChange={e => setFormEm(f => ({ ...f, beneficiario: e.target.value }))} placeholder="Ej: PRETTO, contador, alquiler..." />
           </div>
           <div className="form-group"><label>Monto ($)</label>
-            <input type="number" value={formEm.monto} onChange={e => setFormEm(f => ({ ...f, monto: e.target.value }))} />
+            <input type="text" inputMode="decimal" value={formEm.monto} onChange={e => setFormEm(f => ({ ...f, monto: e.target.value }))} />
           </div>
           <div className="form-group"><label>Notas</label>
             <input value={formEm.notas} onChange={e => setFormEm(f => ({ ...f, notas: e.target.value }))} placeholder="Qué pagamos con este cheque..." />

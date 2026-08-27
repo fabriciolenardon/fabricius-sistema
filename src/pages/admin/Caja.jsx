@@ -1040,7 +1040,7 @@ export default function Caja() {
                         <td style={{ textAlign: 'right', padding: '8px 4px' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'flex-end' }}>
                             <input
-                              type="number" step={item.unidad === 'u' ? '1' : '0.001'} value={item.kg}
+                              type="text" inputMode="decimal" value={item.kg}
                               onChange={e => editarKg(item.id, e.target.value)}
                               style={{ width: 70, textAlign: 'right', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '4px 6px', fontSize: 13 }}
                             />
@@ -1485,20 +1485,20 @@ export default function Caja() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
               <div>
                 <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>💵 EFECTIVO</label>
-                <input ref={efectivoRef} type="number" value={pago.efectivo}
+                <input ref={efectivoRef} type="text" inputMode="decimal" value={pago.efectivo}
                   onChange={e => setPago(p => ({ ...p, efectivo: e.target.value }))}
                   onKeyDown={e => e.key === 'Enter' && cobrado >= totalACobrar && !guardandoVenta && cerrarVenta()}
                   style={{ ...inp, fontSize: 18, textAlign: 'right' }} placeholder="0" />
               </div>
               <div>
                 <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>💳 DÉBITO</label>
-                <input type="number" value={pago.debito}
+                <input type="text" inputMode="decimal" value={pago.debito}
                   onChange={e => setPago(p => ({ ...p, debito: e.target.value }))}
                   style={{ ...inp, fontSize: 18, textAlign: 'right' }} placeholder="0" />
               </div>
               <div>
                 <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>📲 TRANSFERENCIA</label>
-                <input type="number" value={pago.transferencia}
+                <input type="text" inputMode="decimal" value={pago.transferencia}
                   onChange={e => setPago(p => ({ ...p, transferencia: e.target.value }))}
                   style={{ ...inp, fontSize: 18, textAlign: 'right' }} placeholder="0" />
               </div>
@@ -1794,7 +1794,7 @@ function TicketManualCaja({ onGuardado }) {
             )}
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <input type="number" step="0.001" min="0" placeholder="Kg / unidades" value={kgInput} onChange={e => setKgInput(e.target.value)}
+            <input type="text" inputMode="decimal" placeholder="Kg / unidades" value={kgInput} onChange={e => setKgInput(e.target.value)}
               style={{ ...inp, width: 140, borderColor: 'var(--gold)' }} />
             {prodSel && parseNumero(kgInput) > 0 && (
               <span style={{ fontSize: 13, color: 'var(--muted)' }}>= <strong style={{ color: 'var(--gold)' }}>{fmt(parseNumero(kgInput) * precioDe(prodSel))}</strong></span>
@@ -1808,7 +1808,7 @@ function TicketManualCaja({ onGuardado }) {
           <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 8 }}>✍️ Línea libre (no descuenta stock)</div>
           <div style={{ display: 'flex', gap: 8 }}>
             <input placeholder="Descripción (ej: varios)" value={libre.descripcion} onChange={e => setLibre(l => ({ ...l, descripcion: e.target.value }))} style={{ ...inp, flex: 2 }} />
-            <input type="number" step="0.01" min="0" placeholder="$" value={libre.importe} onChange={e => setLibre(l => ({ ...l, importe: e.target.value }))} style={{ ...inp, flex: 1 }} />
+            <input type="text" inputMode="decimal" placeholder="$" value={libre.importe} onChange={e => setLibre(l => ({ ...l, importe: e.target.value }))} style={{ ...inp, flex: 1 }} />
             <button className="btn" onClick={agregarLibre}>➕</button>
           </div>
         </div>
@@ -1820,7 +1820,7 @@ function TicketManualCaja({ onGuardado }) {
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 4px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
                 <span style={{ flex: 1 }}>{it.descripcion}{it.categoria === 'manual' ? ' ✍️' : ''}</span>
                 {it.kg > 0 && <span style={{ color: 'var(--muted)', fontSize: 12 }}>{fmtKg(it.kg)}</span>}
-                <input type="number" step="0.01" value={it.importe} onChange={e => setImporteItem(i, e.target.value)}
+                <input type="text" inputMode="decimal" value={it.importe} onChange={e => setImporteItem(i, e.target.value)}
                   title="Importe cobrado por esta línea (editalo si difiere del precio de lista)"
                   style={{ ...inp, width: 110, padding: '5px 8px', textAlign: 'right', fontWeight: 700 }} />
                 <button onClick={() => setItems(prev => prev.filter((_, k) => k !== i))}

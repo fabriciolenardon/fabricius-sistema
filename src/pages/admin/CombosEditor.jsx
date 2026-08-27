@@ -15,7 +15,7 @@
 // ============================================================
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
-import { fmtPrecio } from '../../lib/formatos'
+import { fmtPrecio, parseNumero } from '../../lib/formatos'
 import { useAuth } from '../../context/AuthContext'
 import { SUCURSAL_CENTRAL } from '../../lib/permisos'
 
@@ -191,18 +191,18 @@ export default function CombosEditor({ precios = [] }) {
 
   async function guardar() {
     const nombre = form.nombre.trim()
-    const precio = Number(form.precio)
+    const precio = parseNumero(form.precio)
     if (!nombre) return mostrarMsg('❌ Poné un nombre al combo')
     if (!precio || precio <= 0) return mostrarMsg('❌ El precio del combo debe ser mayor a 0')
     if (!form.items.length) return mostrarMsg('❌ Agregá al menos un producto')
     for (const it of form.items) {
       if (!it.producto_id) return mostrarMsg('❌ Hay un ítem sin producto enganchado')
-      if (!(Number(it.kg) > 0)) return mostrarMsg('❌ Cada ítem necesita kg mayor a 0')
+      if (!(parseNumero(it.kg) > 0)) return mostrarMsg('❌ Cada ítem necesita kg mayor a 0')
     }
     const payload = {
       nombre, emoji: form.emoji || null, precio,
       disponible: !!form.disponible, orden: Number(form.orden) || 0,
-      items: form.items.map(it => ({ producto_id: it.producto_id, nombre: it.nombre, kg: Number(it.kg) })),
+      items: form.items.map(it => ({ producto_id: it.producto_id, nombre: it.nombre, kg: parseNumero(it.kg) })),
       updated_at: new Date().toISOString(),
     }
     setGuardando(true)
@@ -276,7 +276,7 @@ export default function CombosEditor({ precios = [] }) {
             </div>
             <div>
               <label style={lbl}>Precio del combo</label>
-              <input type="number" value={form.precio} onChange={e => setForm(f => ({ ...f, precio: e.target.value }))} style={{ ...inp, textAlign: 'right', fontWeight: 700 }} placeholder="0" />
+              <input type="text" inputMode="decimal" value={form.precio} onChange={e => setForm(f => ({ ...f, precio: e.target.value }))} style={{ ...inp, textAlign: 'right', fontWeight: 700 }} placeholder="0" />
             </div>
           </div>
 
@@ -336,7 +336,7 @@ export default function CombosEditor({ precios = [] }) {
                     )}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <input type="number" step="0.001" value={it.kg} onChange={e => setItemKg(idx, e.target.value)}
+                    <input type="text" inputMode="decimal" value={it.kg} onChange={e => setItemKg(idx, e.target.value)}
                       style={{ ...inp, textAlign: 'right' }} placeholder="kg" />
                     <span style={{ fontSize: 11, color: 'var(--muted)' }}>kg</span>
                   </div>

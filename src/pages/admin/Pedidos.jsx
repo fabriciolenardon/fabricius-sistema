@@ -68,7 +68,7 @@ export function Pedidos() {
   }
 
   function actualizarItemKg(idx, kg) {
-    setEditingItems(items => items.map((it, i) => i === idx ? { ...it, kg: parseFloat(kg) || 0, subtotal: (parseFloat(kg) || 0) * it.precio_unitario } : it))
+    setEditingItems(items => items.map((it, i) => i === idx ? { ...it, kg: parseNumero(kg), subtotal: (parseNumero(kg)) * it.precio_unitario } : it))
   }
 
   function quitarItemEdit(idx) {
@@ -168,7 +168,7 @@ export function Pedidos() {
   function actualizarKgDespacho(idx, kg) {
     setModalDespacho(m => ({
       ...m,
-      items: m.items.map((it, i) => i === idx ? { ...it, kg_despacho: parseFloat(kg) || 0 } : it)
+      items: m.items.map((it, i) => i === idx ? { ...it, kg_despacho: parseNumero(kg) } : it)
     }))
   }
 
@@ -496,7 +496,7 @@ function ModalNuevoPedido({ cerrar, onCreado, profile }) {
                     <tr key={i}>
                       <td style={{ fontWeight: 600 }}>{it.nombre}</td>
                       <td style={{ textAlign: 'center' }}>
-                        <input type="number" step="0.1" min="0" value={it.kg} onChange={e => setItem(i, { kg: e.target.value })}
+                        <input type="text" inputMode="decimal" value={it.kg} onChange={e => setItem(i, { kg: e.target.value })}
                           style={{ ...inputStyle, width: 64, textAlign: 'center' }} />
                       </td>
                       <td style={{ textAlign: 'center' }}>
@@ -507,7 +507,7 @@ function ModalNuevoPedido({ cerrar, onCreado, profile }) {
                         </select>
                       </td>
                       <td style={{ textAlign: 'center' }}>
-                        <input type="number" step="1" min="0" value={it.precio_unitario} onChange={e => setItem(i, { precio_unitario: e.target.value })}
+                        <input type="text" inputMode="decimal" value={it.precio_unitario} onChange={e => setItem(i, { precio_unitario: e.target.value })}
                           style={{ ...inputStyle, width: 90, textAlign: 'right' }} />
                       </td>
                       <td>
@@ -572,7 +572,7 @@ function DetallePedido({ p, editingItems, editingDia, editingHorario, editingNot
                     <td>{it.preparado ? '✅ ' : ''}{it.nombre}</td>
                     <td>
                       {p.estado === 'pendiente' ? (
-                        <input type="number" step="0.1" value={it.kg} onChange={e => actualizarItemKg(i, e.target.value)}
+                        <input type="text" inputMode="decimal" value={it.kg} onChange={e => actualizarItemKg(i, e.target.value)}
                           style={{ background: 'var(--surface2)', border: '1px solid var(--gold)', color: 'var(--text)', borderRadius: 4, padding: '2px 6px', fontSize: 12, width: 60, textAlign: 'center' }} />
                       ) : (
                         <span>{it.kg} {uLabel(unidad)}</span>
@@ -752,7 +752,7 @@ function ModalDespacho({ m, setModalDespacho, remitosCliente, actualizarKgDespac
                         <td style={{ fontWeight: 600 }}>{it.nombre}</td>
                         <td style={{ textAlign: 'center', color: 'var(--muted)' }}>{it.kg_pedido} {uLabel(it.unidad)}</td>
                         <td style={{ textAlign: 'center' }}>
-                          <input type="number" step="0.01" min="0" value={it.kg_despacho}
+                          <input type="text" inputMode="decimal" value={it.kg_despacho}
                             onChange={e => actualizarKgDespacho(i, e.target.value)}
                             style={{ background: 'var(--surface2)', border: '1px solid var(--gold)', color: 'var(--text)', borderRadius: 4, padding: '4px 8px', fontSize: 13, width: 70, textAlign: 'center' }} /> kg
                         </td>

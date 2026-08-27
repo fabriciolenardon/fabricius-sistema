@@ -13,6 +13,7 @@ import { supabase } from '../../lib/supabase'
 import { generarEAN13Balanza } from '../../lib/balanzaEAN'
 import { fechaHoyARG } from '../../lib/fechas'
 import JsBarcode from 'jsbarcode'
+import { parseNumero } from '../../lib/formatos'
 
 const CATEGORIAS = {
   bovino_corte: '🥩 Bovino Cortes',
@@ -127,7 +128,7 @@ export default function Etiquetas() {
   let codigoEAN = ''
   if (productoSel?.codigo_balanza) {
     try {
-      const peso = parseFloat(datos.peso_kg) || 0
+      const peso = parseNumero(datos.peso_kg)  // parseFloat no entiende la coma
       const precio = productoSel.precio_minorista || 0
       let valor
       if (configEAN.tipo === 'peso') {
@@ -325,7 +326,7 @@ export default function Etiquetas() {
                   </div>
                   <div className="form-group">
                     <label>Peso/Kg (para barcode)</label>
-                    <input type="number" step="0.001" value={datos.peso_kg}
+                    <input type="text" inputMode="decimal" value={datos.peso_kg}
                       onChange={e => setDatos(d => ({ ...d, peso_kg: e.target.value }))}
                       placeholder="0.000" style={inp} />
                   </div>

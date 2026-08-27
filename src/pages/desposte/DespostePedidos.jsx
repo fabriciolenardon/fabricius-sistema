@@ -267,7 +267,7 @@ export default function DespostePedidos() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         {/* Lo real SIEMPRE se pesa y se carga en KG (aunque el pedido diga tiras/u) */}
                         <span style={{ fontSize: 13, color: 'var(--muted)', fontWeight: 700 }}>Real (kg):</span>
-                        <input type="number" inputMode="decimal" step="0.01" min="0"
+                        <input type="text" inputMode="decimal"
                           value={it.kg_real ?? ''}
                           onChange={e => setKgReal(i, e.target.value)}
                           placeholder="0" style={inp} />

@@ -363,7 +363,7 @@ function TarjetaReceta({ receta, puedeEditar, est, setKg, formulas, recetas, vin
             </div>
           ) : (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
-              <input type="number" step="any" value={String(est?.kg ?? base)}
+              <input type="text" inputMode="decimal" value={String(est?.kg ?? base)}
                 onChange={e => setKg(e.target.value)}
                 style={{ ...inp, width: 100, textAlign: 'right', fontWeight: 800 }} />
               <div style={{ fontSize: 13, color: 'var(--muted)' }}>kg de pasta</div>
@@ -374,7 +374,7 @@ function TarjetaReceta({ receta, puedeEditar, est, setKg, formulas, recetas, vin
         <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 12px', marginBottom: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 0.5 }}>{(receta.base_label || 'BASE').toUpperCase()}</div>
-            <input type="number" step="any" value={String(est?.kg ?? base)} onChange={e => setKg(e.target.value)}
+            <input type="text" inputMode="decimal" value={String(est?.kg ?? base)} onChange={e => setKg(e.target.value)}
               style={{ ...inp, width: 90, textAlign: 'right', fontWeight: 800 }} />
             <div style={{ fontSize: 13, color: 'var(--muted)' }}>kg</div>
             {escalada && (
@@ -504,7 +504,7 @@ function EditorReceta({ borrador, setBorrador, onGuardar, onCancelar, esMovil })
         <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : '1fr 2fr', gap: 10, marginBottom: 6 }}>
           <div>
             <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>Base (kg)</label>
-            <input type="number" step="any" value={borrador.base_kg} onChange={e => set('base_kg', e.target.value)}
+            <input type="text" inputMode="decimal" value={borrador.base_kg} onChange={e => set('base_kg', e.target.value)}
               style={{ ...inp, width: '100%', textAlign: 'right' }} />
           </div>
           <div>
@@ -532,7 +532,7 @@ function EditorReceta({ borrador, setBorrador, onGuardar, onCancelar, esMovil })
           <div key={idx} style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : '1.6fr 80px 90px 1.4fr auto', gap: 6, marginBottom: 6, alignItems: 'center' }}>
             <input value={i.nombre} onChange={e => setIng(idx, 'nombre', e.target.value)}
               placeholder="Sal" style={inp} />
-            <input type="number" step="any" value={i.cantidad} onChange={e => setIng(idx, 'cantidad', e.target.value)}
+            <input type="text" inputMode="decimal" value={i.cantidad} onChange={e => setIng(idx, 'cantidad', e.target.value)}
               placeholder="—" style={{ ...inp, textAlign: 'right' }} />
             <input list="recetas-unidades" value={i.unidad} onChange={e => setIng(idx, 'unidad', e.target.value)}
               placeholder="g" style={inp} />

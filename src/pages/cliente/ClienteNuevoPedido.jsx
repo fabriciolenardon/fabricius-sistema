@@ -19,7 +19,7 @@ const CATEGORIAS = {
   rebozado: '🧊 Rebozados',
 }
 
-import { fmtPrecio } from '../../lib/formatos'
+import { fmtPrecio, parseNumero } from '../../lib/formatos'
 const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
 const ahora = () => new Date().toISOString()
 
@@ -122,7 +122,7 @@ export default function ClienteNuevoPedido() {
   }
 
   function agregarAlCarrito() {
-    const cant = parseFloat(kgInput)
+    const cant = parseNumero(kgInput)  // parseFloat no entiende la coma
     if (!cant || cant <= 0) { alert('Ingresá una cantidad válida'); return }
     if (!unidadSel) { alert('Falta indicar si es por kilos o por unidades'); return }
     const precio_unitario = productoSel[listaPrecioField] || 0
@@ -357,16 +357,16 @@ export default function ClienteNuevoPedido() {
             <div className="card">
               <div className="card-title">¿Cuántas {unidadSel === 'kg' ? 'kilos' : 'unidades'} de {productoSel.nombre}?</div>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                <input type="number" step={unidadSel === 'kg' ? '0.1' : '1'} min="0.1" autoFocus value={kgInput} onChange={e => setKgInput(e.target.value)}
+                <input type="text" inputMode="decimal" autoFocus value={kgInput} onChange={e => setKgInput(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && agregarAlCarrito()}
                   placeholder={unidadSel === 'kg' ? 'Ej: 5' : 'Ej: 14'}
                   style={{ background: 'var(--surface2)', border: '1px solid var(--gold)', color: 'var(--text)', borderRadius: 8, padding: '10px 14px', fontSize: 18, width: 120, textAlign: 'center' }} />
                 <span style={{ fontSize: 14, color: 'var(--muted)' }}>{unidadSel === 'kg' ? 'kg' : 'unidades'}</span>
                 <button onClick={agregarAlCarrito} className="btn btn-gold">✅ Agregar al pedido</button>
               </div>
-              {kgInput && parseFloat(kgInput) > 0 && (
+              {kgInput && parseNumero(kgInput) > 0 && (
                 <div style={{ marginTop: 10, fontSize: 13, color: 'var(--muted)' }}>
-                  {parseFloat(kgInput)} {unidadSel === 'kg' ? 'kg' : 'u'} · <strong style={{ color: 'var(--gold)' }}>{fmt(productoSel[listaPrecioField] || 0)}/{unidadSel === 'kg' ? 'kg' : 'u'}</strong>
+                  {parseNumero(kgInput)} {unidadSel === 'kg' ? 'kg' : 'u'} · <strong style={{ color: 'var(--gold)' }}>{fmt(productoSel[listaPrecioField] || 0)}/{unidadSel === 'kg' ? 'kg' : 'u'}</strong>
                 </div>
               )}
             </div>

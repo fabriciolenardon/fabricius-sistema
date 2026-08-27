@@ -219,7 +219,7 @@ export default function Sueldos() {
 
   // Guarda el nuevo valor hora de un empleado (pestaña Empleados).
   async function guardarHora(emp) {
-    const v = parseFloat(editHora[emp.id])
+    const v = parseNumero(editHora[emp.id])
     if (!(v > 0)) { setAlert({ type: 'error', msg: 'Ingresá un valor hora válido' }); return }
     setGuardandoEmp(emp.id)
     const { error } = await supabase.from('empleados_sueldos')
@@ -236,7 +236,7 @@ export default function Sueldos() {
   async function agregarEmpleado() {
     const apellido = nuevoEmp.apellido.trim().toUpperCase()
     const nombre = nuevoEmp.nombre.trim().toUpperCase()
-    const valor = parseFloat(nuevoEmp.valor_hora)
+    const valor = parseNumero(nuevoEmp.valor_hora)
     if (!apellido || !nombre) { setAlert({ type: 'error', msg: 'Cargá apellido y nombre' }); return }
     if (!(valor > 0)) { setAlert({ type: 'error', msg: 'Ingresá un valor hora válido' }); return }
     setGuardandoNuevo(true)
@@ -414,10 +414,10 @@ export default function Sueldos() {
     e.target.value = ''
   }
 
-  function getHoras(empId) { return parseFloat(horas[empId]) || 0 }
-  function getBoletas(empId) { return parseFloat(boletas[empId]) || 0 }
-  function getAdelantos(empId) { return parseFloat(adelantos[empId]) || 0 }
-  function getViaticos(empId) { return parseFloat(viaticos[empId]) || 0 }
+  function getHoras(empId) { return parseNumero(horas[empId]) }
+  function getBoletas(empId) { return parseNumero(boletas[empId]) }
+  function getAdelantos(empId) { return parseNumero(adelantos[empId]) }
+  function getViaticos(empId) { return parseNumero(viaticos[empId]) }
   // ¿El toggle de viáticos está activado para este empleado? Si el usuario no lo
   // tocó, usa el default del empleado (tiene_viaticos): pre-activado solo para
   // los que cobran viáticos (Luciano y Giuliana).
@@ -588,8 +588,8 @@ export default function Sueldos() {
     if (!e) return
     const nombre = `${emp.apellido}, ${emp.nombre}`
     setGuardandoExtra(key)
-    const ag = parseFloat(e.aguinaldo) || 0
-    const vm = parseFloat(e.vacMonto) || 0
+    const ag = parseNumero(e.aguinaldo)
+    const vm = parseNumero(e.vacMonto)
     const vd = parseInt(e.vacDias) || null
     const ops = []
     ops.push(ag > 0
@@ -768,7 +768,7 @@ export default function Sueldos() {
                   </div>
                   <div className="form-group" style={{ marginBottom: 8 }}>
                     <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Horas trabajadas</label>
-                    <input style={{ ...inp, borderColor: getHoras(emp.id) > 0 ? '#7c3aed' : 'var(--border)' }} type="number" step="0.5" placeholder="0" value={horas[emp.id] || ''} onChange={e => setHoras(h => ({ ...h, [emp.id]: e.target.value }))} />
+                    <input style={{ ...inp, borderColor: getHoras(emp.id) > 0 ? '#7c3aed' : 'var(--border)' }} type="text" inputMode="decimal" placeholder="0" value={horas[emp.id] || ''} onChange={e => setHoras(h => ({ ...h, [emp.id]: e.target.value }))} />
                   </div>
                   {/* Viáticos: toggle clickeable. Si está activo SUMA al neto y
                       aparece en el resumen; si no, ni se suma ni se muestra. */}
@@ -779,16 +779,16 @@ export default function Sueldos() {
                       ✈️ Viáticos ($) — suma {vOn ? '· aparece en el resumen' : ''}
                     </label>
                     {vOn && (
-                      <input style={{ ...inp, borderColor: '#22c55e' }} type="number" placeholder="0" value={viaticos[emp.id] || ''} onChange={e => setViaticos(v => ({ ...v, [emp.id]: e.target.value }))} />
+                      <input style={{ ...inp, borderColor: '#22c55e' }} type="text" inputMode="decimal" placeholder="0" value={viaticos[emp.id] || ''} onChange={e => setViaticos(v => ({ ...v, [emp.id]: e.target.value }))} />
                     )}
                   </div>
                   <div className="form-group" style={{ marginBottom: 8 }}>
                     <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Adelantos ($) — se restan</label>
-                    <input style={inp} type="number" placeholder="0" value={adelantos[emp.id] || ''} onChange={e => setAdelantos(a => ({ ...a, [emp.id]: e.target.value }))} />
+                    <input style={inp} type="text" inputMode="decimal" placeholder="0" value={adelantos[emp.id] || ''} onChange={e => setAdelantos(a => ({ ...a, [emp.id]: e.target.value }))} />
                   </div>
                   <div className="form-group" style={{ marginBottom: 10 }}>
                     <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Boletas / Descuentos ($) — se restan</label>
-                    <input style={inp} type="number" placeholder="0" value={boletas[emp.id] || ''} onChange={e => setBoletas(b => ({ ...b, [emp.id]: e.target.value }))} />
+                    <input style={inp} type="text" inputMode="decimal" placeholder="0" value={boletas[emp.id] || ''} onChange={e => setBoletas(b => ({ ...b, [emp.id]: e.target.value }))} />
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 10, borderTop: '1px solid var(--border)', alignItems: 'center' }}>
                     <div>
@@ -873,7 +873,7 @@ export default function Sueldos() {
               <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '8px 12px', marginBottom: 8 }}>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Valor hora ($)</div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <input type="number" step="100" style={{ ...inp, padding: '6px 10px', borderColor: editando ? '#7c3aed' : 'var(--border)' }}
+                  <input type="text" inputMode="decimal" style={{ ...inp, padding: '6px 10px', borderColor: editando ? '#7c3aed' : 'var(--border)' }}
                     value={editando ? editHora[emp.id] : emp.valor_hora}
                     onChange={e => setEditHora(h => ({ ...h, [emp.id]: e.target.value }))} />
                   <button onClick={() => guardarHora(emp)} disabled={!editando || guardandoEmp === emp.id}
@@ -899,7 +899,7 @@ export default function Sueldos() {
                 onChange={e => setNuevoEmp(n => ({ ...n, apellido: e.target.value }))} />
               <input style={inp} placeholder="Nombre" value={nuevoEmp.nombre}
                 onChange={e => setNuevoEmp(n => ({ ...n, nombre: e.target.value }))} />
-              <input type="number" step="100" style={inp} placeholder="Valor hora ($)" value={nuevoEmp.valor_hora}
+              <input type="text" inputMode="decimal" style={inp} placeholder="Valor hora ($)" value={nuevoEmp.valor_hora}
                 onChange={e => setNuevoEmp(n => ({ ...n, valor_hora: e.target.value }))} />
               <input style={inp} placeholder="CBU / alias (opcional)" value={nuevoEmp.cbu}
                 onChange={e => setNuevoEmp(n => ({ ...n, cbu: e.target.value }))} />
@@ -1055,7 +1055,7 @@ export default function Sueldos() {
                             <label style={{ fontSize: 10, color: '#f0abfc', display: 'block', marginBottom: 2 }}>Aguinaldo ($)</label>
                             {(esMesAguinaldo || agSaved) ? (
                               <div style={{ display: 'flex', gap: 4 }}>
-                                <input style={{ ...inp, padding: '5px 8px', fontSize: 13 }} type="number" placeholder="0" value={ed.aguinaldo} onChange={e => setEd({ aguinaldo: e.target.value })} />
+                                <input style={{ ...inp, padding: '5px 8px', fontSize: 13 }} type="text" inputMode="decimal" placeholder="0" value={ed.aguinaldo} onChange={e => setEd({ aguinaldo: e.target.value })} />
                                 <button title={`50% de ${fmt(brutoMes)}`} onClick={() => setEd({ aguinaldo: String(aguinaldoSugerido) })} disabled={brutoMes <= 0}
                                   style={{ padding: '0 8px', background: 'transparent', border: '1px solid #f0abfc', color: '#f0abfc', borderRadius: 6, cursor: brutoMes > 0 ? 'pointer' : 'not-allowed', fontSize: 11, whiteSpace: 'nowrap', opacity: brutoMes > 0 ? 1 : 0.4 }}>50%</button>
                                 {agSaved && (
@@ -1071,8 +1071,8 @@ export default function Sueldos() {
                           <div>
                             <label style={{ fontSize: 10, color: '#7dd3fc', display: 'block', marginBottom: 2 }}>Vacaciones — días + monto ($)</label>
                             <div style={{ display: 'flex', gap: 4 }}>
-                              <input style={{ ...inp, padding: '5px 8px', fontSize: 13, width: 60 }} type="number" placeholder="días" value={ed.vacDias} onChange={e => setEd({ vacDias: e.target.value })} />
-                              <input style={{ ...inp, padding: '5px 8px', fontSize: 13 }} type="number" placeholder="0" value={ed.vacMonto} onChange={e => setEd({ vacMonto: e.target.value })} />
+                              <input style={{ ...inp, padding: '5px 8px', fontSize: 13, width: 60 }} type="text" inputMode="decimal" placeholder="días" value={ed.vacDias} onChange={e => setEd({ vacDias: e.target.value })} />
+                              <input style={{ ...inp, padding: '5px 8px', fontSize: 13 }} type="text" inputMode="decimal" placeholder="0" value={ed.vacMonto} onChange={e => setEd({ vacMonto: e.target.value })} />
                               <button title={`${vacDiasNum} días × (${fmt(brutoRef)} ÷ 25)`} onClick={() => setEd({ vacDias: String(vacDiasNum), vacMonto: String(vacSugerido) })} disabled={brutoRef <= 0}
                                 style={{ padding: '0 8px', background: 'transparent', border: '1px solid #7dd3fc', color: '#7dd3fc', borderRadius: 6, cursor: brutoRef > 0 ? 'pointer' : 'not-allowed', fontSize: 11, whiteSpace: 'nowrap', opacity: brutoRef > 0 ? 1 : 0.4 }}>auto</button>
                               {vacSaved && (
@@ -1119,11 +1119,11 @@ export default function Sueldos() {
                               return (
                                 <tr key={l.id} style={{ background: 'rgba(124,58,237,0.10)' }}>
                                   <td><strong>{l.empleado_nombre}</strong></td>
-                                  <td><input type="number" step="0.5" style={{ ...cell, width: 64 }} value={liqDraft.horas} onChange={e => cambiarDraftLiq(l, 'horas', e.target.value)} /></td>
-                                  <td><input type="number" step="100" style={{ ...cell, width: 92 }} value={liqDraft.bruto} onChange={e => cambiarDraftLiq(l, 'bruto', e.target.value)} /></td>
-                                  <td><input type="number" step="100" style={{ ...cell, width: 84 }} value={liqDraft.viaticos} onChange={e => cambiarDraftLiq(l, 'viaticos', e.target.value)} /></td>
-                                  <td><input type="number" step="100" style={{ ...cell, width: 84 }} value={liqDraft.adelantos} onChange={e => cambiarDraftLiq(l, 'adelantos', e.target.value)} /></td>
-                                  <td><input type="number" step="100" style={{ ...cell, width: 84 }} value={liqDraft.boletas} onChange={e => cambiarDraftLiq(l, 'boletas', e.target.value)} /></td>
+                                  <td><input type="text" inputMode="decimal" style={{ ...cell, width: 64 }} value={liqDraft.horas} onChange={e => cambiarDraftLiq(l, 'horas', e.target.value)} /></td>
+                                  <td><input type="text" inputMode="decimal" style={{ ...cell, width: 92 }} value={liqDraft.bruto} onChange={e => cambiarDraftLiq(l, 'bruto', e.target.value)} /></td>
+                                  <td><input type="text" inputMode="decimal" style={{ ...cell, width: 84 }} value={liqDraft.viaticos} onChange={e => cambiarDraftLiq(l, 'viaticos', e.target.value)} /></td>
+                                  <td><input type="text" inputMode="decimal" style={{ ...cell, width: 84 }} value={liqDraft.adelantos} onChange={e => cambiarDraftLiq(l, 'adelantos', e.target.value)} /></td>
+                                  <td><input type="text" inputMode="decimal" style={{ ...cell, width: 84 }} value={liqDraft.boletas} onChange={e => cambiarDraftLiq(l, 'boletas', e.target.value)} /></td>
                                   <td style={{ color: 'var(--gold)', fontWeight: 700 }}>{fmt(netoDeDraft(liqDraft))}</td>
                                   <td style={{ whiteSpace: 'nowrap' }}>
                                     <button onClick={() => guardarLiq(l)} disabled={guardandoLiq} style={{ ...btn, background: '#7c3aed', color: '#fff', marginRight: 4 }}>{guardandoLiq ? '⏳' : '💾'}</button>
