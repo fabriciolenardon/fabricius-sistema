@@ -29,6 +29,7 @@ import Deposito from './pages/admin/Deposito'
 import Caja from './pages/admin/Caja'
 import Precios from './pages/admin/Precios'
 import AsistenteIA from './components/AsistenteIA'
+import VersionWatcher from './components/VersionWatcher'
 // Estático a propósito: Deposito.jsx ya lo importa así, y con `lazy()` acá
 // Vite no lo separa en su propio chunk — el portal Desposte terminaba
 // bajándose el chunk entero de Depósito sólo para ver las recetas.
@@ -226,6 +227,10 @@ export default function App() {
           Lo ve el CEO y todo admin con iris_habilitado=true en su perfil.
           NUNCA clientes, franquicias ni otros roles. */}
       {user && profile?.rol === 'admin' && (user.email === 'fabriciolenardon@gmail.com' || profile?.iris_habilitado) && <AsistenteIA />}
+      {/* Vigila si esta pestaña quedó corriendo un bundle viejo tras un
+          deploy. Para TODOS los roles: la caja de la franquicia es
+          justamente la que más lo necesita. */}
+      <VersionWatcher />
     </>
   )
 }
