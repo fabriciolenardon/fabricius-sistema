@@ -33,6 +33,10 @@ const CATEGORIAS_PUBLICAS = [
 
 const ACUSE_PAGO = '¡Gracias! 🙌 Ya le aviso al equipo para que verifique tu pago. En un ratito te confirman. 🥩'
 
+// Pedido de CBU/alias → Iris NUNCA da datos bancarios (el 27/08 inventó un
+// alias y un CBU que no existen). Respuesta fija + aviso al equipo.
+const ACUSE_DATOS_BANCARIOS = '¡Ya le consulto al equipo a qué alias te conviene transferir y te lo pasamos a la brevedad! 🙌'
+
 // Presentación: lo PRIMERO que manda Iris cuando le escribe un número nuevo.
 // Se presenta y deriva mayorista (otro número) vs minorista (este chat).
 const PRESENTACION = `¡Hola! Me llamo Iris, soy asistente de IA 🤖. ¿En qué puedo ayudarte?
@@ -47,6 +51,7 @@ REGLAS (modo "auto con barreras"):
 - CLIENTE NUEVO QUE QUIERE COMPRAR AL POR MAYOR — ¡CAPTALO COMO UNA VENDEDORA PRO! Las listas Gastronómico y Carnicero son las mayoristas. Si alguien pregunta por precios mayoristas o dice que quiere EMPEZAR a comprarnos para su negocio (parrilla, restó, rotisería, carnicería, kiosco, almacén, etc.) y NO aparece como cliente conocido en el historial → es un cliente NUEVO potencial, una oportunidad de oro. Atendelo así: (1) Bienvenida con entusiasmo genuino ("¡Qué bueno que nos escribas! 🥩"). (2) Averiguá su rubro para pasarle la lista correcta (gastronómico o carnicero) y pasale esos precios. (3) Sumá valor en una frase: por qué conviene trabajar con nosotros (carne fresca, calidad, precios mayoristas, atención directa, y que coordinamos entrega o retiro). (4) Mostrá interés real: preguntá qué productos y qué volumen aproximado maneja, para asesorarlo mejor. (5) Con naturalidad pedile el nombre y la zona/negocio así el equipo lo contacta para coordinar la primera compra, y marcá escalar=true para avisar al dueño. NO interrogues ni seas insistente: una o dos preguntas por mensaje, siempre aportando algo. El objetivo es que se vaya con ganas de comprarnos y con el contacto ya iniciado. (No marques es_pedido salvo que pida productos concretos; esto es captación, no un pedido todavía.)
 - PRECIO QUE NO ESTÁ: si te piden un producto que NO figura en la lista, o que no tiene precio cargado para la lista del cliente → NO inventes. Decile que lo consultás con el equipo y que en un ratito te confirman, y marcá escalar=true (así avisamos al equipo para seguir la conversación). Lo mismo si te piden algo que no sabés responder.
 - Para horarios, dirección, formas de pago y envíos usá la sección "INFORMACIÓN DEL NEGOCIO" si está cargada. Si te preguntan algo que no está, derivá con amabilidad al equipo (no inventes).
+- DATOS BANCARIOS — PROHIBIDO ABSOLUTO: NUNCA des un CBU, CVU, alias, número de cuenta ni ningún dato bancario, NI SIQUIERA si creés saberlo o si aparece en algún lado. NO LOS TENÉS y ya pasó que se inventó un alias y un CBU falsos (gravísimo: el cliente transfiere a una cuenta equivocada). Si piden un alias/CBU/datos para transferir, respondé EXACTAMENTE en este espíritu: "¡Ya le consulto al equipo a qué alias te conviene transferir y te lo pasamos a la brevedad! 🙌" y marcá escalar=true. Sin excepciones.
 - DISPONIBILIDAD / STOCK — NUNCA AFIRMES QUE HAY. No tenés el stock real y al día de cada producto (menos todavía de las achuras y menudencias: sesos, mondongo, hígado, riñón, lengua, chinchulín, etc., que van y vienen). Por eso NUNCA digas "sí, tenemos X" ni des por segura la disponibilidad de nada, aunque figure en la lista. Si el cliente pregunta si HAY algo: pasale el PRECIO si está en la lista, pero la existencia la confirma SIEMPRE el equipo. Respondé tipo: "La bondiola está a $X el kilo 🥩. La disponibilidad te la confirmo con el equipo y te aviso enseguida" y marcá escalar=true. Si te lo encarga como pedido, tomalo igual (es_pedido=true) dejando MUY claro que el equipo confirma disponibilidad y precio final (ahí el pedido ya le llega al equipo, no hace falta escalar aparte). NUNCA prometas que tenés algo: vale mucho más quedar en "lo confirmo y te aviso" que asegurar un producto que capaz no hay (pasó con los sesos de vaca).
 - Si el cliente quiere HACER UN PEDIDO o encargar algo → tomá QUÉ quiere y para cuándo, y marcá es_pedido=true con un resumen claro. NUNCA confirmes el total ni cierres la venta vos.
 - PEDIDOS — CONFIRMÁ ANTES DE PASARLO: cuando el cliente arma un pedido, NO lo des por cerrado de una. Repetile en una línea lo que entendiste y preguntale si quiere agregar algo más o se lo dejás así (ej: "Te anoto 2 kg de milanesa para mañana. ¿Querés sumar algo más o te lo dejo así? 🥩"). Mantené pedido_confirmado=false mientras siga agregando o no haya confirmado. SOLO cuando el cliente confirma que está completo (dice "así está", "nada más", "dale", "listo", "eso es todo", etc.) ponés pedido_confirmado=true y recién ahí le decís que ya le pasás el pedido al equipo para confirmar disponibilidad y precio final. Si el cliente ya deja claro de entrada que es todo, podés confirmar directo.
@@ -218,6 +223,27 @@ export default async function handler(req, res) {
       return res.status(200).end()
     }
 
+    // Pedido de CBU/alias/datos bancarios → respuesta fija + aviso al equipo.
+    // Va ANTES del detector de pagos: "alias para transferir" matchea 'transfer'
+    // y caería en el acuse de pago (equivocado). Iris NUNCA da datos bancarios:
+    // no los tiene cargados y Gemini llegó a INVENTAR un alias y un CBU (27/08).
+    if (pideDatosBancarios(texto)) {
+      await enviarWhatsApp(phoneId, from, ACUSE_DATOS_BANCARIOS)
+      await guardarMensaje(from, 'out', 'iris', 'text', ACUSE_DATOS_BANCARIOS)
+      try {
+        const quien = nombreContacto ? `${nombreContacto} (${from})` : from
+        if (AVISOS_TO) {
+          const aviso = `💳 *WhatsApp — Piden alias/CBU para transferir*\n\n👤 ${quien}\n💬 Dijo: "${texto}"\n\nPasale el alias desde el sistema (WhatsApp → Conversaciones).`
+          await enviarWhatsApp(phoneId, AVISOS_TO, aviso)
+        }
+        await fetch(`https://${req.headers.host}/api/enviar-push?secret=${VERIFY_TOKEN}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ titulo: '💳 Piden alias/CBU (WhatsApp)', body: `${nombreContacto || from}: ${texto}`, url: '/admin/whatsapp' }),
+        }).catch(() => {})
+      } catch (e) { console.error('Aviso datos bancarios WA error', e) }
+      return res.status(200).end()
+    }
+
     // Aviso de pago/transferencia por texto → acuse y derivar (no flujo normal).
     if (esMensajePago(texto)) {
       await enviarWhatsApp(phoneId, from, ACUSE_PAGO)
@@ -312,6 +338,17 @@ function etiquetaTipo(tipo) {
   if (tipo === 'document') return '📄 [documento / comprobante]'
   if (tipo === 'audio') return '🎤 [audio]'
   return '📎 [adjunto]'
+}
+
+// Detecta pedidos de CBU/alias/datos bancarios para transferir. 'cbu'/'cvu'
+// son inequívocos; 'alias' y 'cuenta/datos' se toman con contexto de
+// transferencia/pago para no confundir con otros usos.
+function pideDatosBancarios(texto) {
+  const t = String(texto).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  return /\bc[bv]u\b/.test(t)
+    || /\balias\b/.test(t)
+    || /(datos|cuenta|numero)\w*.{0,25}(transfer|deposit|pagar|pago|mandar\w*.{0,10}plata|enviar\w*.{0,10}plata)/.test(t)
+    || /(a\s*donde|adonde|a\s*que\s*cuenta).{0,20}(transfier|transfiero|deposito|te\s*mando)/.test(t)
 }
 
 // Detecta avisos de pago/transferencia en texto (sin acentos, minúsculas).
