@@ -68,8 +68,10 @@ const PLANILLAS = {
     ],
   },
   pierna: {
-    label: '🍖 Pierna / Cuarto', bruto: 'Kilos pierna bruto',
-    destino: 'pieza',
+    // Antes decía "Pierna / Cuarto" porque el selector servía para los dos.
+    // Ahora el cuarto pistola tiene su propia planilla con sus cortes.
+    label: '🍖 Pierna', bruto: 'Kilos pierna bruto',
+    destino: 'pieza', preferida: 'Pierna',
     cortes: [
       'NALGA', 'TAPA DE NALGA', 'PECETO', 'JAMON CUADRADO', 'CUADRIL', 'COLITA CUADRIL',
       'BOLA DE LOMO', 'TORTUGUITA', 'OSOBUCO DESHUESADO', 'RECORTES',
@@ -78,11 +80,50 @@ const PLANILLAS = {
   },
   parrillero: {
     label: '🔥 Parrillero', bruto: 'Kilos parrillero bruto',
-    destino: 'pieza',
+    destino: 'pieza', preferida: 'Parrillero',
     cortes: [
       'COSTELETAL', 'LOMO', 'MATAMBRE', 'COSTILLA', 'VACIO', 'AGUJA', 'RECORTES',
       { n: 'HUESOS', m: true },
     ],
+  },
+  // ── Las que pidió Fabricio el 27/08 ───────────────────────────────────
+  // Arrancan casi peladas A PROPÓSITO: él carga los cortes de cada una. Con
+  // el recuerdo de la última planilla (ver cargarHistorial), los cortes que
+  // agregue quedan como plantilla para la próxima — los carga UNA vez.
+  // Sólo van los renglones de merma bovina (huesos/grasa) y recortes, que
+  // son iguales en todas.
+  // "Carré con lomo" es como le dice él a la pieza que en Mermas por
+  // producto se llama "Costeletal con Lomo": el label usa su nombre, el
+  // destino apunta a la pieza real.
+  cortito: {
+    label: '🥩 Cortito', bruto: 'Kilos cortito bruto',
+    destino: 'pieza', preferida: 'Cortito',
+    cortes: ['RECORTES', { n: 'HUESOS', m: true }, { n: 'GRASA', m: true }],
+  },
+  carre_lomo: {
+    label: '🍢 Carré con lomo', bruto: 'Kilos carré bruto',
+    destino: 'pieza', preferida: 'Costeletal con Lomo',
+    cortes: ['RECORTES', { n: 'HUESOS', m: true }, { n: 'GRASA', m: true }],
+  },
+  costillar: {
+    label: '🦴 Costillar completo', bruto: 'Kilos costillar bruto',
+    destino: 'pieza', preferida: 'Costillar Completo',
+    cortes: ['RECORTES', { n: 'HUESOS', m: true }, { n: 'GRASA', m: true }],
+  },
+  cuarto_pistola: {
+    label: '🔫 Cuarto pistola', bruto: 'Kilos cuarto bruto',
+    destino: 'pieza', preferida: 'Cuarto Pistola',
+    cortes: ['RECORTES', { n: 'HUESOS', m: true }, { n: 'GRASA', m: true }],
+  },
+  paleta: {
+    label: '💪 Paleta entera bovina', bruto: 'Kilos paleta bruto',
+    // Como el capón: SÓLO saca el rinde y lo deja en el historial. La paleta
+    // NO es una pieza del desposte de la media res (sale junto con el
+    // cortito), así que la mig 127 la sacó de Mermas por producto — no hay a
+    // dónde mandarle un %. Esta planilla existe para saber a qué precio
+    // vender la paleta deshuesada.
+    destino: null,
+    cortes: ['RECORTES', { n: 'HUESOS', m: true }, { n: 'GRASA', m: true }],
   },
 }
 
@@ -118,8 +159,9 @@ export default function PlanillasRinde({ config, onConfigChange }) {
       return (config.media_res || []).map(m => ({ id: m.id, label: m.label, actual: m.merma }))
     }
     if (!plan.destino) return []   // el capón no ajusta ningún %
-    // pieza: las de la lista, con la que da nombre a la planilla primero
-    const preferida = tipo === 'pierna' ? 'Pierna' : 'Parrillero'
+    // pieza: todas las de la lista, con la que da nombre a la planilla
+    // primero (cada planilla declara su `preferida`).
+    const preferida = plan.preferida
     const todas = Object.entries(config.piezas || {}).map(([n, v]) => ({ id: n, label: n, actual: v }))
     return todas.sort((a, b) => (a.id === preferida ? -1 : b.id === preferida ? 1 : 0))
   }, [config, tipo, plan.destino])
@@ -141,6 +183,20 @@ export default function PlanillasRinde({ config, onConfigChange }) {
       .order('fecha', { ascending: false }).order('created_at', { ascending: false })
       .limit(30)
     setHistorial(data || [])
+
+    // LOS CORTES SE RECUERDAN DE LA ÚLTIMA PLANILLA GUARDADA. Fabricio pidió
+    // agregar él los cortes de las planillas nuevas: sin esto tendría que
+    // tipearlos en CADA planilla. Con esto los carga una vez, guarda, y la
+    // próxima ya vienen puestos (con los kg vacíos).
+    // Sólo se pisa el formulario si todavía no se tipeó ningún kilo — jamás
+    // arriba de una planilla a medio cargar. Y con setFilas funcional, porque
+    // este fetch es async y `filas` acá estaría vieja.
+    const ultima = (data || [])[0]
+    if (Array.isArray(ultima?.cortes) && ultima.cortes.length) {
+      setFilas(fs => fs.every(f => !String(f.kg).trim())
+        ? ultima.cortes.map(c => ({ nombre: c.nombre, kg: '', es_merma: !!c.es_merma }))
+        : fs)
+    }
   }
 
   function mostrar(texto, tipoMsg = 'ok') { setMsg({ texto, tipo: tipoMsg }); setTimeout(() => setMsg(null), 6000) }
@@ -185,9 +241,15 @@ export default function PlanillasRinde({ config, onConfigChange }) {
     if (plan.destino && !destinoId) { mostrar('Elegí a qué producto le corresponde esta planilla', 'error'); return }
     setGuardando(true)
     try {
+      // Se guardan TODOS los renglones con nombre, aunque tengan 0 kg. No es
+      // sólo el registro de lo pesado: es también la plantilla que se recuerda
+      // en la próxima planilla (ver cargarHistorial) — si se filtraran los
+      // vacíos, un corte agregado que esta vez no salió desaparecería de la
+      // lista. Los 0 no afectan ningún cálculo (neto y merma salen del estado,
+      // no de este JSON).
       const cortes = filas
-        .filter(f => parseNumero(f.kg) > 0)
-        .map(f => ({ nombre: f.nombre, kg: parseNumero(f.kg), es_merma: !!f.es_merma }))
+        .filter(f => f.nombre.trim())
+        .map(f => ({ nombre: f.nombre.trim(), kg: parseNumero(f.kg), es_merma: !!f.es_merma }))
       const pct = Math.round(mermaPct * 100) / 100
 
       const { error } = await supabase.from('planillas_rinde').insert({
