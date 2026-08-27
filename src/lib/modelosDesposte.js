@@ -76,7 +76,13 @@ export const MERMA_PIEZA_DEFAULT = {
   'Costillar Completo': 12,
   'Cuarto Pistola': 25,
   'Parrillero': 25,
-  'Paleta': 25,
+  // 'Paleta' NO va acá (Fabricio, 27/08/2026): no es una pieza que salga del
+  // desposte de una media res — sale junto con el cortito. Verificado en la
+  // base: cero despostes, cero piezas físicas y cero kg del bucket en toda la
+  // historia. Su rinde se saca con la planilla propia (sólo historial, para
+  // saber a qué precio vender la paleta deshuesada). OJO: este default se
+  // MEZCLA con la config guardada al cargar (spread), así que dejarla acá la
+  // resucitaría aunque la mig 127 la saque de la base.
 }
 // Merma default para cualquier pieza sin % explícito.
 export const MERMA_PIEZA_GENERICA = 25
