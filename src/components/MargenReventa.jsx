@@ -19,6 +19,13 @@
 // EL MARGEN GENERAL ES PONDERADO POR PLATA (ganancia total ÷ venta total),
 // no un promedio de los %: promediar porcentajes entre categorías da un
 // número que no es de nadie (regla de la casa).
+//
+// VISTA POR SUCURSAL: chips "Todas" + una por franquicia, leídas de
+// `clientes.es_franquicia` — una franquicia nueva aparece sola, sin tocar
+// código. La vista de una sucursal usa el RPC
+// `margen_reventa_franquicia_cliente` (mig 129): mismas cuentas, ventas
+// filtradas a ese cliente; el costo de compra sigue siendo el global de la
+// central (es el mismo costo sea quien sea el que compra).
 // ============================================================
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
@@ -62,26 +69,41 @@ const n1 = n => (Number(n) || 0).toLocaleString('es-AR', { maximumFractionDigits
 
 export default function MargenReventa({ esMovil = false }) {
   const [periodo, setPeriodo] = useState('30')
+  const [sucursal, setSucursal] = useState('todas') // 'todas' | clientes.nombre exacto
+  const [sucursales, setSucursales] = useState([])
   const [filas, setFilas] = useState([])
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState(null)
+
+  // Franquicias reales (es_franquicia, NO tipo='carniceria'): las chips salen
+  // de acá, así una sucursal nueva aparece sola. Se guarda el nombre EXACTO
+  // (algunos tienen espacio al final) porque el RPC filtra por igualdad.
+  useEffect(() => {
+    let vivo = true
+    supabase.from('clientes').select('nombre').eq('es_franquicia', true).order('nombre')
+      .then(({ data }) => { if (vivo) setSucursales(data || []) })
+    return () => { vivo = false }
+  }, [])
 
   useEffect(() => {
     let vivo = true
     async function cargar() {
       setCargando(true); setError(null)
       const { desde, hasta } = rangoDe(periodo)
-      const { data, error: e } = await supabase.rpc('margen_reventa_franquicias', {
-        p_desde: desde, p_hasta: hasta,
-      })
+      const { data, error: e } = sucursal === 'todas'
+        ? await supabase.rpc('margen_reventa_franquicias', { p_desde: desde, p_hasta: hasta })
+        : await supabase.rpc('margen_reventa_franquicia_cliente', { p_desde: desde, p_hasta: hasta, p_cliente: sucursal })
       if (!vivo) return
-      if (e) setError(e.message)
-      else setFilas(data || [])
+      if (e) {
+        setError(/margen_reventa_franquicia_cliente|schema cache/i.test(e.message)
+          ? 'Falta aplicar la migración 129 (supabase/129_margen_reventa_por_franquicia.sql) para ver el detalle por sucursal.'
+          : e.message)
+      } else setFilas(data || [])
       setCargando(false)
     }
     cargar()
     return () => { vivo = false }
-  }, [periodo])
+  }, [periodo, sucursal])
 
   // Derivados por grupo. Sólo entran al general los grupos con las DOS puntas
   // (venta y compra): un grupo sin costo conocido no puede aportar ganancia.
@@ -126,8 +148,28 @@ export default function MargenReventa({ esMovil = false }) {
           ))}
         </div>
       </div>
+
+      {/* Sub-módulo por franquicia: Todas + una chip por sucursal (es_franquicia). */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+        {[{ nombre: 'todas' }, ...sucursales].map(s => {
+          const activa = sucursal === s.nombre
+          return (
+            <button key={s.nombre} onClick={() => setSucursal(s.nombre)}
+              style={{
+                padding: '6px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700,
+                border: `1px solid ${activa ? 'var(--amber)' : 'var(--border)'}`,
+                background: activa ? 'var(--amber)' : 'transparent',
+                color: activa ? '#000' : 'var(--muted)',
+              }}>
+              {s.nombre === 'todas' ? '🏪 Todas las sucursales' : `📍 ${s.nombre.trim()}`}
+            </button>
+          )
+        })}
+      </div>
+
       <div style={{ fontSize: 12, color: 'var(--muted)', margin: '8px 0 12px', lineHeight: 1.5 }}>
-        Promedio de compra (lo que paga la central) contra promedio de venta a Alvear y Monte Cristo,
+        Promedio de compra (lo que paga la central) contra promedio de venta a{' '}
+        {sucursal === 'todas' ? 'las sucursales' : <strong style={{ color: 'var(--text)' }}>{sucursal.trim()}</strong>},
         por grupo. En bovino cortes y cerdo el costo es el <strong style={{ color: 'var(--text)' }}>real
         del desposte</strong>: la plata del animal repartida entre los kilos vendibles.
       </div>
@@ -136,7 +178,11 @@ export default function MargenReventa({ esMovil = false }) {
       {error && <div style={{ color: '#ff8b8b', fontSize: 13 }}>❌ {error}</div>}
 
       {!cargando && !error && conDatos.length === 0 && (
-        <div className="empty">No hubo ventas a las sucursales en este período.</div>
+        <div className="empty">
+          {sucursal === 'todas'
+            ? 'No hubo ventas a las sucursales en este período.'
+            : `No hubo ventas a ${sucursal.trim()} en este período.`}
+        </div>
       )}
 
       {!cargando && !error && conDatos.length > 0 && (
