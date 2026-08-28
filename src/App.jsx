@@ -77,6 +77,7 @@ const DesposteMediaRes = lazy(() => import('./pages/desposte/DesposteMediaRes'))
 const DesposteHistorial = lazy(() => import('./pages/desposte/DesposteHistorial'))
 const DespostePedidos = lazy(() => import('./pages/desposte/DespostePedidos'))
 const DesposteElaborar = lazy(() => import('./pages/desposte/DesposteElaborar'))
+const DesposteRindes = lazy(() => import('./pages/desposte/DesposteRindes'))
 
 // Bloquea el acceso por URL directa a un módulo vedado para este usuario
 // (lib/restricciones.js). El menú ya lo oculta; esto cubre el link tipeado.
@@ -216,6 +217,7 @@ export default function App() {
           <Route path="capones" element={<DesposteCapones />} />
           <Route path="media-res" element={<DesposteMediaRes />} />
           <Route path="historial" element={<DesposteHistorial />} />
+          <Route path="rindes" element={<DesposteRindes />} />
           {/* Sólo lectura, y no sólo porque no le pasamos `puedeEditar`: la
               policy de la mig 104 pide is_admin() Y es_central(), y el
               perfil del desposte no es admin. */}
