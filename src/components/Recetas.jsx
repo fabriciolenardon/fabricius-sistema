@@ -409,8 +409,11 @@ function TarjetaReceta({ receta, puedeEditar, est, setKg, formulas, recetas, vin
       {/* `tableLayout: fixed` + colgroup: sin esto la tabla se ensancha con el
           contenido y la columna de cantidades se sale de la tarjeta — los
           números salían cortados ("8,C" en vez de "8,00 kg"). Con el ancho
-          fijado, el que se acomoda es el nombre, que sí puede cortar línea. */}
-      <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+          fijado, el que se acomoda es el nombre, que sí puede cortar línea.
+          `minWidth: 0` porque index.css le pone min-width 480px a TODA tabla:
+          en una tarjeta de ~410px (tres al lado, tablet del desposte) la tabla
+          se pasaba del borde y los kilos quedaban cortados AFUERA (28/08). */}
+      <table style={{ width: '100%', minWidth: 0, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
         <colgroup>
           <col />
           <col style={{ width: 124 }} />
