@@ -3015,7 +3015,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
   // (precio viejo de media res): en los tipos donde ese campo se ignoraba se
   // guardaba ese 9800 en entradas_deposito y ensuciaba el costo, y desde que
   // existe el cuadre (kg × precio = importe) además hacía saltar la alerta.
-  const [form, setForm] = useState({ tipo: '', proveedor: '', descripcion: '', fecha: fechaHoyARG(), kg: '', precioKg: '', merma: '', destino: 'DEPOSITO', importe: '', cantidad: '1', cajaProductoId: '', polloProductoId: '', embutidoProductoId: '', brosaProductoId: '' })
+  const [form, setForm] = useState({ tipo: '', proveedor: '', descripcion: '', fecha: fechaHoyARG(), kg: '', precioKg: '', merma: '', destino: 'DEPOSITO', importe: '', cantidad: '1', cajaProductoId: '', polloProductoId: '', embutidoProductoId: '', brosaProductoId: '', hamburguesaProductoId: '' })
   const [historial, setHistorial] = useState([])
   // Anular un ingreso pide la CLAVE DE CAJA (mig 102), que define el dueño en
   // Perfil → Contraseñas. Confirmación INLINE, nunca window.confirm: en
@@ -3044,6 +3044,11 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
   // Brosas (mig 89): cada producto tiene su bucket brosa_* propio — la
   // entrada se guarda con ese tipo y suma a su stock individual.
   const [productosBrosa, setProductosBrosa] = useState([])
+  // Hamburguesas COMPRADAS hechas (la franquicia las compra para reventa en
+  // vez de elaborarlas): el selector lista los productos con stock hamb_*.
+  // Query aparte porque viven en categorías distintas (bovino_corte,
+  // cerdo_corte, pollo) y se reconocen por el stock_origen, no la categoría.
+  const [productosHamburguesa, setProductosHamburguesa] = useState([])
   useEffect(() => {
     supabase.from('precios').select('id, nombre, categoria, kg_por_unidad, stock_origen')
       .in('categoria', ['bovino_caja_cb', 'bovino_caja_pt', 'pollo_cajon', 'rebozado_cajon', 'embutido', 'bovino_brosa'])
@@ -3056,6 +3061,9 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
         setProductosEmbutido(all.filter(p => p.categoria === 'embutido' && String(p.stock_origen || '').startsWith('emb_')))
         setProductosBrosa(all.filter(p => p.categoria === 'bovino_brosa' && String(p.stock_origen || '').startsWith('brosa_')))
       })
+    supabase.from('precios').select('id, nombre, stock_origen')
+      .like('stock_origen', 'hamb%').order('nombre')
+      .then(({ data }) => setProductosHamburguesa(data || []))
   }, [])
 
   // Helpers para detectar si el tipo actual requiere selector de producto
@@ -3063,6 +3071,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
   const esRebozadoCajon = form.tipo === 'rebozado'
   const esEmbutido = form.tipo === 'embutido'
   const esBrosa = form.tipo === 'bovino_brosa'
+  const esHamburguesa = form.tipo === 'hamburguesa'
   const productosFiltradosTipo = esPolloCajon ? productosPolloCajon
                                 : esRebozadoCajon ? productosRebozadoCajon
                                 : []
@@ -3323,6 +3332,15 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
       showAlert({ type: 'error', msg: 'Seleccioná qué brosa estás ingresando (Chinchulín, Hígado, Mondongo...) — la entrada suma a su stock propio' })
       return
     }
+    // Hamburguesas compradas hechas: producto obligatorio — define a qué
+    // stock propio (hamb_*) suma la entrada, el MISMO bucket que descuentan
+    // las ventas y que alimenta la elaboración. Los dos caminos (elaborar o
+    // comprar) terminan en el mismo stock.
+    const prodHamburguesa = esHamburguesa ? productosHamburguesa.find(p => p.id === form.hamburguesaProductoId) : null
+    if (esHamburguesa && !prodHamburguesa) {
+      showAlert({ type: 'error', msg: 'Seleccioná qué hamburguesa estás ingresando (carne, cerdo, pollo...) — la entrada suma a su stock propio' })
+      return
+    }
 
     const esEnUnidades = TIPOS_EN_UNIDADES.includes(form.tipo)
     const cantidad = esEnUnidades ? Math.max(1, parseInt(form.cantidad) || 1) : 1
@@ -3362,7 +3380,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     // Para media res, el nombre siempre es canónico (uno de los 2 de la lista).
     const descripcionBase = form.tipo === 'bovino_mr'
       ? nombreCanonicoMediaRes(form.descripcion)
-      : (prodEmbutido?.nombre?.trim() || prodBrosa?.nombre?.trim() || productoSelec?.nombre || form.descripcion || form.tipo)
+      : (prodEmbutido?.nombre?.trim() || prodBrosa?.nombre?.trim() || prodHamburguesa?.nombre?.trim() || productoSelec?.nombre || form.descripcion || form.tipo)
     const descripcionFinal = esEnUnidades && cantidad > 1
       ? `${descripcionBase} ×${cantidad}`
       : descripcionBase
@@ -3371,6 +3389,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     // se edita o elimina, la reversión también pega en el bucket correcto.
     const tipoEntrada = prodEmbutido ? prodEmbutido.stock_origen
       : prodBrosa ? prodBrosa.stock_origen
+      : prodHamburguesa ? prodHamburguesa.stock_origen
       : form.tipo
     // Para bovino_mr necesitamos el id de la entrada insertada para crear
     // la fila correspondiente en medias_stock (el codigo MR-XXX se genera
@@ -3465,7 +3484,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
       ? `✅ ${cantidad} unidades de ${descripcionBase} registradas — ${kgTotal.toFixed(1)} kg al stock`
       : '✅ Entrada registrada — Stock actualizado'
     showAlert({ type: 'success', msg: msgOK })
-    setForm(f => ({ ...f, mermaTipoId: '', descripcion: '', kg: '', importe: '', precioKg: '', cantidad: '1', polloProductoId: '', embutidoProductoId: '', brosaProductoId: '' }))
+    setForm(f => ({ ...f, mermaTipoId: '', descripcion: '', kg: '', importe: '', precioKg: '', cantidad: '1', polloProductoId: '', embutidoProductoId: '', brosaProductoId: '', hamburguesaProductoId: '' }))
     onSaved()
     cargarHistorial()
     setTimeout(() => showAlert(null), 3000)
@@ -3710,6 +3729,7 @@ async function ejecutarAnulacion(entrada) {
 <option value="cerdo_huesos">🐷 Cerdo — Huesos (pieza comprada)</option>
 <option value="pollo">🍗 Pollo por Cajones</option>
 <option value="embutido">🌭 Embutido</option>
+<option value="hamburguesa">🍔 Hamburguesa (comprada hecha)</option>
 <option value="rebozado">🧊 Rebozado por Cajones</option>
 <option value="almacen">🛒 Almacén (por unidad)</option>
 <option value="bebidas">🥤 Bebidas (por unidad)</option>
@@ -3814,6 +3834,36 @@ async function ejecutarAnulacion(entrada) {
                 {productosEmbutido.length === 0
                   ? <span style={{ color: '#ff8b8b' }}>⚠️ No hay embutidos con stock propio — asignales su "stock origen" en /admin/precios.</span>
                   : 'La entrada suma directo al stock propio de ese producto (el mismo que descuentan las ventas). Si falta alguno, asignale su stock origen en Precios.'}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Selector para HAMBURGUESAS COMPRADAS HECHAS. La franquicia puede
+            elaborarlas (Depósito → Elaborar, eso queda igual) o comprarlas
+            para reventa: este ingreso suma al MISMO bucket hamb_* que
+            descuentan las ventas — los dos caminos terminan en el mismo
+            stock. Nació de Monte Cristo con hamb_pollo y hamb_carne en
+            negativo: vendían hamburguesas compradas sin forma de
+            ingresarlas. */}
+        {esHamburguesa && (
+          <div className="form-row">
+            <div className="form-group" style={{ gridColumn: '1/-1' }}>
+              <label>🍔 ¿Qué hamburguesa ingresa?</label>
+              <select
+                value={form.hamburguesaProductoId || ''}
+                onChange={e => setForm(f => ({ ...f, hamburguesaProductoId: e.target.value }))}
+                style={{ borderColor: 'var(--gold)' }}
+              >
+                <option value="">— Seleccioná la hamburguesa —</option>
+                {productosHamburguesa.map(p => (
+                  <option key={p.id} value={p.id}>{p.nombre}</option>
+                ))}
+              </select>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                {productosHamburguesa.length === 0
+                  ? <span style={{ color: '#ff8b8b' }}>⚠️ No hay hamburguesas con stock propio — asignales su "stock origen" en /admin/precios.</span>
+                  : 'La entrada suma directo al stock propio de esa hamburguesa (el mismo que descuentan las ventas y al que suma la elaboración).'}
               </div>
             </div>
           </div>
