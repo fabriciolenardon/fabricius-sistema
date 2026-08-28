@@ -1338,13 +1338,28 @@ export async function ejecutarFuncion(nombre, args) {
 
       case 'consultar_ofertas': {
         const hoy = fechaHoyARG()
-        const { data, error } = await supabase.from('ofertas').select('*').eq('activa', true)
-          .lte('fecha_inicio', hoy).or(`fecha_fin.is.null,fecha_fin.gte.${hoy}`)
+        const [{ data, error }, { data: sucs }] = await Promise.all([
+          supabase.from('ofertas').select('*').eq('activa', true)
+            .lte('fecha_inicio', hoy).or(`fecha_fin.is.null,fecha_fin.gte.${hoy}`),
+          supabase.from('sucursales').select('id, nombre'),
+        ])
         if (error) throw error
         if (!data || data.length === 0) return { resultado: 'No hay ofertas activas hoy.' }
-        const lista = data.map(o =>
-          `• ${o.producto_nombre}: ${o.descuento_pct ? `−${o.descuento_pct}%` : formatearPesos(o.precio_oferta)}${o.fecha_fin ? ` (hasta ${formatearFecha(o.fecha_fin)})` : ''}`
-        ).join('\n')
+        // La central ve las filas de TODAS las bocas (mig 103): una oferta
+        // multi-boca son varias filas con el mismo grupo_id. Se juntan y se
+        // aclara dónde corre, así IRIS no da por vigente en la central una
+        // oferta que es solo de una sucursal.
+        const nombreSuc = id => (sucs || []).find(s => s.id === id)?.nombre || `Sucursal ${id}`
+        const grupos = new Map()
+        for (const o of data) {
+          const k = o.grupo_id || o.id
+          if (!grupos.has(k)) grupos.set(k, { ...o, bocas: [] })
+          grupos.get(k).bocas.push(Number(o.sucursal_id ?? 1))
+        }
+        const lista = [...grupos.values()].map(o => {
+          const donde = o.bocas.every(b => b === 1) ? '' : ` — corre en: ${o.bocas.map(nombreSuc).join(', ')}`
+          return `• ${o.producto_nombre}: ${o.descuento_pct ? `−${o.descuento_pct}%` : formatearPesos(o.precio_oferta)}${o.fecha_fin ? ` (hasta ${formatearFecha(o.fecha_fin)})` : ''}${donde}`
+        }).join('\n')
         return { resultado: `Ofertas activas:\n${lista}` }
       }
 

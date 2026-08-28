@@ -539,21 +539,28 @@ export default function Precios() {
     }
   }
 
-  const ofertasVigentes = ofertas.filter(o => o.activa && o.fecha_inicio <= hoy && o.fecha_fin >= hoy)
+  // Vigentes de TODAS las bocas: SOLO para la tabla de administración. La RLS
+  // deja que la central VEA las filas de todas las bocas a propósito (las
+  // gobierna ella, mig 103) — por eso acá llegan también las de Monte Cristo.
+  const ofertasVigentesTodas = ofertas.filter(o => o.activa && o.fecha_inicio <= hoy && o.fecha_fin >= hoy)
+  // Vigentes DE ESTA BOCA: lo que usa el resto de la pantalla para marcar un
+  // producto en oferta. Sin este filtro, una oferta cargada solo para una
+  // sucursal aparecía "en oferta" también en la central (bug 28/08: Fabricio
+  // cargó ofertas para Monte Cristo y se le aplicaban en su caja).
+  const miBoca = Number(sucursalId ?? SUCURSAL_CENTRAL)
+  const ofertasVigentes = ofertasVigentesTodas.filter(o => Number(o.sucursal_id ?? SUCURSAL_CENTRAL) === miBoca)
   // Para la TABLA: una fila por oferta, no por boca. Una oferta que corre en
   // la central y en Monte Cristo son dos filas en la base con el mismo
   // `grupo_id`; acá se juntan y se muestran las bocas como chips.
-  // `ofertasVigentes` se deja plano porque es lo que usa el resto de la
-  // pantalla para saber si UN producto está en oferta.
   const ofertasAgrupadas = useMemo(() => {
     const m = new Map()
-    for (const o of ofertasVigentes) {
+    for (const o of ofertasVigentesTodas) {
       const k = o.grupo_id || o.id
       if (!m.has(k)) m.set(k, { ...o, bocas: [] })
       m.get(k).bocas.push(o.sucursal_id)
     }
     return [...m.values()]
-  }, [ofertasVigentes])
+  }, [ofertasVigentesTodas])
   const ofertasVencidas = ofertas.filter(o => !o.activa || o.fecha_fin < hoy)
   const productosFiltrados = precios.filter(p => p.categoria === filtro)
   const productosBusqueda = precios.filter(p => p.nombre.toLowerCase().includes(busquedaOferta.toLowerCase()))
@@ -646,7 +653,7 @@ export default function Precios() {
             (mig 114). Para una sucursal la base lo rechaza, así que mejor que
             ni aparezca a que apriete y no pase nada. */}
         {!esSucursal && tabBtn('masivo', '🚀 Actualización masiva')}
-        {tabBtn('ofertas', `🏷️ Ofertas${ofertasVigentes.length > 0 ? ` (${ofertasVigentes.length})` : ''}`)}
+        {tabBtn('ofertas', `🏷️ Ofertas${ofertasAgrupadas.length > 0 ? ` (${ofertasAgrupadas.length})` : ''}`)}
         {tabBtn('combos', '🍱 Combos')}
         {/* Categorías, Limpieza e Importar PLUs escriben el CATÁLOGO COMPARTIDO
             (`precios` y `config_sistema`): las tres son de la central. Para una
@@ -1264,8 +1271,8 @@ export default function Precios() {
             </button>
           </div>
 
-          {/* OFERTAS VIGENTES */}
-          {ofertasVigentes.length > 0 && (
+          {/* OFERTAS VIGENTES (de todas las bocas: esta tabla es administración) */}
+          {ofertasVigentesTodas.length > 0 && (
             <div className="card" style={{ marginBottom: 16, borderColor: '#4a8a2a' }}>
               <div className="card-title">✅ Ofertas vigentes ahora</div>
               <table>
