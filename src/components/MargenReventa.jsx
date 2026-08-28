@@ -132,6 +132,12 @@ export default function MargenReventa({ esMovil = false }) {
 
   const colorMargen = m => (m == null ? 'var(--muted)' : m < 0 ? '#ff8b8b' : m < 10 ? '#ffd17a' : 'var(--green)')
 
+  // Fechas exactas del período elegido, visibles en pantalla: Fabricio
+  // preguntó "¿30 días desde cuándo?" — son ventanas que TERMINAN HOY
+  // (no mes calendario), así que se muestra el rango para que no haya duda.
+  const rango = rangoDe(periodo)
+  const ddmm = f => { const [, m, d] = f.split('-'); return `${d}/${m}` }
+
   return (
     <div className="card" style={{ marginBottom: 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
@@ -168,6 +174,10 @@ export default function MargenReventa({ esMovil = false }) {
       </div>
 
       <div style={{ fontSize: 12, color: 'var(--muted)', margin: '8px 0 12px', lineHeight: 1.5 }}>
+        <span style={{ display: 'inline-block', marginRight: 8, padding: '1px 8px', borderRadius: 5,
+                       border: '1px solid var(--border)', color: 'var(--text)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+          📅 Del {ddmm(rango.desde)} al {ddmm(rango.hasta)}{rango.hasta === fechaHoyARG() ? ' (hoy)' : ''}
+        </span>
         Promedio de compra (lo que paga la central) contra promedio de venta a{' '}
         {sucursal === 'todas' ? 'las sucursales' : <strong style={{ color: 'var(--text)' }}>{sucursal.trim()}</strong>},
         por grupo. En bovino cortes y cerdo el costo es el <strong style={{ color: 'var(--text)' }}>real
