@@ -17,6 +17,7 @@ import { kgPorUnidadDeProducto, bucketPiezaBovina, redondearStock } from '../../
 import { cargarCajasDisponibles, venderCaja, CATEGORIA_A_TIPO_CAJA } from '../../lib/cajasStock'
 import { fmtPrecio, fmtKg, parseNumero } from '../../lib/formatos'
 import { overlayDeSucursal, conPreciosDeSucursal } from '../../lib/preciosSucursal'
+import { SUCURSAL_CENTRAL } from '../../lib/permisos'
 import { productosQueVende } from '../../lib/categoriasPrecios'
 import { useAuth } from '../../context/AuthContext'
 import HistorialCaja from './HistorialCaja'
@@ -172,7 +173,12 @@ export default function Caja() {
     // (ver lib/balanzaFormato.js). Sin override cae al global de siempre.
     if (cfg?.valor) setConfigEAN(resolverFormatoEAN(cfg.valor, sucursalId))
     setVentasHoy(ventas || [])
-    setOfertas(ofs || [])
+    // SOLO las ofertas de ESTA boca. La RLS no filtra para la central (ve las
+    // filas de todas las bocas para administrarlas, mig 103): sin este filtro,
+    // una oferta cargada solo para Monte Cristo se aplicaba también en la caja
+    // de la central (bug 28/08).
+    const miBoca = Number(sucursalId ?? SUCURSAL_CENTRAL)
+    setOfertas((ofs || []).filter(o => Number(o.sucursal_id ?? SUCURSAL_CENTRAL) === miBoca))
     setCajasDisp(cajas || [])
     setPiezasDisp(piezas || [])
     setCombos(cbs || [])

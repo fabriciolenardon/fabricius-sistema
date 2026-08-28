@@ -26,7 +26,7 @@ import { cargarCategoriasPrecios, labelsDeCategorias } from '../../lib/categoria
 import { estadoBloqueoCliente } from '../../lib/moraClientes'
 import { logAuditoria } from '../../lib/auditoria'
 import { useAuth } from '../../context/AuthContext'
-import { puedeAjustarStock } from '../../lib/permisos'
+import { puedeAjustarStock, SUCURSAL_CENTRAL } from '../../lib/permisos'
 import { overlayDeSucursal, conPreciosDeSucursal } from '../../lib/preciosSucursal'
 import { hayClaveCaja, verificarClaveCaja } from '../../lib/clavesOperativas'
 import { productosQueVende } from '../../lib/categoriasPrecios'
@@ -4315,10 +4315,15 @@ export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
     supabase.from('clientes').select('*').order('nombre').then(({ data }) => setClientes(data || []))
     // Ofertas vigentes (activas y dentro del rango de fechas) para aplicar
     // el precio de oferta en los despachos, igual que en Caja Rápida.
+    // SOLO las de ESTA boca: la RLS no filtra para la central (ve las filas de
+    // todas las bocas para administrarlas, mig 103) — sin este filtro, una
+    // oferta cargada solo para Monte Cristo se aplicaba también en los
+    // despachos de la central (bug 28/08).
     const hoyOf = fechaHoyARG()
+    const miBoca = Number(sucursalId ?? SUCURSAL_CENTRAL)
     supabase.from('ofertas').select('*').eq('activa', true)
       .lte('fecha_inicio', hoyOf).gte('fecha_fin', hoyOf)
-      .then(({ data }) => setOfertas(data || []))
+      .then(({ data }) => setOfertas((data || []).filter(o => Number(o.sucursal_id ?? SUCURSAL_CENTRAL) === miBoca)))
   // Orden por created_at además de fecha: dos medias reses cargadas el mismo
   // día necesitan ordenarse por hora real de creación (la columna `fecha` es
   // DATE y `id` es UUID — ninguno sirve solo como criterio cronológico).
