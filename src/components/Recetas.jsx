@@ -80,6 +80,18 @@ function fmtCant(v) {
   return fmtNumero(n, dec)
 }
 
+// Cantidad escalada con su unidad, cambiando de unidad cuando cruza el kilo:
+// "1.200 g" en la balanza se pesa como "1,2 kg" (Fabricio 28/08), y al revés
+// una receta en kg escalada para abajo se lee mejor en gramos.
+function cantEscalada(v, unidad) {
+  const n = Number(v)
+  if (!isFinite(n)) return { num: '', uni: unidad || '' }
+  const u = String(unidad || '').toLowerCase()
+  if (u === 'g' && Math.abs(n) >= 1000) return { num: fmtCant(n / 1000), uni: 'kg' }
+  if (u === 'kg' && n !== 0 && Math.abs(n) < 1) return { num: fmtCant(n * 1000), uni: 'g' }
+  return { num: fmtCant(n), uni: unidad || '' }
+}
+
 // Cuánto de este ingrediente entra en UN kilo de producto terminado.
 // Se pasa a gramos cuando queda por debajo del kilo, que es como se lee.
 function porKilo(cantidad, unidad, totalKg) {
@@ -448,10 +460,13 @@ function FilaIngrediente({ nombre, nota, cantidad, unidad, factor, totalBase, es
         {cantidad != null ? (
           <>
             <div style={{ whiteSpace: 'nowrap' }}>
-              <strong style={{ fontSize: 15, color: escalada ? 'var(--gold)' : 'var(--text)' }}>
-                {fmtCant(Number(cantidad) * factor)}
-              </strong>
-              <span style={{ fontSize: 11, color: 'var(--muted)' }}> {unidad || ''}</span>
+              {(() => {
+                const { num, uni } = cantEscalada(Number(cantidad) * factor, unidad)
+                return (<>
+                  <strong style={{ fontSize: 15, color: escalada ? 'var(--gold)' : 'var(--text)' }}>{num}</strong>
+                  <span style={{ fontSize: 11, color: 'var(--muted)' }}> {uni}</span>
+                </>)
+              })()}
             </div>
             {unitario && <div style={{ fontSize: 10, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{unitario} por kg</div>}
           </>
