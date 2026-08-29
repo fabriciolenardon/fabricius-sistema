@@ -1446,7 +1446,7 @@ async function confirmarDesposteCerdo() {
 ...(esSucursal ? [] : [{ id: 'cerdo', label: '🐷 Desposte Cerdo' }]),
 // En la sucursal, Elaborar ya es una solapa propia arriba: si además la
 // dejáramos acá, el mismo tablero estaría en dos lugares.
-...(esSucursal ? [] : [{ id: 'embutidos', label: '🌭 Elaborar Embutidos' }]),
+...(esSucursal ? [] : [{ id: 'embutidos', label: '🌭 Elaborados' }]),
 { id: 'historial', label: '📋 Historial Desposte' },
 // Las mermas las define la CENTRAL (una sola config para las dos bocas).
 ...(esSucursal ? [] : [{ id: 'mermas', label: '⚙️ Mermas' }])].map(t => (
@@ -2845,7 +2845,14 @@ const PRODUCTOS_POR_FAMILIA = {
 }
 
 function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, onEditarProductos, loading }) {
-  const pag = usePaginacion(elaboraciones || [], 15)
+  // Filtro por familia (Fabricio 29/08): chorizos / salames / hamburguesas,
+  // así no hay que scrollear todo para encontrar una tanda. Las elaboraciones
+  // viejas sin `tipo` son chorizos (la familia original).
+  const [familia, setFamilia] = useState('todas')
+  const familiaDe = e => (e.tipo === 'salame' || e.tipo === 'hamburguesa' || e.tipo === 'milanesa') ? e.tipo : 'embutido'
+  const filtradas = (elaboraciones || []).filter(e => familia === 'todas' || familiaDe(e) === familia)
+  const cuenta = f => (elaboraciones || []).filter(e => familiaDe(e) === f).length
+  const pag = usePaginacion(filtradas, 15)
   // id del salame cuyo candado está abierto + kg finales tipeados por variedad
   const [finId, setFinId] = useState(null)
   const [kgFinales, setKgFinales] = useState({})  // { [tipo_salame]: kg }
@@ -2866,9 +2873,27 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, onEditarProd
   }
   return (
     <div className="card">
-      <div className="card-title">🌭 Historial de elaboraciones ({(elaboraciones || []).length})</div>
-      {(elaboraciones || []).length === 0
-        ? <div className="empty">Sin elaboraciones registradas</div>
+      <div className="card-title">🌭 Historial de elaboraciones ({filtradas.length})</div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+        {[
+          { id: 'todas', label: `Todas (${(elaboraciones || []).length})` },
+          { id: 'embutido', label: `🌭 Chorizos (${cuenta('embutido')})` },
+          { id: 'salame', label: `🥩 Salames (${cuenta('salame')})` },
+          { id: 'hamburguesa', label: `🍔 Hamburguesas (${cuenta('hamburguesa')})` },
+          // Milanesas: elaboran solo las sucursales — la chip aparece únicamente si hay tandas.
+          ...(cuenta('milanesa') > 0 ? [{ id: 'milanesa', label: `🍗 Milanesas (${cuenta('milanesa')})` }] : []),
+        ].map(f => (
+          <button key={f.id} onClick={() => setFamilia(f.id)}
+            style={{
+              padding: '6px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700,
+              border: `1px solid ${familia === f.id ? 'var(--gold)' : 'var(--border)'}`,
+              background: familia === f.id ? 'var(--gold)' : 'transparent',
+              color: familia === f.id ? '#000' : 'var(--muted)',
+            }}>{f.label}</button>
+        ))}
+      </div>
+      {filtradas.length === 0
+        ? <div className="empty">{familia === 'todas' ? 'Sin elaboraciones registradas' : 'Sin elaboraciones de este tipo'}</div>
         : pag.items.map(e => (
           <div key={e.id} style={{ padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
