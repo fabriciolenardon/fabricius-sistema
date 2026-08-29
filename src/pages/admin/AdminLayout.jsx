@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useFlujoNotificaciones, usePedidosListosNotif } from '../../lib/useFlujoNotificaciones'
 import { fechaHoyARG, horaHoyARG, diaSemanaARG } from '../../lib/fechas'
+import { lunesDeLaSemana, domingoDeLaSemana } from '../../lib/cierreAuto'
 import { fmtPrecio, fmtKg } from '../../lib/formatos'
 import { rutaRestringida, moduloDeSucursal } from '../../lib/restricciones'
 import BuscadorGlobal from '../../components/BuscadorGlobal'
@@ -110,6 +111,8 @@ function itemVisible(item, { email, esSucursal, esCeo }) {
 
 function useNotificaciones() {
   const [notifs, setNotifs] = useState([])
+  // El cierre semanal es de la CENTRAL: a una sucursal no se le reclama.
+  const { isSucursal } = useAuth()
   useEffect(() => {
     async function cargar() {
       const hoy = new Date()
@@ -161,9 +164,34 @@ function useNotificaciones() {
         })
       }
 
-      if (cierres?.length > 0) {
-        const diasSinCierre = Math.floor((hoy - new Date(cierres[0].semana_fin + 'T12:00')) / (1000 * 60 * 60 * 24))
-        if (diasSinCierre > 8) nuevas.push({ tipo: 'info', icono: '📋', titulo: `Hace ${diasSinCierre} días sin cierre`, sub: 'Registrá el cierre de la semana', link: '/admin/cierre' })
+      // ── Cierre semanal pendiente (Fabricio 29/08: "por ahí me olvido") ──
+      // La semana PASADA (lun→dom) tiene que tener su fila en cierres_semanales.
+      // Antes solo avisaba como "info" a los 9 días del último cierre; ahora
+      // avisa desde el lunes si la semana anterior quedó sin cerrar, y pasa a
+      // rojo de miércoles en adelante o con más de una semana colgada.
+      if (!isSucursal) {
+        const lunesPasadoBase = new Date(hoy); lunesPasadoBase.setDate(hoy.getDate() - 7)
+        const lunesPasado = lunesDeLaSemana(lunesPasadoBase)
+        const domingoPasado = domingoDeLaSemana(lunesPasadoBase)
+        const cubierta = (cierres || []).some(c => c.semana_inicio >= lunesPasado)
+        if (!cubierta) {
+          const dd = f => f ? `${String(f).slice(8, 10)}/${String(f).slice(5, 7)}` : ''
+          const ultimoFin = cierres?.[0]?.semana_fin
+          const semanasColgadas = ultimoFin
+            ? Math.max(1, Math.round((new Date(lunesPasado + 'T12:00') - new Date(ultimoFin + 'T12:00')) / (7 * 86400000)))
+            : 1
+          // Día de la semana en ARG (no la TZ del server): 0=dom, 1=lun...
+          const dow = new Date(hoyStr + 'T12:00:00').getDay()
+          const grave = semanasColgadas > 1 || dow === 0 || dow >= 3
+          nuevas.push({
+            tipo: grave ? 'danger' : 'warning', icono: '📋',
+            titulo: semanasColgadas > 1
+              ? `Faltan ${semanasColgadas} cierres semanales`
+              : 'Falta el cierre de la semana pasada',
+            sub: `Semana del ${dd(lunesPasado)} al ${dd(domingoPasado)} sin cerrar${ultimoFin ? ` · último cierre hasta el ${dd(ultimoFin)}` : ''}`,
+            link: '/admin/cierre',
+          })
+        }
       }
 
       // ── Avisos de Facturación ──
@@ -217,7 +245,7 @@ function useNotificaciones() {
       setNotifs(nuevas)
     }
     cargar()
-  }, [])
+  }, [isSucursal])
   return notifs
 }
 
