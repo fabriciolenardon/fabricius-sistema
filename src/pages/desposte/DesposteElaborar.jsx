@@ -108,7 +108,8 @@ export default function DesposteElaborar() {
   // Salames
   const [piezasSal, setPiezasSal] = useState({})
   const [kgBovinoSal, setKgBovinoSal] = useState('')
-  const [kgQuesoSal, setKgQuesoSal] = useState('')
+  const [kgQuesoHolSal, setKgQuesoHolSal] = useState('')
+  const [kgQuesoRockSal, setKgQuesoRockSal] = useState('')
   const [variedadesSal, setVariedadesSal] = useState({})
   const [enSecado, setEnSecado] = useState([])
   const [finales, setFinales] = useState({}) // { [elabId]: { [tipo]: kg } }
@@ -133,7 +134,7 @@ export default function DesposteElaborar() {
   function limpiar() {
     setPiezasEmb({}); setRetazos(''); setPesoReal({})
     setPiezasHamb({}); setKgOrigenHamb(''); setKgFinalHamb('')
-    setPiezasSal({}); setKgBovinoSal(''); setKgQuesoSal(''); setVariedadesSal({})
+    setPiezasSal({}); setKgBovinoSal(''); setKgQuesoHolSal(''); setKgQuesoRockSal(''); setVariedadesSal({})
     setNotas('')
   }
 
@@ -147,7 +148,7 @@ export default function DesposteElaborar() {
   const kgFinHamb = parseNumero(kgFinalHamb)
   const pctHamb = kgOrigHamb > 0 ? (kgFinHamb / kgOrigHamb - 1) * 100 : 0
 
-  const kgMateriaSal = sumaObj(piezasSal) + parseNumero(kgBovinoSal) + parseNumero(kgQuesoSal)
+  const kgMateriaSal = sumaObj(piezasSal) + parseNumero(kgBovinoSal) + parseNumero(kgQuesoHolSal) + parseNumero(kgQuesoRockSal)
   const kgNetoSal = sumaObj(variedadesSal)
 
   // ── Confirmaciones ──
@@ -179,7 +180,8 @@ export default function DesposteElaborar() {
     setGuardando(true)
     try {
       const r = await registrarElaboracionSalame({
-        piezasCerdo: objNum(piezasSal), kgBovino: parseNumero(kgBovinoSal), kgQueso: parseNumero(kgQuesoSal),
+        piezasCerdo: objNum(piezasSal), kgBovino: parseNumero(kgBovinoSal),
+        kgQuesoHolanda: parseNumero(kgQuesoHolSal), kgQuesoRockeford: parseNumero(kgQuesoRockSal),
         variedades: objNum(variedadesSal), notas,
       })
       aviso(`✅ Salame registrado en secado — ${r.detalle} (${r.kgTotal.toFixed(1)} kg netos). Cargá el peso final cuando esté seco.`)
@@ -342,7 +344,8 @@ export default function DesposteElaborar() {
               <CampoKg key={p.key} label={p.nombre} valor={piezasSal[p.key]} onChange={v => setPiezasSal(x => ({ ...x, [p.key]: v }))} />
             ))}
             <CampoKg label="Carne bovina (descuenta de Bovino Cortes)" valor={kgBovinoSal} onChange={setKgBovinoSal} />
-            <CampoKg label="Queso (no descuenta stock)" valor={kgQuesoSal} onChange={setKgQuesoSal} />
+            <CampoKg label="Queso Holanda (no descuenta stock)" valor={kgQuesoHolSal} onChange={setKgQuesoHolSal} />
+            <CampoKg label="Queso Rockeford (no descuenta stock)" valor={kgQuesoRockSal} onChange={setKgQuesoRockSal} />
           </div>
 
           <h2 style={{ fontSize: 20, marginBottom: 4 }}>🥓 Kg netos por variedad (entran al secado)</h2>

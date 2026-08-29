@@ -209,7 +209,10 @@ export async function registrarElaboracionHamburguesa({ fecha = fechaHoyARG(), t
 // ── REGISTRAR SALAME (etapa 1: entra al secado, NO suma stock todavía) ──
 // variedades: { salame_comun: kgNeto, salame_holanda: ..., salame_rockeford: ... }
 // kgBovino descuenta de 'bovino_corte'; el queso no toca stock.
-export async function registrarElaboracionSalame({ fecha = fechaHoyARG(), piezasCerdo, kgBovino = 0, kgQueso = 0, variedades, notas = '' }) {
+// Quesos desglosados (mig 133): kgQuesoHolanda y kgQuesoRockeford suman a la
+// pasta cada uno por su lado; kg_queso guarda el total (compat). kgQueso
+// queda como parámetro legacy por si algo viejo lo sigue pasando.
+export async function registrarElaboracionSalame({ fecha = fechaHoyARG(), piezasCerdo, kgBovino = 0, kgQueso = 0, kgQuesoHolanda = 0, kgQuesoRockeford = 0, variedades, notas = '' }) {
   const piezasUsadas = Object.entries(piezasCerdo || {})
     .map(([tipo, v]) => ({ tipo, kg: n(v) }))
     .filter(p => p.kg > 0)
@@ -220,13 +223,16 @@ export async function registrarElaboracionSalame({ fecha = fechaHoyARG(), piezas
     .filter(v => v.kg_neto > 0)
   if (vars.length === 0) throw new Error('Cargá los kg de al menos una variedad de salame (común/holanda/rockeford)')
 
-  const kgTotal = kgCerdo + n(kgBovino) + n(kgQueso)
+  const kgQuesoTotal = n(kgQueso) + n(kgQuesoHolanda) + n(kgQuesoRockeford)
+  const kgTotal = kgCerdo + n(kgBovino) + kgQuesoTotal
   const { error: errElab } = await supabase.from('elaboraciones_embutidos').insert({
     fecha, tipo: 'salame', tipo_embutido: vars[0].tipo,
     piezas_usadas: piezasUsadas,
     kg_carne_cerdo: kgCerdo,
     kg_carne_bovina: n(kgBovino),
-    kg_queso: n(kgQueso),
+    kg_queso: kgQuesoTotal,
+    kg_queso_holanda: n(kgQuesoHolanda),
+    kg_queso_rockeford: n(kgQuesoRockeford),
     kg_elaborado: kgTotal, pct_aumento: 0,
     productos_finales: vars,
     kg_final: 0, maduracion_completa: false,

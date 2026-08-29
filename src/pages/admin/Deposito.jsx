@@ -546,7 +546,8 @@ const [piezasEmbutido, setPiezasEmbutido] = useState({
   cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: ''
 })
 const [kgCarneBovinaEmbutido, setKgCarneBovinaEmbutido] = useState('')
-const [kgQuesoEmbutido, setKgQuesoEmbutido] = useState('')
+const [kgQuesoEmbutido, setKgQuesoEmbutido] = useState('') // Queso Holanda (kg) del salame
+const [kgQuesoRockefordEmbutido, setKgQuesoRockefordEmbutido] = useState('')
 const [pctAumentoEmbutido, setPctAumentoEmbutido] = useState(10)
 // Peso real embutido por variedad (parrilleros). Si se carga, la merma sale sola.
 // Peso real por PRODUCTO terminado: una misma elaboración puede producir
@@ -1078,7 +1079,7 @@ async function confirmarElaboracionSalame() {
       // kg netos = suma de piezas de cerdo + bovino + queso. NO se aplica
       // ninguna merma automática: el peso final real se carga después del
       // secado (varía mucho cuánto tarda, así que no se fija una fecha).
-      const kgTotal = kgCerdo + (parseNumero(kgCarneBovinaEmbutido)) + (parseNumero(kgQuesoEmbutido))
+      const kgTotal = kgCerdo + (parseNumero(kgCarneBovinaEmbutido)) + (parseNumero(kgQuesoEmbutido)) + (parseNumero(kgQuesoRockefordEmbutido))
       const piezasUsadas = Object.entries(piezasEmbutido)
         .filter(([, v]) => parseNumero(v) > 0)
         .map(([tipo, v]) => ({ tipo, kg: parseNumero(v) }))
@@ -1089,7 +1090,11 @@ async function confirmarElaboracionSalame() {
         piezas_usadas: piezasUsadas,
         kg_carne_cerdo: kgCerdo,
         kg_carne_bovina: parseNumero(kgCarneBovinaEmbutido),
-        kg_queso: parseNumero(kgQuesoEmbutido),
+        // kg_queso guarda el TOTAL (compat con historial/mermas); el desglose
+        // Holanda/Rockeford va en sus columnas (mig 133). No descuenta stock.
+        kg_queso: parseNumero(kgQuesoEmbutido) + parseNumero(kgQuesoRockefordEmbutido),
+        kg_queso_holanda: parseNumero(kgQuesoEmbutido),
+        kg_queso_rockeford: parseNumero(kgQuesoRockefordEmbutido),
         kg_elaborado: kgTotal, pct_aumento: 0,
         productos_finales: variedades,
         kg_final: 0, maduracion_completa: false,
@@ -1110,7 +1115,7 @@ async function confirmarElaboracionSalame() {
       showAlert(`✅ Salame registrado en secado — ${detalleVar} (${kgTotal.toFixed(1)} kg netos). Cargá el peso final de cada uno cuando esté seco.`)
       setPiezasEmbutido({ cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '', cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: '' })
       setSalameNeto({ salame_comun: '', salame_rockeford: '', salame_holanda: '' })
-      setKgCarneBovinaEmbutido(''); setKgQuesoEmbutido(''); setNotas('')
+      setKgCarneBovinaEmbutido(''); setKgQuesoEmbutido(''); setKgQuesoRockefordEmbutido(''); setNotas('')
       await cargarDatos(); onSaved()
     } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
     setLoading(false)
@@ -2238,10 +2243,20 @@ async function confirmarDesposteCerdo() {
           </div>
         )
       })()}
-      {tipoElaboracion === 'salame' && parseNumero(salameNeto.salame_holanda) > 0 && (
-        <div className="form-group" style={{ marginBottom: 10 }}>
-          <label>🧀 Queso Holanda (kg)</label>
-          <input type="text" inputMode="decimal" placeholder="0" value={kgQuesoEmbutido} onChange={e => setKgQuesoEmbutido(e.target.value)} style={{ ...inp, borderColor: 'var(--amber)' }} />
+      {/* Quesos SIEMPRE visibles en modo salame (Fabricio 29/08): antes el
+          campo aparecía solo con kg frescos del Holanda cargados, y la pasta
+          se carga primero — en la práctica no se veía nunca. Suman a la
+          materia prima; no descuentan stock (no hay bucket de queso). */}
+      {tipoElaboracion === 'salame' && (
+        <div className="form-row" style={{ marginBottom: 10 }}>
+          <div className="form-group">
+            <label>🧀 Queso Holanda (kg)</label>
+            <input type="text" inputMode="decimal" placeholder="0" value={kgQuesoEmbutido} onChange={e => setKgQuesoEmbutido(e.target.value)} style={{ ...inp, borderColor: kgQuesoEmbutido ? 'var(--amber)' : 'var(--border)' }} />
+          </div>
+          <div className="form-group">
+            <label>🧀 Queso Rockeford (kg)</label>
+            <input type="text" inputMode="decimal" placeholder="0" value={kgQuesoRockefordEmbutido} onChange={e => setKgQuesoRockefordEmbutido(e.target.value)} style={{ ...inp, borderColor: kgQuesoRockefordEmbutido ? 'var(--amber)' : 'var(--border)' }} />
+          </div>
         </div>
       )}
       {tipoElaboracion !== 'hamburguesa' && (
@@ -2249,7 +2264,7 @@ async function confirmarDesposteCerdo() {
         {(() => {
           const kgCerdo = Object.values(piezasEmbutido).reduce((s, v) => s + parseNumero(v), 0)
           const kgBovino = parseNumero(kgCarneBovinaEmbutido)
-          const kgQueso = parseNumero(kgQuesoEmbutido)
+          const kgQueso = parseNumero(kgQuesoEmbutido) + parseNumero(kgQuesoRockefordEmbutido)
           const kgTotal = kgCerdo + kgBovino + kgQueso
           // SALAME: se muestran los DOS primeros pesos de la tanda — materia
           // prima (①) y frescos embutidos (②, suma de las variedades) con su
@@ -2430,7 +2445,10 @@ async function confirmarDesposteCerdo() {
               </div>
               <div style={{ fontSize: 11, color: 'var(--muted)' }}>
                 {e.fecha} · {(Number(e.kg_carne_cerdo) || 0).toFixed(1)} kg cerdo + {(Number(e.kg_carne_bovina) || 0).toFixed(1)} kg bovino
-                {Number(e.kg_queso) > 0 ? ` + ${Number(e.kg_queso).toFixed(1)} kg queso` : ''}
+                {Number(e.kg_queso_holanda) > 0 ? ` + ${Number(e.kg_queso_holanda).toFixed(1)} kg queso holanda` : ''}
+                {Number(e.kg_queso_rockeford) > 0 ? ` + ${Number(e.kg_queso_rockeford).toFixed(1)} kg queso rockeford` : ''}
+                {/* elaboraciones viejas: queso sin desglose */}
+                {Number(e.kg_queso) > 0 && !(Number(e.kg_queso_holanda) > 0) && !(Number(e.kg_queso_rockeford) > 0) ? ` + ${Number(e.kg_queso).toFixed(1)} kg queso` : ''}
               </div>
               {Array.isArray(e.productos_finales) && e.productos_finales.length > 0 && (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
