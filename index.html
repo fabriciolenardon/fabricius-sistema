@@ -27,6 +27,21 @@
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
     <script>
+      // WATCHDOG pantalla gris (29/08/2026: "no me anda"): si el JS principal
+      // ni arranca (este index.html quedó cacheado apuntando a un bundle que
+      // el deploy nuevo purgó → 404), React nunca monta y la ventana queda
+      // gris muda. A los 10 segundos, si #root sigue vacío, recargamos UNA
+      // vez salteando el cache. Guard en sessionStorage para no loopear.
+      setTimeout(() => {
+        const root = document.getElementById('root')
+        if (root && root.childElementCount === 0) {
+          try {
+            if (sessionStorage.getItem('fabricius_boot_reload')) return
+            sessionStorage.setItem('fabricius_boot_reload', '1')
+          } catch { return }
+          window.location.reload()
+        }
+      }, 10000)
       // Registra el service worker → la app se puede instalar en el celu (PWA).
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
