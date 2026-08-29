@@ -29,6 +29,17 @@ export default function CambiarPasswordModal({ onClose }) {
       setError('La nueva contraseña tiene que tener al menos 8 caracteres.')
       return
     }
+    // Las reglas de Supabase Auth chequeadas ACÁ y en español (Fabricio
+    // 29/08: el rechazo del backend le llegó en inglés y no se entendía).
+    const falta = []
+    if (!/[a-z]/.test(pwNueva)) falta.push('una minúscula')
+    if (!/[A-Z]/.test(pwNueva)) falta.push('una MAYÚSCULA')
+    if (!/[0-9]/.test(pwNueva)) falta.push('un número')
+    if (!/[^a-zA-Z0-9]/.test(pwNueva)) falta.push('un símbolo (por ej. ! @ # $ % . -)')
+    if (falta.length > 0) {
+      setError(`A la nueva contraseña le falta ${falta.join(', ')}. Tiene que mezclar minúsculas, MAYÚSCULAS, números y algún símbolo.`)
+      return
+    }
     if (pwNueva !== pwConfirma) {
       setError('La confirmación no coincide con la nueva contraseña.')
       return
@@ -62,7 +73,10 @@ export default function CambiarPasswordModal({ onClose }) {
     // Actualizamos la contraseña
     const { error: errUpdate } = await supabase.auth.updateUser({ password: pwNueva })
     if (errUpdate) {
-      setError(errUpdate.message || 'No se pudo cambiar la contraseña.')
+      // Red de abajo: si igual llega el rechazo del backend, en español.
+      setError(/should contain at least one character/i.test(errUpdate.message || '')
+        ? 'La contraseña tiene que mezclar minúsculas, MAYÚSCULAS, números y algún símbolo (por ej. ! @ # $ % . -).'
+        : (errUpdate.message || 'No se pudo cambiar la contraseña.'))
       setLoading(false)
       return
     }
