@@ -5,9 +5,15 @@
 //
 // Valida que la nueva contraseña cumpla las reglas que están
 // configuradas en Supabase Auth (mínimo 8 caracteres, mezcla de
-// mayúsculas / minúsculas / dígitos / símbolos). Si Supabase
-// rechaza el cambio, muestra el error tal como vino del backend
-// para que el usuario sepa qué le faltó.
+// mayúsculas / minúsculas / dígitos / símbolos).
+//
+// CAMBIO SEGURO (Fabricio 29/08): el proyecto tiene activado el "secure
+// password change" de Supabase — el PUT /user rebota con "Current password
+// required when setting new password" aunque reautentiquemos con
+// signInWithPassword. La vía soportada es reauthenticate(): manda un CÓDIGO
+// de 6 dígitos al mail y el updateUser va con ese código como `nonce`.
+// Es un código que se tipea acá (no un link), así Gmail no lo puede quemar
+// como pasaba con el link de recuperación.
 // ============================================================
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -20,6 +26,9 @@ export default function CambiarPasswordModal({ onClose }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [ok, setOk] = useState(false)
+  // Paso 2 del cambio seguro: Supabase mandó el código al mail y acá se tipea.
+  const [pideCodigo, setPideCodigo] = useState(false)
+  const [codigo, setCodigo] = useState('')
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -73,6 +82,19 @@ export default function CambiarPasswordModal({ onClose }) {
     // Actualizamos la contraseña
     const { error: errUpdate } = await supabase.auth.updateUser({ password: pwNueva })
     if (errUpdate) {
+      // El proyecto exige confirmar el cambio con un código por mail
+      // (cambio seguro): lo pedimos y pasamos al paso del código.
+      if (/current password required|reauthentication/i.test(errUpdate.message || '')) {
+        const { error: errRe } = await supabase.auth.reauthenticate()
+        if (errRe) {
+          setError('No se pudo mandar el código de confirmación al mail: ' + errRe.message)
+          setLoading(false)
+          return
+        }
+        setPideCodigo(true)
+        setLoading(false)
+        return
+      }
       // Red de abajo: si igual llega el rechazo del backend, en español.
       setError(/should contain at least one character/i.test(errUpdate.message || '')
         ? 'La contraseña tiene que mezclar minúsculas, MAYÚSCULAS, números y algún símbolo (por ej. ! @ # $ % . -).'
@@ -83,6 +105,25 @@ export default function CambiarPasswordModal({ onClose }) {
 
     setOk(true)
     setLoading(false)
+    setTimeout(() => { onClose() }, 1800)
+  }
+
+  // Paso 2: el usuario tipea el código de 6 dígitos que llegó al mail y el
+  // cambio va con ese código como nonce.
+  async function handleConfirmarCodigo(e) {
+    e.preventDefault()
+    setError(null)
+    if (!codigo.trim()) { setError('Poné el código que te llegó al mail.'); return }
+    setLoading(true)
+    const { error: errUpdate } = await supabase.auth.updateUser({ password: pwNueva, nonce: codigo.trim() })
+    setLoading(false)
+    if (errUpdate) {
+      setError(/nonce|invalid|expired/i.test(errUpdate.message || '')
+        ? 'El código no es válido o venció. Fijate el último mail (cada código nuevo anula el anterior) o cerrá y volvé a empezar.'
+        : (errUpdate.message || 'No se pudo cambiar la contraseña.'))
+      return
+    }
+    setOk(true)
     setTimeout(() => { onClose() }, 1800)
   }
 
@@ -119,6 +160,35 @@ export default function CambiarPasswordModal({ onClose }) {
           <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--green)', fontSize: 15 }}>
             ✅ Contraseña cambiada con éxito.
           </div>
+        ) : pideCodigo ? (
+          <form onSubmit={handleConfirmarCodigo} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ background: '#1a2a0a', border: '1px solid #4a8a2a', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#7dff7d', lineHeight: 1.5 }}>
+              📧 Te mandamos un <strong>código</strong> al mail para confirmar que sos vos.
+              Ponelo acá abajo y la contraseña nueva queda guardada.
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginBottom: 4, letterSpacing: 0.5 }}>
+                Código del mail
+              </label>
+              <input type="text" inputMode="numeric" autoComplete="one-time-code" value={codigo}
+                onChange={e => setCodigo(e.target.value)} required autoFocus style={{ ...inp, letterSpacing: 4, fontSize: 18, textAlign: 'center' }} placeholder="000000" />
+            </div>
+            {error && (
+              <div style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', color: 'var(--red-light)', borderRadius: 8, padding: '10px 12px', fontSize: 13 }}>
+                ❌ {error}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+              <button type="button" onClick={onClose} disabled={loading}
+                style={{ flex: 1, padding: '10px', background: 'transparent', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>
+                Cancelar
+              </button>
+              <button type="submit" disabled={loading}
+                style={{ flex: 1, padding: '10px', background: 'var(--gold)', border: 'none', color: '#000', borderRadius: 8, cursor: loading ? 'wait' : 'pointer', fontSize: 14, fontWeight: 700 }}>
+                {loading ? 'Confirmando...' : 'Confirmar cambio'}
+              </button>
+            </div>
+          </form>
         ) : (
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div>
