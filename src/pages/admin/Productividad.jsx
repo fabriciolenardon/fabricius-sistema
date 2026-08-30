@@ -313,6 +313,7 @@ function TabSemanas({ esMovil }) {
       caja: n(ing.ventas_caja), mayorista: n(ing.ventas_mayorista),
       kgTotal: n(c.kg_carne) + n(c.kg_pollo) + n(c.kg_cerdo),
       dVentas: ant ? deltaPct(c.ventas, ant.ventas) : null,
+      dCompras: ant ? deltaPct(c.compras, ant.compras) : null,
       dGanancia: ant ? deltaPct(c.ganancia, ant.ganancia) : null,
       dKg: ant ? deltaPct(n(c.kg_carne) + n(c.kg_pollo) + n(c.kg_cerdo), n(ant.kg_carne) + n(ant.kg_pollo) + n(ant.kg_cerdo)) : null,
     }
@@ -331,6 +332,8 @@ function TabSemanas({ esMovil }) {
               <th style={{ ...thStyle, textAlign: 'left' }}>Semana</th>
               <th style={thStyle}>Ventas</th>
               <th style={thStyle}>vs ant.</th>
+              <th style={thStyle}>Compras</th>
+              {!esMovil && <th style={thStyle}>vs ant.</th>}
               {!esMovil && <th style={thStyle}>Caja</th>}
               {!esMovil && <th style={thStyle}>Mayorista</th>}
               <th style={thStyle}>Kg</th>
@@ -350,6 +353,8 @@ function TabSemanas({ esMovil }) {
                   </div>
                 </td>
                 <td style={tdStyle}><Delta pct={f.dVentas} /></td>
+                <td style={tdStyle}>{fmt(f.compras)}</td>
+                {!esMovil && <td style={tdStyle}><Delta pct={f.dCompras} /></td>}
                 {!esMovil && <td style={{ ...tdStyle, color: 'var(--muted)' }}>{fmt(f.caja)}</td>}
                 {!esMovil && <td style={{ ...tdStyle, color: 'var(--muted)' }}>{fmt(f.mayorista)}</td>}
                 <td style={tdStyle}>{fmtNumero(f.kgTotal, 0)}</td>
