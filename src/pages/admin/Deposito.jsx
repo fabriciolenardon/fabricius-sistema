@@ -5661,13 +5661,17 @@ export function RemitosTab({ remitoActual }) {
 
   // Productos que aparecen en los remitos (para el autocompletado): salen del
   // historial real, así también entran los ítems cargados a mano.
+  // OJO: el nombre del producto vive en `descripcion` (así lo guarda el
+  // remito, verificado contra la base — buscar por `nombre` daba 0
+  // resultados); `nombre` queda de fallback por si algún ítem viejo lo usa.
+  const nombreItem = i => String(i?.descripcion || i?.nombre || '').trim()
   const productosRemito = useMemo(() => {
     const nombres = new Set()
-    remitos.forEach(r => (Array.isArray(r.items) ? r.items : []).forEach(i => { if (i?.nombre) nombres.add(i.nombre) }))
+    remitos.forEach(r => (Array.isArray(r.items) ? r.items : []).forEach(i => { const n = nombreItem(i); if (n) nombres.add(n) }))
     return [...nombres].sort((a, b) => a.localeCompare(b))
   }, [remitos])
 
-  const itemMatchProducto = i => String(i?.nombre || '').toLowerCase().includes(fProducto.trim().toLowerCase())
+  const itemMatchProducto = i => nombreItem(i).toLowerCase().includes(fProducto.trim().toLowerCase())
 
   // Remitos que pasan los filtros (r.fecha es 'YYYY-MM-DD', comparable como string)
   const remitosFiltrados = useMemo(() => remitos.filter(r => {
@@ -6276,7 +6280,7 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
                       <div style={{ fontSize: 10, color: 'var(--amber)', marginTop: 2 }}>
                         {its.map((i, k) => (
                           <div key={k}>
-                            {i.nombre}: {(Number(i.kg) || 0).toLocaleString('es-AR', { maximumFractionDigits: 2 })} × ${Math.round(Number(i.precio) || 0).toLocaleString('es-AR')} = ${Math.round(Number(i.importe) || 0).toLocaleString('es-AR')}
+                            {nombreItem(i)}: {(Number(i.kg) || 0).toLocaleString('es-AR', { maximumFractionDigits: 2 })} × ${Math.round(Number(i.precio) || 0).toLocaleString('es-AR')} = ${Math.round(Number(i.importe) || 0).toLocaleString('es-AR')}
                           </div>
                         ))}
                       </div>
