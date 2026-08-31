@@ -52,6 +52,35 @@ const inicioSemanaARG = () => {
 }
 const sumar = (rows, campo) => (rows || []).reduce((s, r) => s + (Number(r?.[campo]) || 0), 0)
 
+// ─── Matcheo de productos por palabras ──────────────────────
+// Compartido por buscar_remitos_detalle y buscar_producto_vendido.
+// Ignora conectores y muletillas de peso ("x kg", "kilos"), exige TODAS
+// las palabras significativas y tolera plural/singular: Fabricio pregunta
+// "cuántas MORCILLAS vendí" y el producto se llama "MORCILLA x kg" —
+// antes ese plural hacía que la búsqueda devolviera "no encontré nada"
+// (31/08/2026). Normaliza tildes en las dos puntas.
+const STOP_PRODUCTO = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'y', 'con', 'x', 'a', 'al', 'un', 'una', 'kg', 'kgs', 'xkg', 'kilo', 'kilos'])
+const sinTilde = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+function matcherProducto(texto) {
+  const tokens = sinTilde(texto).split(/\s+/).filter(w => w && !STOP_PRODUCTO.has(w))
+  // Cada palabra vale también en singular: "morcillas"→"morcilla",
+  // "chorizos"→"chorizo", "salchichones"→"salchichon". Palabras cortas
+  // quedan como están ("res" no se recorta a "re").
+  const variantes = tokens.map(t => {
+    const v = [t]
+    if (t.length > 4 && t.endsWith('es')) v.push(t.slice(0, -2))
+    if (t.length > 3 && t.endsWith('s')) v.push(t.slice(0, -1))
+    return v
+  })
+  return {
+    tokens,
+    match: desc => {
+      const d = sinTilde(desc)
+      return variantes.length > 0 && variantes.every(vs => vs.some(v => d.includes(v)))
+    },
+  }
+}
+
 // ═══════════════════════════════════════════════════════════
 // 1. DEFINICIONES — Le decimos a Gemini qué funciones tiene disponibles
 // ═══════════════════════════════════════════════════════════
@@ -1024,14 +1053,10 @@ export async function ejecutarFuncion(nombre, args) {
 
         const prod = (args?.producto || '').trim().toLowerCase()
         if (prod) {
-          // Match por PALABRAS (no substring literal): ignora conectores como
-          // "de/la/el" y exige TODAS las palabras significativas. Así "matambre
-          // de cerdo" encuentra "MATAMBRE CERDO" pero no "MATAMBRE DE TERNERA"
-          // (le falta "cerdo"). Normaliza tildes.
-          const sinTilde = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-          const STOP = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'y', 'con', 'x', 'a', 'al'])
-          const tokens = sinTilde(prod).split(/\s+/).filter(w => w && !STOP.has(w))
-          const matchProd = desc => { const d = sinTilde(desc); return tokens.length > 0 && tokens.every(t => d.includes(t)) }
+          // Match por PALABRAS con tolerancia a plurales (ver matcherProducto):
+          // "matambre de cerdo" encuentra "MATAMBRE CERDO" pero no
+          // "MATAMBRE DE TERNERA" (le falta "cerdo").
+          const { match: matchProd } = matcherProducto(prod)
           let totalKg = 0, totalImp = 0, nRemitos = 0
           const lineas = []
           data.forEach(rm => {
@@ -1063,11 +1088,8 @@ export async function ejecutarFuncion(nombre, args) {
 
       case 'buscar_producto_vendido': {
         if (!args?.producto || !args?.desde || !args?.hasta) return { resultado: 'Necesito el producto y el rango de fechas (desde y hasta).' }
-        const sinTilde = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-        const STOP = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'y', 'con', 'x', 'a', 'al'])
-        const tokens = sinTilde(args.producto).split(/\s+/).filter(w => w && !STOP.has(w))
+        const { tokens, match: matchProd } = matcherProducto(args.producto)
         if (!tokens.length) return { resultado: 'Decime un nombre de producto para buscar.' }
-        const matchProd = desc => { const d = sinTilde(desc); return tokens.every(t => d.includes(t)) }
 
         // Paginado: rango largo → remitos y caja superan las 1000 filas y los kg/$
         // se acumulan en el cliente (Supabase corta en 1000; ver lib/fetchAllRows.js).
