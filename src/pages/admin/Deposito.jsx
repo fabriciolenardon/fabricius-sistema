@@ -5648,6 +5648,9 @@ export function RemitosTab({ remitoActual }) {
   const [fDesde, setFDesde] = useState('')
   const [fHasta, setFHasta] = useState('')
   const [fCliente, setFCliente] = useState('todos')
+  // Filtro por PRODUCTO (Fabricio 31/08): "¿a quién y cuánto le vendí de X?"
+  // Busca dentro del `items` JSON de cada remito, por nombre.
+  const [fProducto, setFProducto] = useState('')
 
   // Clientes presentes en los remitos (para el selector)
   const clientesRemito = useMemo(() => {
@@ -5656,20 +5659,48 @@ export function RemitosTab({ remitoActual }) {
     return [...nombres].sort((a, b) => a.localeCompare(b))
   }, [remitos])
 
+  // Productos que aparecen en los remitos (para el autocompletado): salen del
+  // historial real, así también entran los ítems cargados a mano.
+  const productosRemito = useMemo(() => {
+    const nombres = new Set()
+    remitos.forEach(r => (Array.isArray(r.items) ? r.items : []).forEach(i => { if (i?.nombre) nombres.add(i.nombre) }))
+    return [...nombres].sort((a, b) => a.localeCompare(b))
+  }, [remitos])
+
+  const itemMatchProducto = i => String(i?.nombre || '').toLowerCase().includes(fProducto.trim().toLowerCase())
+
   // Remitos que pasan los filtros (r.fecha es 'YYYY-MM-DD', comparable como string)
   const remitosFiltrados = useMemo(() => remitos.filter(r => {
     if (fDesde && (r.fecha || '') < fDesde) return false
     if (fHasta && (r.fecha || '') > fHasta) return false
     if (fCliente !== 'todos' && r.cliente_nombre !== fCliente) return false
+    if (fProducto.trim() && !(Array.isArray(r.items) && r.items.some(itemMatchProducto))) return false
     return true
-  }), [remitos, fDesde, fHasta, fCliente])
+  }), [remitos, fDesde, fHasta, fCliente, fProducto])
 
   // El total vendido excluye los anulados (no son ventas reales); igual se
   // listan tachados para trazabilidad.
   const remitosValidos = remitosFiltrados.filter(r => !r.eliminado)
   const totalFiltrado = remitosValidos.reduce((s, r) => s + (Number(r.total) || 0), 0)
   const anuladosEnFiltro = remitosFiltrados.length - remitosValidos.length
-  const hayFiltro = !!(fDesde || fHasta || fCliente !== 'todos')
+  const hayFiltro = !!(fDesde || fHasta || fCliente !== 'todos' || fProducto.trim())
+
+  // Resumen del PRODUCTO buscado sobre los remitos válidos del filtro:
+  // cantidad (el campo kg guarda unidades en cajones/piezas, por eso el
+  // rótulo neutro), plata de ESOS ítems y a cuántos clientes se les vendió.
+  const statsProducto = useMemo(() => {
+    if (!fProducto.trim()) return null
+    let cant = 0, plata = 0, nRemitos = 0
+    const clientes = new Set()
+    for (const r of remitosValidos) {
+      const its = (Array.isArray(r.items) ? r.items : []).filter(itemMatchProducto)
+      if (!its.length) continue
+      nRemitos++
+      if (r.cliente_nombre) clientes.add(r.cliente_nombre)
+      for (const i of its) { cant += Number(i.kg) || 0; plata += Number(i.importe) || 0 }
+    }
+    return { cant, plata, nRemitos, nClientes: clientes.size }
+  }, [fProducto, remitosValidos])
 
   function setSemanaActual() { setFDesde(lunesDeLaSemana()); setFHasta(domingoDeLaSemana()) }
   function setSemanaAnterior() {
@@ -5677,7 +5708,7 @@ export function RemitosTab({ remitoActual }) {
     setFHasta(fechaRelativaARG(-7, new Date(domingoDeLaSemana() + 'T12:00')))
   }
   function setMesActual() { const h = fechaHoyARG(); setFDesde(h.substring(0, 7) + '-01'); setFHasta(h) }
-  function limpiarFiltros() { setFDesde(''); setFHasta(''); setFCliente('todos') }
+  function limpiarFiltros() { setFDesde(''); setFHasta(''); setFCliente('todos'); setFProducto('') }
 
   // Paginación del historial de remitos (ya filtrado)
   const pagRemitos = usePaginacion(remitosFiltrados, 20)
@@ -6156,9 +6187,9 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
       )}
       {/* FILTRO POR FECHA / CLIENTE + RESUMEN DE VENTAS */}
       <div className="card" style={{ marginBottom: 16 }}>
-        <div className="card-title">🔎 Buscar remitos por fecha / cliente</div>
+        <div className="card-title">🔎 Buscar remitos por fecha / cliente / producto</div>
         <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
-          Filtrá por período (y opcionalmente un cliente) para ver cuánto se vendió. La suma excluye remitos anulados.
+          Filtrá por período, cliente y/o producto. Con un producto elegido ves a quién se le vendió, cuánto y por cuánta plata. La suma excluye remitos anulados.
         </div>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <div>
@@ -6175,6 +6206,14 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
               <option value="todos">Todos los clientes</option>
               {clientesRemito.map(n => <option key={n} value={n}>{n}</option>)}
             </select>
+          </div>
+          <div style={{ minWidth: 220 }}>
+            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Producto</label>
+            <input list="remitos-filtro-productos" value={fProducto} onChange={e => setFProducto(e.target.value)}
+              placeholder="Todos los productos" style={{ ...inp, width: '100%', borderColor: fProducto ? 'var(--amber)' : 'var(--border)' }} />
+            <datalist id="remitos-filtro-productos">
+              {productosRemito.map(n => <option key={n} value={n} />)}
+            </datalist>
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             <button className="btn btn-ghost btn-sm" onClick={setSemanaActual}>Semana actual</button>
@@ -6194,6 +6233,18 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
               {remitosValidos.length} remito(s){anuladosEnFiltro > 0 ? ` · ${anuladosEnFiltro} anulado(s) excluido(s)` : ''}
             </div>
           </div>
+          {statsProducto && (
+            <div style={{ flex: '1 1 260px', background: 'var(--surface2)', border: '1px solid var(--amber)', borderRadius: 10, padding: '12px 16px' }}>
+              <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 600 }}>
+                🥩 Producto — {fProducto.trim()}
+              </div>
+              <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 30, color: 'var(--amber)' }}>{fmt(statsProducto.plata)}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                {statsProducto.cant.toLocaleString('es-AR', { maximumFractionDigits: 2 })} kg/un ·
+                {' '}en {statsProducto.nRemitos} remito(s) · {statsProducto.nClientes} cliente(s)
+              </div>
+            </div>
+          )}
           <div style={{ flex: '1 1 220px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 16px' }}>
             <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 600 }}>📅 Período</div>
             <div style={{ fontSize: 15, fontWeight: 700, marginTop: 6 }}>
@@ -6215,7 +6266,23 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
   {r.eliminado && <span style={{ marginLeft: 8, background: '#3a1a1a', color: '#ff6b6b', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700 }}>❌ ANULADO por {r.eliminado_por}</span>}
 </td>
                 <td>{r.fecha}</td>
-                <td>{r.cliente_nombre}</td>
+                <td>
+                  {r.cliente_nombre}
+                  {/* Con producto buscado, el renglón muestra QUÉ de ese
+                      producto llevó este remito: cantidad × precio = importe. */}
+                  {fProducto.trim() && (() => {
+                    const its = (Array.isArray(r.items) ? r.items : []).filter(itemMatchProducto)
+                    return its.length > 0 && (
+                      <div style={{ fontSize: 10, color: 'var(--amber)', marginTop: 2 }}>
+                        {its.map((i, k) => (
+                          <div key={k}>
+                            {i.nombre}: {(Number(i.kg) || 0).toLocaleString('es-AR', { maximumFractionDigits: 2 })} × ${Math.round(Number(i.precio) || 0).toLocaleString('es-AR')} = ${Math.round(Number(i.importe) || 0).toLocaleString('es-AR')}
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  })()}
+                </td>
                 <td style={{ color: 'var(--gold)' }}>
                   ${Math.round(r.total).toLocaleString('es-AR')}
                   {(() => {
