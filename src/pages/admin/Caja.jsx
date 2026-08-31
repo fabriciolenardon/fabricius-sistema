@@ -21,6 +21,7 @@ import { SUCURSAL_CENTRAL } from '../../lib/permisos'
 import { productosQueVende } from '../../lib/categoriasPrecios'
 import { useAuth } from '../../context/AuthContext'
 import HistorialCaja from './HistorialCaja'
+import PlanillaBlangino from './PlanillaBlangino'
 import HistorialDiaCaja from './HistorialDiaCaja'
 import ArqueoCaja from './ArqueoCaja'
 
@@ -920,7 +921,10 @@ export default function Caja() {
           { id: 'historial', label: '📊 Historial' },
           { id: 'arqueo',    label: '🧾 Arqueo' },
           { id: 'ticket_manual', label: '📝 Ticket manual' },
-        ].filter(t => !(esCajero && t.id === 'historial')).map(t => (
+          // Planilla del convenio: registro contable para pasarle a Blangino
+          // su 5% — es de administración, el cajero no la necesita.
+          { id: 'planilla_blangino', label: '🔵 Planilla Blangino' },
+        ].filter(t => !(esCajero && (t.id === 'historial' || t.id === 'planilla_blangino'))).map(t => (
           <button key={t.id} onClick={() => setVistaCaja(t.id)}
             style={{
               padding: '9px 20px', borderRadius: 8, border: 'none',
@@ -940,6 +944,7 @@ export default function Caja() {
       {vistaCaja === 'historial' && !esCajero && <HistorialCaja />}
       {vistaCaja === 'arqueo' && <ArqueoCaja />}
       {vistaCaja === 'ticket_manual' && <TicketManualCaja onGuardado={cargarTodo} />}
+      {vistaCaja === 'planilla_blangino' && !esCajero && <PlanillaBlangino />}
       {/* Vista vender: se oculta con display:none para no desmontar el estado/foco */}
       <div style={{ display: vistaCaja === 'vender' ? 'block' : 'none' }}>
 
@@ -1122,6 +1127,9 @@ export default function Caja() {
                           ) : (
                             <>
                               {fmt(item.precio)}
+                              {item.oferta_suspendida && (
+                                <div style={{ fontSize: 9, color: '#7ec8ff' }}>🔵 sin oferta (Blangino)</div>
+                              )}
                               {item.lista === 'mayorista' && (
                                 <div style={{ fontSize: 9, color: '#7a9dff' }}>📦 MAY</div>
                               )}
