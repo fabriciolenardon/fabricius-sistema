@@ -187,7 +187,10 @@ export default function Caja() {
   // ---- Resuelve el precio final de un producto según lista activa + ofertas ----
   // Devuelve { precio, precioBase, oferta }. Si hay oferta vigente que aplica a la
   // lista activa, descuenta usando descuento_pct (si existe) o usa precio_oferta.
-  function resolverPrecio(producto) {
+  // CON BLANGINO NO HAY OFERTAS (Fabricio 31/08): el convenio es 10% sobre el
+  // precio de LISTA — oferta + 10% sería descuento doble. `sinOfertas` se puede
+  // forzar (lo usa el repreciado del carrito al togglear el convenio).
+  function resolverPrecio(producto, { sinOfertas = blangino.activo } = {}) {
     if (!producto) return { precio: 0, precioBase: 0, oferta: null }
     const precioBase = listaPrecio === 'mayorista'
       ? Number(producto.precio_mayorista || producto.precio_minorista || producto.precio_carniceria || 0)
@@ -195,7 +198,7 @@ export default function Caja() {
 
     const flagLista = listaPrecio === 'mayorista' ? 'aplica_mayorista' : 'aplica_minorista'
     // Ofertas viejas sin flags se asumen aplicables (default DB es TRUE).
-    const oferta = ofertas.find(o => o.precio_id === producto.id && o[flagLista] !== false)
+    const oferta = sinOfertas ? null : ofertas.find(o => o.precio_id === producto.id && o[flagLista] !== false)
 
     let precio = precioBase
     if (oferta) {
@@ -543,6 +546,37 @@ export default function Caja() {
   const totalACobrar = total - descuentoAplicado
   const vuelto = cobrado - totalACobrar
   const blanginoIncompleto = blangino.activo && (!blangino.empleado.trim() || !blangino.legajo.trim())
+
+  // ── Blangino ↔ ofertas: repreciado del carrito al togglear el convenio ──
+  // Lo típico es que el "soy de Blangino" llegue con el carrito ya escaneado:
+  // al PRENDER el convenio, las líneas que entraron con precio de oferta
+  // vuelven al precio de lista (queda `oferta_suspendida` de recuerdo); al
+  // APAGARLO, esas líneas se re-resuelven contra las ofertas vigentes. Los
+  // combos no se tocan (su precio YA es la oferta y están fuera del 10%).
+  function repreciarCarritoBlangino(activo) {
+    setCarrito(c => c.map(it => {
+      if (it.combo_id) return it
+      if (activo) {
+        if (!it.tiene_oferta) return it
+        const precio = Number(it.precio_base) || Number(it.precio) || 0
+        return { ...it, precio, importe: it.kg * precio, tiene_oferta: false, oferta_pct: null, oferta_suspendida: true }
+      }
+      if (!it.oferta_suspendida) return it
+      const prod = precios.find(p => p.id === it.producto_id)
+      if (!prod) return { ...it, oferta_suspendida: undefined }
+      const resuelto = resolverPrecio(prod, { sinOfertas: false })
+      const tieneOferta = !!resuelto.oferta && resuelto.precio < resuelto.precioBase
+      return {
+        ...it,
+        precio: parseFloat(resuelto.precio),
+        precio_base: parseFloat(resuelto.precioBase),
+        importe: it.kg * parseFloat(resuelto.precio),
+        tiene_oferta: tieneOferta,
+        oferta_pct: tieneOferta && resuelto.oferta?.descuento_pct ? Number(resuelto.oferta.descuento_pct) : null,
+        oferta_suspendida: undefined,
+      }
+    }))
+  }
 
   // Al cerrar el modal (cancelación o éxito) liberamos el client_id
   // para que la próxima venta nazca con un UUID nuevo. Cubre las
@@ -1488,7 +1522,7 @@ export default function Caja() {
             <div style={{ marginBottom: 14, padding: 12, borderRadius: 10, border: `1px solid ${blangino.activo ? '#3a6ea5' : 'var(--border)'}`, background: blangino.activo ? 'rgba(122,200,255,0.07)' : 'transparent' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 700, fontSize: 14, color: blangino.activo ? '#7ec8ff' : 'var(--text)' }}>
                 <input type="checkbox" checked={blangino.activo}
-                  onChange={e => setBlangino(b => ({ ...b, activo: e.target.checked }))}
+                  onChange={e => { const on = e.target.checked; setBlangino(b => ({ ...b, activo: on })); repreciarCarritoBlangino(on) }}
                   style={{ width: 18, height: 18, cursor: 'pointer' }} />
                 🔵 Descuento Blangino (−{BLANGINO_PCT}%)
               </label>
