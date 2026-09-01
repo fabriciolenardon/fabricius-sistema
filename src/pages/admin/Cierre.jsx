@@ -7,6 +7,7 @@ import { imprimirHTML } from '../../lib/imprimir'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 import { calcularCierreAuto, cierreAutoAFila, lunesDeLaSemana, domingoDeLaSemana } from '../../lib/cierreAuto'
 import { calcularControlSemanal, guardarSnapshotStock, nombreTipo } from '../../lib/controlSemanal'
+import { cargarSocios } from '../../lib/socios'
 
 const fmt = n => fmtPrecio(Math.abs(Number(n) || 0))
 const fmtKg = n => fmtKgAR(Number(n) || 0)
@@ -15,13 +16,34 @@ const fmtFecha = s => s ? new Date(s + 'T12:00').toLocaleDateString('es-AR') : '
 const mesDe = d => String(d || '').substring(0, 7)
 const mesLabelDe = m => m ? new Date(m + '-15T12:00').toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }) : '—'
 
+// ── REPARTO DE LA GANANCIA ENTRE LOS DUEÑOS ──────────────────
+// Los dueños salen de la tabla `socios`, que la base aísla por sucursal
+// (migración 98): la central reparte 85/15 y Monte Cristo es 100% de Pamela.
+// Acá estaba escrito a mano "Fabricio 85% / Ariel 15%", así que la franquicia
+// veía a los socios de la central repartiéndose SU ganancia — en la tarjeta,
+// en el Excel y en el PDF.
+const COLOR_SOCIO = ['var(--gold)', '#7db5ff', 'var(--green)', 'var(--amber)']
+const COLOR_SOCIO_PRINT = ['#8a6d1f', '#1a3a7a', '#1f6b3a', '#8a5a1f']
+function repartoSocios(socios, ganancia) {
+  const g = Number(ganancia) || 0
+  return (socios || []).map((so, i) => {
+    const pct = Number(so.porcentaje) || 0
+    return {
+      nombre: so.nombre,
+      pct,
+      monto: g * pct / 100,
+      icono: so.es_principal || i === 0 ? '👑' : '🤝',
+    }
+  })
+}
+
 // ============================================================
 // Excel + Print mensual (idénticos al esquema viejo — siguen
 // funcionando porque los snapshots de cierres_semanales
 // conservan los mismos campos: ventas, compras, gastos, etc.)
 // ============================================================
 
-function exportarExcel(semanasMes, totMes, mesLabel) {
+function exportarExcel(semanasMes, totMes, mesLabel, socios = []) {
   const rows = [
     ['CARNICERÍAS FABRICIUS — CIERRE MENSUAL'],
     [mesLabel.toUpperCase()],
@@ -36,8 +58,7 @@ function exportarExcel(semanasMes, totMes, mesLabel) {
     ['TOTAL', totMes.ventas, totMes.ventasCtacte, totMes.compras, totMes.gastos, totMes.sueldos, totMes.ganancia, totMes.kgCarne, totMes.kgPollo, totMes.kgCerdo],
     [],
     ['Distribución socios'],
-    ['Fabricio Lenardon (85%)', totMes.ganancia * 0.85],
-    ['Ariel Garrone (15%)', totMes.ganancia * 0.15],
+    ...repartoSocios(socios, totMes.ganancia).map(r => [`${r.nombre} (${r.pct}%)`, r.monto]),
   ]
   const csv = rows.map(r => r.map(v => `"${v ?? ''}"`).join(',')).join('\n')
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
@@ -47,7 +68,7 @@ function exportarExcel(semanasMes, totMes, mesLabel) {
   URL.revokeObjectURL(url)
 }
 
-async function imprimirCierreMensual(semanasMes, totMes, mesLabel, trendMeses = []) {
+async function imprimirCierreMensual(semanasMes, totMes, mesLabel, trendMeses = [], duenios = []) {
   const fechaCorta = d => new Date(d + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })
   const capSocio = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : 'Otros'
 
@@ -190,16 +211,14 @@ async function imprimirCierreMensual(semanasMes, totMes, mesLabel, trendMeses = 
         </tfoot>
       </table>
       ${tablaRetiros}
+      ${repartoSocios(duenios, totMes.ganancia).length ? `
       <div class="socios">
+        ${repartoSocios(duenios, totMes.ganancia).map((r, i) => `
         <div class="socio">
-          <div class="socio-nombre">👑 Fabricio Lenardon (85%)</div>
-          <div class="socio-valor oro">${fmtPrecio(totMes.ganancia * 0.85)}</div>
-        </div>
-        <div class="socio">
-          <div class="socio-nombre">🤝 Ariel Garrone (15%)</div>
-          <div class="socio-valor" style="color:#1a3a7a">${fmtPrecio(totMes.ganancia * 0.15)}</div>
-        </div>
-      </div>
+          <div class="socio-nombre">${r.icono} ${r.nombre} (${r.pct}%)</div>
+          <div class="socio-valor" style="color:${COLOR_SOCIO_PRINT[i % COLOR_SOCIO_PRINT.length]}">${fmtPrecio(r.monto)}</div>
+        </div>`).join('')}
+      </div>` : ''}
       ${graficos}
     </body></html>
   `
@@ -459,6 +478,7 @@ export default function Cierre() {
   const [cierres, setCierres] = useState([])
   const [mesesOp, setMesesOp] = useState([])   // meses operativos (inicio/cierre manual)
   const [remitosHist, setRemitosHist] = useState([]) // para detectar cierres desactualizados
+  const [sociosNegocio, setSociosNegocio] = useState([])  // dueños de ESTA boca (RLS)
   const [gastosHist, setGastosHist] = useState([])
   const [entradasHist, setEntradasHist] = useState([])
   const [loading, setLoading] = useState(false)
@@ -506,6 +526,8 @@ export default function Cierre() {
   }
 
   useEffect(() => { fetchCierres() }, [])
+  // Dueños del negocio: sin filtro por sucursal, lo pone el RLS.
+  useEffect(() => { cargarSocios().then(setSociosNegocio) }, [])
   // Meses operativos: los usa "Mes en curso" para respetar inicio/cierre manual.
   useEffect(() => {
     supabase.from('meses_operativos').select('*').order('fecha_inicio', { ascending: false })
@@ -1105,10 +1127,10 @@ export default function Cierre() {
               <div className="form-group">
                 <label>&nbsp;</label>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn btn-ghost btn-sm" onClick={() => imprimirCierreMensual(semanasMes, totMes, mesLabel, trendMeses)} disabled={!semanasMes.length}>
+                  <button className="btn btn-ghost btn-sm" onClick={() => imprimirCierreMensual(semanasMes, totMes, mesLabel, trendMeses, sociosNegocio)} disabled={!semanasMes.length}>
                     🖨️ Imprimir
                   </button>
-                  <button className="btn btn-ghost btn-sm" onClick={() => exportarExcel(semanasMes, totMes, mesLabel)} disabled={!semanasMes.length}>
+                  <button className="btn btn-ghost btn-sm" onClick={() => exportarExcel(semanasMes, totMes, mesLabel, sociosNegocio)} disabled={!semanasMes.length}>
                     📊 Excel
                   </button>
                 </div>
@@ -1134,24 +1156,25 @@ export default function Cierre() {
                 <MetricCard label="Ganancia neta" value={fmt(totMes.ganancia)} color={totMes.ganancia >= 0 ? 'var(--gold)' : 'var(--red-light)'} big />
               </div>
 
-              {/* DISTRIBUCIÓN SOCIOS */}
-              <div className="card">
-                <div className="card-title">👥 Distribución entre socios</div>
-                <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-                  <div style={{ flex: 1, minWidth: 280, background: 'var(--surface2)', border: '2px solid var(--gold)', borderRadius: 10, padding: 18 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--gold)' }}>👑 Fabricio Lenardon (85%)</div>
-                    <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 32, color: 'var(--gold)', marginTop: 4 }}>
-                      {fmt(totMes.ganancia * 0.85)}
-                    </div>
-                  </div>
-                  <div style={{ flex: 1, minWidth: 280, background: 'var(--surface2)', border: '2px solid #4a7ac0', borderRadius: 10, padding: 18 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: '#7db5ff' }}>🤝 Ariel Garrone (15%)</div>
-                    <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 32, color: '#7db5ff', marginTop: 4 }}>
-                      {fmt(totMes.ganancia * 0.15)}
-                    </div>
+              {/* DISTRIBUCIÓN SOCIOS — los dueños de ESTA boca, no los de la central */}
+              {repartoSocios(sociosNegocio, totMes.ganancia).length > 0 && (
+                <div className="card">
+                  <div className="card-title">👥 Distribución entre socios</div>
+                  <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+                    {repartoSocios(sociosNegocio, totMes.ganancia).map((r, i) => {
+                      const col = COLOR_SOCIO[i % COLOR_SOCIO.length]
+                      return (
+                        <div key={r.nombre} style={{ flex: 1, minWidth: 280, background: 'var(--surface2)', border: `2px solid ${col}`, borderRadius: 10, padding: 18 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: col }}>{r.icono} {r.nombre} ({r.pct}%)</div>
+                          <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 32, color: col, marginTop: 4 }}>
+                            {fmt(r.monto)}
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
-              </div>
+              )}
 
               {/* TABLA SEMANAS */}
               <div className="card">

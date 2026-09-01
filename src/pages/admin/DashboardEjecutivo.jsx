@@ -19,6 +19,7 @@ import { fmtKg } from '../../lib/formatos'
 import { useCentroActividad } from '../../lib/useCentroActividad'
 import { totalesConceptos } from '../../lib/cierreAuto'
 import { ultimoArqueoPorDia } from '../../lib/arqueos'
+import { cargarSocios, comoLoLlamamos } from '../../lib/socios'
 import {
   useReportesData, SelectorPeriodo,
   ReporteMargen, ReporteCliente, ReporteCanal, ReporteTemporal,
@@ -945,6 +946,12 @@ function DonutSVG({ segmentos, centroTop, centroBot, size = 150 }) {
 // % Compras / % Gastos (sueldos+socios+otros) / % Ganancia, sobre las ventas.
 // ════════════════════════════════════════════════════════════
 function WidgetMargenMes({ m }) {
+  // Los dueños salen de la tabla `socios` (aislada por sucursal, mig 98).
+  // Estaba escrito a mano "Fabricio 85% / Ariel 15%", así que a Monte Cristo
+  // le aparecían los socios de la central repartiéndose SU ganancia.
+  const [duenios, setDuenios] = useState([])
+  useEffect(() => { cargarSocios().then(setDuenios) }, [])
+  const colorSocio = ['#ffd17a', NEON.cian, NEON.verde, '#ff9de2']
   if (!m) return null
   const total = m.ventas || 1
   const seg = [
@@ -974,16 +981,22 @@ function WidgetMargenMes({ m }) {
         <div style={{ marginLeft: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, paddingLeft: 20, borderLeft: '1px solid rgba(0,212,255,0.18)', minWidth: 240 }}>
           <span style={{ fontSize: 10, letterSpacing: 2, color: NEON.muted, fontWeight: 800 }}>GANANCIA NETA DEL MES</span>
           <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 40, lineHeight: 1, color: m.ganancia >= 0 ? NEON.verde : NEON.rojo }}>{fmtArs(m.ganancia)}</span>
-          <div style={{ display: 'flex', gap: 22, marginTop: 10, justifyContent: 'flex-end' }}>
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: 11, color: NEON.muted }}>👑 Fabricio · 85%</div>
-              <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: '#ffd17a' }}>{fmtArs(m.ganancia * 0.85)}</div>
+          {duenios.length > 0 && (
+            <div style={{ display: 'flex', gap: 22, marginTop: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+              {duenios.map((d, i) => {
+                const pct = Number(d.porcentaje) || 0
+                const col = colorSocio[i % colorSocio.length]
+                return (
+                  <div key={d.id || d.nombre} style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 11, color: NEON.muted }}>
+                      {d.es_principal || i === 0 ? '👑' : '🤝'} {comoLoLlamamos(d) || d.nombre} · {pct}%
+                    </div>
+                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: col }}>{fmtArs(m.ganancia * pct / 100)}</div>
+                  </div>
+                )
+              })}
             </div>
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: 11, color: NEON.muted }}>🤝 Ariel · 15%</div>
-              <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: NEON.cian }}>{fmtArs(m.ganancia * 0.15)}</div>
-            </div>
-          </div>
+          )}
         </div>
       </div>
     </div>
