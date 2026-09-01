@@ -7,6 +7,7 @@ import { bucketDePiezaBovina, MERMA_PIEZA_DEFAULT, MERMA_PIEZA_GENERICA, MERMA_M
 import { cargarCajasDisponibles, crearCajasIngreso, venderCaja, revertirVentaCaja, CATEGORIA_A_TIPO_CAJA } from '../../lib/cajasStock'
 import { fmtPrecio, fmtKg, parseNumero } from '../../lib/formatos'
 import { imprimirHTML } from '../../lib/imprimir'
+import BadgeCobranzaTerceros, { FILA_COBRANZA_TERCEROS } from '../../components/BadgeCobranzaTerceros'
 import { recomputarSaldoCliente } from '../../lib/ctaCorriente'
 import { getCampoPrecio, LISTAS, listasDeVenta } from '../../lib/listasPrecios'
 import CuentaCorrienteProveedor from './CuentaCorrienteProveedor'
@@ -5701,6 +5702,12 @@ export function RemitosTab({ remitoActual }) {
   const remitosValidos = remitosFiltrados.filter(r => !r.eliminado)
   const totalFiltrado = remitosValidos.reduce((s, r) => s + (Number(r.total) || 0), 0)
   const anuladosEnFiltro = remitosFiltrados.length - remitosValidos.length
+  // Del total facturado, cuánto es cobranza por cuenta de la franquicia: plata
+  // que entra a la cta cte del cliente pero NO es venta nuestra. Se muestra
+  // aparte (no se resta del total) para que el número del módulo siga siendo
+  // "lo que se emitió" y a la vez se vea qué parte no es venta propia.
+  const remitosTerceros = remitosValidos.filter(r => r.es_cobranza_terceros)
+  const totalTerceros = remitosTerceros.reduce((s, r) => s + (Number(r.total) || 0), 0)
   const hayFiltro = !!(fDesde || fHasta || fCliente !== 'todos' || fProducto.trim())
 
   // Resumen del PRODUCTO buscado sobre los remitos válidos del filtro:
@@ -6107,7 +6114,7 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
         <button onClick={() => setEditando(null)} className="btn btn-ghost" style={{ marginBottom: 16 }}>← Volver a remitos</button>
         <div style={{ background: '#2a1a0a', border: '1px solid var(--amber)', borderRadius: 10, padding: '12px 16px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <div style={{ fontWeight: 700, color: 'var(--amber)', fontSize: 14 }}>✏️ Editando Remito N° {String(editando.numero).padStart(5, '0')}</div>
+            <div style={{ fontWeight: 700, color: 'var(--amber)', fontSize: 14 }}>✏️ Editando Remito N° {String(editando.numero).padStart(5, '0')}{editando.es_cobranza_terceros && <BadgeCobranzaTerceros />}</div>
             <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{editando.cliente_nombre} · {editando.fecha}</div>
           </div>
           <div style={{ textAlign: 'right' }}>
@@ -6195,7 +6202,7 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
       {alert && <div style={{ background: '#1a2a1a', border: '1px solid #2d5a2d', borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: '#7dff7d', fontWeight: 600 }}>{alert.msg}</div>}
       {seleccionado && (
         <div className="card" style={{ marginBottom: 16, borderColor: 'var(--gold)' }}>
-          <div className="card-title">🧾 Remito N° {String(seleccionado.numero).padStart(5, '0')} — {seleccionado.cliente_nombre}</div>
+          <div className="card-title">🧾 Remito N° {String(seleccionado.numero).padStart(5, '0')} — {seleccionado.cliente_nombre}{seleccionado.es_cobranza_terceros && <BadgeCobranzaTerceros />}</div>
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
             <button className="btn btn-gold" onClick={() => imprimir(seleccionado)}>🖨️ Imprimir remito</button>
             <button className="btn btn-ghost" onClick={() => abrirEdicion(seleccionado)}>✏️ Editar remito</button>
@@ -6250,6 +6257,13 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
             <div style={{ fontSize: 11, color: 'var(--muted)' }}>
               {remitosValidos.length} remito(s){anuladosEnFiltro > 0 ? ` · ${anuladosEnFiltro} anulado(s) excluido(s)` : ''}
             </div>
+            {totalTerceros > 0 && (
+              <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 4, lineHeight: 1.4 }}>
+                🧾 Incluye {fmt(totalTerceros)} de cobranza por cuenta de la franquicia
+                ({remitosTerceros.length} remito(s)) — no es venta nuestra.
+                <div style={{ color: 'var(--muted)' }}>Venta propia: <strong style={{ color: 'var(--text)' }}>{fmt(totalFiltrado - totalTerceros)}</strong></div>
+              </div>
+            )}
           </div>
           {statsProducto && (
             <div style={{ flex: '1 1 260px', background: 'var(--surface2)', border: '1px solid var(--amber)', borderRadius: 10, padding: '12px 16px' }}>
@@ -6278,10 +6292,10 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
           <thead><tr><th>N° Remito</th><th>Fecha</th><th>Cliente</th><th>Total</th><th>Acciones</th></tr></thead>
           <tbody>
             {pagRemitos.items.map(r => (
-              <tr key={r.id} style={{ background: r.eliminado ? 'rgba(255,50,50,0.08)' : 'transparent', opacity: r.eliminado ? 0.7 : 1 }}>
+              <tr key={r.id} style={{ background: r.eliminado ? 'rgba(255,50,50,0.08)' : (r.es_cobranza_terceros ? FILA_COBRANZA_TERCEROS : 'transparent'), opacity: r.eliminado ? 0.7 : 1 }}>
                 <td>
   <strong>N° {String(r.numero).padStart(5, '0')}</strong>
-  {r.es_cobranza_terceros && <span title="Boleta de un cliente de la franquicia que cobramos nosotros: suma a la cuenta corriente pero no cuenta como venta nuestra." style={{ marginLeft: 8, background: '#2a1f0a', color: 'var(--amber)', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700 }}>🧾 COBRANZA X CTA DE FRANQUICIA</span>}
+  {r.es_cobranza_terceros && <BadgeCobranzaTerceros />}
   {r.eliminado && <span style={{ marginLeft: 8, background: '#3a1a1a', color: '#ff6b6b', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700 }}>❌ ANULADO por {r.eliminado_por}</span>}
 </td>
                 <td>{r.fecha}</td>

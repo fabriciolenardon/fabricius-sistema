@@ -13,6 +13,7 @@ import { useAuth } from '../../context/AuthContext'
 import { vencidoPorCliente, setBloqueoCliente, setConfigCtaCte, plazoCliente, DIAS_BLOQUEO } from '../../lib/moraClientes'
 import { useEsMovil } from '../../lib/useEsMovil'
 import Paginador, { usePaginacion } from '../../components/Paginador'
+import BadgeCobranzaTerceros, { FILA_COBRANZA_TERCEROS } from '../../components/BadgeCobranzaTerceros'
 
 // URL publica de produccion del portal — NO usar window.location.origin para evitar URLs de preview de Vercel
 const PORTAL_URL = 'https://fabricius-sistema.vercel.app/login'
@@ -1260,6 +1261,9 @@ function RemitosCliente({ remitos, imprimirRemito }) {
   // Total a cobrar del rango: SOLO remitos no anulados (un anulado no es una compra).
   const noAnulados = filtrados.filter(r => !r.eliminado)
   const totalRango = noAnulados.reduce((s, r) => s + (Number(r.total) || 0), 0)
+  // Parte del total que es cobranza por cuenta de la franquicia: el cliente la
+  // debe igual (por eso suma al total a cobrar), pero no es venta nuestra.
+  const totalTerceros = noAnulados.filter(r => r.es_cobranza_terceros).reduce((s, r) => s + (Number(r.total) || 0), 0)
   const pag = usePaginacion(filtrados, 20)
   const inpF = { padding: '7px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 13 }
   return (
@@ -1281,15 +1285,21 @@ function RemitosCliente({ remitos, imprimirRemito }) {
             {hayFiltro ? `TOTAL A COBRAR DEL RANGO · ${noAnulados.length} boleta${noAnulados.length === 1 ? '' : 's'}` : `TOTAL · ${noAnulados.length} boleta${noAnulados.length === 1 ? '' : 's'}`}
           </div>
           <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 26, color: 'var(--gold)', lineHeight: 1 }}>${Math.round(totalRango).toLocaleString('es-AR')}</div>
+          {totalTerceros > 0 && (
+            <div style={{ fontSize: 10, color: 'var(--amber)', marginTop: 3 }}>
+              🧾 Incluye ${Math.round(totalTerceros).toLocaleString('es-AR')} cobrado por cuenta de la franquicia
+            </div>
+          )}
         </div>
       </div>
       <table>
         <thead><tr><th>N° Remito</th><th>Fecha</th><th>Total</th><th>Imprimir</th></tr></thead>
         <tbody>
           {pag.items.map(r => (
-            <tr key={r.id} style={{ background: r.eliminado ? 'rgba(255,50,50,0.08)' : 'transparent', opacity: r.eliminado ? 0.8 : 1 }}>
+            <tr key={r.id} style={{ background: r.eliminado ? 'rgba(255,50,50,0.08)' : (r.es_cobranza_terceros ? FILA_COBRANZA_TERCEROS : 'transparent'), opacity: r.eliminado ? 0.8 : 1 }}>
               <td>
                 <strong>N° {String(r.numero).padStart(5, '0')}</strong>
+                {r.es_cobranza_terceros && <BadgeCobranzaTerceros compacto />}
                 {r.eliminado && <span style={{ marginLeft: 8, background: '#3a1a1a', color: '#ff6b6b', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700 }}>❌ ANULADO por {r.eliminado_por}</span>}
               </td>
               <td>{r.fecha}</td>
@@ -1518,6 +1528,9 @@ function MovimientosCliente({ movimientos, fmt, remitos = [], imprimirRemito }) 
   // Abrir el remito directo desde el movimiento de la cta cte, sin ir a
   // buscarlo a Mayorista → Remitos (pedido de Fabricio 21/07).
   const remitoDe = (m) => m.remito_id ? remitos.find(r => r.id === m.remito_id && !r.eliminado) : null
+  // Para el chip vale también el remito anulado: si el movimiento sigue en el
+  // ledger hay que poder ver de qué se trataba.
+  const esTerceros = (m) => !!(m.remito_id && remitos.find(r => r.id === m.remito_id)?.es_cobranza_terceros)
   return (
     <div className="card" style={{ marginBottom: 16 }}>
       <div className="card-title">📒 Cuenta corriente ({movimientos.length} movimientos)</div>
@@ -1525,11 +1538,12 @@ function MovimientosCliente({ movimientos, fmt, remitos = [], imprimirRemito }) 
         <thead><tr><th>Fecha</th><th>Tipo</th><th>Descripción</th><th style={{ textAlign: 'right' }}>Debe</th><th style={{ textAlign: 'right' }}>Haber</th><th style={{ textAlign: 'right' }}>Saldo</th></tr></thead>
         <tbody>
           {pag.items.map(m => (
-            <tr key={m.id}>
+            <tr key={m.id} style={{ background: esTerceros(m) ? FILA_COBRANZA_TERCEROS : 'transparent' }}>
               <td>{m.fecha}</td>
               <td><span className={`badge ${m.tipo === 'compra' ? 'badge-red' : 'badge-green'}`}>{m.tipo}</span></td>
               <td>
                 {m.descripcion || '—'}
+                {esTerceros(m) && <BadgeCobranzaTerceros compacto />}
                 {remitoDe(m) && imprimirRemito && (
                   <button onClick={() => imprimirRemito(remitoDe(m))} title="Ver / imprimir el remito"
                     style={{ marginLeft: 8, background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', fontWeight: 700, fontSize: 11 }}>🖨️</button>
