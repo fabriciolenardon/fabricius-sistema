@@ -922,7 +922,7 @@ export async function ejecutarFuncion(nombre, args) {
         const esHoy = fecha === fechaHoyARG()
         const [caja, remitos, cajaAyer] = await Promise.all([
           supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').eq('fecha', fecha),
-          supabase.from('remitos').select('total, cliente_nombre').eq('fecha', fecha).eq('eliminado', false).neq('cobro', 'interno'),
+          supabase.from('remitos').select('total, cliente_nombre').eq('fecha', fecha).eq('eliminado', false).neq('cobro', 'interno').eq('es_cobranza_terceros', false),
           esHoy ? supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').eq('fecha', fechaRelativaARG(-1)) : Promise.resolve({ data: null }),
         ])
         const totCaja = sumar(caja.data, 'total'), nCaja = (caja.data || []).length
@@ -1520,7 +1520,7 @@ export async function ejecutarFuncion(nombre, args) {
           // Paginado: cada período puede abarcar meses/un año (ver lib/fetchAllRows.js).
           const [caja, remitos] = await Promise.all([
             fetchAllRows(() => supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').gte('fecha', p.desde).lte('fecha', p.hasta)),
-            fetchAllRows(() => supabase.from('remitos').select('total').eq('eliminado', false).neq('cobro', 'interno').gte('fecha', p.desde).lte('fecha', p.hasta)),
+            fetchAllRows(() => supabase.from('remitos').select('total').eq('eliminado', false).neq('cobro', 'interno').eq('es_cobranza_terceros', false).gte('fecha', p.desde).lte('fecha', p.hasta)),
           ])
           if (caja.error) throw caja.error
           if (remitos.error) throw remitos.error

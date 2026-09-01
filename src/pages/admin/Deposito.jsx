@@ -4252,7 +4252,7 @@ async function ejecutarAnulacion(entrada) {
 
 export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
   const { sucursalId, isSucursal: esSucursal } = useAuth()
-  const [form, setForm] = useState({ destino: '', clienteId: '', clienteNombre: '', domicilio: '', fecha: fechaHoyARG(), categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
+  const [form, setForm] = useState({ destino: '', clienteId: '', clienteNombre: '', domicilio: '', fecha: fechaHoyARG(), categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '', cobranzaTerceros: false })
   // Pago dividido (cobro='mixto'): hasta 3 líneas { metodo, monto }. Solo se usa
   // cuando la venta se cobra en 2-3 formas distintas (ej. parte efectivo + parte
   // transferencia). Es 100% pagado: no genera deuda en cuenta corriente.
@@ -5031,7 +5031,10 @@ for (const item of items) {
       fecha: form.fecha, cliente_nombre: clienteNombre,
       cliente_id: clienteId || null,
       domicilio, telefono, localidad,
-      items, total, cobro: form.cobro, pagos: pagosMixto, notas: form.notas
+      items, total, cobro: form.cobro, pagos: pagosMixto, notas: form.notas,
+      // Boletas de clientes de la franquicia que cobramos nosotros: suma a la
+      // cuenta corriente pero NO es venta nuestra (mig 135).
+      es_cobranza_terceros: !!form.cobranzaTerceros
     }).select().single()
 
     // Vincular las salidas_deposito recién creadas con este remito (por id, no
@@ -5110,7 +5113,7 @@ for (const item of items) {
     // adelante el destino quedaba inválido y en blanco en pantalla, y el guard
     // `!form.destino` no saltaba porque el string no estaba vacío. Se colaba un
     // despacho sin destino elegido.
-    setForm({ destino: '', clienteId: '', clienteNombre: '', domicilio: '', fecha: fechaHoyARG(), categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '' })
+    setForm({ destino: '', clienteId: '', clienteNombre: '', domicilio: '', fecha: fechaHoyARG(), categoria: '', productoId: '', kg: '', precio: '', cobro: 'cta_cte', notas: '', cobranzaTerceros: false })
     setPagosSplit([{ metodo: 'efectivo', monto: '' }, { metodo: 'transferencia', monto: '' }])
     // Refrescar el stockMap para que las cajas/almacén/bebidas reflejen la
     // resta inmediatamente — sin esto, el cajero ve disponibilidad vieja
@@ -5544,6 +5547,17 @@ for (const item of items) {
               <option value="echeq">E-cheq</option>
               <option value="mixto">💰 Pago dividido (2-3 formas)</option>
             </select>
+            {/* Cobranza por cuenta de terceros (mig 135): las boletas de los
+                clientes de la franquicia que cobramos nosotros. Suman a la
+                cuenta corriente igual que siempre, pero no son venta nuestra
+                (la mercadería ya se facturó al vendérsela a la franquicia). */}
+            {form.cobro === 'cta_cte' && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, cursor: 'pointer', fontSize: 12, color: form.cobranzaTerceros ? 'var(--amber)' : 'var(--muted)' }}>
+                <input type="checkbox" checked={!!form.cobranzaTerceros}
+                  onChange={e => setForm(f => ({ ...f, cobranzaTerceros: e.target.checked }))} />
+                <span>🧾 <strong>Cobranza por cuenta de la franquicia</strong> — suma a la cuenta del cliente pero NO cuenta como venta nuestra</span>
+              </label>
+            )}
           </div>
           <div className="form-group"><label>Notas</label>
             <input placeholder="Observaciones" value={form.notas} onChange={e => setForm(f => ({ ...f, notas: e.target.value }))} />
@@ -6267,6 +6281,7 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
               <tr key={r.id} style={{ background: r.eliminado ? 'rgba(255,50,50,0.08)' : 'transparent', opacity: r.eliminado ? 0.7 : 1 }}>
                 <td>
   <strong>N° {String(r.numero).padStart(5, '0')}</strong>
+  {r.es_cobranza_terceros && <span title="Boleta de un cliente de la franquicia que cobramos nosotros: suma a la cuenta corriente pero no cuenta como venta nuestra." style={{ marginLeft: 8, background: '#2a1f0a', color: 'var(--amber)', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700 }}>🧾 COBRANZA X CTA DE FRANQUICIA</span>}
   {r.eliminado && <span style={{ marginLeft: 8, background: '#3a1a1a', color: '#ff6b6b', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700 }}>❌ ANULADO por {r.eliminado_por}</span>}
 </td>
                 <td>{r.fecha}</td>

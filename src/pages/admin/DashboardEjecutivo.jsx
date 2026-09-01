@@ -262,7 +262,7 @@ function useDashboardData(refreshMs = 120000) {
       supabase.from('compras_proveedores').select('proveedor_nombre, importe').gte('fecha', inicioSemanaARG()).lte('fecha', hoy).not('anulado', 'is', true),
       // Remitos/despachos mayoristas de HOY (para el ticker, sin flujos internos)
       // items: alimentan los kilos vendidos por categoría (mayorista del día)
-      supabase.from('remitos').select('numero, cliente_nombre, total, created_at, cobro, items').eq('fecha', hoy).eq('eliminado', false).neq('cobro', 'interno'),
+      supabase.from('remitos').select('numero, cliente_nombre, total, created_at, cobro, items').eq('fecha', hoy).eq('eliminado', false).neq('cobro', 'interno').eq('es_cobranza_terceros', false),
       // Vendido / cobrado / por cobrar del mes (FIFO server-side: los pagos cancelan
       // primero la deuda vieja, así "por cobrar" es solo de ventas del período)
       supabase.rpc('ventas_cobranza_periodo', { p_desde: mesIni, p_hasta: hoy }),

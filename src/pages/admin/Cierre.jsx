@@ -529,7 +529,7 @@ export default function Cierre() {
     if (data?.length) {
       const minIni = data.map(c => c.semana_inicio).filter(Boolean).sort()[0]
       const [rems, gas, ent] = await Promise.all([
-        fetchAllRows(() => supabase.from('remitos').select('fecha, total, created_at, eliminado, cobro, cliente_nombre').gte('fecha', minIni)),
+        fetchAllRows(() => supabase.from('remitos').select('fecha, total, created_at, eliminado, cobro, cliente_nombre, es_cobranza_terceros').gte('fecha', minIni)),
         fetchAllRows(() => supabase.from('gastos').select('fecha, monto, created_at, solo_balance, tipo').gte('fecha', minIni)),
         fetchAllRows(() => supabase.from('entradas_deposito').select('fecha, importe, kg, kg_real, precio_kg, created_at, eliminado, destino').gte('fecha', minIni)),
       ])
@@ -651,7 +651,7 @@ export default function Cierre() {
     const ini = c.semana_inicio, fin = c.semana_fin, ts = c.created_at
     const enRango = (f) => f >= ini && f <= fin
     const ventasN = remitosHist
-      .filter(r => !r.eliminado && r.cobro !== 'interno' && String(r.cliente_nombre || '').trim().toUpperCase() !== 'MITRE' && enRango(r.fecha) && r.created_at > ts)
+      .filter(r => !r.eliminado && r.cobro !== 'interno' && !r.es_cobranza_terceros && String(r.cliente_nombre || '').trim().toUpperCase() !== 'MITRE' && enRango(r.fecha) && r.created_at > ts)
       .reduce((s, r) => s + (Number(r.total) || 0), 0)
     const gastosN = gastosHist
       .filter(g => !g.solo_balance && ['fijo', 'variable', 'socio'].includes(g.tipo) && enRango(g.fecha) && g.created_at > ts)

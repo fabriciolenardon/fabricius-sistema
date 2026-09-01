@@ -37,7 +37,7 @@ export function Clientes() {
   const [editandoId, setEditandoId] = useState(null)
   const [busquedaCliente, setBusquedaCliente] = useState('')   // filtro lista clientes
   const [filtroSaldo, setFiltroSaldo] = useState('todos')      // todos | con_deuda | al_dia
-  const [pago, setPago] = useState({ importe: '', forma: 'efectivo', fecha: fechaHoyARG(), notas: '' })
+  const [pago, setPago] = useState({ importe: '', forma: 'efectivo', fecha: fechaHoyARG(), notas: '', compensacion: false })
   const [form, setForm] = useState({ nombre: '', nombre_fantasia: '', tipo: 'carniceria', telefono: '', localidad: '', domicilio: '', cuit: '', lista_precios: listaPorDefecto(esSucursal), notas: '', titular: '', es_franquicia: false })
   // Modal de gestion del portal: { tipo: 'habilitar'|'credenciales'|'revocar', cliente, email, credenciales, loading }
   const [modalPortal, setModalPortal] = useState(null)
@@ -384,10 +384,13 @@ async function eliminarMovimiento(mov) {
       descripcion: `Pago — ${pago.forma}${pago.notas ? ' — ' + pago.notas : ''}`,
       debe: 0,
       haber: importe,
-      saldo: 0
+      saldo: 0,
+      // Compensación (mig 135): baja la deuda pero no entró plata — típico
+      // de las "BOLETAS MAYORISTAS" que se le descuentan a la franquicia.
+      es_compensacion: !!pago.compensacion
     })
     const nuevoSaldo = await recomputarSaldoCliente(seleccionado.id)
-    setPago({ importe: '', forma: 'efectivo', fecha: fechaHoyARG(), notas: '' })
+    setPago({ importe: '', forma: 'efectivo', fecha: fechaHoyARG(), notas: '', compensacion: false })
     setShowPago(false)
     await fetchClientes()
     await seleccionar({ ...seleccionado, saldo: nuevoSaldo })
@@ -960,6 +963,14 @@ async function eliminarMovimiento(mov) {
                       </div>
                       <div className="form-group"><label>Fecha</label><input style={inp} type="date" value={pago.fecha} onChange={e => setPago(p => ({ ...p, fecha: e.target.value }))} /></div>
                       <div className="form-group"><label>Notas</label><input style={inp} value={pago.notas} onChange={e => setPago(p => ({ ...p, notas: e.target.value }))} placeholder="Cheque nro., banco..." /></div>
+                      {/* Compensación (mig 135): las "BOLETAS MAYORISTAS" que se
+                          le descuentan a la franquicia no son plata que entró —
+                          la paga después el cliente final. Baja la deuda igual. */}
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, cursor: 'pointer', fontSize: 12, color: pago.compensacion ? 'var(--amber)' : 'var(--muted)' }}>
+                        <input type="checkbox" checked={!!pago.compensacion}
+                          onChange={e => setPago(p => ({ ...p, compensacion: e.target.checked }))} />
+                        <span>🧾 <strong>Compensación</strong> (no entró plata) — baja la deuda pero no cuenta como cobranza</span>
+                      </label>
                     </div>
 
                     {/* Preview anti-typo: muestra el monto parseado y el saldo después */}

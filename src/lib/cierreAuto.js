@@ -142,14 +142,14 @@ export async function calcularCierreAuto(desde, hasta) {
     // Excluye anulados y MITRE (casa central, no cliente).
     fetchAllRows(() => supabase
       .from('remitos')
-      .select('id, numero, fecha, total, cobro, cliente_nombre, eliminado')
+      .select('id, numero, fecha, total, cobro, cliente_nombre, eliminado, es_cobranza_terceros')
       .gte('fecha', desde)
       .lte('fecha', hasta)),
 
     // Movimientos cta cte clientes — cobranzas (pago / cheque)
     fetchAllRows(() => supabase
       .from('movimientos_ctacte')
-      .select('id, fecha, tipo, debe, haber, cliente_id, cliente_nombre')
+      .select('id, fecha, tipo, debe, haber, cliente_id, cliente_nombre, es_compensacion')
       .gte('fecha', desde)
       .lte('fecha', hasta)),
 
@@ -248,9 +248,14 @@ export async function calcularCierreAuto(desde, hasta) {
   //  - anulados (eliminado): no son ventas reales
   //  - cobro 'interno' (movimiento entre depósito y carnicería)
   //  - "MITRE": es nuestra propia casa central, NO un cliente.
+  //  - es_cobranza_terceros: boletas de clientes de la franquicia que
+  //    cobramos nosotros (mig 135). Suman a la cuenta corriente del cliente,
+  //    pero la mercadería YA se facturó al venderle a la franquicia: contarlas
+  //    acá sería contar la misma venta dos veces, y encima sin costo.
   const remitos = (remitosR.data || []).filter(r =>
     !r.eliminado &&
     r.cobro !== 'interno' &&
+    !r.es_cobranza_terceros &&
     (r.cliente_nombre || '').toUpperCase().trim() !== 'MITRE'
   )
   const movCtaCte = movCtaCteR.data || []
@@ -284,8 +289,11 @@ export async function calcularCierreAuto(desde, hasta) {
   const cobradoTransferencia = sum(ventasCaja, 'transferencia')
   // Cobranzas de cta cte: SOLO pagos reales (efectivo/transferencia). Los cheques
   // NO son cobro nuestro — se endosan a proveedores, no se cobran (no van al flujo).
+  // Las COMPENSACIONES (mig 135) se descuentan de lo que la franquicia nos
+  // debe, pero no entró un peso: la plata la paga después el cliente final y
+  // ahí sí se cuenta. Sumarlas acá sería contar la misma plata dos veces.
   const cobranzasCta = movCtaCte
-    .filter(m => m.tipo === 'pago')
+    .filter(m => m.tipo === 'pago' && !m.es_compensacion)
     .reduce((s, m) => s + (Number(m.haber) || 0), 0)
   // Mayorista cobrada al despachar (remitos con cobro != 'cta_cte')
   const cobradoMayorista = remitos
