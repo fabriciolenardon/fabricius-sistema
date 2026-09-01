@@ -23,6 +23,7 @@ import { supabase } from '../../lib/supabase'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
 import { fmtKg } from '../../lib/formatos'
 import { esStockNegativo } from '../../lib/stockHelpers'
+import { ultimoArqueoPorDia } from '../../lib/arqueos'
 
 const fmt$ = n => '$' + Math.round(Math.abs(n || 0)).toLocaleString('es-AR')
 
@@ -91,7 +92,10 @@ export default function AlertasAnomalias() {
       supabase.from('precios').select('nombre, categoria, stock_origen, stock_no_aplica')
         .in('categoria', ['cerdo_corte', 'cerdo_pieza', 'embutido']),
     ])
-    setArqueosSemana(arq || [])
+    // Solo el ÚLTIMO arqueo de cada día y boca: un cierre rehecho (o el
+    // duplicado de un doble clic) inflaba el faltante de la semana con la
+    // diferencia del arqueo viejo, que ya no vale.
+    setArqueosSemana(ultimoArqueoPorDia(arq || []))
     setVentasHoy(ventas || [])
     // esStockNegativo (no `< 0`): un bucket vaciado queda con residuo de float
     // (-0,0000000000000036) que se muestra como 0 y no es un faltante real.

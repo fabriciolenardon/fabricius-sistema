@@ -37,6 +37,7 @@ import { useAuth } from '../../context/AuthContext'
 import { fechaHoyARG, horaHoyARG } from '../../lib/fechas'
 import { parseNumero, fmtPrecio } from '../../lib/formatos'
 import Paginador, { usePaginacion } from '../../components/Paginador'
+import { idsArqueosReemplazados } from '../../lib/arqueos'
 
 const fmt$ = n => fmtPrecio(Math.abs(Number(n) || 0))
 
@@ -930,6 +931,10 @@ export default function ArqueoCaja() {
 // Las acciones (✏️ editar y 🗑️ eliminar) solo aparecen para el CEO.
 function HistorialArqueosPaginado({ historial, onEliminar, onPedirEliminar, onCancelarBorrar, confirmandoBorrar, onEditar, editandoId, esCEO }) {
   const pag = usePaginacion(historial, 20)
+  // Cierres pisados por otro posterior del mismo día y boca: siguen listados
+  // (control del dueño: se ve quién retocó un cierre), pero marcados, porque
+  // en los totales vale el último (ver lib/arqueos.js).
+  const reemplazados = idsArqueosReemplazados(historial)
   return (
     <>
       <div style={{ overflowX: 'auto' }}>
@@ -964,11 +969,16 @@ function HistorialArqueosPaginado({ historial, onEliminar, onPedirEliminar, onCa
                   background: enEdicion
                     ? 'rgba(255,209,122,0.18)'
                     : esBackfill ? 'rgba(255,209,122,0.04)' : 'transparent',
+                  opacity: !enEdicion && reemplazados.has(a.id) ? 0.55 : 1,
                   outline: enEdicion ? '1px solid var(--gold)' : 'none',
                 }}>
                   <td style={{ padding: '6px 4px' }}>
                     {a.fecha}
                     {esBackfill && <span title="Cargado manualmente (backfill)" style={{ marginLeft: 6, fontSize: 10, color: '#ffd17a' }}>⚡</span>}
+                    {reemplazados.has(a.id) && (
+                      <div title="Se cargó otro cierre de este día después. En los totales vale el último; este queda como registro."
+                        style={{ fontSize: 9, color: '#ff8b8b', fontWeight: 700, marginTop: 2 }}>↩ REEMPLAZADO</div>
+                    )}
                   </td>
                   <td style={{ padding: '6px 4px', color: 'var(--muted)' }}>{a.hora}</td>
                   <td style={{ padding: '6px 4px' }}>{a.cajero || '—'}</td>
