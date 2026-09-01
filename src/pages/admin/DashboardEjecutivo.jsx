@@ -18,6 +18,7 @@ import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
 import { fmtKg } from '../../lib/formatos'
 import { useCentroActividad } from '../../lib/useCentroActividad'
 import { totalesConceptos } from '../../lib/cierreAuto'
+import { ultimoArqueoPorDia } from '../../lib/arqueos'
 import {
   useReportesData, SelectorPeriodo,
   ReporteMargen, ReporteCliente, ReporteCanal, ReporteTemporal,
@@ -266,7 +267,9 @@ function useDashboardData(refreshMs = 120000) {
       // primero la deuda vieja, así "por cobrar" es solo de ventas del período)
       supabase.rpc('ventas_cobranza_periodo', { p_desde: mesIni, p_hasta: hoy }),
       // Arqueos de la semana (lunes→hoy) — minorista REAL contado: efectivo+débito+transf
-      supabase.from('arqueos_caja').select('total_contado, debito_real, transferencia_real, fecha').gte('fecha', inicioSemanaARG()).lte('fecha', hoy),
+      // id/hora/sucursal_id: hacen falta para quedarse con el ÚLTIMO arqueo de
+      // cada día y boca (lib/arqueos.js) y no sumar dos veces un cierre rehecho.
+      supabase.from('arqueos_caja').select('id, hora, sucursal_id, total_contado, debito_real, transferencia_real, fecha').gte('fecha', inicioSemanaARG()).lte('fecha', hoy),
       // Cobranzas mayoristas de TODA la historia (tipo 'pago': los cheques NO cuentan,
       // se endosan a proveedores). Paginado: el ledger supera las 1000 filas.
       fetchAllRows(() => supabase.from('movimientos_ctacte').select('tipo, haber')),
@@ -462,7 +465,9 @@ function useDashboardData(refreshMs = 120000) {
     // Aguinaldo/vacaciones que caen en esta semana (por fecha de cierre del mes)
     const conceptosSemana = totalesConceptos(conceptosQ?.data || [], mesesOpData || [], inicioSem, hoy).total
     // Minorista REAL de la semana = lo contado en los arqueos (efectivo+débito+transf)
-    const minoristaArqueoSemana = (arqueosSemQ.data || []).reduce((s, a) =>
+    // Un día puede tener varios arqueos (cierre rehecho o doble clic): vale el
+    // ÚLTIMO de cada día y boca, si no el minorista de la semana se duplica.
+    const minoristaArqueoSemana = ultimoArqueoPorDia(arqueosSemQ.data || []).reduce((s, a) =>
       s + (Number(a.total_contado) || 0) + (Number(a.debito_real) || 0) + (Number(a.transferencia_real) || 0), 0)
     // Mayorista vendido esta semana (remitos/salidas emitidos lunes→hoy, sin flujos internos)
     const mayoristaVendidoSemana = (salidasMes.data || [])
