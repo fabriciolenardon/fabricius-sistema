@@ -285,7 +285,6 @@ export default function Dashboard() {
   const stockCerdo = Math.max(0, stock.cerdo || 0)
   // Milanesas elaboradas por la sucursal (mig 99). En la central da 0: no usa
   // este circuito, su milanesa descuenta la materia prima al venderse.
-  const stockMilanesas = Math.max(0, (stock.mila_carne || 0) + (stock.mila_cerdo || 0) + (stock.mila_pollo || 0))
   const stockCerdoPiezas = Math.max(0,
     (stock.cerdo_pierna || 0) +
     (stock.cerdo_carre || 0) +
@@ -544,11 +543,13 @@ export default function Dashboard() {
             // (capón entero → piezas). Por eso sus salidas son los despostes de cerdo
             // (despostesCerdo), NO las ventas de piezas. Las ventas/elaborados de piezas
             // (matambre, pulpa, etc. = cerdo_corte/cerdo_pieza) se descuentan de Cerdo Piezas.
-            // Una franquicia no recibe capones (le llegan las piezas ya
-            // despostadas), así que ese widget le quedaba siempre en cero. En
-            // su lugar ve sus MILANESAS, que sí elabora y vende (mig 99).
+            // La franquicia no recibe capones (le llegan las piezas ya
+            // despostadas), así que ese widget le quedaba siempre en cero. En su
+            // lugar veía sus MILANESAS, pero desde el 01/09/2026 no las elabora
+            // más (ver Deposito.jsx): la tarjeta de 🍔 Hamburguesas, que sí
+            // elabora, está más abajo y le sirve para lo mismo.
             isSucursal
-              ? { label: '🍗 Milanesas', valor: fmtKg(stockMilanesas), color: 'var(--amber)', aprox: 'al peso', bajo: stockMilanesas < 10, stockKg: stockMilanesas, tiposEntradas: ['mila_carne', 'mila_cerdo', 'mila_pollo'], tiposSalidas: ['mila_carne', 'mila_cerdo', 'mila_pollo'], elaboraciones: true }
+              ? null
               : { label: '🐷 Cerdo Capones', valor: fmtKg(stockCerdo), color: 'var(--amber)', aprox: Math.round(stockCerdo / 107) + ' capones', bajo: stockCerdo < 50, stockKg: stockCerdo, tiposEntradas: ['cerdo'], tiposSalidas: ['cerdo'], despostesCerdo: true },
             { label: '🐷 Cerdo Piezas', valor: fmtKg(stockCerdoPiezas), color: 'var(--amber)', aprox: 'al peso', bajo: stockCerdoPiezas < 20, stockKg: stockCerdoPiezas, tiposEntradas: ['cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza','cerdo_huesos'], tiposSalidas: ['cerdo_pieza','cerdo_corte','cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza','cerdo_huesos'], elaboraciones: true },
             { label: '🍗 Pollo', valor: fmtKg(stockPollo), color: 'var(--blue)', aprox: Math.round(stockPollo / 20) + ' cajones', bajo: stockPollo < 50, stockKg: stockPollo, tiposEntradas: ['pollo'], tiposSalidas: ['pollo'], elaboraciones: true },
@@ -558,7 +559,7 @@ export default function Dashboard() {
             { label: '🧊 Rebozados/Congelados', valor: fmtKg(stockRebozado), color: 'var(--blue)', aprox: 'al peso', bajo: stockRebozado < 20, stockKg: stockRebozado, tiposEntradas: ['rebozado'], tiposSalidas: ['rebozado'] },
             { label: '🛒 Almacén', valor: Math.round(stockAlmacen) + ' u', color: 'var(--gold)', aprox: cantAlmacen + ' productos cargados', bajo: stockAlmacen < 10, stockKg: stockAlmacen, tiposEntradas: ['almacen'], tiposSalidas: ['almacen'] },
             { label: '🥤 Bebidas', valor: Math.round(stockBebidas) + ' u', color: 'var(--blue)', aprox: cantBebidas + ' productos cargados', bajo: stockBebidas < 10, stockKg: stockBebidas, tiposEntradas: ['bebidas'], tiposSalidas: ['bebidas'] },
-          ].map(s => (
+          ].filter(Boolean).map(s => (
             <div key={s.label} style={{ background: s.bajo ? '#3a1a1a' : 'var(--surface2)', border: `1px solid ${s.bajo ? 'var(--red-light)' : 'var(--border)'}`, borderRadius: 10, padding: '12px 14px', textAlign: 'center', cursor: 'pointer', transition: 'transform 0.1s, border-color 0.1s' }} onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--gold)'} onMouseLeave={e => e.currentTarget.style.borderColor = s.bajo ? 'var(--red-light)' : 'var(--border)'} onClick={() => { if (s.esConteo) navigate('/admin/precios'); else if (s.tiposEntradas) abrirDetalle(s) }}>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>{s.label}</div>
               <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 26, color: s.bajo ? 'var(--red-light)' : s.color }}>{s.valor}</div>

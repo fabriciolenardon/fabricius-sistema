@@ -63,6 +63,19 @@ const LABEL_BUCKET_HAMB = {
   hamb_cerdo: '🐷 Hamburguesas de Cerdo',
 }
 
+// ── MILANESAS (mig 99) — APAGADO desde el 01/09/2026 ─────────
+// Monte Cristo dejó de elaborar milanesas: ahora las vende igual que la
+// central, descontando la materia prima directo al venderlas
+// (MILANESA COMUN/NALGA/PECETO → bovino_corte, DE PECHUGA → pollo,
+// DE CERDO → cerdo_pierna). Se sacaron los overrides de
+// precios_sucursal.stock_origen que apuntaban a los buckets mila_*.
+//
+// El módulo NO se borró: queda entero detrás de este interruptor por si
+// vuelven a elaborarlas. Para reactivarlo: poner true acá y volver a
+// cargar los overrides (ver supabase/99_milanesas_sucursal.sql). Los
+// buckets mila_* siguen existiendo en stock_actual, en cero.
+const MILANESAS_ELABORACION_ACTIVA = false
+
 // ── MILANESAS (mig 99) ──────────────────────────────────────
 // Mismo modelo que hamburguesas: se elaboran, suman a su bucket propio y la
 // venta descuenta de ahí. Se pesan los kg de materia prima usados y se cargan
@@ -441,7 +454,7 @@ export function Deposito() {
           // sube acá: casi no desposta (recibe las piezas ya hechas), así que
           // elaborar es una tarea propia y no un paso del desposte. En la
           // central queda donde estaba, que es su flujo real.
-          ...(isSucursal ? [{ id: 'elaborar', label: '🍔 Elab. Hamburguesas y Milanesas' }] : []),
+          ...(isSucursal ? [{ id: 'elaborar', label: MILANESAS_ELABORACION_ACTIVA ? '🍔 Elab. Hamburguesas y Milanesas' : '🍔 Elab. Hamburguesas' }] : []),
           { id: 'piezas', label: '🥩 Piezas' },
           // Los kilos de cada pieza de cerdo con su historial. A la central le
           // sirve igual, pero para una sucursal es la única forma de saber
@@ -1886,7 +1899,7 @@ async function confirmarDesposteCerdo() {
               descuenta la materia prima directo al venderse, sin paso de
               elaboración). Ver supabase/99. */}
           {(esSucursal
-            ? [{ id: 'hamburguesa', label: '🍔 Hamburguesas' }, { id: 'milanesa', label: '🍗 Milanesas' }]
+            ? [{ id: 'hamburguesa', label: '🍔 Hamburguesas' }, ...(MILANESAS_ELABORACION_ACTIVA ? [{ id: 'milanesa', label: '🍗 Milanesas' }] : [])]
             : [{ id: 'embutido', label: '🌭 Embutidos frescos' }, { id: 'salame', label: '🥩 Salames' }, { id: 'hamburguesa', label: '🍔 Hamburguesas' }]
           ).map(t => (
             <button key={t.id} onClick={() => setTipoElaboracion(t.id)}
@@ -2014,8 +2027,8 @@ async function confirmarDesposteCerdo() {
           </span>
         </div>
       </div>
-      {/* Stock de milanesas (mig 99) — solo franquicias */}
-      {esSucursal && (
+      {/* Stock de milanesas (mig 99) — solo franquicias, y sólo si vuelven a elaborarlas */}
+      {esSucursal && MILANESAS_ELABORACION_ACTIVA && (
         <div className="card" style={{ marginTop: 16 }}>
           <div className="card-title">🍗 Stock milanesas</div>
           {Object.entries(LABEL_BUCKET_MILA).map(([tipo, label]) => (
