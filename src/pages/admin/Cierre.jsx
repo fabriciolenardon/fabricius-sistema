@@ -643,6 +643,30 @@ export default function Cierre() {
   const meses = [...new Set(cierres.map(c => c.mes))].sort().reverse()
   const semanasMes = cierres.filter(c => c.mes === mesSelector)
 
+  // ── CIERRES QUE SE PISAN ENTRE SÍ ────────────────────────────
+  // Dos cierres guardados que comparten aunque sea un día suman las MISMAS
+  // ventas dos veces en el total del mes. Pasó el 01/09/2026 en Monte Cristo:
+  // se cerró 25→31/08 y después, por errarle al día de arranque, 24→31/08 —
+  // el mes mostró $17,4M de minorista en vez de $9,6M.
+  // No se bloquea nada: el sistema avisa y el dueño decide cuál anular.
+  // `cierres` ya viene filtrado por RLS a la boca del usuario, así que el
+  // cierre de otra sucursal nunca cuenta como solape.
+  const seSolapan = (a, b) =>
+    !!(a.semana_inicio && a.semana_fin && b.semana_inicio && b.semana_fin) &&
+    a.semana_inicio <= b.semana_fin && b.semana_inicio <= a.semana_fin
+
+  // Cierres guardados que pisan el período [ini, fin] con OTRAS fechas.
+  // El de fechas idénticas no cuenta: guardar ahí actualiza esa misma fila.
+  function cierresQueSePisan(ini, fin) {
+    if (!ini || !fin || ini > fin) return []
+    return cierres.filter(c =>
+      !(c.semana_inicio === ini && c.semana_fin === fin) &&
+      seSolapan({ semana_inicio: ini, semana_fin: fin }, c))
+  }
+  // Dentro del mes que se está mirando: qué otras filas pisan a ésta.
+  const pisadosEnMes = c => semanasMes.filter(o => o.id !== c.id && seSolapan(c, o))
+  const hayPisadosEnMes = semanasMes.some(c => pisadosEnMes(c).length > 0)
+
   // Impacto en la ganancia de datos cargados DESPUÉS de cerrar la semana (snapshot
   // desactualizado): + ventas nuevas (remitos) − gastos nuevos − compras nuevas.
   // Si hubo cambios, la ganancia guardada quedó vieja → conviene recalcular y reguardar.
@@ -756,6 +780,31 @@ export default function Cierre() {
                   ? `📊 Período: ${fmtFecha(cierreAuto.periodo.desde)} → ${fmtFecha(cierreAuto.periodo.hasta)}`
                   : 'Seleccioná un período válido'}
             </div>
+            {/* Este período pisa un cierre ya guardado con OTRAS fechas: si se
+                guarda, el mes cuenta dos veces los días repetidos. */}
+            {cierresQueSePisan(desde, hasta).map(c => (
+              <div key={c.id} style={{
+                marginTop: 10, padding: '10px 12px', borderRadius: 8,
+                background: 'rgba(255,90,90,0.10)', border: '1px solid var(--red-light)',
+                fontSize: 12, color: 'var(--red-light)', display: 'flex',
+                alignItems: 'center', gap: 10, flexWrap: 'wrap'
+              }}>
+                <span style={{ flex: 1, minWidth: 240 }}>
+                  ⚠️ <b>Este período pisa un cierre ya guardado</b> ({fmtFecha(c.semana_inicio)} → {fmtFecha(c.semana_fin)}).
+                  Si guardás igual, el mes va a contar dos veces los días repetidos.
+                  Poné exactamente esas fechas para actualizarlo, o anulá el viejo.
+                </span>
+                <button className="btn btn-ghost btn-sm" style={{ whiteSpace: 'nowrap' }}
+                  title="Usar el período del cierre ya guardado, para actualizarlo en vez de crear uno nuevo"
+                  onClick={() => { setDesde(c.semana_inicio); setHasta(c.semana_fin) }}>
+                  📅 Usar {fmtFecha(c.semana_inicio)} → {fmtFecha(c.semana_fin)}
+                </button>
+                <button className="btn btn-ghost btn-sm" style={{ color: 'var(--red-light)', whiteSpace: 'nowrap' }}
+                  title="Anular el cierre ya guardado" onClick={() => eliminarCierre(c.id)}>
+                  🗑️ Anular el viejo
+                </button>
+              </div>
+            ))}
           </div>
 
           {cierreAuto && !calculando && (
@@ -1127,12 +1176,18 @@ export default function Cierre() {
                     <tbody>
                       {semanasMes.map(c => {
                         const desact = impactoPost(c)
+                        const pisados = pisadosEnMes(c)
                         return (
                         <tr key={c.id}>
                           <td>{fmtFecha(c.semana_inicio)} → {fmtFecha(c.semana_fin)}
                             {desact.hay && (
                               <div title="Se cargaron ventas, gastos o compras con fecha de esta semana DESPUÉS de cerrarla. Recalculá y reguardá el cierre para actualizar la ganancia." style={{ fontSize: 10, color: 'var(--amber)', fontWeight: 700, marginTop: 3 }}>
                                 ⚠️ desactualizado · ganancia real {desact.delta >= 0 ? '+' : '−'}{fmt(desact.delta)} · recalculá
+                              </div>
+                            )}
+                            {pisados.length > 0 && (
+                              <div title="Estos cierres comparten días. El TOTAL del mes suma las mismas ventas dos veces: anulá el que sobra." style={{ fontSize: 10, color: 'var(--red-light)', fontWeight: 700, marginTop: 3 }}>
+                                ⛔ pisa {pisados.map(o => `${fmtFecha(o.semana_inicio)} → ${fmtFecha(o.semana_fin)}`).join(', ')} · el TOTAL cuenta doble
                               </div>
                             )}
                           </td>
@@ -1155,6 +1210,13 @@ export default function Cierre() {
                                 </button>
                               ) : <span style={{ color: 'var(--muted)' }}>—</span>
                             })()}
+                            {/* Anular acá mismo: antes había que ir hasta el tab
+                                Historial para sacar un cierre mal cerrado. */}
+                            <button className="btn btn-ghost btn-sm" title="Anular este cierre semanal"
+                              onClick={() => eliminarCierre(c.id)}
+                              style={{ color: 'var(--red-light)', fontSize: 11, marginLeft: 4 }}>
+                              🗑️
+                            </button>
                           </td>
                         </tr>
                         )
@@ -1162,7 +1224,13 @@ export default function Cierre() {
                     </tbody>
                     <tfoot>
                       <tr className="total-row">
-                        <td>TOTAL</td>
+                        <td>TOTAL
+                          {hayPisadosEnMes && (
+                            <div style={{ fontSize: 10, color: 'var(--red-light)', fontWeight: 700, marginTop: 3 }}>
+                              ⛔ hay cierres que se pisan · este total está inflado
+                            </div>
+                          )}
+                        </td>
                         <td style={{ color: 'var(--green)' }}>{fmt(totMes.ventasMin)}</td>
                         <td style={{ color: 'var(--green)' }}>{fmt(totMes.ventasMay)}</td>
                         <td style={{ color: 'var(--red-light)' }}>{fmt(totMes.compras)}</td>
