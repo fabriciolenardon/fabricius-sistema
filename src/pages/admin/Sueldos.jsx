@@ -144,6 +144,30 @@ function informeEmpleados(liqs, conceptos = []) {
 }
 const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }
 
+// Suma días a una fecha 'YYYY-MM-DD'. Ancla al mediodía para que el cambio
+// de huso no corra el día (misma regla que el resto del sistema).
+function sumarDiasISO(iso, dias) {
+  const d = new Date(`${iso}T12:00:00`)
+  d.setDate(d.getDate() + dias)
+  return fechaHoyARG(d)
+}
+
+// Un LOTE es una liquidación cargada de una tirada: mismo rango de semana y
+// misma boca. Se corrige la fecha por lote y por IDs exactos, nunca con un
+// "update where semana_inicio = X": la central ve las filas de TODAS las bocas
+// (política is_admin de la RLS) y dos bocas pueden compartir semana_inicio con
+// distinto fin — así, corregir la semana de Monte Cristo no mueve la central.
+function lotesDeSemana(liqs) {
+  const map = {}
+  for (const l of liqs) {
+    const key = `${l.semana_inicio}|${l.semana_fin}|${l.sucursal_id ?? ''}`
+    if (!map[key]) map[key] = { key, inicio: l.semana_inicio, fin: l.semana_fin, sucursal_id: l.sucursal_id, ids: [], nombres: [] }
+    map[key].ids.push(l.id)
+    map[key].nombres.push(l.empleado_nombre)
+  }
+  return Object.values(map)
+}
+
 export default function Sueldos() {
   const [tab, setTab] = useState('liquidacion')
   const [liquidaciones, setLiquidaciones] = useState([])
@@ -173,12 +197,19 @@ export default function Sueldos() {
   const [extrasAbiertos, setExtrasAbiertos] = useState({})   // toggle panel de extras por mes
   const [extraEdit, setExtraEdit] = useState({})   // edición inline: `${mesKey}_${empId}` → { aguinaldo, vacDias, vacMonto }
   const [guardandoExtra, setGuardandoExtra] = useState(null)
+  // Corrección de la fecha de una semana ya liquidada (Pamela cargó la semana
+  // del 24→30/8 con fecha 17→23/8, 01/09/2026).
+  const [panelFecha, setPanelFecha] = useState(null)     // semana_inicio del panel abierto
+  const [fechaDrafts, setFechaDrafts] = useState({})     // lote.key → { inicio, fin }
+  const [guardandoFecha, setGuardandoFecha] = useState(null)
+  const [sucursales, setSucursales] = useState([])       // solo para etiquetar lotes cuando el admin ve varias bocas
 
   useEffect(() => {
     fetchLiquidaciones()
     cargarEmpleados()
     cargarMeses()
     cargarConceptos()
+    supabase.from('sucursales').select('id, nombre').then(({ data }) => setSucursales(data || []))
     const hoy = new Date()
     const dia = hoy.getDay()
     const lunes = new Date(hoy); lunes.setDate(hoy.getDate() - (dia === 0 ? 6 : dia - 1))
@@ -304,6 +335,44 @@ export default function Sueldos() {
     setAlert({ type: 'success', msg: `✅ Liquidación de ${l.empleado_nombre} actualizada` })
     fetchLiquidaciones()   // recarga → el TOTAL de la semana se recalcula solo
     setTimeout(() => setAlert(null), 3500)
+  }
+
+  // ── Corregir la FECHA de una semana ya liquidada ──────────────
+  // Se carga la liquidación con la semana equivocada más seguido de lo que
+  // parece (01/09: los sueldos del 24→30/8 quedaron cargados como 17→23/8).
+  // Se corrige acá en vez de borrar y recargar todo a mano.
+  function togglePanelFecha(semana, lotes) {
+    if (panelFecha === semana) { setPanelFecha(null); return }
+    const draft = {}
+    lotes.forEach(lo => { draft[lo.key] = { inicio: lo.inicio, fin: lo.fin } })
+    setFechaDrafts(draft)
+    setPanelFecha(semana)
+  }
+  // Corre el lote entero N días (±7 = la semana de al lado, que es el error
+  // típico): mueve inicio y fin juntos y mantiene la duración.
+  function correrLoteDias(key, dias) {
+    setFechaDrafts(d => {
+      const actual = d[key]
+      if (!actual?.inicio || !actual?.fin) return d
+      return { ...d, [key]: { inicio: sumarDiasISO(actual.inicio, dias), fin: sumarDiasISO(actual.fin, dias) } }
+    })
+  }
+  async function guardarFechaLote(lote) {
+    const dr = fechaDrafts[lote.key] || {}
+    if (!dr.inicio || !dr.fin) { setAlert({ type: 'error', msg: 'Poné las dos fechas (desde y hasta).' }); return }
+    if (dr.fin < dr.inicio) { setAlert({ type: 'error', msg: 'La fecha "hasta" no puede ser anterior a la de "desde".' }); return }
+    if (dr.inicio === lote.inicio && dr.fin === lote.fin) { setPanelFecha(null); return }
+    setGuardandoFecha(lote.key)
+    // .in('id', ...) — solo las filas de ESTE lote (esta boca, este rango).
+    const { error } = await supabase.from('liquidaciones_sueldos')
+      .update({ semana_inicio: dr.inicio, semana_fin: dr.fin })
+      .in('id', lote.ids)
+    setGuardandoFecha(null)
+    if (error) { setAlert({ type: 'error', msg: error.message }); return }
+    setPanelFecha(null)
+    setAlert({ type: 'success', msg: `✅ ${lote.ids.length} liquidación(es) movidas a la semana ${fmtDdMm(dr.inicio)} → ${fmtDdMm(dr.fin)}` })
+    fetchLiquidaciones()   // recarga → el mes y los totales se reagrupan solos
+    setTimeout(() => setAlert(null), 4500)
   }
 
   async function importarExcel(e) {
@@ -1100,14 +1169,63 @@ export default function Sueldos() {
                 {abierto && semanasMes.map(semana => {
                   const liqSemana = mes.liqs.filter(l => l.semana_inicio === semana)
                   const totalSemana = liqSemana.reduce((s, l) => s + (Number(l.neto) || 0), 0)
+                  const lotes = lotesDeSemana(liqSemana)
+                  const fechaAbierta = panelFecha === semana
                   return (
                     <div key={semana} style={{ marginTop: 14, border: '1px solid var(--border)', borderRadius: 10, padding: 14 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                        <div style={{ fontWeight: 700, fontSize: 13 }}>
-                          Semana {fmtDdMm(semana)} → {fmtDdMm(liqSemana[0]?.semana_fin || semana)}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 10, flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                          <div style={{ fontWeight: 700, fontSize: 13 }}>
+                            Semana {fmtDdMm(semana)} → {fmtDdMm(liqSemana[0]?.semana_fin || semana)}
+                          </div>
+                          <button onClick={() => togglePanelFecha(semana, lotes)}
+                            title="Corregir la semana con la que se cargaron estos sueldos"
+                            style={{ padding: '3px 10px', background: fechaAbierta ? '#7c3aed' : 'var(--surface2)', color: fechaAbierta ? '#fff' : 'var(--muted)', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: "'DM Sans',sans-serif" }}>
+                            📅 {fechaAbierta ? 'Cerrar' : 'Corregir fecha'}
+                          </button>
                         </div>
                         <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: 'var(--gold)' }}>TOTAL: {fmt(totalSemana)}</div>
                       </div>
+
+                      {/* Corrección de la semana mal cargada. Cada "lote" es una
+                          tirada de liquidación (misma boca + mismo rango): se
+                          mueve sola, sin tocar la de las otras sucursales. */}
+                      {fechaAbierta && (
+                        <div style={{ marginBottom: 12, padding: 12, borderRadius: 8, border: '1px solid #7c3aed', background: 'rgba(124,58,237,0.08)' }}>
+                          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
+                            Corregí la semana con la que quedaron cargados estos sueldos. Los montos no se tocan: solo cambian las fechas (y el mes al que van, si corresponde).
+                          </div>
+                          {lotes.map(lote => {
+                            const dr = fechaDrafts[lote.key] || { inicio: lote.inicio, fin: lote.fin }
+                            const nombreSuc = sucursales.find(s => s.id === lote.sucursal_id)?.nombre
+                            const cambiado = dr.inicio !== lote.inicio || dr.fin !== lote.fin
+                            const btnMini = { padding: '6px 10px', background: 'var(--surface2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700, fontFamily: "'DM Sans',sans-serif", whiteSpace: 'nowrap' }
+                            return (
+                              <div key={lote.key} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingTop: lotes.length > 1 ? 10 : 0, borderTop: lotes.length > 1 ? '1px solid var(--border)' : 'none', marginTop: lotes.length > 1 ? 10 : 0 }}>
+                                <div style={{ fontSize: 12, minWidth: 190 }}>
+                                  {lotes.length > 1 && (
+                                    <div style={{ fontWeight: 700, color: '#a78bfa' }}>🏪 {nombreSuc || `Sucursal ${lote.sucursal_id ?? '—'}`}</div>
+                                  )}
+                                  <div style={{ color: 'var(--muted)' }}>
+                                    {lote.ids.length} liquidación{lote.ids.length !== 1 ? 'es' : ''} · {fmtDdMm(lote.inicio)} → {fmtDdMm(lote.fin)}
+                                  </div>
+                                </div>
+                                <button onClick={() => correrLoteDias(lote.key, -7)} style={btnMini} title="Correr una semana para atrás">◀ −1 sem</button>
+                                <input type="date" value={dr.inicio} onChange={e => setFechaDrafts(d => ({ ...d, [lote.key]: { ...dr, inicio: e.target.value } }))}
+                                  style={{ ...inp, width: 'auto', padding: '6px 8px', fontSize: 13 }} />
+                                <span style={{ color: 'var(--muted)', fontSize: 12 }}>→</span>
+                                <input type="date" value={dr.fin} onChange={e => setFechaDrafts(d => ({ ...d, [lote.key]: { ...dr, fin: e.target.value } }))}
+                                  style={{ ...inp, width: 'auto', padding: '6px 8px', fontSize: 13 }} />
+                                <button onClick={() => correrLoteDias(lote.key, 7)} style={btnMini} title="Correr una semana para adelante">+1 sem ▶</button>
+                                <button onClick={() => guardarFechaLote(lote)} disabled={guardandoFecha === lote.key || !cambiado}
+                                  style={{ ...btnMini, background: cambiado ? '#7c3aed' : 'var(--surface2)', color: cambiado ? '#fff' : 'var(--muted)', borderColor: cambiado ? '#7c3aed' : 'var(--border)', cursor: cambiado ? 'pointer' : 'not-allowed' }}>
+                                  {guardandoFecha === lote.key ? '⏳ Guardando…' : '💾 Guardar fecha'}
+                                </button>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
                       <table>
                         <thead><tr><th>Empleado</th><th>Horas</th><th>Bruto</th><th>Viáticos</th><th>Adelantos</th><th>Boletas</th><th>Neto</th><th></th></tr></thead>
                         <tbody>
