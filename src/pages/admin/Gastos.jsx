@@ -131,9 +131,9 @@ export default function Gastos() {
     setGastos(data || [])
   }
 
-  function showAlert(msg, type = 'success') {
+  function showAlert(msg, type = 'success', ms = 4000) {
     setAlert({ msg, type })
-    setTimeout(() => setAlert(null), 4000)
+    setTimeout(() => setAlert(null), ms)
   }
 
   async function fetchTope() {
@@ -240,7 +240,13 @@ export default function Gastos() {
         setEditandoId(null)
       } else {
         const { error } = await supabase.from('gastos').insert(datos)
-        if (error) { showAlert(error.message, 'error'); return }
+        if (error) {
+          // Barrera anti-duplicado de la base (mig 134): el mensaje ya viene
+          // explicado en castellano — se muestra 9s porque hay que leerlo.
+          const esDup = /Ya cargaste este gasto/i.test(error.message || '')
+          showAlert(esDup ? `⚠️ ${error.message}` : error.message, 'error', esDup ? 9000 : 4000)
+          return
+        }
         showAlert(conFactura ? '✅ Gasto con factura registrado' : '✅ Registrado correctamente')
       }
       setForm(FORM_VACIO)
