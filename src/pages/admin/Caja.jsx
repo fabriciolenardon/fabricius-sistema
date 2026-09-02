@@ -15,6 +15,7 @@ import { resolverFormatoEAN } from '../../lib/balanzaFormato'
 import { fechaHoyARG, horaHoyARG, horaNumARG } from '../../lib/fechas'
 import { kgPorUnidadDeProducto, bucketPiezaBovina, redondearStock } from '../../lib/stockHelpers'
 import { cargarCajasDisponibles, venderCaja, CATEGORIA_A_TIPO_CAJA } from '../../lib/cajasStock'
+import { venderAnimalitoPorId, labelDe as labelAnimalito } from '../../lib/animalitos'
 import { fmtPrecio, fmtKg, parseNumero } from '../../lib/formatos'
 import { overlayDeSucursal, conPreciosDeSucursal } from '../../lib/preciosSucursal'
 import { SUCURSAL_CENTRAL } from '../../lib/permisos'
@@ -91,6 +92,11 @@ export default function Caja() {
   // que tienen tracking individual en piezas_stock).
   const [selectorPieza, setSelectorPieza] = useState(null)    // { producto } | null
   const [piezasDisp, setPiezasDisp] = useState([])            // piezas disponibles
+  // Selector de animalito entero (lechón, cabrito, cordero) — mismo patrón
+  // que las cajas: cada animal tiene su peso propio, así que el cajero elige
+  // CUÁL sale y el importe se calcula con ese peso.
+  const [selectorAnimalito, setSelectorAnimalito] = useState(null) // { producto } | null
+  const [animalitosDisp, setAnimalitosDisp] = useState([])         // animalitos disponibles
   // 🛡️ Guardia anti-disparate: cantidad enorme en un ítem del mostrador =
   // casi seguro un escaneo/tipeo roto. Pide confirmación inline antes de
   // agregarlo al carrito (20/07: una etiqueta de prueba de la balanza metió
@@ -146,7 +152,7 @@ export default function Caja() {
 
   async function cargarTodo() {
     const hoy = fechaHoyARG()  // Hora local ARG, NO UTC. Ver lib/fechas.js
-    const [{ data: pre }, { data: cfg }, { data: ventas }, { data: ofs }, { data: cajas }, { data: piezas }, { data: cbs }] = await Promise.all([
+    const [{ data: pre }, { data: cfg }, { data: ventas }, { data: ofs }, { data: cajas }, { data: piezas }, { data: cbs }, { data: anims }] = await Promise.all([
       supabase.from('precios').select('*').order('nombre'),
       supabase.from('config_sistema').select('*').eq('clave', 'ean13_formato').maybeSingle(),
       supabase.from('ventas_minoristas').select('*')
@@ -164,6 +170,9 @@ export default function Caja() {
         .order('fecha_ingreso', { ascending: true }).order('id', { ascending: true }),
       // Combos disponibles para vender (los pausados no se muestran).
       supabase.from('combos_venta').select('*').eq('disponible', true).order('orden').order('nombre'),
+      // Animalitos enteros en cámara (mig 137): el cajero elige cuál vende.
+      supabase.from('animalitos_stock').select('*').eq('estado', 'disponible')
+        .order('fecha_ingreso', { ascending: true }).order('id', { ascending: true }),
     ])
     // Si quien está en la caja es de una sucursal, sus precios pisan a los del
     // catálogo. Para la central esto no hace nada (ver lib/preciosSucursal.js).
@@ -184,6 +193,7 @@ export default function Caja() {
     setCajasDisp(cajas || [])
     setPiezasDisp(piezas || [])
     setCombos(cbs || [])
+    setAnimalitosDisp(anims || [])
   }
 
   // ---- Resuelve el precio final de un producto según lista activa + ofertas ----
@@ -285,6 +295,13 @@ export default function Caja() {
       setSelectorCaja({ producto, precioOverride })
       return
     }
+    // Interceptar los animalitos: se venden ENTEROS y cada uno pesa distinto,
+    // así que en vez de agregar kilos sueltos se elige CUÁL animal sale
+    // (mismo criterio que las cajas CB/PT).
+    if (producto?.categoria === 'animalitos') {
+      setSelectorAnimalito({ producto, precioOverride })
+      return
+    }
     // Interceptar productos marcados como "vende por pieza entera": abrir
     // el selector de piezas individuales del stock (piezas_stock).
     if (producto?.vende_por_pieza) {
@@ -368,6 +385,38 @@ export default function Caja() {
     }])
     setSelectorCaja(null)
     showMsg(`✅ Caja ${caja.tipo_caja} #${caja.id} — ${kg.toFixed(1)} kg`)
+  }
+
+  // Agrega un animalito específico del modal al carrito. El kg es el del
+  // animal físico y el precio sale de la lista (kg × precio_kg), igual que
+  // una caja. El animal se marca 'vendido' recién en cerrarVenta.
+  function agregarAnimalitoAlCarrito(animal, producto) {
+    const resuelto = resolverPrecio(producto)
+    const precio = resuelto.precio
+    const tieneOferta = !!resuelto.oferta && precio < resuelto.precioBase
+    const kg = Number(animal.kg) || 0
+    setCarrito(c => [...c, {
+      id: Date.now() + Math.random(),
+      producto_id: producto.id,
+      descripcion: `${producto.nombre} — ${animal.codigo} (${kg.toFixed(2)} kg)`,
+      categoria: producto.categoria,
+      // El stock lo mueve venderAnimalitoPorId por el bucket del animal; el
+      // descuento genérico tiene que saltearlo (como con caja_id).
+      stock_origen: null,
+      kg_por_unidad: null,
+      kg,
+      unidad: 'kg',
+      precio: parseFloat(precio),
+      precio_base: parseFloat(resuelto.precioBase),
+      tiene_oferta: tieneOferta,
+      oferta_pct: tieneOferta && resuelto.oferta?.descuento_pct ? Number(resuelto.oferta.descuento_pct) : null,
+      lista: listaPrecio,
+      importe: kg * parseFloat(precio),
+      animalito_id: animal.id,
+      animalito_codigo: animal.codigo,
+    }])
+    setSelectorAnimalito(null)
+    showMsg(`✅ ${animal.codigo} — ${kg.toFixed(2)} kg`)
   }
 
   // Agrega una pieza entera específica seleccionada del modal al carrito.
@@ -674,6 +723,10 @@ export default function Caja() {
         // la pieza de vuelta como 'disponible' en piezas_stock.
         pieza_id: i.pieza_id || null,
         pieza_tipo: i.pieza_tipo || null,
+        // Animalito entero (animalitos_stock) — al anular la venta vuelve a la
+        // cámara con su peso. Sin esto persistido, la anulación no lo repone.
+        animalito_id: i.animalito_id || null,
+        animalito_codigo: i.animalito_codigo || null,
         // Combo del que salió esta línea (si aplica) — solo trazabilidad;
         // el descuento de stock y la anulación usan categoria/stock_origen/kg.
         combo_id: i.combo_id || null,
@@ -739,6 +792,9 @@ export default function Caja() {
       // Caja individual: la maneja venderCaja() abajo, que ya decrementa
       // stock_actual.caja_cb / caja_pt por su peso individual.
       if (item.caja_id) continue
+      // Animalito entero: lo maneja venderAnimalitoPorId() abajo, que marca el
+      // animal vendido y descuenta su bucket (animal_lechon, etc.).
+      if (item.animalito_id) continue
       // Pieza entera: además de marcarla 'vendida' en piezas_stock (abajo),
       // descontamos su kg del agregado stock_actual.bovino_pieza — que es lo
       // que el Dashboard muestra como "Piezas Bovinas". El desposte sumó ese
@@ -795,6 +851,23 @@ export default function Caja() {
         notas: `Vendida en Caja Rápida #${data.id}`,
       })
       if (errCaja) console.warn('No se pudo marcar caja vendida:', errCaja)
+    }
+
+    // Marcar animalitos vendidos (animalitos_stock) — mismo patrón que cajas.
+    // Va sin cta cte: en el mostrador se cobra al contado. Si alguna vez se le
+    // vende a cuenta corriente, eso se hace desde Depósito → Animalitos.
+    for (const item of carrito) {
+      if (!item.animalito_id) continue
+      const r = await venderAnimalitoPorId(item.animalito_id, {
+        fecha: fechaHoyARG(ahora),
+        cliente: 'Caja Rápida',
+        clienteId: null,
+        aCtaCte: false,
+        precioVentaKg: item.precio,
+        kgFinal: item.kg,
+        notas: `Vendido en Caja Rápida #${data.id}`,
+      })
+      if (r?.error) console.warn('No se pudo marcar el animalito vendido:', r.error)
     }
 
     // Marcar piezas enteras vendidas (piezas_stock) — mismo patrón que cajas
@@ -1369,6 +1442,55 @@ export default function Caja() {
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
                             <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{fmtKg(c.kg)}</span>
                             <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--green)' }}>{fmtPrecio(importe)}</span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ============ MODAL SELECTOR DE ANIMALITO ENTERO ============ */}
+      {selectorAnimalito && (() => {
+        const idsEnCarrito = carrito.filter(i => i.animalito_id).map(i => i.animalito_id)
+        const visibles = animalitosDisp.filter(a => !idsEnCarrito.includes(a.id))
+        const precioKg = resolverPrecio(selectorAnimalito.producto).precio
+        return (
+          <div onClick={() => setSelectorAnimalito(null)}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+            <div onClick={e => e.stopPropagation()}
+              style={{ background: 'var(--surface)', border: '1px solid var(--gold)', borderRadius: 12, padding: 20, maxWidth: 680, width: '100%', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <div style={{ fontSize: 16, fontWeight: 700 }}>🐑 Elegí cuál vas a vender</div>
+                <button onClick={() => setSelectorAnimalito(null)} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 18 }}>✕</button>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
+                {selectorAnimalito.producto.nombre} · {fmtPrecio(precioKg)}/kg
+                {' · '}{visibles.length} en cámara
+              </div>
+              <div style={{ overflowY: 'auto', flex: 1 }}>
+                {visibles.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: 30, color: 'var(--muted)' }}>
+                    No hay animalitos en stock. Se cargan desde Depósito → 📥 Ingresos.
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
+                    {visibles.map(a => {
+                      const kg = Number(a.kg) || 0
+                      return (
+                        <div key={a.id} onClick={() => agregarAnimalitoAlCarrito(a, selectorAnimalito.producto)}
+                          style={{ padding: '10px 12px', borderRadius: 8, cursor: 'pointer', border: '2px solid var(--border)', background: 'var(--surface2)' }}
+                          onMouseOver={e => { e.currentTarget.style.borderColor = 'var(--gold)'; e.currentTarget.style.background = 'rgba(201,168,76,0.08)' }}
+                          onMouseOut={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = 'var(--surface2)' }}>
+                          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{a.codigo} · {labelAnimalito(a.tipo)}</div>
+                          <div style={{ fontSize: 10, color: 'var(--muted)' }}>{a.proveedor_origen || 's/proveedor'} · {a.fecha_ingreso}</div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
+                            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{fmtKg(kg)}</span>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--green)' }}>{fmtPrecio(kg * precioKg)}</span>
                           </div>
                         </div>
                       )
