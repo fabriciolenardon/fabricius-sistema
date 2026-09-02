@@ -31,11 +31,83 @@
 //
 // A propósito NO tiene valores ni ganancia: Fabricio pidió sólo los kilos.
 // ============================================================
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, Fragment } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { fmtKg, parseNumero } from '../lib/formatos'
 import { fechaHoyARG } from '../lib/fechas'
+import { imprimirHTML } from '../lib/imprimir'
+
+// ── REIMPRIMIR UNA PLANILLA DEL HISTORIAL ───────────────────────────────
+// El rinde guardado tiene TODOS los renglones en `cortes`, así que la planilla
+// de papel se puede volver a armar tal cual se cargó. Sirve para archivarla o
+// para discutir un rinde con el que despostó, meses después.
+// Misma vía que el resto de las impresiones del sistema (iframe oculto): en la
+// tablet del mostrador un window.open deja el diálogo colgado.
+const escHtml = t => String(t ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+const kg3 = v => (Number(v) || 0).toFixed(3).replace('.', ',')
+const fechaLarga = d => d ? new Date(d + 'T12:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'
+
+function imprimirPlanillaRinde(pl, tituloTipo) {
+  // Sin el emoji del label: en papel no aporta y hay impresoras que lo dibujan mal.
+  const tipoLimpio = String(tituloTipo || '').replace(/^\S+\s/, '')
+  const bruto = Number(pl.kg_bruto) || 0
+  const cortes = Array.isArray(pl.cortes) ? pl.cortes : []
+  // % sobre el bruto: es la lectura con la que se compara una planilla contra
+  // otra del mismo tipo (los kilos absolutos cambian con el tamaño del animal).
+  const pctDe = kg => bruto > 0 ? ((Number(kg) || 0) / bruto * 100).toFixed(2).replace('.', ',') + '%' : '—'
+  const filas = cortes.map(c => `
+      <tr class="${c.es_merma ? 'merma' : ''}">
+        <td>${escHtml(c.nombre)}${c.es_merma ? ' <span class="tag">merma</span>' : ''}</td>
+        <td class="num">${kg3(c.kg)}</td>
+        <td class="num">${pctDe(c.kg)}</td>
+      </tr>`).join('')
+
+  imprimirHTML(`<!DOCTYPE html><html><head><meta charset="utf-8">
+    <title>Planilla de rinde — ${escHtml(pl.destino_label || tipoLimpio)}</title>
+    <style>
+      @page { size: A4; margin: 14mm; }
+      body { font-family: Arial, Helvetica, sans-serif; color: #111; font-size: 12px; }
+      h1 { font-size: 17px; margin: 0 0 2px; letter-spacing: 1px; }
+      .sub { font-size: 12px; color: #444; margin-bottom: 14px; }
+      .datos { display: flex; gap: 26px; border: 1px solid #999; padding: 8px 12px; margin-bottom: 14px; }
+      .datos div { font-size: 12px; }
+      .datos b { display: block; font-size: 10px; color: #666; text-transform: uppercase; letter-spacing: .5px; font-weight: 700; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border-bottom: 1px solid #ddd; padding: 5px 6px; text-align: left; }
+      th { font-size: 10px; text-transform: uppercase; color: #666; border-bottom: 1px solid #999; }
+      .num { text-align: right; font-variant-numeric: tabular-nums; }
+      tr.merma td { color: #7a2d2d; }
+      .tag { font-size: 9px; border: 1px solid #7a2d2d; padding: 0 3px; border-radius: 3px; }
+      tfoot td { border-top: 2px solid #111; border-bottom: none; font-weight: 700; padding-top: 7px; }
+      tfoot tr.total td { font-size: 14px; }
+      .notas { margin-top: 14px; font-size: 11px; border: 1px solid #ddd; padding: 8px 10px; }
+      .firma { margin-top: 42px; display: flex; gap: 60px; font-size: 11px; color: #666; }
+      .firma div { border-top: 1px solid #999; padding-top: 4px; width: 210px; text-align: center; }
+      .pie { margin-top: 18px; font-size: 9px; color: #888; }
+    </style></head><body>
+    <h1>PLANILLA DE RINDE — ${escHtml((pl.destino_label || tipoLimpio || '').toUpperCase())}</h1>
+    <div class="sub">FABRICIUS SAS · ${escHtml(tipoLimpio)}</div>
+    <div class="datos">
+      <div><b>Fecha</b>${fechaLarga(pl.fecha)}</div>
+      <div><b>Kilos brutos</b>${kg3(pl.kg_bruto)} kg</div>
+      <div><b>Neto vendible</b>${kg3(pl.kg_neto)} kg</div>
+      <div><b>Merma</b>${kg3(pl.kg_merma)} kg · ${Number(pl.merma_pct).toFixed(2).replace('.', ',')}%</div>
+      <div><b>Cargada por</b>${escHtml(pl.creado_por || '—')}</div>
+    </div>
+    <table>
+      <thead><tr><th>Corte</th><th class="num">Kg</th><th class="num">% del bruto</th></tr></thead>
+      <tbody>${filas || '<tr><td colspan="3">Sin renglones cargados.</td></tr>'}</tbody>
+      <tfoot>
+        <tr><td>NETO VENDIBLE</td><td class="num">${kg3(pl.kg_neto)}</td><td class="num">${pctDe(pl.kg_neto)}</td></tr>
+        <tr class="total"><td>MERMA</td><td class="num">${kg3(pl.kg_merma)}</td><td class="num">${Number(pl.merma_pct).toFixed(2).replace('.', ',')}%</td></tr>
+      </tfoot>
+    </table>
+    ${pl.notas ? `<div class="notas"><b>Notas:</b> ${escHtml(pl.notas)}</div>` : ''}
+    <div class="firma"><div>Pesó</div><div>Controló</div></div>
+    <div class="pie">Reimpresión de la planilla guardada el ${fechaLarga(pl.fecha)}. Los renglones marcados como merma se pesan igual, pero no suman al neto vendible.</div>
+  </body></html>`)
+}
 
 // ── Las 4 planillas del papel ───────────────────────────────────────────
 // m: true = ese renglón es merma (no suma al neto vendible).
@@ -149,6 +221,9 @@ export default function PlanillasRinde({ config, onConfigChange }) {
   const [guardando, setGuardando] = useState(false)
   const [msg, setMsg] = useState(null)
   const [verHistorial, setVerHistorial] = useState(false)
+  // Qué planilla del historial está abierta (id). Se ve renglón por renglón,
+  // igual que se cargó, y desde ahí se imprime.
+  const [detalleId, setDetalleId] = useState(null)
 
   const plan = PLANILLAS[tipo]
 
@@ -526,9 +601,17 @@ export default function PlanillasRinde({ config, onConfigChange }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {historial.map((p, i) => (
-                    <tr key={p.id} style={{ borderTop: '1px solid var(--border)', background: i === 0 ? 'rgba(201,168,76,0.07)' : 'transparent' }}>
+                  {historial.map((p, i) => {
+                    const abierta = detalleId === p.id
+                    const cortes = Array.isArray(p.cortes) ? p.cortes : []
+                    const brutoN = Number(p.kg_bruto) || 0
+                    return (
+                    <Fragment key={p.id}>
+                    <tr onClick={() => setDetalleId(abierta ? null : p.id)}
+                      title="Ver la planilla que se cargó para este rinde"
+                      style={{ borderTop: '1px solid var(--border)', background: abierta ? 'rgba(201,168,76,0.14)' : (i === 0 ? 'rgba(201,168,76,0.07)' : 'transparent'), cursor: 'pointer' }}>
                       <td style={{ padding: '6px 4px' }}>
+                        <span style={{ color: 'var(--gold)', marginRight: 4 }}>{abierta ? '▾' : '▸'}</span>
                         {p.fecha}
                         {/* "La que rige" sólo tiene sentido donde la planilla ajusta el %.
                             En el capón no rige nada: es historial puro. */}
@@ -538,14 +621,60 @@ export default function PlanillasRinde({ config, onConfigChange }) {
                       <td style={{ padding: '6px 4px', textAlign: 'right', color: 'var(--green)' }}>{fmtKg(p.kg_neto, { decimales: 3 })}</td>
                       <td style={{ padding: '6px 4px', textAlign: 'right', fontWeight: 700, color: 'var(--gold)' }}>{Number(p.merma_pct).toFixed(2)}%</td>
                       <td style={{ padding: '6px 4px', color: 'var(--muted)' }}>{p.creado_por || '—'}</td>
-                      <td style={{ padding: '6px 4px', textAlign: 'right' }}>
+                      <td style={{ padding: '6px 4px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        {/* stopPropagation: el click de la fila abre/cierra el detalle. */}
+                        <button onClick={e => { e.stopPropagation(); imprimirPlanillaRinde(p, plan.label) }}
+                          title="Imprimir esta planilla"
+                          style={{ background: 'none', border: 'none', color: 'var(--gold)', cursor: 'pointer', fontSize: 13 }}>🖨️</button>
                         {isCEO && (
-                          <button onClick={() => borrar(p)} title="Borrar esta planilla"
+                          <button onClick={e => { e.stopPropagation(); borrar(p) }} title="Borrar esta planilla"
                             style={{ background: 'none', border: 'none', color: '#ff8b8b', cursor: 'pointer', fontSize: 13 }}>🗑️</button>
                         )}
                       </td>
                     </tr>
-                  ))}
+                    {abierta && (
+                      <tr style={{ background: 'var(--surface2)' }}>
+                        <td colSpan={6} style={{ padding: '10px 12px 14px' }}>
+                          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+                            Planilla del {p.fecha}{p.destino_label ? ` — ${p.destino_label}` : ''} · {fmtKg(p.kg_bruto, { decimales: 3 })} brutos
+                          </div>
+                          {cortes.length === 0
+                            ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>Esta planilla se guardó sin renglones.</div>
+                            : (
+                              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                                <thead>
+                                  <tr style={{ color: 'var(--muted)', fontSize: 10, textTransform: 'uppercase' }}>
+                                    <th style={{ textAlign: 'left', padding: '4px 4px' }}>Corte</th>
+                                    <th style={{ textAlign: 'right', padding: '4px 4px' }}>Kg</th>
+                                    <th style={{ textAlign: 'right', padding: '4px 4px' }}>% del bruto</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {cortes.map((c, j) => (
+                                    <tr key={j} style={{ borderTop: '1px solid var(--border)' }}>
+                                      <td style={{ padding: '4px 4px', color: c.es_merma ? '#ff8b8b' : 'var(--text)' }}>
+                                        {c.nombre}
+                                        {c.es_merma && <span style={{ marginLeft: 6, fontSize: 9, border: '1px solid #ff8b8b', borderRadius: 3, padding: '0 3px' }}>merma</span>}
+                                      </td>
+                                      <td style={{ padding: '4px 4px', textAlign: 'right' }}>{fmtKg(c.kg, { decimales: 3 })}</td>
+                                      <td style={{ padding: '4px 4px', textAlign: 'right', color: 'var(--muted)' }}>
+                                        {brutoN > 0 ? ((Number(c.kg) || 0) / brutoN * 100).toFixed(2) + '%' : '—'}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            )}
+                          {p.notas && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}><b>Notas:</b> {p.notas}</div>}
+                          <button onClick={() => imprimirPlanillaRinde(p, plan.label)} className="btn btn-ghost btn-sm" style={{ marginTop: 10 }}>
+                            🖨️ Imprimir esta planilla
+                          </button>
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
