@@ -18,6 +18,7 @@ import FlujoDeposito from './FlujoDeposito'
 import AjusteStock from './AjusteStock'
 import CajasTab from './CajasTab'
 import PolloCajonesTab from './PolloCajonesTab'
+import AnimalitosTab from './AnimalitosTab'
 import StockPiezasTab from './StockPiezasTab'
 import MermasHistorial from './MermasHistorial'
 import { esMermaDeCerdo } from '../../lib/mermas'
@@ -483,6 +484,10 @@ export function Deposito() {
           { id: 'cerdo', label: '🐷 Cerdo y Embutidos' },
           { id: 'cajas', label: '📦 Cajas Bovinas' },
           { id: 'pollo_cajones', label: '🍗 Pollo Cajones' },
+          // Lechón, cabrito y cordero: se compran y se venden ENTEROS y cada
+          // animal pesa distinto, así que van uno por uno con su código
+          // (LE-001) y no como un bucket de kilos (mig 137).
+          { id: 'animalitos', label: '🐑 Animalitos' },
           ...(isSucursal ? [] : [{ id: 'flujo', label: '📥 Flujo Depósito' }]),
           { id: 'remitos', label: '🧾 Remitos' },
           ...(puedeAjustar ? [{ id: 'ajuste', label: '🔧 Ajuste Stock' }] : []),
@@ -508,6 +513,7 @@ export function Deposito() {
 {tab === 'recetas' && <Recetas key={tab} puedeEditar={!isSucursal} />}
 {tab === 'cajas' && <CajasTab key={tab} />}
 {tab === 'pollo_cajones' && <PolloCajonesTab key={tab} />}
+{tab === 'animalitos' && <AnimalitosTab key={tab} />}
 {tab === 'remitos' && <RemitosTab remitoActual={remitoActual} />}
       {tab === 'flujo' && !isSucursal && <FlujoDeposito />}
       {tab === 'ajuste' && puedeAjustar && <AjusteStock />}
@@ -3773,6 +3779,11 @@ async function ejecutarAnulacion(entrada) {
     pieza_costeletal: '🥩 Costeletal con Lomo',
     pieza_paleta: '🥩 Paleta/Cogote',
     pieza_parrillero: '🥩 Parrillero',
+    // Animalitos enteros (mig 137): se cargan desde su propia solapa, pero
+    // la compra queda en el mismo historial de ingresos que el resto.
+    animal_lechon: '🐖 Lechón',
+    animal_cabrito: '🐐 Cabrito',
+    animal_cordero: '🐑 Cordero',
   }
 
   const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, width: '100%', boxSizing: 'border-box' }

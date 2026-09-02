@@ -54,6 +54,11 @@ const LABELS = {
   cerdo_cabeza: '💀 Cerdo — Cabeza',
   cerdo_huesos: '🦴 Cerdo — Huesos',
   pollo: '🍗 Pollo',
+  // Animalitos enteros (mig 137). El ajuste acá corrige el bucket en kilos;
+  // quién está en la cámara se ve y se corrige en Depósito → Animalitos.
+  animal_lechon: '🐖 Lechón (entero)',
+  animal_cabrito: '🐐 Cabrito (entero)',
+  animal_cordero: '🐑 Cordero (entero)',
   embutido: '🌭 Embutidos (legacy — bucket eliminado, no usar)',
   emb_chorizo_parrillero: '🌭 Chorizo Parrillero (elab.)',
   emb_chorizo_saborizado: '🌭 Chorizo Saborizado (elab.)',

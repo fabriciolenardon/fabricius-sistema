@@ -37,6 +37,7 @@ export default function Dashboard() {
   const [chequesPropios, setChequesPropios] = useState([])  // emitidos pendientes de imputar
   const [precios, setPrecios] = useState([])
   const [mediasMR, setMediasMR] = useState({ count: 0, kg: 0 })  // medias reses individuales disponibles
+  const [animalitos, setAnimalitos] = useState({ count: 0, kg: 0 })  // lechones, cabritos y corderos en cámara
   const [loading, setLoading] = useState(true)
   // Estado del modal de detalle de stock (entradas y salidas por categoria)
   const [detalleAbierto, setDetalleAbierto] = useState(null)
@@ -59,7 +60,7 @@ export default function Dashboard() {
   }, [profile?.sucursal_id])
 
   async function fetchData() {
-    const [c, cl, st, r, g, ch, chProp, pr, md] = await Promise.all([
+    const [c, cl, st, r, g, ch, chProp, pr, md, an] = await Promise.all([
       supabase.from('cierres_semanales').select('*').order('semana_inicio', { ascending: false }).limit(8),
       supabase.from('clientes').select('*').order('saldo', { ascending: false }),
       supabase.from('stock_actual').select('*'),
@@ -73,6 +74,9 @@ export default function Dashboard() {
       // Medias reses individuales disponibles (fuente de verdad para el conteo,
       // igual que el historial). Evita estimar las medias por kg/105.
       supabase.from('medias_stock').select('kg').eq('estado', 'disponible'),
+      // Animalitos enteros en cámara (mig 137). Como las medias, el conteo
+      // real sale de la tabla individual, no de estimar kg/promedio.
+      supabase.from('animalitos_stock').select('kg').eq('estado', 'disponible'),
     ])
     setCierres(c.data || [])
     setClientes(cl.data || [])
@@ -92,6 +96,8 @@ export default function Dashboard() {
     setPrecios(pr.data || [])
     const medias = md?.data || []
     setMediasMR({ count: medias.length, kg: medias.reduce((acc, m) => acc + (Number(m.kg) || 0), 0) })
+    const anim = an?.data || []
+    setAnimalitos({ count: anim.length, kg: anim.reduce((acc, a) => acc + (Number(a.kg) || 0), 0) })
     setLoading(false)
   }
 
@@ -322,6 +328,9 @@ export default function Dashboard() {
     (stock.hamb_pollo || 0) +
     (stock.hamb_cerdo || 0)
   )
+  // Animalitos (mig 137): lechón + cabrito + cordero. El conteo manda desde
+  // animalitos_stock; los buckets son el espejo en kilos.
+  const stockAnimalitos = Math.max(0, (stock.animal_lechon || 0) + (stock.animal_cabrito || 0) + (stock.animal_cordero || 0))
   const stockRebozado = Math.max(0, stock.rebozado || 0)
   const stockAlmacen = Math.max(0, stock.almacen || 0)
   const stockBebidas = Math.max(0, stock.bebidas || 0)
@@ -553,6 +562,7 @@ export default function Dashboard() {
               : { label: '🐷 Cerdo Capones', valor: fmtKg(stockCerdo), color: 'var(--amber)', aprox: Math.round(stockCerdo / 107) + ' capones', bajo: stockCerdo < 50, stockKg: stockCerdo, tiposEntradas: ['cerdo'], tiposSalidas: ['cerdo'], despostesCerdo: true },
             { label: '🐷 Cerdo Piezas', valor: fmtKg(stockCerdoPiezas), color: 'var(--amber)', aprox: 'al peso', bajo: stockCerdoPiezas < 20, stockKg: stockCerdoPiezas, tiposEntradas: ['cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza','cerdo_huesos'], tiposSalidas: ['cerdo_pieza','cerdo_corte','cerdo_pierna','cerdo_carre','cerdo_pechito','cerdo_matambre','cerdo_paleta','cerdo_parrillero','cerdo_bondiola','cerdo_tocino','cerdo_cuero','cerdo_cabeza','cerdo_huesos'], elaboraciones: true },
             { label: '🍗 Pollo', valor: fmtKg(stockPollo), color: 'var(--blue)', aprox: Math.round(stockPollo / 20) + ' cajones', bajo: stockPollo < 50, stockKg: stockPollo, tiposEntradas: ['pollo'], tiposSalidas: ['pollo'], elaboraciones: true },
+            { label: '🐑 Animalitos', valor: fmtKg(animalitos.count > 0 ? animalitos.kg : stockAnimalitos), color: 'var(--amber)', aprox: animalitos.count + (animalitos.count === 1 ? ' entero' : ' enteros'), bajo: false, stockKg: animalitos.count > 0 ? animalitos.kg : stockAnimalitos, tiposEntradas: ['animal_lechon', 'animal_cabrito', 'animal_cordero'], tiposSalidas: ['animal_lechon', 'animal_cabrito', 'animal_cordero'] },
             { label: '🫀 Brosas', valor: fmtKg(stockBrosas), color: 'var(--amber)', aprox: 'al peso', bajo: stockBrosas < 20, stockKg: stockBrosas, tiposEntradas: ['bovino_brosa', 'brosa_chinchulin', 'brosa_corazon', 'brosa_entrana', 'brosa_higado', 'brosa_lengua', 'brosa_molleja', 'brosa_mondongo', 'brosa_rabo', 'brosa_rinon', 'brosa_sesos', 'brosa_tripa_gorda'], tiposSalidas: ['bovino_brosa', 'brosa_chinchulin', 'brosa_corazon', 'brosa_entrana', 'brosa_higado', 'brosa_lengua', 'brosa_molleja', 'brosa_mondongo', 'brosa_rabo', 'brosa_rinon', 'brosa_sesos', 'brosa_tripa_gorda'] },
             { label: '🌭 Embutidos', valor: fmtKg(stockEmbutido), color: 'var(--purple)', aprox: 'al peso', bajo: stockEmbutido < 20, stockKg: stockEmbutido, tiposEntradas: ['embutido', 'emb_chorizo_parrillero', 'emb_chorizo_saborizado', 'emb_chorizo_colorado', 'emb_salchicha_parrillera', 'emb_morcilla', 'emb_salame_comun', 'emb_salame_holanda', 'emb_salame_rockeford'], tiposSalidas: ['embutido', 'emb_chorizo_parrillero', 'emb_chorizo_saborizado', 'emb_chorizo_colorado', 'emb_salchicha_parrillera', 'emb_morcilla', 'emb_salame_comun', 'emb_salame_holanda', 'emb_salame_rockeford'] },
             { label: '🍔 Hamburguesas', valor: fmtKg(stockHamburguesas), color: 'var(--purple)', aprox: 'al peso', bajo: false, stockKg: stockHamburguesas, tiposEntradas: ['hamb_carne', 'hamb_pollo', 'hamb_cerdo'], tiposSalidas: ['hamb_carne', 'hamb_pollo', 'hamb_cerdo'] },
