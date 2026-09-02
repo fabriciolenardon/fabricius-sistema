@@ -29,6 +29,7 @@ const fFecha = f => {
 export default function AnimalitosTab() {
   const [animales, setAnimales] = useState([])
   const [proveedores, setProveedores] = useState([])
+  const [clientes, setClientes] = useState([])
   const [loading, setLoading] = useState(true)
   const [alert, setAlert] = useState(null)
 
@@ -49,13 +50,16 @@ export default function AnimalitosTab() {
 
   async function cargar() {
     setLoading(true)
-    const [{ data: anim }, { data: prov }] = await Promise.all([
+    const [{ data: anim }, { data: prov }, { data: cli }] = await Promise.all([
       supabase.from('animalitos_stock').select('*')
         .order('fecha_ingreso', { ascending: false }).order('id', { ascending: false }),
       supabase.from('proveedores').select('nombre').eq('activo', true).order('nombre'),
+      // Para poder cargar la venta a la cuenta corriente de un mayorista.
+      supabase.from('clientes').select('id, nombre, tipo, saldo').order('nombre'),
     ])
     setAnimales(anim || [])
     setProveedores((prov || []).map(p => p.nombre))
+    setClientes(cli || [])
     setLoading(false)
   }
 
@@ -155,11 +159,15 @@ export default function AnimalitosTab() {
     if (!v) return
     const kgFinal = parseNumero(v.kgFinal)
     const r = await venderAnimalito(v.animal, {
-      fecha: v.fecha, cliente: v.cliente, kgFinal,
+      fecha: v.fecha, cliente: v.cliente, clienteId: v.clienteId || null,
+      aCtaCte: v.aCtaCte, kgFinal,
       precioVentaKg: parseNumero(v.precioKg), notas: v.notas,
     })
     if (r.error) { showAlert({ type: 'error', msg: r.error }); return }
-    showAlert({ type: 'success', msg: `✅ ${v.animal.codigo} vendido — ${fmtKg(r.kg)} fuera del stock` })
+    if (r.avisoCtaCte) showAlert({ type: 'error', msg: `⚠️ ${r.avisoCtaCte}` })
+    else showAlert({ type: 'success', msg: r.ctaCte
+      ? `✅ ${v.animal.codigo} vendido — ${fmtKg(r.kg)} fuera del stock y ${fmtPrecio(r.ctaCte)} a la cuenta de ${v.cliente}`
+      : `✅ ${v.animal.codigo} vendido — ${fmtKg(r.kg)} fuera del stock` })
     setVendiendo(null)
     cargar()
   }
@@ -168,7 +176,9 @@ export default function AnimalitosTab() {
     const r = await revertirVentaAnimalito(animal)
     setConfirmando(null)
     if (r.error) { showAlert({ type: 'error', msg: r.error }); return }
-    showAlert({ type: 'success', msg: `↩️ ${animal.codigo} volvió al stock` })
+    showAlert({ type: 'success', msg: r.ctaCteRevertida
+      ? `↩️ ${animal.codigo} volvió al stock y se dio de baja el cargo en la cuenta corriente`
+      : `↩️ ${animal.codigo} volvió al stock` })
     cargar()
   }
 
@@ -308,7 +318,8 @@ export default function AnimalitosTab() {
                     <td style={{ ...td, textAlign: 'right' }}>
                       <button className="btn btn-ghost btn-sm"
                         onClick={() => setVendiendo({
-                          animal: a, fecha: fechaHoyARG(), cliente: '',
+                          animal: a, fecha: fechaHoyARG(), cliente: '', clienteId: '',
+                          aCtaCte: false,
                           kgFinal: String(Number(a.kg) || ''), precioKg: '', notas: '',
                         })}>Vender</button>
                     </td>
@@ -347,7 +358,24 @@ export default function AnimalitosTab() {
           </div>
           <div className="form-row">
             <div className="form-group"><label>¿A quién?</label>
-              <input placeholder="Nombre del cliente (opcional)" value={vendiendo.cliente}
+              {/* Si es un cliente de la lista se elige acá: es lo que habilita
+                  cargarlo a su cuenta corriente. Para una venta de mostrador
+                  alcanza con escribir el nombre al lado. */}
+              <select value={vendiendo.clienteId}
+                onChange={e => {
+                  const c = clientes.find(x => x.id === e.target.value)
+                  setVendiendo(v => ({
+                    ...v, clienteId: e.target.value,
+                    cliente: c?.nombre || v.cliente,
+                    aCtaCte: e.target.value ? v.aCtaCte : false,
+                  }))
+                }}>
+                <option value="">— Venta de mostrador —</option>
+                {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+              </select>
+            </div>
+            <div className="form-group"><label>Nombre</label>
+              <input placeholder="Opcional" value={vendiendo.cliente}
                 onChange={e => setVendiendo(v => ({ ...v, cliente: e.target.value }))} />
             </div>
             <div className="form-group"><label>Nota</label>
@@ -355,6 +383,16 @@ export default function AnimalitosTab() {
                 onChange={e => setVendiendo(v => ({ ...v, notas: e.target.value }))} />
             </div>
           </div>
+
+          {/* Cuenta corriente: sólo con un cliente de la lista elegido. Carga
+              el DEBE en su ledger; el saldo lo recalcula el sistema. */}
+          {vendiendo.clienteId && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 10, cursor: 'pointer' }}>
+              <input type="checkbox" checked={vendiendo.aCtaCte} style={{ width: 'auto' }}
+                onChange={e => setVendiendo(v => ({ ...v, aCtaCte: e.target.checked }))} />
+              Cargar esta venta a la cuenta corriente de {clientes.find(c => c.id === vendiendo.clienteId)?.nombre}
+            </label>
+          )}
           {parseNumero(vendiendo.kgFinal) > 0 && parseNumero(vendiendo.precioKg) > 0 && (
             <div style={{ padding: '10px 12px', background: 'var(--surface2)', borderRadius: 8, fontSize: 12, marginBottom: 10 }}>
               {fmtKg(parseNumero(vendiendo.kgFinal))} × {fmtPrecio(parseNumero(vendiendo.precioKg))} ={' '}
@@ -364,8 +402,9 @@ export default function AnimalitosTab() {
             </div>
           )}
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
-            Esto saca el animal del stock y queda registrado acá. El cobro se carga
-            aparte, por Caja o por remito, como cualquier otra venta.
+            {vendiendo.aCtaCte
+              ? `Esto saca el animal del stock y le carga la deuda a ${clientes.find(c => c.id === vendiendo.clienteId)?.nombre || 'el cliente'} en su cuenta corriente. Si después revertís la salida, el movimiento se borra y el saldo se recalcula solo.`
+              : 'Esto saca el animal del stock y queda registrado acá. El cobro se carga aparte, por Caja, como cualquier otra venta de mostrador.'}
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-primary" onClick={confirmarVenta}
@@ -403,6 +442,9 @@ export default function AnimalitosTab() {
                       <td style={td}>{fFecha(a.fecha_salida)}</td>
                       <td style={{ ...td, textAlign: 'right' }}>
                         {a.total_venta ? fmtPrecio(Number(a.total_venta)) : '—'}
+                        {a.movimiento_ctacte_id && (
+                          <div style={{ fontSize: 10, color: 'var(--gold)' }}>cta cte</div>
+                        )}
                       </td>
                       <td style={{ ...td, textAlign: 'right' }}>
                         {confirmando?.accion === 'revertir' && confirmando.id === a.id ? (

@@ -35,8 +35,13 @@ CREATE TABLE IF NOT EXISTS animalitos_stock (
   entrada_id       uuid REFERENCES entradas_deposito(id) ON DELETE SET NULL,
   estado           text NOT NULL DEFAULT 'disponible'
                      CHECK (estado IN ('disponible', 'vendido', 'anulado')),
-  -- Salida: se vende entero, pesado y cobrado por kilo.
+  -- Salida: se vende entero, pesado y cobrado por kilo. Si se le vende a un
+  -- cliente de cuenta corriente, el movimiento del ledger queda enganchado acá
+  -- para poder revertirlo si la venta se deshace (nunca se toca a mano el
+  -- saldo: se recalcula con recomputarSaldoCliente).
+  cliente_id       uuid REFERENCES clientes(id) ON DELETE SET NULL,
   cliente_nombre   text,
+  movimiento_ctacte_id uuid,
   precio_venta_kg  numeric,
   total_venta      numeric,
   fecha_salida     date,

@@ -12,6 +12,7 @@
 import { supabase } from './supabase'
 import { redondearStock } from './stockHelpers'
 import { registrarCompraDesdeEntrada, revertirCompraDeEntrada } from './ctaProveedores'
+import { recomputarSaldoCliente } from './ctaCorriente'
 
 export const ANIMALITOS = [
   { id: 'lechon',  label: 'Lechón',  emoji: '🐖', bucket: 'animal_lechon',  prefijo: 'LE', kgMin: 3,  kgMax: 25 },
@@ -90,19 +91,31 @@ export async function ingresarAnimalitos({ tipo, proveedor, fecha, pesos, precio
 
 // ── SALIDA ──────────────────────────────────────────────────
 // Se vende entero: se pesa (el peso de acá es el definitivo) y se cobra por
-// kilo. NO toca la cuenta corriente del cliente — eso se carga por Caja o por
-// remito como cualquier otra venta.
-export async function venderAnimalito(animal, { fecha, cliente, precioVentaKg, kgFinal, notas }) {
+// kilo.
+//
+// El cobro puede ir de dos formas:
+//   · contado — el módulo sólo saca el animal del stock y el cobro se carga
+//     por Caja, como cualquier otra venta del mostrador.
+//   · cuenta corriente — además carga el DEBE en el ledger del cliente. Nunca
+//     se suma a mano al saldo: se inserta el movimiento y se recalcula con
+//     recomputarSaldoCliente, que es la única fuente de verdad.
+export async function venderAnimalito(animal, { fecha, cliente, clienteId, aCtaCte, precioVentaKg, kgFinal, notas }) {
   if (!animal?.id) return { error: 'Animal inválido' }
   if (animal.estado !== 'disponible') return { error: `${animal.codigo} ya no está disponible` }
   const kg = kgFinal > 0 ? kgFinal : Number(animal.kg) || 0
+  const total = precioVentaKg ? kg * precioVentaKg : 0
+  // A cuenta corriente hace falta el cliente y el precio: sin uno de los dos
+  // no hay deuda que cargar y se registraría un movimiento en cero.
+  if (aCtaCte && !clienteId) return { error: 'Elegí el cliente de cuenta corriente al que le cargás la venta' }
+  if (aCtaCte && !(total > 0)) return { error: 'Para cargar a cuenta corriente hace falta el precio por kilo' }
   // El .eq('estado','disponible') + .select() es el candado: si alguien lo
   // vendió desde otra pantalla, no vuelve ninguna fila y NO se descuenta el
   // stock dos veces (el update sin select no da error con 0 filas).
   const { data: tocadas, error } = await supabase.from('animalitos_stock').update({
     estado: 'vendido', fecha_salida: fecha, cliente_nombre: cliente || null,
+    cliente_id: clienteId || null,
     precio_venta_kg: precioVentaKg || null,
-    total_venta: precioVentaKg ? kg * precioVentaKg : null,
+    total_venta: total || null,
     kg, notas_salida: notas || null, updated_at: new Date().toISOString(),
   }).eq('id', animal.id).eq('estado', 'disponible').select('id')
   if (error) return { error: error.message }
@@ -110,8 +123,29 @@ export async function venderAnimalito(animal, { fecha, cliente, precioVentaKg, k
   // Descuenta el peso REAL de salida del bucket.
   const { error: errStock } = await moverStock(bucketDe(animal.tipo), -kg)
   if (errStock) return { error: `Se marcó vendido pero el stock no bajó: ${errStock.message}` }
+
+  if (aCtaCte) {
+    const { data: mov, error: errMov } = await supabase.from('movimientos_ctacte').insert({
+      cliente_id: clienteId, fecha, tipo: 'compra',
+      descripcion: `${animal.codigo} — ${labelSinEmoji(animal.tipo)} entero ${fmtKgPlano(kg)} kg`,
+      debe: total, haber: 0, saldo: 0,
+    }).select('id').single()
+    if (errMov) {
+      return { ok: true, kg, avisoCtaCte: `El animal salió del stock, pero la cuenta corriente NO se cargó: ${errMov.message}. Cargá los ${total} a mano o revertí la salida.` }
+    }
+    await supabase.from('animalitos_stock')
+      .update({ movimiento_ctacte_id: mov.id }).eq('id', animal.id)
+    // El saldo lo fija el recálculo del ledger, nunca una suma a mano.
+    await recomputarSaldoCliente(clienteId)
+    return { ok: true, kg, ctaCte: total }
+  }
   return { ok: true, kg }
 }
+
+// El ledger se imprime en el extracto del cliente: sin emoji y con la coma
+// decimal argentina.
+const labelSinEmoji = tipo => animalito(tipo)?.label || tipo
+const fmtKgPlano = kg => (Number(kg) || 0).toFixed(2).replace('.', ',')
 
 // Deshacer una venta (se cargó mal o volvió): vuelve a disponible con su peso
 // y devuelve los kilos al bucket.
@@ -127,6 +161,15 @@ export async function revertirVentaAnimalito(animal) {
   if (!tocadas?.length) return { error: `${animal.codigo} ya no figura como vendido — refrescá la lista` }
   const { error: errStock } = await moverStock(bucketDe(animal.tipo), kg)
   if (errStock) return { error: `Volvió a disponible pero el stock no subió: ${errStock.message}` }
+  // Si la venta había ido a cuenta corriente, se borra ESE movimiento (por su
+  // id, nunca por cliente) y se recalcula el saldo desde el ledger.
+  if (animal.movimiento_ctacte_id) {
+    await supabase.from('movimientos_ctacte').delete().eq('id', animal.movimiento_ctacte_id)
+    await supabase.from('animalitos_stock')
+      .update({ movimiento_ctacte_id: null, cliente_id: null }).eq('id', animal.id)
+    if (animal.cliente_id) await recomputarSaldoCliente(animal.cliente_id)
+    return { ok: true, ctaCteRevertida: true }
+  }
   return { ok: true }
 }
 
