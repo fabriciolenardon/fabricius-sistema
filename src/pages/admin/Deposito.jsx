@@ -341,7 +341,27 @@ function nombreCanonicoMediaRes(txtLibre) {
 }
 // Los 2 únicos tipos de media res (coinciden con la lista de precios). El
 // ingreso al depósito los elige de acá — no más texto libre.
-const MEDIA_RES_TIPOS = ['MEDIA RES NT-VQ PREMIUM', 'MEDIA RES OVERO CHICO']
+// ── LA CLASIFICACIÓN ES EL NOMBRE DE LA MEDIA (01/09/2026) ───
+// Al ingresar había DOS selectores que decían lo mismo: "Tipo de media res"
+// (NT-VQ Premium / Overo Chico) y "Clasificación" (NOVILLITO A-1,
+// VAQUILLONA B-2…). Fabricio: manda la clasificación, que además define la
+// merma al despostar. Se sacó el tipo comercial y la media pasa a llamarse
+// por su clasificación — así el remito dice qué animal se llevó el cliente.
+function nombreMediaRes(label) {
+  const l = String(label || '').trim().toUpperCase()
+  return l ? `MEDIA RES ${l}` : 'MEDIA RES'
+}
+// Lo que se imprime en el remito: el nombre (clasificación) + el código
+// MR-XXX con el que se sigue esa media. Las medias viejas no tienen
+// clasificación: conservan el nombre comercial con el que se cargaron, así
+// los remitos históricos no cambian de texto.
+function descripcionMediaParaRemito(media) {
+  const base = String(media?.descripcion || '').trim()
+  const nombre = /^MEDIA RES/i.test(base)
+    ? base
+    : nombreCanonicoMediaRes(base || media?.proveedor_nombre)
+  return media?.codigo_media ? `${nombre} (${media.codigo_media})` : nombre
+}
 
 // Qué ítems cambiaron entre la versión vieja de un remito y la editada.
 // Compara como MULTISET (no por `includes`): un remito puede llevar dos medias
@@ -3068,6 +3088,8 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     supabase.from('config_sistema').select('valor').eq('clave', 'merma_conversion').maybeSingle()
       .then(({ data }) => setTiposMerma(data?.valor?.media_res || []))
   }, [])
+  // 'novillito_a_1' → 'NOVILLITO A-1'. Es el nombre de la media res.
+  const labelClasificacion = id => tiposMerma.find(t => t.id === id)?.label || ''
   // precioKg arranca VACÍO, no con un precio puesto. Antes venía con 9800
   // (precio viejo de media res): en los tipos donde ese campo se ignoraba se
   // guardaba ese 9800 en entradas_deposito y ensuciaba el costo, y desde que
@@ -3427,16 +3449,18 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
       showAlert({ type: 'error', msg: `⛔ Los números no cuadran: ${fmtKg(cuadre.kgTotal)} × ${fmtPrecio(cuadre.precio)} = ${fmtPrecio(cuadre.esperado)}, pero el importe dice ${fmtPrecio(cuadre.importe)}. Corregí el importe o el precio antes de registrar.` })
       return
     }
-    // Media res: exigir el tipo (Premium NT-VQ u Overo Chico) — no texto libre.
-    if (form.tipo === 'bovino_mr' && !MEDIA_RES_TIPOS.includes(form.descripcion)) {
-      showAlert({ type: 'error', msg: 'Elegí el tipo de media res (Premium NT-VQ u Overo Chico).' })
+    // Media res: la CLASIFICACIÓN es obligatoria. Es su nombre (lo que sale
+    // impreso en el remito) y además define la merma al despostar, así que
+    // sin ella la media entra sin identidad y el desposte queda preguntando.
+    if (form.tipo === 'bovino_mr' && !form.mermaTipoId) {
+      showAlert({ type: 'error', msg: 'Elegí la clasificación de la media res (Novillito A-1, Vaquillona B-2, etc.). Es el nombre con el que sale en el remito.' })
       return
     }
     // Si se seleccionó un producto pollo/rebozado/embutido, usar su nombre en la descripción.
     const productoSelec = productosFiltradosTipo.find(p => p.id === form.polloProductoId)
     // Para media res, el nombre siempre es canónico (uno de los 2 de la lista).
     const descripcionBase = form.tipo === 'bovino_mr'
-      ? nombreCanonicoMediaRes(form.descripcion)
+      ? nombreMediaRes(labelClasificacion(form.mermaTipoId))
       : (prodEmbutido?.nombre?.trim() || prodBrosa?.nombre?.trim() || prodHamburguesa?.nombre?.trim() || productoSelec?.nombre || form.descripcion || form.tipo)
     const descripcionFinal = esEnUnidades && cantidad > 1
       ? `${descripcionBase} ×${cantidad}`
@@ -3803,12 +3827,14 @@ async function ejecutarAnulacion(entrada) {
               {proveedores.map(p => <option key={p}>{p}</option>)}
             </select>
           </div>
-          <div className="form-group"><label>{form.tipo === 'bovino_mr' ? 'Tipo de media res' : 'Descripción'}</label>
+          {/* La media res ya NO se nombra a mano ni con el tipo comercial:
+              su nombre SALE de la clasificación de acá abajo. Este campo
+              queda de sólo lectura para ver cómo va a quedar antes de
+              registrar (y es lo que después se imprime en el remito). */}
+          <div className="form-group"><label>{form.tipo === 'bovino_mr' ? 'Nombre (sale de la clasificación)' : 'Descripción'}</label>
             {form.tipo === 'bovino_mr' ? (
-              <select value={MEDIA_RES_TIPOS.includes(form.descripcion) ? form.descripcion : ''} onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))}>
-                <option value="">— Elegí el tipo —</option>
-                {MEDIA_RES_TIPOS.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
+              <input readOnly value={form.mermaTipoId ? nombreMediaRes(labelClasificacion(form.mermaTipoId)) : '— Elegí la clasificación acá abajo —'}
+                style={{ opacity: 0.75, cursor: 'not-allowed' }} />
             ) : (
               <input placeholder="Ej: Novillito Premium..." value={form.descripcion} onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))} />
             )}
@@ -3826,7 +3852,7 @@ async function ejecutarAnulacion(entrada) {
         {form.tipo === 'bovino_mr' && (
           <div className="form-row">
             <div className="form-group" style={{ flex: 1 }}>
-              <label>Clasificación (define la merma al despostar)</label>
+              <label>Clasificación (es el nombre de la media y define la merma)</label>
               <select value={form.mermaTipoId || ''}
                 onChange={e => setForm(f => ({ ...f, mermaTipoId: e.target.value }))}
                 style={{ borderColor: form.mermaTipoId ? 'var(--border)' : 'var(--gold)' }}>
@@ -3839,8 +3865,8 @@ async function ejecutarAnulacion(entrada) {
                 {tiposMerma.length === 0
                   ? <>⚠️ No hay clasificaciones cargadas. Cargalas en Mermas → Mermas por producto.</>
                   : form.mermaTipoId
-                    ? <>Cuando se desposte a Bovino Cortes se le va a descontar esta merma sola, sin volver a preguntar.</>
-                    : <>Si la dejás vacía, al despostar hay que elegir el tipo a mano.</>}
+                    ? <>Con este nombre sale en el remito (junto al código MR-XXX) y con esta merma se desposta a Bovino Cortes, sin volver a preguntar.</>
+                    : <>Obligatoria: es el nombre con el que la media entra al stock y sale impresa en el remito.</>}
               </div>
             </div>
           </div>
@@ -4691,9 +4717,9 @@ async function agregarItem() {
     const prod = todosPrecios.find(p => p.id === form.productoId)
     let descripcion
     if (form.categoria === 'bovino_mr') {
-      // Siempre uno de los 2 nombres de la lista de precios (no el texto libre
-      // de la media) para que el dato quede consistente en remitos y reportes.
-      descripcion = nombreCanonicoMediaRes(mediaSeleccionada?.descripcion || mediaSeleccionada?.proveedor_nombre)
+      // El remito dice QUÉ media se llevó: su clasificación (que es su
+      // nombre desde el 01/09/2026) y el código MR-XXX con el que se la sigue.
+      descripcion = descripcionMediaParaRemito(mediaSeleccionada)
     } else if (form.categoria === 'pieza_entera') {
       // El remito lo ve el CLIENTE: no incluir el proveedor de origen de la
       // media res. La trazabilidad interna queda por pieza_id (se guarda aparte).
@@ -5185,7 +5211,7 @@ for (const item of items) {
         title={e.reservada_para_txt ? `Reservada para ${e.reservada_para_txt}` : ''}
         style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderRadius: 8, marginBottom: 6, cursor: e.reservada_para_txt ? 'not-allowed' : 'pointer', opacity: e.reservada_para_txt ? 0.55 : 1, border: `2px solid ${e.reservada_para_txt ? '#ffd17a' : (mediaSeleccionada?.id === e.id ? 'var(--gold)' : (dupIds.has(e.id) ? '#ffb86b' : 'var(--border)'))}`, background: mediaSeleccionada?.id === e.id ? 'rgba(201,168,76,0.1)' : 'var(--surface2)' }}>
         <div>
-          <div style={{ fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>🐄 {e.descripcion || 'Media Res'}{dupIds.has(e.id) && <TagDuplicada />}</div>
+          <div style={{ fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>🐄 {e.codigo_media ? `${e.codigo_media} · ` : ''}{e.descripcion || 'Media Res'}{dupIds.has(e.id) && <TagDuplicada />}</div>
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.fecha} · {e.proveedor_nombre}</div>
           {e.reservada_para_txt && <div style={{ fontSize: 11, color: '#ffd17a', fontWeight: 700 }}>🔒 RESERVADA — {e.reservada_para_txt}</div>}
         </div>
