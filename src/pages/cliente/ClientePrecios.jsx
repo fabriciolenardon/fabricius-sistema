@@ -18,6 +18,7 @@ const CATEGORIAS = {
   cerdo_corte: '🐷 Cerdo — Cortes',
   cerdo_pieza: '🐷 Cerdo — Piezas',
   embutido: '🌭 Embutidos',
+  animalitos: '🐑 Animalitos',
   pollo: '🍗 Pollo x Kilo',
   pollo_cajon: '🍗 Pollo x Cajón',
   rebozado: '🧊 Rebozados',

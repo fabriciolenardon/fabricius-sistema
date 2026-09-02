@@ -30,6 +30,7 @@ export const CATEGORIAS_SISTEMA = [
   { clave: 'cerdo_corte',    label: '🐷 Cerdo Cortes' },
   { clave: 'cerdo_pieza',    label: '🐷 Cerdo Piezas' },
   { clave: 'embutido',       label: '🌭 Embutidos' },
+  { clave: 'animalitos',     label: '🐑 Animalitos' },
   { clave: 'pollo',          label: '🍗 Pollo X Kilo' },
   { clave: 'pollo_cajon',    label: '🍗 Pollo Cajón' },
   { clave: 'rebozado',       label: '🧊 Rebozado X Kilo' },
