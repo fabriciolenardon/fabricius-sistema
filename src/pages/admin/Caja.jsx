@@ -20,6 +20,7 @@ import { fmtPrecio, fmtKg, parseNumero } from '../../lib/formatos'
 import { overlayDeSucursal, conPreciosDeSucursal } from '../../lib/preciosSucursal'
 import { SUCURSAL_CENTRAL } from '../../lib/permisos'
 import { productosQueVende } from '../../lib/categoriasPrecios'
+import { useEsMovil } from '../../lib/useEsMovil'
 import { useAuth } from '../../context/AuthContext'
 import HistorialCaja from './HistorialCaja'
 import PlanillaBlangino from './PlanillaBlangino'
@@ -62,6 +63,12 @@ export default function Caja() {
   // Si la ve, a la noche cuenta contra ese número en vez de contar la caja
   // de verdad. Ver el comentario largo en ArqueoCaja.jsx.
   const { sucursalId, isSucursal: esSucursal, isCajero: esCajero } = useAuth()
+  // La caja se usa tambien desde el celular (la franquicia opera asi). Con
+  // estilos inline no hay media queries, asi que el layout de dos columnas
+  // se apila con este flag: en un telefono la columna del carrito quedaba de
+  // unos 40 px y no se leia ni el codigo de barras (captura de Monte Cristo,
+  // 02/09/2026).
+  const esMovil = useEsMovil()
   const [precios, setPrecios] = useState([])
   const [ofertas, setOfertas] = useState([])
   const [listaPrecio, setListaPrecio] = useState('minorista') // 'minorista' | 'mayorista'
@@ -1067,13 +1074,13 @@ export default function Caja() {
           <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 1, marginBottom: 8 }}>
             🍱 COMBOS — un toque agrega todos sus productos al precio del combo
           </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ display: esMovil ? 'grid' : 'flex', gridTemplateColumns: esMovil ? '1fr 1fr' : undefined, gap: 8, flexWrap: 'wrap' }}>
             {combos.map(combo => (
               <button key={combo.id} onClick={() => agregarCombo(combo)}
                 style={{
                   padding: '10px 14px', borderRadius: 10, border: '1px solid var(--gold)',
                   background: 'linear-gradient(135deg,#1a1408,#0a0a08)', color: 'var(--text)',
-                  cursor: 'pointer', textAlign: 'left', minWidth: 130,
+                  cursor: 'pointer', textAlign: 'left', minWidth: esMovil ? 0 : 130,
                 }}
                 onMouseOver={e => { e.currentTarget.style.background = 'rgba(201,168,76,0.12)' }}
                 onMouseOut={e => { e.currentTarget.style.background = 'linear-gradient(135deg,#1a1408,#0a0a08)' }}>
@@ -1087,17 +1094,17 @@ export default function Caja() {
 
       {msg && (
         <div style={{
-          position: 'fixed', top: 70, right: 20, zIndex: 1000,
+          position: 'fixed', top: 70, right: 20, left: esMovil ? 20 : undefined, zIndex: 1000,
           background: msg.type === 'error' ? '#3a1a1a' : '#1a2a1a',
           border: `1px solid ${msg.type === 'error' ? '#ff6b6b' : '#7dff7d'}`,
           borderRadius: 8, padding: '14px 22px',
           color: msg.type === 'error' ? '#ff6b6b' : '#7dff7d',
           fontWeight: 700, fontSize: 14, boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
-          maxWidth: 380,
+          maxWidth: esMovil ? 'none' : 380,
         }}>{msg.texto}</div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 16, marginTop: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : '1.4fr 1fr', gap: 16, marginTop: 12 }}>
         {/* ============ COLUMNA IZQUIERDA: CARRITO ============ */}
         <div className="card" style={{ padding: 16 }}>
           {/* Input de código de barras */}
@@ -1149,7 +1156,7 @@ export default function Caja() {
                 <div style={{ fontSize: 11, marginTop: 6 }}>Escaneá un producto para empezar</div>
               </div>
             ) : (
-              <div style={{ maxHeight: 'calc(100vh - 420px)', overflowY: 'auto' }}>
+              <div style={{ maxHeight: esMovil ? 'none' : 'calc(100vh - 420px)', overflowY: esMovil ? 'visible' : 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead style={{ position: 'sticky', top: 0, background: 'var(--bg)' }}>
                     <tr>
