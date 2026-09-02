@@ -557,6 +557,9 @@ function DesposteTab({ onSaved, soloElaborar = false }) {
   const [tipoAnimalPieza, setTipoAnimalPieza] = useState('novillo')
   const [precioCostoPieza, setPrecioCostoPieza] = useState('')
   const [mermaPieza, setMermaPieza] = useState(25)
+  // Lo que se esta tipeando, para no comerse la coma (mismo caso que editarKg).
+  // null = nadie lo toco todavia -> se muestra el numero.
+  const [mermaPiezaTxt, setMermaPiezaTxt] = useState(null)
   // Merma por producto (editable). Fuente: config_sistema.merma_conversion.
   // Se usa para autocompletar el % al elegir una pieza / tipo de media res,
   // así no se convierte apurado sin ver la merma. Arranca con los defaults.
@@ -796,12 +799,22 @@ setElaboraciones(elaboracionesData || [])
     if (seleccionada) setPiezas(calcularPiezas(seleccionada, m))
   }
 
+  // EL SEPARADOR DECIMAL SE PERDIA AL TIPEARLO (02/09/2026, MacBook del local).
+  // El input es controlado y guardaba SOLO el numero parseado: al escribir
+  // "31," parseNumero devolvia 31, el estado pasaba a 31 y React repintaba el
+  // campo como "31" — la coma (o el punto) desaparecia apenas se apretaba, y
+  // no habia forma de cargar 31,5 kg. Nada que ver con la Mac: pasaba en
+  // cualquier teclado, solo que ahi lo notaron.
+  // Ahora se guardan LAS DOS COSAS: el texto crudo para mostrar mientras se
+  // escribe, y el numero parseado para las cuentas. Sin `kg_texto` (recien
+  // calculada o al cambiar de modelo) el input cae al numero, que es lo que
+  // corresponde mostrar. Ver [[coma-decimal-input-number]].
   function editarKg(idx, valor) {
-    setPiezas(prev => prev.map((p, i) => i === idx ? { ...p, kg_editado: parseNumero(valor) } : p))
+    setPiezas(prev => prev.map((p, i) => i === idx ? { ...p, kg_texto: valor, kg_editado: parseNumero(valor) } : p))
   }
 
   function editarPrecio(idx, valor) {
-    setPiezas(prev => prev.map((p, i) => i === idx ? { ...p, precio_venta: parseNumero(valor) } : p))
+    setPiezas(prev => prev.map((p, i) => i === idx ? { ...p, precio_texto: valor, precio_venta: parseNumero(valor) } : p))
   }
 
   async function confirmarDespostePiezas() {
@@ -1567,9 +1580,9 @@ async function confirmarDesposteCerdo() {
                       <td style={{ fontWeight: 600 }}>{p.nombre}</td>
                       <td style={{ color: 'var(--muted)', fontSize: 11 }}>{(MODELOS_DESPOSTE[modelo].piezas[i]?.pct * 100).toFixed(1)}%</td>
                       <td style={{ color: 'var(--muted)', fontSize: 11 }}>{fmtKg(p.kg, { decimales: 2 })}</td>
-                      <td><input type="text" inputMode="decimal" value={p.kg_editado} onChange={e => editarKg(i, e.target.value)} style={{ ...inp, width: 75, borderColor: Math.abs(p.kg_editado - p.kg) > 2 ? 'var(--amber)' : 'var(--border)' }} /></td>
+                      <td><input type="text" inputMode="decimal" value={p.kg_texto ?? p.kg_editado} onChange={e => editarKg(i, e.target.value)} style={{ ...inp, width: 75, borderColor: Math.abs(p.kg_editado - p.kg) > 2 ? 'var(--amber)' : 'var(--border)' }} /></td>
                       <td style={{ color: 'var(--gold)', fontSize: 11, fontWeight: 600 }}>{pctReal.toFixed(1)}%</td>
-                      <td><input type="text" inputMode="decimal" value={p.precio_venta} onChange={e => editarPrecio(i, e.target.value)} style={{ ...inp, width: 100, borderColor: 'var(--gold)' }} /></td>
+                      <td><input type="text" inputMode="decimal" value={p.precio_texto ?? p.precio_venta} onChange={e => editarPrecio(i, e.target.value)} style={{ ...inp, width: 100, borderColor: 'var(--gold)' }} /></td>
                       <td style={{ color: 'var(--green)', fontWeight: 600, fontSize: 12 }}>{fmtPrecio((p.kg_editado || 0) * (p.precio_venta || 0))}</td>
                     </tr>
                   )})}
@@ -1727,6 +1740,9 @@ async function confirmarDesposteCerdo() {
                       // Enlazar la merma de la pieza: autocompleta el % desde la
                       // config para no convertir apurado sin verlo (editable abajo).
                       setMermaPieza(mermaConfig.piezas?.[pz.tipo_pieza] ?? MERMA_PIEZA_GENERICA)
+                      // Borrar lo tipeado antes: si no, el texto viejo seguiría
+                      // tapando el % que se acaba de autocompletar.
+                      setMermaPiezaTxt(null)
                     }}
                     style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderRadius: 8, cursor: 'pointer', background: sel ? 'rgba(201,168,76,0.12)' : 'var(--surface2)', border: sel ? '2px solid var(--gold)' : '1px solid var(--border)', marginBottom: 6 }}>
                     <div>
@@ -1761,7 +1777,8 @@ async function confirmarDesposteCerdo() {
       <div style={{ marginBottom: 14 }}>
         <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>% de merma de la pieza</label>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <input type="text" inputMode="decimal" value={mermaPieza} onChange={e => setMermaPieza(parseNumero(e.target.value) || 0)}
+          <input type="text" inputMode="decimal" value={mermaPiezaTxt ?? mermaPieza}
+            onChange={e => { setMermaPiezaTxt(e.target.value); setMermaPieza(parseNumero(e.target.value) || 0) }}
             style={{ ...inp, width: 80, borderColor: 'var(--gold)', textAlign: 'center', fontSize: 18, fontWeight: 700 }} />
           {(() => {
             const linked = nombrePieza ? mermaConfig.piezas?.[nombrePieza] : undefined
@@ -1771,7 +1788,7 @@ async function confirmarDesposteCerdo() {
               <span style={{ fontSize: 12, color: 'var(--muted)' }}>
                 🔗 Enlazada a <strong style={{ color: 'var(--text)' }}>{nombrePieza}</strong>: {linked}%
                 {cambiado
-                  ? <> · <button type="button" onClick={() => setMermaPieza(linked)} style={{ background: 'none', border: 'none', color: 'var(--blue)', cursor: 'pointer', padding: 0, fontSize: 12, textDecoration: 'underline' }}>volver a {linked}%</button></>
+                  ? <> · <button type="button" onClick={() => { setMermaPieza(linked); setMermaPiezaTxt(null) }} style={{ background: 'none', border: 'none', color: 'var(--blue)', cursor: 'pointer', padding: 0, fontSize: 12, textDecoration: 'underline' }}>volver a {linked}%</button></>
                   : ' (editable)'}
               </span>
             )
