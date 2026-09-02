@@ -25,6 +25,9 @@ export const BUCKETS_ANIMALITOS = ANIMALITOS.map(a => a.bucket)
 export const animalito = id => ANIMALITOS.find(a => a.id === id) || null
 export const bucketDe = id => animalito(id)?.bucket || null
 export const labelDe = id => { const a = animalito(id); return a ? `${a.emoji} ${a.label}` : id }
+// El ingreso vive en la solapa Ingresos como el resto de la mercadería, y ahí
+// el tipo elegido es el BUCKET (animal_lechon); esto lo lleva al id interno.
+export const animalitoDeBucket = bucket => ANIMALITOS.find(a => a.bucket === bucket) || null
 
 // Suma (o resta, con kg negativo) al bucket agregado. Mismo helper que usa
 // Depósito: la fila la crea la migración, pero si falta se inserta.

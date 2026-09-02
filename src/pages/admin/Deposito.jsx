@@ -19,6 +19,7 @@ import AjusteStock from './AjusteStock'
 import CajasTab from './CajasTab'
 import PolloCajonesTab from './PolloCajonesTab'
 import AnimalitosTab from './AnimalitosTab'
+import { BUCKETS_ANIMALITOS, animalitoDeBucket, ingresarAnimalitos } from '../../lib/animalitos'
 import StockPiezasTab from './StockPiezasTab'
 import MermasHistorial from './MermasHistorial'
 import { esMermaDeCerdo } from '../../lib/mermas'
@@ -169,6 +170,9 @@ const TIPOS_COMPRA_POR_KG = new Set([
   'cerdo_pierna', 'cerdo_carre', 'cerdo_pechito', 'cerdo_matambre',
   'cerdo_paleta', 'cerdo_parrillero', 'cerdo_bondiola', 'cerdo_tocino',
   'cerdo_cuero', 'cerdo_cabeza', 'cerdo_huesos',
+  // Animalitos enteros (mig 137): se compran por kilo, igual que la media res
+  // y el capón, pero cada uno entra con su peso propio.
+  'animal_lechon', 'animal_cabrito', 'animal_cordero',
 ])
 
 // ── Detector de posibles cargas duplicadas ──────────────────
@@ -513,7 +517,7 @@ export function Deposito() {
 {tab === 'recetas' && <Recetas key={tab} puedeEditar={!isSucursal} />}
 {tab === 'cajas' && <CajasTab key={tab} />}
 {tab === 'pollo_cajones' && <PolloCajonesTab key={tab} />}
-{tab === 'animalitos' && <AnimalitosTab key={tab} />}
+{tab === 'animalitos' && <AnimalitosTab key={tab} onIrAIngresos={() => setTab('entradas')} />}
 {tab === 'remitos' && <RemitosTab remitoActual={remitoActual} />}
       {tab === 'flujo' && !isSucursal && <FlujoDeposito />}
       {tab === 'ajuste' && puedeAjustar && <AjusteStock />}
@@ -3172,11 +3176,15 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
 
   // Tipos que tienen tracking individual (cada unidad es una fila en cajas_stock)
   const esCajaIndividual = form.tipo === 'caja_cb' || form.tipo === 'caja_pt'
+  // Los animalitos (lechón, cabrito, cordero) también entran uno por uno con
+  // su peso: se venden enteros y cada uno pesa distinto (mig 137).
+  const esAnimalito = BUCKETS_ANIMALITOS.includes(form.tipo)
+  const pesosPorUnidad = esCajaIndividual || esAnimalito
 
   // Sincronizar el array de pesos con la cantidad cada vez que cambia
   // form.cantidad o form.tipo (entrando/saliendo del modo cajas).
   useEffect(() => {
-    if (!esCajaIndividual) { setCajasPesos([]); return }
+    if (!pesosPorUnidad) { setCajasPesos([]); return }
     const n = Math.max(1, parseInt(form.cantidad) || 1)
     setCajasPesos(prev => {
       const arr = [...prev]
@@ -3184,7 +3192,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
       if (arr.length > n) arr.length = n
       return arr
     })
-  }, [form.cantidad, form.tipo, esCajaIndividual])
+  }, [form.cantidad, form.tipo, pesosPorUnidad])
 
   useEffect(() => { cargarHistorial() }, [])
 
@@ -3218,7 +3226,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
   // Tipos que vienen en unidades discretas (cajones, cajas).
   // Para estos, el campo "Kg" representa los KG POR UNIDAD y se multiplica
   // por la cantidad de unidades.
-  const TIPOS_EN_UNIDADES = ['pollo', 'caja_cb', 'caja_pt', 'almacen', 'bebidas']
+  const TIPOS_EN_UNIDADES = ['pollo', 'caja_cb', 'caja_pt', 'almacen', 'bebidas', ...BUCKETS_ANIMALITOS]
 
   // Tipos que son por unidad PURA (no se pesan, no se manejan en kg).
   // Para estos no se muestra Kg ni Precio/kg — solo Cantidad e Importe total.
@@ -3237,7 +3245,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
   // sistema, no se puede desalinear) ni a las cajas individuales (no tienen
   // precio/kg: se deriva del peso de cada caja).
   const cuadre = useMemo(() => {
-    if (TIPOS_COMPRA_POR_KG.has(form.tipo) || esCajaIndividual) return null
+    if (TIPOS_COMPRA_POR_KG.has(form.tipo) || pesosPorUnidad) return null
     const cantidad = TIPOS_EN_UNIDADES.includes(form.tipo) ? Math.max(1, parseInt(form.cantidad) || 1) : 1
     const kgUnidad = esSoloUnidades ? 1 : parseNumero(form.kg)
     const kgTotal = kgUnidad * cantidad
@@ -3258,7 +3266,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
       precioImplicito: Math.round((importe / kgTotal) * 100) / 100,
       kgImplicito: Math.round((importe / precio) * 1000) / 1000,
     }
-  }, [form.tipo, form.cantidad, form.kg, form.precioKg, form.importe, esCajaIndividual, esSoloUnidades])
+  }, [form.tipo, form.cantidad, form.kg, form.precioKg, form.importe, pesosPorUnidad, esSoloUnidades])
 
   async function guardar() {
     if (guardandoRef.current) return       // bloqueo síncrono contra doble click
@@ -3273,7 +3281,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     // alto debe ser bloqueado o confirmado.
     // parseNumero acepta "12,5" o "12.5" (coma o punto) sin distinción.
     const kgInput = parseNumero(form.kg)
-    if (!esCajaIndividual && !esSoloUnid && kgInput < 0) {
+    if (!pesosPorUnidad && !esSoloUnid && kgInput < 0) {
       showAlert({ type: 'error', msg: 'Los kilos no pueden ser negativos' }); return
     }
     // ⛔ TECHO GENERAL — la coma comida. Los chequeos de abajo son por tipo y
@@ -3296,7 +3304,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
       if (!confirm(`⚠️ ${kgInput} kg por cajón de pollo es muy poco (rango real: 10-30 kg). ¿Es correcto?`)) return
     }
     // Otros tipos en unidades (no pollo, no cajas individuales, no almacén)
-    if (TIPOS_EN_UNIDADES.includes(form.tipo) && form.tipo !== 'pollo' && !esSoloUnid && !esCajaIndividual && kgInput > 200) {
+    if (TIPOS_EN_UNIDADES.includes(form.tipo) && form.tipo !== 'pollo' && !esSoloUnid && !pesosPorUnidad && kgInput > 200) {
       if (!confirm(`⚠️ ${kgInput} kg por unidad es bastante alto. ¿Es correcto?`)) return
     }
     // Media res: rango real Fabricius 70-140 kg
@@ -3312,6 +3320,38 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     }
     if (form.tipo === 'cerdo' && kgInput > 0 && kgInput < 60) {
       if (!confirm(`⚠️ ${kgInput} kg es muy bajo para un capón (rango real: 70-150 kg). ¿Es correcto?`)) return
+    }
+
+    // ── ANIMALITOS: lechón, cabrito y cordero ──────────────────
+    // Entran acá como toda la mercadería, pero cada animal se guarda con su
+    // peso propio y su código (LE-001) en animalitos_stock. El resto de la
+    // compra (entrada + compras_proveedores + cta cte del proveedor) lo hace
+    // ingresarAnimalitos, que es el mismo camino de siempre.
+    if (esAnimalito) {
+      const a = animalitoDeBucket(form.tipo)
+      const pesos = cajasPesos.map(p => parseNumero(p)).filter(p => p > 0)
+      const cantEsperada = Math.max(1, parseInt(form.cantidad) || 1)
+      if (pesos.length !== cantEsperada) {
+        showAlert({ type: 'error', msg: `Cargá el peso de ${cantEsperada === 1 ? 'el animal' : `los ${cantEsperada} animales`} (faltan ${cantEsperada - pesos.length})` })
+        return
+      }
+      const raro = pesos.find(k => k > a.kgMax * 3)
+      if (raro) {
+        showAlert({ type: 'error', msg: `⛔ ${fmtKg(raro)} para un ${a.label.toLowerCase()} es casi seguro un error de tipeo (lo normal son ${a.kgMin}-${a.kgMax} kg). Si lo que querés poner es ${fmtKg(raro / 1000, { decimales: 3 })}, escribilo con la coma.` })
+        return
+      }
+      const r = await ingresarAnimalitos({
+        tipo: a.id, proveedor: form.proveedor, fecha: form.fecha,
+        pesos, precioKg: parseNumero(form.precioKg),
+      })
+      if (r.error) { showAlert({ type: 'error', msg: r.error }); return }
+      showAlert({ type: 'success', msg: `✅ ${r.cantidad} ${a.label.toLowerCase()}${r.cantidad > 1 ? 's' : ''} — ${fmtKg(r.kgTotal)} por ${fmtPrecio(r.importe)}. Se ven en la solapa 🐑 Animalitos.` })
+      setForm(f => ({ ...f, descripcion: '', kg: '', importe: '', precioKg: '', cantidad: '1' }))
+      setCajasPesos([])
+      onSaved()
+      cargarHistorial()
+      setTimeout(() => showAlert(null), 4000)
+      return
     }
 
     // ── CAJAS CB / PT: tracking individual ────────────────────────────
@@ -3820,6 +3860,9 @@ async function ejecutarAnulacion(entrada) {
 <option value="cerdo_cabeza">🐷 Cerdo — Cabeza (pieza comprada)</option>
 <option value="cerdo_huesos">🐷 Cerdo — Huesos (pieza comprada)</option>
 <option value="pollo">🍗 Pollo por Cajones</option>
+<option value="animal_lechon">🐖 Lechón (entero)</option>
+<option value="animal_cabrito">🐐 Cabrito (entero)</option>
+<option value="animal_cordero">🐑 Cordero (entero)</option>
 <option value="embutido">🌭 Embutido</option>
 <option value="hamburguesa">🍔 Hamburguesa (comprada hecha)</option>
 <option value="rebozado">🧊 Rebozado por Cajones</option>
@@ -3991,19 +4034,20 @@ async function ejecutarAnulacion(entrada) {
 
         {TIPOS_EN_UNIDADES.includes(form.tipo) && (
           <div className="form-row">
-            <div className="form-group"><label>{esSoloUnidades ? '📦 Cantidad de unidades' : esCajaIndividual ? '📦 Cantidad de cajas' : 'Cantidad de unidades'}</label>
-              <input type="number" min="1" step="1" placeholder={esSoloUnidades ? 'Ej: 24' : esCajaIndividual ? 'Ej: 5' : 'Ej: 14'} value={form.cantidad} onChange={e => setForm(f => ({ ...f, cantidad: e.target.value }))} style={{ borderColor: 'var(--gold)' }} />
+            <div className="form-group"><label>{esSoloUnidades ? '📦 Cantidad de unidades' : esCajaIndividual ? '📦 Cantidad de cajas' : esAnimalito ? `¿Cuántos ${animalitoDeBucket(form.tipo)?.label.toLowerCase()}s?` : 'Cantidad de unidades'}</label>
+              <input type="number" min="1" step="1" placeholder={esSoloUnidades ? 'Ej: 24' : esCajaIndividual ? 'Ej: 5' : 'Ej: 3'} value={form.cantidad} onChange={e => setForm(f => ({ ...f, cantidad: e.target.value }))} style={{ borderColor: 'var(--gold)' }} />
             </div>
             <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end' }}>
               <div style={{ fontSize: 12, color: 'var(--muted)', paddingBottom: 8 }}>
                 {(() => {
                   const cant = Math.max(1, parseInt(form.cantidad) || 1)
                   if (esSoloUnidades) return `📦 Se sumarán ${cant} unidades al stock`
-                  if (esCajaIndividual) {
+                  if (pesosPorUnidad) {
                     const total = cajasPesos.reduce((s, p) => s + parseNumero(p), 0)
+                    const que = esAnimalito ? `${animalitoDeBucket(form.tipo)?.label.toLowerCase()}s` : 'cajas'
                     return total > 0
-                      ? `📦 Total: ${cant} cajas = ${total.toFixed(1)} kg`
-                      : '📦 Cargá el peso de cada caja abajo'
+                      ? `📦 Total: ${cant} ${que} = ${total.toFixed(1)} kg`
+                      : `📦 Cargá el peso de cada ${esAnimalito ? 'animal' : 'caja'} abajo`
                   }
                   const kgU = parseNumero(form.kg)
                   return kgU > 0 ? `📦 Total: ${cant} × ${kgU} kg = ${(cant * kgU).toFixed(1)} kg al stock` : '📦 Ingresá kg por unidad para ver el total'
@@ -4039,15 +4083,17 @@ async function ejecutarAnulacion(entrada) {
             </div>
           </div>
         )}
-        {esCajaIndividual && cajasPesos.length > 0 && (
+        {pesosPorUnidad && cajasPesos.length > 0 && (
           <div style={{ background: '#1a2a3a', border: '1px solid #2d3a5a', borderRadius: 10, padding: '12px 14px', marginBottom: 12 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: '#7db5ff', marginBottom: 10 }}>
-              ⚖️ Peso individual de cada caja {form.tipo === 'caja_cb' ? 'CB' : 'PT'}
+              ⚖️ {esAnimalito
+                ? `Peso de cada ${animalitoDeBucket(form.tipo)?.label.toLowerCase()}`
+                : `Peso individual de cada caja ${form.tipo === 'caja_cb' ? 'CB' : 'PT'}`}
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 8 }}>
               {cajasPesos.map((p, idx) => (
                 <div key={idx}>
-                  <label style={{ fontSize: 10, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>Caja #{idx + 1} (kg)</label>
+                  <label style={{ fontSize: 10, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>{esAnimalito ? `#${idx + 1}` : `Caja #${idx + 1}`} (kg)</label>
                   <input
                     type="text" inputMode="decimal" placeholder="0.0"
                     value={p}
@@ -4058,12 +4104,14 @@ async function ejecutarAnulacion(entrada) {
               ))}
             </div>
             <div style={{ marginTop: 10, fontSize: 11, color: 'var(--muted)' }}>
-              💡 Cada caja se carga individualmente. Al vender vas a elegir cuál caja específica del stock.
+              {esAnimalito
+                ? '💡 Cada animal entra con su código propio (LE-001, CA-002…). Al venderlo elegís cuál sale y se lo vuelve a pesar. Se ven en la solapa 🐑 Animalitos.'
+                : '💡 Cada caja se carga individualmente. Al vender vas a elegir cuál caja específica del stock.'}
             </div>
           </div>
         )}
 
-        {!esSoloUnidades && !esCajaIndividual && (
+        {!esSoloUnidades && !pesosPorUnidad && (
           <div className="form-row">
             <div className="form-group"><label>{TIPOS_EN_UNIDADES.includes(form.tipo) ? 'Kg por unidad' : 'Kg'}</label>
               {/* type="text": el type="text" inputMode="decimal" se come la coma decimal según el

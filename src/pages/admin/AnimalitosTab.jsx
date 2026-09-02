@@ -6,18 +6,20 @@
 // peso, así se puede mirar la cámara desde el sistema cuando el cliente
 // pregunta "¿tenés uno de 10 kg?".
 //
-// Ingreso: elegís el animalito, el proveedor y el precio por kilo, y cargás el
-// peso de cada uno (igual que las Cajas Bovinas). Salida: se pesa de nuevo al
+// El INGRESO no vive acá: los animalitos entran por la solapa 📥 Ingresos como
+// toda la mercadería, eligiendo el animalito en el tipo de producto y cargando
+// el peso de cada uno (igual que las Cajas Bovinas). Esta pantalla es el stock:
+// qué hay en la cámara, la salida y el historial. Salida: se pesa de nuevo al
 // venderlo — ese peso es el definitivo y es el que baja del stock.
 // ============================================================
-import { useEffect, useMemo, useState, useRef } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../lib/supabase'
-import { fechaHoyARG, esFechaFutura } from '../../lib/fechas'
+import { fechaHoyARG } from '../../lib/fechas'
 import { fmtPrecio, fmtKg, parseNumero } from '../../lib/formatos'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 import {
-  ANIMALITOS, animalito, labelDe,
-  ingresarAnimalitos, venderAnimalito, revertirVentaAnimalito, anularIngresoAnimalitos,
+  ANIMALITOS, labelDe,
+  venderAnimalito, revertirVentaAnimalito, anularIngresoAnimalitos,
 } from '../../lib/animalitos'
 
 const fFecha = f => {
@@ -26,18 +28,11 @@ const fFecha = f => {
   return `${d}/${m}/${y}`
 }
 
-export default function AnimalitosTab() {
+export default function AnimalitosTab({ onIrAIngresos }) {
   const [animales, setAnimales] = useState([])
-  const [proveedores, setProveedores] = useState([])
   const [clientes, setClientes] = useState([])
   const [loading, setLoading] = useState(true)
   const [alert, setAlert] = useState(null)
-
-  // Ingreso
-  const [form, setForm] = useState({ tipo: '', proveedor: '', fecha: fechaHoyARG(), cantidad: '1', precioKg: '' })
-  const [pesos, setPesos] = useState([''])
-  const [guardando, setGuardando] = useState(false)
-  const guardandoRef = useRef(false)
 
   // Venta / confirmaciones inline (nunca window.confirm: iOS lo suprime sin
   // avisar y la acción se pierde).
@@ -50,29 +45,16 @@ export default function AnimalitosTab() {
 
   async function cargar() {
     setLoading(true)
-    const [{ data: anim }, { data: prov }, { data: cli }] = await Promise.all([
+    const [{ data: anim }, { data: cli }] = await Promise.all([
       supabase.from('animalitos_stock').select('*')
         .order('fecha_ingreso', { ascending: false }).order('id', { ascending: false }),
-      supabase.from('proveedores').select('nombre').eq('activo', true).order('nombre'),
       // Para poder cargar la venta a la cuenta corriente de un mayorista.
       supabase.from('clientes').select('id, nombre, tipo, saldo').order('nombre'),
     ])
     setAnimales(anim || [])
-    setProveedores((prov || []).map(p => p.nombre))
     setClientes(cli || [])
     setLoading(false)
   }
-
-  // El array de pesos sigue a la cantidad.
-  useEffect(() => {
-    const n = Math.max(1, parseInt(form.cantidad) || 1)
-    setPesos(prev => {
-      const arr = [...prev]
-      while (arr.length < n) arr.push('')
-      if (arr.length > n) arr.length = n
-      return arr
-    })
-  }, [form.cantidad])
 
   const disponibles = useMemo(() => animales.filter(a => a.estado === 'disponible'), [animales])
   const vendidos = useMemo(() => animales.filter(a => a.estado === 'vendido'), [animales])
@@ -113,46 +95,8 @@ export default function AnimalitosTab() {
     }).sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)))
   }, [animales])
 
-  const totalIngreso = useMemo(() => {
-    const kg = pesos.reduce((s, p) => s + parseNumero(p), 0)
-    return { kg, importe: kg * parseNumero(form.precioKg) }
-  }, [pesos, form.precioKg])
-
   const pagVendidos = usePaginacion(vendidos, 10)
   const pagIngresos = usePaginacion(ingresos, 10)
-
-  async function registrar() {
-    if (guardandoRef.current) return          // bloqueo síncrono contra doble click
-    guardandoRef.current = true
-    setGuardando(true)
-    try {
-      if (esFechaFutura(form.fecha)) {
-        showAlert({ type: 'error', msg: `⛔ La fecha no puede ser futura (hoy es ${fFecha(fechaHoyARG())})` }); return
-      }
-      const a = animalito(form.tipo)
-      const kgs = pesos.map(p => parseNumero(p)).filter(k => k > 0)
-      if (a && kgs.length) {
-        // Aviso de peso raro: bloquea sólo lo imposible, el resto lo carga igual.
-        const raro = kgs.find(k => k > a.kgMax * 3)
-        if (raro) {
-          showAlert({ type: 'error', msg: `⛔ ${fmtKg(raro)} para un ${a.label.toLowerCase()} es casi seguro un error de tipeo (lo normal son ${a.kgMin}-${a.kgMax} kg). Si querés poner ${fmtKg(raro / 1000, { decimales: 3 })}, escribilo con la coma.` })
-          return
-        }
-      }
-      const r = await ingresarAnimalitos({
-        tipo: form.tipo, proveedor: form.proveedor, fecha: form.fecha,
-        pesos: kgs, precioKg: parseNumero(form.precioKg),
-      })
-      if (r.error) { showAlert({ type: 'error', msg: r.error }); return }
-      showAlert({ type: 'success', msg: `✅ ${r.cantidad} ${a.label.toLowerCase()}${r.cantidad > 1 ? 's' : ''} — ${fmtKg(r.kgTotal)} por ${fmtPrecio(r.importe)}` })
-      setForm(f => ({ ...f, cantidad: '1', precioKg: '' }))
-      setPesos([''])
-      cargar()
-    } finally {
-      guardandoRef.current = false
-      setGuardando(false)
-    }
-  }
 
   async function confirmarVenta() {
     const v = vendiendo
@@ -193,11 +137,8 @@ export default function AnimalitosTab() {
   const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 14 }
   const th = { textAlign: 'left', padding: '7px 8px', fontSize: 10, textTransform: 'uppercase', color: 'var(--muted)' }
   const td = { padding: '6px 8px', fontSize: 12, borderTop: '1px solid var(--border)' }
-  const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, width: '100%', boxSizing: 'border-box' }
 
   if (loading) return <div className="card" style={{ padding: 30, textAlign: 'center', color: 'var(--muted)' }}>Cargando…</div>
-
-  const tipoElegido = animalito(form.tipo)
 
   return (
     <div>
@@ -219,72 +160,15 @@ export default function AnimalitosTab() {
         </div>
       </div>
 
-      {/* ── INGRESO ──────────────────────────────────────────── */}
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="card-title">Ingresar animalitos al depósito</div>
-        <div className="form-row">
-          <div className="form-group"><label>¿Qué animalito?</label>
-            <select value={form.tipo} onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))}>
-              <option value="">— Seleccioná —</option>
-              {ANIMALITOS.map(a => <option key={a.id} value={a.id}>{a.emoji} {a.label}</option>)}
-            </select>
-          </div>
-          <div className="form-group"><label>Proveedor</label>
-            <select value={form.proveedor} onChange={e => setForm(f => ({ ...f, proveedor: e.target.value }))}>
-              <option value="">— Seleccioná —</option>
-              {proveedores.map(p => <option key={p}>{p}</option>)}
-            </select>
-          </div>
-          <div className="form-group"><label>Fecha</label>
-            <input type="date" value={form.fecha} max={fechaHoyARG()}
-              onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} />
-          </div>
+      {/* El ingreso NO vive acá: los animalitos entran por la solapa
+          📥 Ingresos como toda la mercadería que llega al depósito. */}
+      <div style={{ ...card, marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+          Para cargar lechones, cabritos o corderos andá a <strong style={{ color: 'var(--text)' }}>📥 Ingresos</strong> y
+          elegí el animalito en el tipo de producto, como con el resto de la mercadería.
+          Ahí ponés el proveedor, el precio por kilo y el peso de cada animal.
         </div>
-        <div className="form-row">
-          <div className="form-group"><label>¿Cuántos?</label>
-            <input type="number" min="1" value={form.cantidad}
-              onChange={e => setForm(f => ({ ...f, cantidad: e.target.value }))} />
-          </div>
-          <div className="form-group"><label>Precio por kilo</label>
-            {/* type=text a propósito: con type=number el navegador descarta la
-                coma decimal según su idioma y el precio se multiplica x1000. */}
-            <input type="text" inputMode="decimal" placeholder="Ej: 8500"
-              value={form.precioKg} onChange={e => setForm(f => ({ ...f, precioKg: e.target.value }))} />
-          </div>
-        </div>
-
-        {/* Peso de cada animal, uno por uno */}
-        {form.tipo && (
-          <div style={{ marginTop: 4 }}>
-            <label style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--muted)' }}>
-              Peso de cada {tipoElegido?.label.toLowerCase()} (kg)
-            </label>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 8, marginTop: 6 }}>
-              {pesos.map((p, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 11, color: 'var(--muted)', minWidth: 22 }}>#{i + 1}</span>
-                  <input type="text" inputMode="decimal" placeholder="kg" value={p} style={inp}
-                    onChange={e => setPesos(prev => prev.map((x, j) => j === i ? e.target.value : x))} />
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Cuadre: los kilos × el precio tienen que dar lo que se le paga al
-            proveedor. Se muestra antes de registrar, no después. */}
-        {totalIngreso.kg > 0 && (
-          <div style={{ marginTop: 12, padding: '10px 12px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}>
-            {fmtKg(totalIngreso.kg)} × {fmtPrecio(parseNumero(form.precioKg))} ={' '}
-            <strong style={{ color: 'var(--gold)', fontSize: 14 }}>{fmtPrecio(totalIngreso.importe)}</strong>
-            <span style={{ color: 'var(--muted)' }}> — va a la cuenta corriente de {form.proveedor || 'el proveedor'}</span>
-          </div>
-        )}
-
-        <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={registrar}
-          disabled={guardando || !form.tipo || !form.proveedor || !(totalIngreso.importe > 0)}>
-          {guardando ? 'Registrando…' : 'Registrar ingreso'}
-        </button>
+        <button className="btn btn-ghost btn-sm" onClick={() => onIrAIngresos && onIrAIngresos()}>📥 Ir a Ingresos</button>
       </div>
 
       {/* ── EN CÁMARA AHORA ──────────────────────────────────── */}
