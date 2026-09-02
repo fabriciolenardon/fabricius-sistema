@@ -11,6 +11,7 @@
 import { supabase } from './supabase'
 import { kgPorUnidadDeProducto, redondearStock } from './stockHelpers'
 import { revertirVentaCaja } from './cajasStock'
+import { revertirVentaAnimalitoPorId } from './animalitos'
 import { fmtPrecio } from './formatos'
 
 const fmt$ = n => fmtPrecio(Math.abs(Number(n) || 0))
@@ -83,6 +84,13 @@ export async function anularVenta(venta, { isAdmin = false, yaConfirmado = false
     if (item.caja_id) {
       const { error } = await revertirVentaCaja(item.caja_id)
       if (error) errores.push(`Caja #${item.caja_id}: ${error}`)
+      continue
+    }
+    // Animalito entero — vuelve a la cámara con su peso y su código. La
+    // función ya repone el bucket, así que acá no se toca stock_actual.
+    if (item.animalito_id) {
+      const r = await revertirVentaAnimalitoPorId(item.animalito_id)
+      if (r?.error) errores.push(`Animalito #${item.animalito_id}: ${r.error}`)
       continue
     }
     // Pieza entera — volver a 'disponible' en piezas_stock Y reponer su kg
