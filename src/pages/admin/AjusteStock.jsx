@@ -18,6 +18,7 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import { puedeAjustarStock } from '../../lib/permisos'
 import Paginador, { usePaginacion } from '../../components/Paginador'
+import { bucketDe, BUCKETS_ANIMALITOS } from '../../lib/animalitos'
 import { logAuditoria } from '../../lib/auditoria'
 import { EPSILON_STOCK, stockNormalizado, redondearStock, excedeTopeStock, TOPE_STOCK } from '../../lib/stockHelpers'
 import { imprimirHTML } from '../../lib/imprimir'
@@ -407,9 +408,12 @@ export default function AjusteStock() {
 
   useEffect(() => { cargar() }, [])
 
+  // { animal_lechon: { n, kg }, ... } — lo que hay realmente en la cámara.
+  const [animalitos, setAnimalitos] = useState([])
+
   async function cargar() {
     setLoading(true)
-    const [{ data, error }, { data: hist }] = await Promise.all([
+    const [{ data, error }, { data: hist }, { data: anims }] = await Promise.all([
       supabase.from('stock_actual').select('*').order('tipo'),
       // Cada ajuste de stock quedó logueado en auditoría = un desfasaje histórico.
       supabase.from('auditoria_log')
@@ -417,9 +421,14 @@ export default function AjusteStock() {
         .eq('entidad', 'stock_actual')
         .order('fecha', { ascending: false })
         .limit(500),
+      // Los animalitos (mig 137) son la excepción del conteo: el bucket en kilos
+      // es el espejo, pero la verdad es quiénes están en la cámara. Se traen
+      // para poder mostrar el contraste y ofrecer el conteo real de un click.
+      supabase.from('animalitos_stock').select('tipo, kg').eq('estado', 'disponible'),
     ])
     if (error) console.error(error)
     setStocks(data || [])
+    setAnimalitos(anims || [])
     setHistorial(hist || [])
     setContados({})
     setLoading(false)
@@ -429,6 +438,20 @@ export default function AjusteStock() {
     setMsg({ texto, tipo })
     setTimeout(() => setMsg(null), ms)
   }
+
+  // Conteo real de animalitos por bucket. Los numeric de Supabase llegan como
+  // STRING, así que Number() antes de sumar.
+  const animalitosPorBucket = useMemo(() => {
+    const acc = {}
+    ;(animalitos || []).forEach(a => {
+      const b = bucketDe(a.tipo)
+      if (!b) return
+      const x = (acc[b] = acc[b] || { n: 0, kg: 0 })
+      x.n += 1
+      x.kg += Number(a.kg) || 0
+    })
+    return acc
+  }, [animalitos])
 
   // Lista de filas con la diferencia ya calculada (memo para no recalcular en cada tecla).
   //
@@ -754,6 +777,26 @@ export default function AjusteStock() {
                       <td style={{ padding: '8px 12px', fontWeight: 600 }}>
                         {f.label}
                         <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'monospace' }}>{f.tipo}</div>
+                        {/* Animalitos: acá se ajusta el bucket en kilos, pero lo
+                            que manda es quiénes están en la cámara. Se muestra el
+                            conteo real y, si no coincide, se ofrece igualarlo
+                            (carga el número en el input y sigue el flujo normal,
+                            con su motivo y su auditoría). */}
+                        {BUCKETS_ANIMALITOS.includes(f.tipo) && (() => {
+                          const real = animalitosPorBucket[f.tipo] || { n: 0, kg: 0 }
+                          const difiere = Math.abs(real.kg - f.actual) >= 0.01
+                          return (
+                            <div style={{ fontSize: 10, marginTop: 3, color: difiere ? '#ffb86b' : 'var(--muted)' }}>
+                              {real.n === 0 ? 'Ninguno en cámara' : `${real.n} en cámara · ${fmt(real.kg)} kg`}
+                              {difiere && (
+                                <button onClick={() => setContado(f.tipo, String(real.kg))}
+                                  style={{ marginLeft: 6, background: 'transparent', border: '1px solid #ffb86b', color: '#ffb86b', borderRadius: 5, padding: '1px 6px', cursor: 'pointer', fontSize: 10, fontWeight: 700 }}>
+                                  igualar a los animales
+                                </button>
+                              )}
+                            </div>
+                          )
+                        })()}
                       </td>
                       <td style={{ textAlign: 'right', padding: '8px 12px', fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: colorActual }}>
                         {fmt(f.actual)} <span style={{ fontSize: 11, color: 'var(--muted)' }}>{f.unidad}</span>
