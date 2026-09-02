@@ -51,6 +51,7 @@ const CATEGORIAS = {
   bovino_pieza: '🍖 Piezas',
   bovino_brosa: '🫀 Brosa',
   cerdo: '🐷 Cerdo',
+  animalitos: '🐑 Animalitos',
   pollo: '🍗 Pollo',
   embutido: '🌭 Embutidos',
 }
