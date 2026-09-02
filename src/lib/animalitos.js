@@ -51,7 +51,7 @@ async function moverStock(bucket, kg) {
 // Una compra de animalitos vive, como toda compra, en las TRES tablas:
 // entradas_deposito (stock) + compras_proveedores (dashboard) + la cuenta
 // corriente del proveedor. Además crea una fila por animal.
-export async function ingresarAnimalitos({ tipo, proveedor, fecha, pesos, precioKg }) {
+export async function ingresarAnimalitos({ tipo, proveedor, fecha, pesos, precioKg, destino }) {
   const a = animalito(tipo)
   if (!a) return { error: 'Elegí qué animalito estás ingresando' }
   if (!proveedor) return { error: 'Elegí el proveedor' }
@@ -66,7 +66,7 @@ export async function ingresarAnimalitos({ tipo, proveedor, fecha, pesos, precio
   const { data: entrada, error: errEnt } = await supabase.from('entradas_deposito').insert({
     fecha, tipo: a.bucket, proveedor_nombre: proveedor, descripcion,
     kg: kgTotal, kg_real: kgTotal, merma_pct: 0,
-    precio_kg: precioKg, importe, destino: 'DEPOSITO', cantidad: kgs.length,
+    precio_kg: precioKg, importe, destino: destino || 'DEPOSITO', cantidad: kgs.length,
   }).select().single()
   if (errEnt) return { error: errEnt.message }
 
