@@ -6035,10 +6035,20 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
     setSeleccionado(null)
   }
 
+  // Se guarda el TEXTO CRUDO aparte (kg_texto / precio_texto) sólo para
+  // mostrarlo mientras se escribe: el input es controlado y, guardando sólo el
+  // número, al tipear "2," parseNumero devolvía 2, el estado volvía a 2 y React
+  // repintaba "2" — la coma no llegaba a verse (mismo caso que Caja, PR #459).
+  // El campo numérico sigue siendo NÚMERO siempre: es lo que se persiste en el
+  // remito y lo que compara diffItemsRemito. Los *_texto NO se guardan: los saca
+  // itemsLimpios en guardarEdicion.
+  // (El viejo `parseNumero(valor) || valor` dejaba pasar el string cuando el
+  // parseo daba 0, así que un "0," podía terminar guardado como texto en el
+  // remito. Se llama sólo con 'kg' y 'precio', los dos numéricos.)
   function editarItem(idx, campo, valor) {
     setItemsEdit(prev => {
       const items = [...prev]
-      items[idx] = { ...items[idx], [campo]: parseNumero(valor) || valor }
+      items[idx] = { ...items[idx], [`${campo}_texto`]: valor, [campo]: parseNumero(valor) }
       if (campo === 'kg' || campo === 'precio') {
         items[idx].importe = parseNumero(items[idx].kg) * parseNumero(items[idx].precio)
       }
@@ -6066,12 +6076,15 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
     if (itemsEdit.length === 0) { showAlert('Debe tener al menos un producto', 'error'); return }
     if (!fechaEdit) { showAlert('La fecha de emisión no puede estar vacía', 'error'); return }
     if (esFechaFutura(fechaEdit)) { showAlert(`⛔ La fecha no puede ser futura (hoy es ${fechaHoyARG()})`, 'error'); return }
-    const nuevoTotal = itemsEdit.reduce((s, i) => s + parseNumero(i.importe), 0)
+    // Los *_texto son andamiaje del input (ver editarItem): fuera antes de que
+    // los ítems toquen la base, el diff de stock o el ledger del cliente.
+    const itemsLimpios = itemsEdit.map(({ kg_texto, precio_texto, ...it }) => it)
+    const nuevoTotal = itemsLimpios.reduce((s, i) => s + parseNumero(i.importe), 0)
     const diferencia = nuevoTotal - (editando.total || 0)
     const fechaAnterior = editando.fecha
     const fechaCambio = fechaEdit !== fechaAnterior
 
-    await supabase.from('remitos').update({ items: itemsEdit, total: nuevoTotal, fecha: fechaEdit }).eq('id', editando.id)
+    await supabase.from('remitos').update({ items: itemsLimpios, total: nuevoTotal, fecha: fechaEdit }).eq('id', editando.id)
 
     // ── RECONCILIAR EL DEPÓSITO CON LA EDICIÓN ─────────────────────────────
     // Editar un remito tocaba items/total/fecha y la cuenta corriente, pero
@@ -6083,7 +6096,7 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
     // Ahora se calcula el DELTA (qué ítems se fueron y cuáles entraron) y se
     // aplica el mismo criterio que la anulación: medias/piezas/cajas vuelven a
     // 'disponible' y el stock se devuelve o se descuenta según corresponda.
-    const { quitados, agregados } = diffItemsRemito(editando.items || [], itemsEdit)
+    const { quitados, agregados } = diffItemsRemito(editando.items || [], itemsLimpios)
 
     if (quitados.length > 0) {
       // Medias res → vuelven a 'disponible'. Se libera despostada Y reservada:
@@ -6143,7 +6156,7 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
     if (salsPrevias && salsPrevias.length > 0) {
       const { lista, cobro, notas } = salsPrevias[0]
       await supabase.from('salidas_deposito').delete().eq('remito_id', editando.id)
-      for (const it of itemsEdit) {
+      for (const it of itemsLimpios) {
         await supabase.from('salidas_deposito').insert({
           fecha: fechaEdit, cliente_nombre: editando.cliente_nombre,
           tipo: it.tipo, descripcion: it.descripcion,
@@ -6181,7 +6194,7 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
           // diferencia sobre el valor viejo: las columnas numeric pueden venir como
           // string y concatenar). El saldo lo recalcula recomputarSaldoCliente.
           upd.debe = nuevoTotal
-          upd.descripcion = `Remito N° ${String(editando.numero || '').padStart(5, '0')} — ${itemsEdit.map(i => i.descripcion).join(', ')} ✏️ Editado`
+          upd.descripcion = `Remito N° ${String(editando.numero || '').padStart(5, '0')} — ${itemsLimpios.map(i => i.descripcion).join(', ')} ✏️ Editado`
         }
         if (fechaCambio) upd.fecha = fechaEdit
         await supabase.from('movimientos_ctacte').update(upd).eq('id', movs.id)
@@ -6288,8 +6301,8 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
               {itemsEdit.map((item, i) => (
                 <tr key={i}>
                   <td style={{ fontWeight: 500 }}>{item.descripcion}</td>
-                  <td><input type="text" inputMode="decimal" value={item.kg} onChange={e => editarItem(i, 'kg', e.target.value)} style={{ ...inp, width: 70 }} /></td>
-                  <td><input type="text" inputMode="decimal" value={item.precio} onChange={e => editarItem(i, 'precio', e.target.value)} style={{ ...inp, width: 100 }} /></td>
+                  <td><input type="text" inputMode="decimal" value={item.kg_texto ?? item.kg} onChange={e => editarItem(i, 'kg', e.target.value)} style={{ ...inp, width: 70 }} /></td>
+                  <td><input type="text" inputMode="decimal" value={item.precio_texto ?? item.precio} onChange={e => editarItem(i, 'precio', e.target.value)} style={{ ...inp, width: 100 }} /></td>
                   <td style={{ color: 'var(--gold)', fontWeight: 600 }}>${Math.round(item.importe || 0).toLocaleString('es-AR')}</td>
                   <td><button onClick={() => quitarItemEdit(i)} style={{ background: 'none', border: 'none', color: 'var(--red-light)', cursor: 'pointer', fontSize: 16 }}>🗑️</button></td>
                 </tr>
