@@ -176,6 +176,25 @@ export async function revertirVentaAnimalito(animal) {
   return { ok: true }
 }
 
+// Las dos de arriba trabajan con el animal entero, que es lo que tiene a mano
+// la pantalla de Depósito. La Caja sólo guarda el id en el ítem de la venta,
+// así que estas dos lo buscan primero. Misma lógica, sin duplicarla.
+export async function venderAnimalitoPorId(id, opciones) {
+  const { data: animal, error } = await supabase.from('animalitos_stock')
+    .select('*').eq('id', id).maybeSingle()
+  if (error) return { error: error.message }
+  if (!animal) return { error: `No se encontró el animalito #${id}` }
+  return venderAnimalito(animal, opciones)
+}
+
+export async function revertirVentaAnimalitoPorId(id) {
+  const { data: animal, error } = await supabase.from('animalitos_stock')
+    .select('*').eq('id', id).maybeSingle()
+  if (error) return { error: error.message }
+  if (!animal) return { error: `No se encontró el animalito #${id}` }
+  return revertirVentaAnimalito(animal)
+}
+
 // ── ANULAR UN INGRESO ───────────────────────────────────────
 // Revierte la compra entera: los animales, el bucket y las tres tablas de la
 // compra. Solo si NINGUNO de los animales se vendió todavía.
