@@ -231,9 +231,15 @@ export default function Caja() {
   }
 
   // ---- Auto-focus en input de código ----
+  // OJO CON LA DEPENDENCIA: iba `carrito` (el array entero), así que CUALQUIER
+  // cambio del carrito devolvia el foco al codigo de barras — incluido editar
+  // los kg de un item. Tipeabas "0" en el peso, el carrito cambiaba, el foco
+  // se iba, y la coma terminaba escrita en el campo del codigo (02/09/2026).
+  // Con `carrito.length` el foco vuelve al escaner cuando se AGREGA o SE QUITA
+  // un producto, que es para lo que estaba, y no mientras se corrige un peso.
   useEffect(() => {
     if (!mostrarCierre && !mostrarBuscador) codigoRef.current?.focus()
-  }, [carrito, mostrarCierre, mostrarBuscador])
+  }, [carrito.length, mostrarCierre, mostrarBuscador])
 
   function showMsg(texto, type = 'success', ms = 2500) {
     setMsg({ texto, type })
@@ -548,12 +554,19 @@ export default function Caja() {
     setCarrito(c => c.filter(item => item.combo_inst !== comboInst))
   }
 
+  // Se guardan LAS DOS COSAS: el texto crudo (`kg_texto`) para mostrar mientras
+  // se escribe y el numero parseado (`kg`) para las cuentas. Antes se guardaba
+  // solo el numero, que es el mismo `value` del input: al tipear "0," parseNumero
+  // devolvia 0, el estado volvia a 0 y React repintaba "0" — la coma no llegaba
+  // a verse nunca. Sin `kg_texto` (item recien agregado) el input muestra el
+  // numero, que es lo que corresponde. `kg_texto` NO se persiste: los items de
+  // la venta se arman campo por campo en cerrarVenta.
   function editarKg(id, nuevoKg) {
     setCarrito(c => c.map(item => {
       if (item.id !== id) return item
       // parseNumero acepta "2,5" o "2.5" sin distinción
       const kg = parseNumero(nuevoKg)
-      return { ...item, kg, importe: kg * item.precio }
+      return { ...item, kg_texto: nuevoKg, kg, importe: kg * item.precio }
     }))
   }
 
@@ -1186,9 +1199,12 @@ export default function Caja() {
                         </td>
                         <td style={{ textAlign: 'right', padding: '8px 4px' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'flex-end' }}>
+                            {/* Enter = "listo con el peso": devuelve el foco al lector
+                                para seguir escaneando sin tener que clickear. */}
                             <input
-                              type="text" inputMode="decimal" value={item.kg}
+                              type="text" inputMode="decimal" value={item.kg_texto ?? item.kg}
                               onChange={e => editarKg(item.id, e.target.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); codigoRef.current?.focus() } }}
                               style={{ width: 70, textAlign: 'right', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '4px 6px', fontSize: 13 }}
                             />
                             <span style={{ fontSize: 10, color: 'var(--muted)', minWidth: 18 }}>{item.unidad || 'kg'}</span>
