@@ -3342,7 +3342,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
       }
       const r = await ingresarAnimalitos({
         tipo: a.id, proveedor: form.proveedor, fecha: form.fecha,
-        pesos, precioKg: parseNumero(form.precioKg),
+        pesos, precioKg: parseNumero(form.precioKg), destino: form.destino,
       })
       if (r.error) { showAlert({ type: 'error', msg: r.error }); return }
       showAlert({ type: 'success', msg: `✅ ${r.cantidad} ${a.label.toLowerCase()}${r.cantidad > 1 ? 's' : ''} — ${fmtKg(r.kgTotal)} por ${fmtPrecio(r.importe)}. Se ven en la solapa 🐑 Animalitos.` })
@@ -4111,6 +4111,29 @@ async function ejecutarAnulacion(entrada) {
           </div>
         )}
 
+        {/* Los animalitos se compran POR KILO, pero su bloque de Kg no existe
+            (el peso va animal por animal arriba), así que el precio va acá
+            con la cuenta hecha: es lo que se le suma a la deuda del proveedor. */}
+        {esAnimalito && (
+          <div className="form-row">
+            <div className="form-group"><label>💰 Precio por kilo ($) — al que se lo compramos</label>
+              <input type="text" inputMode="decimal" placeholder="Ej: 8500" value={form.precioKg}
+                onChange={e => setForm(f => ({ ...f, precioKg: e.target.value }))}
+                style={{ borderColor: form.precioKg ? 'var(--border)' : 'var(--gold)' }} />
+            </div>
+            <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end' }}>
+              <div style={{ fontSize: 12, color: 'var(--muted)', paddingBottom: 8 }}>
+                {(() => {
+                  const kgTotal = cajasPesos.reduce((acc, x) => acc + parseNumero(x), 0)
+                  const precio = parseNumero(form.precioKg)
+                  if (!(kgTotal > 0)) return 'Cargá el peso de cada animal para ver el total'
+                  if (!(precio > 0)) return 'Cargá el precio por kilo — sin precio no entra al depósito'
+                  return `💰 ${fmtKg(kgTotal)} × ${fmtPrecio(precio)} = ${fmtPrecio(kgTotal * precio)} a la cuenta de ${form.proveedor || 'el proveedor'}`
+                })()}
+              </div>
+            </div>
+          </div>
+        )}
         {!esSoloUnidades && !pesosPorUnidad && (
           <div className="form-row">
             <div className="form-group"><label>{TIPOS_EN_UNIDADES.includes(form.tipo) ? 'Kg por unidad' : 'Kg'}</label>
