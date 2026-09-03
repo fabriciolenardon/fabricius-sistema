@@ -48,10 +48,13 @@ const PERIODOS = [
   { id: 'pasada',  label: 'Semana pasada' },
   { id: '30',      label: '30 días' },
   { id: '90',      label: '90 días' },
+  { id: 'custom',  label: '📅 Elegir fechas' },
 ]
 
-function rangoDe(id) {
+// `custom` son las fechas que elige a mano; para los demás períodos se ignora.
+function rangoDe(id, custom) {
   const hoy = fechaHoyARG()
+  if (id === 'custom') return { desde: custom?.desde || hoy, hasta: custom?.hasta || hoy }
   if (id === 'semana') return { desde: lunesDeLaSemana(), hasta: hoy }
   if (id === 'pasada') {
     const lun = new Date(lunesDeLaSemana() + 'T12:00:00')
@@ -69,6 +72,9 @@ const n1 = n => (Number(n) || 0).toLocaleString('es-AR', { maximumFractionDigits
 
 export default function MargenReventa({ esMovil = false }) {
   const [periodo, setPeriodo] = useState('30')
+  // Rango a medida. Arranca en los últimos 30 días para que, al abrirlo, ya
+  // tenga algo válido cargado y no haya que tipear las dos fechas de cero.
+  const [custom, setCustom] = useState({ desde: fechaRelativaARG(-29), hasta: fechaHoyARG() })
   const [sucursal, setSucursal] = useState('todas') // 'todas' | clientes.nombre exacto
   const [sucursales, setSucursales] = useState([])
   const [filas, setFilas] = useState([])
@@ -89,7 +95,7 @@ export default function MargenReventa({ esMovil = false }) {
     let vivo = true
     async function cargar() {
       setCargando(true); setError(null)
-      const { desde, hasta } = rangoDe(periodo)
+      const { desde, hasta } = rangoDe(periodo, custom)
       const { data, error: e } = sucursal === 'todas'
         ? await supabase.rpc('margen_reventa_franquicias', { p_desde: desde, p_hasta: hasta })
         : await supabase.rpc('margen_reventa_franquicia_cliente', { p_desde: desde, p_hasta: hasta, p_cliente: sucursal })
@@ -103,7 +109,7 @@ export default function MargenReventa({ esMovil = false }) {
     }
     cargar()
     return () => { vivo = false }
-  }, [periodo, sucursal])
+  }, [periodo, sucursal, custom.desde, custom.hasta])
 
   // Derivados por grupo. Sólo entran al general los grupos con las DOS puntas
   // (venta y compra): un grupo sin costo conocido no puede aportar ganancia.
@@ -135,7 +141,9 @@ export default function MargenReventa({ esMovil = false }) {
   // Fechas exactas del período elegido, visibles en pantalla: Fabricio
   // preguntó "¿30 días desde cuándo?" — son ventanas que TERMINAN HOY
   // (no mes calendario), así que se muestra el rango para que no haya duda.
-  const rango = rangoDe(periodo)
+  const rango = rangoDe(periodo, custom)
+  // Al revés no devuelve nada y parecería que no hubo ventas.
+  const rangoInvertido = periodo === 'custom' && custom.desde > custom.hasta
   const ddmm = f => { const [, m, d] = f.split('-'); return `${d}/${m}` }
 
   return (
@@ -154,6 +162,25 @@ export default function MargenReventa({ esMovil = false }) {
           ))}
         </div>
       </div>
+
+      {periodo === 'custom' && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10,
+                      padding: '10px 12px', background: 'var(--surface2)', borderRadius: 8, border: '1px solid var(--border)' }}>
+          <span style={{ fontSize: 12, color: 'var(--muted)' }}>Del</span>
+          <input type="date" value={custom.desde} max={fechaHoyARG()}
+            onChange={e => setCustom(c => ({ ...c, desde: e.target.value }))}
+            style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '6px 10px', fontSize: 13 }} />
+          <span style={{ fontSize: 12, color: 'var(--muted)' }}>al</span>
+          <input type="date" value={custom.hasta} max={fechaHoyARG()}
+            onChange={e => setCustom(c => ({ ...c, hasta: e.target.value }))}
+            style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '6px 10px', fontSize: 13 }} />
+          {rangoInvertido && (
+            <span style={{ fontSize: 12, color: '#ff8b8b', fontWeight: 700 }}>
+              ⚠️ La fecha de inicio es posterior a la de fin
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Sub-módulo por franquicia: Todas + una chip por sucursal (es_franquicia). */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
@@ -244,14 +271,22 @@ export default function MargenReventa({ esMovil = false }) {
                     Ponderado por plata (ganancia ÷ venta), no promedio de los %.
                   </div>
                 </td>
-                <td style={{ padding: '10px 4px', textAlign: 'right', color: 'var(--muted)', fontSize: 12 }} colSpan={2}>
-                  Venta {$(ventaGral)}
+                {/* Cada total DEBAJO de su columna: el costo bajo "Prom. compra"
+                    y la venta bajo "Prom. venta". Antes el colSpan arrancaba en
+                    "Vendido" y los dos números quedaban corridos una columna a la
+                    izquierda: se leía la venta bajo compra y el costo bajo venta. */}
+                <td />
+                <td style={{ padding: '10px 4px', textAlign: 'right', color: 'var(--muted)', fontSize: 12, whiteSpace: 'nowrap' }}>
+                  <div style={{ fontSize: 10, textTransform: 'uppercase' }}>Costo total</div>
+                  {$(costoGral)}
                 </td>
-                <td style={{ padding: '10px 4px', textAlign: 'right', color: 'var(--muted)', fontSize: 12 }}>
-                  Costo {$(costoGral)}
+                <td style={{ padding: '10px 4px', textAlign: 'right', color: 'var(--muted)', fontSize: 12, whiteSpace: 'nowrap' }}>
+                  <div style={{ fontSize: 10, textTransform: 'uppercase' }}>Venta total</div>
+                  {$(ventaGral)}
                 </td>
                 <td style={{ padding: '10px 4px', textAlign: 'right', fontWeight: 800, color: colorMargen(margenGral), whiteSpace: 'nowrap' }}>
-                  +{$(ganaGral)}
+                  <div style={{ fontSize: 10, textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 400 }}>Ganancia</div>
+                  {ganaGral >= 0 ? '+' : ''}{$(ganaGral)}
                 </td>
                 <td style={{ padding: '10px 4px', textAlign: 'right', fontFamily: "'Bebas Neue',cursive", fontSize: 26, color: colorMargen(margenGral) }}>
                   {margenGral.toFixed(1)}%
