@@ -835,7 +835,10 @@ setElaboraciones(elaboracionesData || [])
       const { data: desposteData, error } = await supabase.from('despostes').insert({
         fecha, entrada_id: seleccionada.id, modelo,
         tipo_desposte: 'piezas', tipo_animal: tipoAnimal,
-        kg_media_res: kgBase, merma_pct: mermaFrio * 100, kg_neto: kgNeto,
+        // La merma de un desposte a piezas es la que sale de la resta entre lo
+        // que entró y lo que se pesó. Antes se guardaba el 2,5% de frío, que
+        // ya no se descuenta: quedaba en 0 y no decía nada.
+        kg_media_res: kgBase, merma_pct: kgBase > 0 ? ((kgBase - kgTotalPiezas) / kgBase) * 100 : 0, kg_neto: kgNeto,
         piezas: piezas.map(p => ({ nombre: p.nombre, kg: p.kg_editado, precio_venta: p.precio_venta, tipo_stock: p.tipo_stock })),
         notas
       }).select().single()
@@ -1557,8 +1560,17 @@ async function confirmarDesposteCerdo() {
               <div className="card-title">🔪 Despostar en piezas: {seleccionada.descripcion || 'Media Res'}</div>
               <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
                 <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg entrada</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{fmtKg(kgBase, { decimales: 2 })}</div></div>
-                <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)' }}>Merma 2.5%</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--red-light)' }}>-{fmtKg(kgBase * 0.025, { decimales: 2 })}</div></div>
-                <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg neto</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--green)' }}>{fmtKg(kgNetoPiezas, { decimales: 2 })}</div></div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>Merma real</div>
+                  {kgTotalPiezas > 0 ? (
+                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--red-light)' }}>
+                      -{fmtKg(mermaDesposteKg, { decimales: 2 })} · {mermaDesposteRealPct.toFixed(1)}%
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 12, color: 'var(--muted)', paddingTop: 6 }}>al cargar las piezas</div>
+                  )}
+                </div>
+                <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg en piezas</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--green)' }}>{fmtKg(kgTotalPiezas, { decimales: 2 })}</div></div>
               </div>
               <div className="form-row" style={{ marginBottom: 14 }}>
                 <div className="form-group"><label>Fecha</label><input type="date" value={fecha} onChange={e => setFecha(e.target.value)} style={inp} /></div>
