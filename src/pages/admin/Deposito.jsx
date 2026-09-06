@@ -24,6 +24,7 @@ import StockPiezasTab from './StockPiezasTab'
 import MermasHistorial from './MermasHistorial'
 import { esMermaDeCerdo } from '../../lib/mermas'
 import PlanillasRinde from '../../components/PlanillasRinde'
+import CostoConMerma from '../../components/CostoConMerma'
 import Recetas from '../../components/Recetas'
 import { cargarCategoriasPrecios, labelsDeCategorias } from '../../lib/categoriasPrecios'
 import { estadoBloqueoCliente } from '../../lib/moraClientes'
@@ -2433,6 +2434,10 @@ async function confirmarDesposteCerdo() {
     <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
       {[
         { id: 'config', label: '⚙️ Mermas por producto' },
+        // A la franquicia le sirve más que ninguna: le compra las piezas a la
+        // central y necesita saber a cuánto le queda el kilo después de la
+        // merma para poner sus precios. Por eso va primero para ella.
+        { id: 'costo', label: '💲 Costo con merma' },
         { id: 'planillas', label: '📋 Planillas de rinde' },
         { id: 'historial', label: '📊 Historial semanal' },
       ].map(t => (
@@ -2481,6 +2486,7 @@ async function confirmarDesposteCerdo() {
 
     {/* Los % configurados son una cosa; esto es lo que pasó de VERDAD con esos
         % en la semana, en kilos y en plata. */}
+    {tabMerma === 'costo' && <CostoConMerma config={mermaConfig} />}
     {tabMerma === 'historial' && <MermasHistorial mermaConfig={mermaConfig} />}
   </div>
 )}
