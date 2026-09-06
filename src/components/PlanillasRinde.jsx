@@ -33,6 +33,7 @@
 // ============================================================
 import { useState, useEffect, useMemo, Fragment } from 'react'
 import { supabase } from '../lib/supabase'
+import { actualizarMermaPropia } from '../lib/mermaTipos'
 import { useAuth } from '../context/AuthContext'
 import { fmtKg, parseNumero } from '../lib/formatos'
 import { fechaHoyARG } from '../lib/fechas'
@@ -350,6 +351,26 @@ export default function PlanillasRinde({ config, onConfigChange }) {
         return
       }
 
+      // Si el destino es un tipo PROPIO de esta boca (mig 138), el % se guarda
+      // en su tabla y no se toca la config de la central. La sucursal ajusta
+      // los suyos; los que le impone la central los usa como vienen.
+      const esPropio = plan.destino === 'media_res' &&
+        (config?.media_res || []).some(m => m.id === destinoId && m.propio)
+      if (esPropio) {
+        const ok = await actualizarMermaPropia(destinoId, pct)
+        mostrar(ok
+          ? `✅ Planilla guardada. ${destinoActual?.label} pasa a ${pct}% de merma.`
+          : '⚠️ La planilla se guardó, pero no se pudo actualizar el % de ese tipo.', ok ? 'ok' : 'error')
+        if (ok) onConfigChange?.({
+          ...config,
+          media_res: (config.media_res || []).map(m => (m.id === destinoId ? { ...m, merma: pct } : m)),
+        })
+        setBruto(''); setNotas('')
+        setFilas(PLANILLAS[tipo].cortes.map(filaNueva))
+        await cargarHistorial()
+        return
+      }
+
       // La ÚLTIMA planilla es la que manda: se pisa el % en Mermas por producto.
       const nuevo = JSON.parse(JSON.stringify(config || {}))
       if (plan.destino === 'media_res') {
@@ -363,7 +384,7 @@ export default function PlanillasRinde({ config, onConfigChange }) {
       // mirar las filas, no el error, o se festeja un guardado que no pasó.
       if (e2) throw e2
       if (!guardado || guardado.length === 0) {
-        mostrar('⚠️ La planilla se guardó, pero el % de Mermas por producto no se pudo actualizar (permisos). Avisale a Fabricio.', 'error')
+        mostrar(`⚠️ La planilla se guardó en tu historial, pero ${destinoActual?.label || 'ese tipo'} lo define la central: su % no se cambia desde acá. Pasale el dato a Fabricio.`, 'error')
       } else {
         mostrar(`✅ Planilla guardada. ${destinoActual?.label} pasa a ${pct}% de merma.`)
         onConfigChange?.(nuevo)

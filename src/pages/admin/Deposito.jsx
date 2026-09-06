@@ -30,6 +30,7 @@ import { estadoBloqueoCliente } from '../../lib/moraClientes'
 import { logAuditoria } from '../../lib/auditoria'
 import { useAuth } from '../../context/AuthContext'
 import { puedeAjustarStock, SUCURSAL_CENTRAL } from '../../lib/permisos'
+import { cargarTiposPropios, combinarTipos, guardarTipoPropio, eliminarTipoPropio } from '../../lib/mermaTipos'
 import { overlayDeSucursal, conPreciosDeSucursal } from '../../lib/preciosSucursal'
 import { hayClaveCaja, verificarClaveCaja } from '../../lib/clavesOperativas'
 import { productosQueVende } from '../../lib/categoriasPrecios'
@@ -654,8 +655,15 @@ const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(n
   }, [mermaConfig])
 
   async function cargarMermaConfig() {
-    const { data } = await supabase.from('config_sistema').select('valor').eq('clave', 'merma_conversion').maybeSingle()
+    // Los tipos de la CENTRAL (config_sistema, uno solo para todo el sistema)
+    // más los PROPIOS de esta boca (merma_tipos_sucursal, mig 138). En la
+    // central la segunda lista viene vacía y todo queda como antes.
+    const [{ data }, propios] = await Promise.all([
+      supabase.from('config_sistema').select('valor').eq('clave', 'merma_conversion').maybeSingle(),
+      cargarTiposPropios(),
+    ])
     if (data?.valor) {
+      const deLaCentral = (data.valor.media_res && data.valor.media_res.length) ? data.valor.media_res : MERMA_MEDIA_RES_DEFAULT
       setMermaConfig({
         // El spread va PRIMERO para no perder las claves que esta pantalla no
         // conoce (hoy `capon`, que lo escriben las planillas de rinde). Antes
@@ -663,7 +671,7 @@ const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(n
         // borraba en silencio todo lo demás.
         ...data.valor,
         piezas: { ...MERMA_PIEZA_DEFAULT, ...(data.valor.piezas || {}) },
-        media_res: (data.valor.media_res && data.valor.media_res.length) ? data.valor.media_res : MERMA_MEDIA_RES_DEFAULT,
+        media_res: combinarTipos(deLaCentral, propios),
         // Si la config es vieja (sin merma_frio), vale el 2,5% de siempre.
         merma_frio: Number.isFinite(Number(data.valor.merma_frio)) ? Number(data.valor.merma_frio) : MERMA_FRIO_DEFAULT,
       })
@@ -675,9 +683,12 @@ const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(n
   // resultado, así que decía lo mismo hubiera guardado o no. Fabricio perdió
   // 8 tipos de media res sin enterarse.
   async function guardarMermaConfig(nueva) {
+    // Los tipos propios de una boca NO van a la config de la central: viven en
+    // su tabla. Sin este filtro, guardar acá se los mandaría a todo el sistema.
+    const valor = { ...nueva, media_res: (nueva.media_res || []).filter(m => !m.propio) }
     const { data, error } = await supabase.from('config_sistema').upsert({
       clave: 'merma_conversion',
-      valor: nueva,
+      valor,
       descripcion: 'Merma por producto al convertir a cortes: % por pieza individual y por tipo de media res. Editable desde Depósito → Desposte.',
     }, { onConflict: 'clave' }).select('clave')
     // Con RLS bloqueando, supabase devuelve error null y CERO filas. Hay que
@@ -2459,7 +2470,7 @@ async function confirmarDesposteCerdo() {
         </div>
       </div>
     </div>
-    <EditorMerma config={mermaConfig} onSave={guardarMermaConfig} inicialAbierto />
+    <EditorMerma config={mermaConfig} onSave={guardarMermaConfig} onRecargar={cargarMermaConfig} inicialAbierto />
     </>)}
 
     {/* De acá SALEN los % de la otra pestaña: se cargan los kilos reales de un
@@ -7685,11 +7696,36 @@ function PiezasTab() {
 // Panel colapsable para editar el % de merma enlazado a cada pieza
 // y a cada tipo de media res. Se guarda en config_sistema y de ahí
 // se autocompleta al convertir a cortes. Editable por si cambia.
-function EditorMerma({ config, onSave, inicialAbierto = false }) {
+function EditorMerma({ config, onSave, onRecargar, inicialAbierto = false }) {
+  const { isSucursal } = useAuth()
   const [open, setOpen] = useState(inicialAbierto)
   const [draft, setDraft] = useState(config)
   const [ok, setOk] = useState(false)
   useEffect(() => { setDraft(config) }, [config])
+  // Tipos propios de la boca (mig 138): en la central esto es siempre vacío.
+  const propios = (config?.media_res || []).filter(m => m.propio)
+  const heredados = (config?.media_res || []).filter(m => !m.propio)
+  const [nuevo, setNuevo] = useState({ label: '', merma: '25' })
+  const [editando, setEditando] = useState(null)   // { filaId, label, merma }
+  const [confirmBorrar, setConfirmBorrar] = useState(null)
+  const [msgTipo, setMsgTipo] = useState(null)
+
+  async function guardarPropio(datos) {
+    const r = await guardarTipoPropio(datos)
+    if (r.error) { setMsgTipo({ tipo: 'error', txt: r.error }); return }
+    setMsgTipo({ tipo: 'ok', txt: '✅ Guardado' })
+    setNuevo({ label: '', merma: '25' })
+    setEditando(null)
+    onRecargar && onRecargar()
+    setTimeout(() => setMsgTipo(null), 2500)
+  }
+
+  async function borrarPropio(filaId) {
+    const r = await eliminarTipoPropio(filaId)
+    setConfirmBorrar(null)
+    if (r.error) { setMsgTipo({ tipo: 'error', txt: r.error }); return }
+    onRecargar && onRecargar()
+  }
 
   const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '7px 10px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, boxSizing: 'border-box' }
 
@@ -7760,26 +7796,98 @@ function EditorMerma({ config, onSave, inicialAbierto = false }) {
               (baja, la pieza pierde poco; el hueso se va al convertirla). */}
           <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
             Lo que se pierde al convertir la media entera a cortes: hueso, grasa y recorte.
-            A este % se le suma la <strong>merma de frío</strong> de abajo.
+            El % ya viene con el frío incluido (la media se pesa recién en la mesa).
           </div>
           <div style={{ display: 'flex', gap: 8, padding: '0 10px', marginBottom: 4, fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1 }}>
             <span style={{ flex: 1 }}>Tipo</span>
             <span style={{ width: 96, textAlign: 'center' }}>A cortes (x kilo)</span>
             <span style={{ width: 22 }} />
           </div>
-          <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
-            {(draft.media_res || []).map((m, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface2)', borderRadius: 8, padding: '6px 10px' }}>
-                <input value={m.label} onChange={e => setMedia(i, 'label', e.target.value)} placeholder="Ej: Novillito (Nt)" style={{ ...inp, flex: 1 }} />
-                <div style={{ width: 96, display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
-                  <input type="text" inputMode="decimal" value={m.merma} onChange={e => setMedia(i, 'merma', e.target.value)} style={{ ...inp, width: 64, textAlign: 'center', fontWeight: 700 }} />
-                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>%</span>
+          {/* LA CENTRAL edita la lista; la SUCURSAL la ve y la usa tal cual.
+              Son la misma fila de config_sistema para todo el sistema: si acá
+              se cambia un %, la boca lo tiene en la próxima carga. */}
+          {!isSucursal ? (<>
+            <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
+              {(draft.media_res || []).filter(m => !m.propio).map((m, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface2)', borderRadius: 8, padding: '6px 10px' }}>
+                  <input value={m.label} onChange={e => setMedia(i, 'label', e.target.value)} placeholder="Ej: Novillito (Nt)" style={{ ...inp, flex: 1 }} />
+                  <div style={{ width: 96, display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
+                    <input type="text" inputMode="decimal" value={m.merma} onChange={e => setMedia(i, 'merma', e.target.value)} style={{ ...inp, width: 64, textAlign: 'center', fontWeight: 700 }} />
+                    <span style={{ fontSize: 12, color: 'var(--muted)' }}>%</span>
+                  </div>
+                  <button type="button" onClick={() => delMedia(i)} title="Eliminar" style={{ background: 'none', border: 'none', color: 'var(--red-light)', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}>✕</button>
                 </div>
-                <button type="button" onClick={() => delMedia(i)} title="Eliminar" style={{ background: 'none', border: 'none', color: 'var(--red-light)', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}>✕</button>
+              ))}
+            </div>
+            <button type="button" className="btn btn-ghost" onClick={addMedia} style={{ fontSize: 12, marginBottom: 12 }}>+ Agregar tipo de media res</button>
+          </>) : (<>
+            <div style={{ display: 'grid', gap: 8, marginBottom: 6 }}>
+              {heredados.map(m => (
+                <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface2)', borderRadius: 8, padding: '8px 10px', opacity: 0.85 }}>
+                  <span style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>🔒 {m.label}</span>
+                  <span style={{ width: 96, textAlign: 'center', fontWeight: 800, fontSize: 14 }}>{Number(m.merma) || 0}%</span>
+                  <span style={{ width: 22 }} />
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 16 }}>
+              Estos los define la central y se actualizan solos: si allá cambian un %, acá cambia también.
+              El costo por kilo igual te da distinto, porque se calcula sobre <strong>tu</strong> precio de compra.
+            </div>
+
+            {/* Tipos propios de esta boca: una media res que compra ella y la
+                central no maneja (mig 138). */}
+            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Mis tipos</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+              Si comprás una media res que la central no maneja, agregala acá con su %.
+            </div>
+            {msgTipo && (
+              <div style={{ fontSize: 12, marginBottom: 8, fontWeight: 700, color: msgTipo.tipo === 'error' ? '#ff8b8b' : 'var(--green)' }}>{msgTipo.txt}</div>
+            )}
+            <div style={{ display: 'grid', gap: 8, marginBottom: 10 }}>
+              {propios.length === 0 && (
+                <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>Todavía no agregaste ninguno.</div>
+              )}
+              {propios.map(m => (
+                <div key={m.filaId} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface2)', borderRadius: 8, padding: '6px 10px' }}>
+                  {editando?.filaId === m.filaId ? (<>
+                    <input value={editando.label} onChange={e => setEditando(x => ({ ...x, label: e.target.value }))} style={{ ...inp, flex: 1 }} />
+                    <div style={{ width: 96, display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
+                      <input type="text" inputMode="decimal" value={editando.merma} onChange={e => setEditando(x => ({ ...x, merma: e.target.value }))} style={{ ...inp, width: 64, textAlign: 'center', fontWeight: 700 }} />
+                      <span style={{ fontSize: 12, color: 'var(--muted)' }}>%</span>
+                    </div>
+                    <button type="button" className="btn btn-gold btn-sm" onClick={() => guardarPropio(editando)}>OK</button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditando(null)}>✕</button>
+                  </>) : (<>
+                    <span style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>{m.label}</span>
+                    <span style={{ width: 96, textAlign: 'center', fontWeight: 800, fontSize: 14 }}>{Number(m.merma) || 0}%</span>
+                    <button type="button" onClick={() => setEditando({ filaId: m.filaId, label: m.label, merma: String(m.merma) })}
+                      style={{ background: 'none', border: 'none', color: 'var(--gold)', cursor: 'pointer', fontSize: 14, padding: '0 4px' }} title="Editar">✏️</button>
+                    {confirmBorrar === m.filaId ? (
+                      <span style={{ display: 'inline-flex', gap: 4 }}>
+                        <button type="button" className="btn btn-danger btn-sm" onClick={() => borrarPropio(m.filaId)}>Sí</button>
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmBorrar(null)}>No</button>
+                      </span>
+                    ) : (
+                      <button type="button" onClick={() => setConfirmBorrar(m.filaId)} title="Eliminar"
+                        style={{ background: 'none', border: 'none', color: 'var(--red-light)', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}>✕</button>
+                    )}
+                  </>)}
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              <input value={nuevo.label} onChange={e => setNuevo(x => ({ ...x, label: e.target.value }))}
+                placeholder="Nombre del tipo (ej: Ternera especial)" style={{ ...inp, flex: 1 }} />
+              <div style={{ width: 96, display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
+                <input type="text" inputMode="decimal" value={nuevo.merma}
+                  onChange={e => setNuevo(x => ({ ...x, merma: e.target.value }))}
+                  style={{ ...inp, width: 64, textAlign: 'center', fontWeight: 700 }} />
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>%</span>
               </div>
-            ))}
-          </div>
-          <button type="button" className="btn btn-ghost" onClick={addMedia} style={{ fontSize: 12, marginBottom: 12 }}>+ Agregar tipo de media res</button>
+              <button type="button" className="btn btn-gold btn-sm" onClick={() => guardarPropio(nuevo)}>+ Agregar</button>
+            </div>
+          </>)}
 
           {/* La merma de frío se sacó el 03/09/2026: el % de cada tipo ya la
               incluye, porque la media se pesa recién en la mesa de desposte.
