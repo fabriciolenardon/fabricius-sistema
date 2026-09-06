@@ -540,7 +540,9 @@ function DesposteTab({ onSaved, soloElaborar = false }) {
   // Dentro de Mermas hay dos cosas distintas y la pantalla quedaba larguísima
   // con las dos apiladas: los % configurados, y las planillas de rinde de
   // donde salen esos %.
-  const [tabMerma, setTabMerma] = useState('config')
+  // La sucursal no edita los %, los usa: le abre directo en el costo por kilo,
+  // que es a lo que entra.
+  const [tabMerma, setTabMerma] = useState(esSucursal ? 'costo' : 'config')
   const [mediasRes, setMediasRes] = useState([])
   const [piezasStock, setPiezasStock] = useState({})
   const [despostes, setDespostes] = useState([])
@@ -1527,8 +1529,11 @@ async function confirmarDesposteCerdo() {
 // dejáramos acá, el mismo tablero estaría en dos lugares.
 ...(esSucursal ? [] : [{ id: 'embutidos', label: '🌭 Elaborados' }]),
 { id: 'historial', label: '📋 Historial Desposte' },
-// Las mermas las define la CENTRAL (una sola config para las dos bocas).
-...(esSucursal ? [] : [{ id: 'mermas', label: '⚙️ Mermas' }])].map(t => (
+// Los % los define la CENTRAL, pero la sucursal SÍ tiene que entrar acá: ve
+// los tipos heredados de sólo lectura, carga los suyos y —sobre todo— saca el
+// costo del kilo con merma de lo que le compra a la central. Estuvo oculta
+// hasta el 06/09/2026 y por eso "no aparecía nada" del lado de Monte Cristo.
+{ id: 'mermas', label: esSucursal ? '⚙️ Mermas y costo' : '⚙️ Mermas' }].map(t => (
           <button key={t.id} onClick={() => { setSubtab(t.id); setSeleccionada(null); setPiezas([]); cargarDatos() }}
             style={{ padding: '8px 16px', borderRadius: 8, border: `1px solid ${subtab === t.id ? 'var(--gold)' : 'var(--border)'}`, background: subtab === t.id ? 'var(--gold)' : 'transparent', color: subtab === t.id ? '#000' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
             {t.label}
@@ -2438,7 +2443,10 @@ async function confirmarDesposteCerdo() {
         // central y necesita saber a cuánto le queda el kilo después de la
         // merma para poner sus precios. Por eso va primero para ella.
         { id: 'costo', label: '💲 Costo con merma' },
-        { id: 'planillas', label: '📋 Planillas de rinde' },
+        // Las planillas de rinde son de la central: la RLS sólo deja
+        // escribirlas a es_central(), así que a una sucursal la solapa le
+        // serviría para ver las de la central y para nada más.
+        ...(esSucursal ? [] : [{ id: 'planillas', label: '📋 Planillas de rinde' }]),
         { id: 'historial', label: '📊 Historial semanal' },
       ].map(t => (
         <button key={t.id} onClick={() => setTabMerma(t.id)}
