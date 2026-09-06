@@ -7734,7 +7734,13 @@ function EditorMerma({ config, onSave, onRecargar, inicialAbierto = false }) {
   const addMedia = () => setDraft(d => ({ ...d, media_res: [...(d.media_res || []), { id: '', label: '', merma: 25 }] }))
   const delMedia = (i) => setDraft(d => ({ ...d, media_res: d.media_res.filter((_, j) => j !== i) }))
 
-  const clamp = v => Math.max(0, Math.min(50, Number(v) || 0))
+  // parseNumero, NO Number(): el input es type=text para poder tipear la coma,
+  // y Number("25,37") es NaN → el `|| 0` lo dejaba en CERO. El 06/09/2026
+  // Fabricio cargó las mermas a mano y se le borraron justo las que tenían
+  // decimales (A-2, B-2 y VAQUILLONA B-1 quedaron en 0); las enteras, que
+  // Number() sí parsea, se guardaron bien. Misma trampa de la coma decimal de
+  // siempre, esta vez por el parseo y no por el type del input.
+  const clamp = v => Math.max(0, Math.min(50, parseNumero(v)))
 
   // ¿El borrador difiere de lo guardado? Comparación por CONTENIDO: los
   // objetos siempre son distintos por identidad, así que === no sirve acá.
