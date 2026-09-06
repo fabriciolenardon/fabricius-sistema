@@ -1,85 +1,104 @@
 // ============================================================
 // COSTO CON MERMA — a cuánto queda el kilo después de despostar
 // ============================================================
-// Para las franquicias, sobre todo: le compran las piezas a la central a un
-// precio por kilo, pero ese NO es lo que les cuesta el kilo que venden. Al
-// romper la pieza en cortes se va hueso, grasa y recorte, así que la misma
-// plata queda repartida entre menos kilos.
+// Para las franquicias, sobre todo: le compran a la central a un precio por
+// kilo, pero ese NO es lo que les cuesta el kilo que venden. Al despostar se
+// va hueso, grasa y recorte, así que la misma plata queda repartida entre
+// menos kilos.
 //
 //     costo real del kilo = precio pagado ÷ (1 − merma)
 //
-// Los % son los que define la central: acá se muestran de SÓLO LECTURA. Lo
-// único que se toca es el precio, que es propio de cada boca — la central paga
-// más barato y la sucursal, que le recompra, calcula sobre lo que ella pagó.
+// DE DÓNDE SALE EL PRECIO (confirmado por Fabricio, 06/09/2026):
+//   · Una SUCURSAL le compra a la central, así que su precio es el de la lista
+//     `precio_carniceria` del catálogo compartido — el mismo que le sale en el
+//     remito. NO sale de sus entradas: las piezas le llegan por remito de la
+//     central y no las carga como ingreso, así que ahí no hay nada.
+//   · La CENTRAL le compra al frigorífico: su precio es el de su última compra
+//     en entradas_deposito. Para ella `precio_carniceria` es precio de VENTA,
+//     no de costo, y usarlo daría un número sin sentido.
 //
-// El precio viene precargado con la última compra de esa pieza (la entrada más
-// reciente de ESTA boca, que la RLS ya filtra), y se puede editar para simular.
+// Los % son los que define la central y acá se muestran de SÓLO LECTURA.
 // ============================================================
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { fmtPrecio, parseNumero } from '../lib/formatos'
+import { useAuth } from '../context/AuthContext'
 
-// Nombre de la pieza en la config de mermas → tipo con el que entra al stock.
-const TIPO_DE_PIEZA = {
-  'Pierna': 'pieza_pierna',
-  'Cuarto Pistola': 'pieza_cuarto_pistola',
-  'Costillar Completo': 'pieza_costillar',
-  'Cortito': 'pieza_cortito',
-  'Costeletal con Lomo': 'pieza_costeletal',
-  'Parrillero': 'pieza_parrillero',
-  'Paleta': 'pieza_paleta',
+// Nombre de la pieza en la config de mermas → cómo reconocer su producto en la
+// lista de precios y con qué tipo entra al stock. El match del producto es por
+// palabra clave normalizada para que aguante un cambio de nombre.
+const PIEZAS = {
+  'Pierna':              { kw: 'PIERNA',     tipo: 'pieza_pierna' },
+  'Cuarto Pistola':      { kw: 'CUARTO',     tipo: 'pieza_cuarto_pistola' },
+  'Costillar Completo':  { kw: 'COSTILLARCOMPLETO', tipo: 'pieza_costillar' },
+  'Cortito':             { kw: 'CORTITO',    tipo: 'pieza_cortito' },
+  'Costeletal con Lomo': { kw: 'COSTELETAL', tipo: 'pieza_costeletal' },
+  'Parrillero':          { kw: 'PARRILLERO', tipo: 'pieza_parrillero' },
+  'Paleta':              { kw: 'PALETA',     tipo: 'pieza_paleta' },
 }
+const norm = s => String(s || '').toUpperCase().normalize('NFD').replace(/[^A-Z0-9]/g, '')
 
 export default function CostoConMerma({ config }) {
-  const [precios, setPrecios] = useState({})     // { tipo: precio_kg de la última compra }
-  const [editados, setEditados] = useState({})   // { clave: texto tipeado }
+  const { isSucursal } = useAuth()
+  const [precios, setPrecios] = useState({})     // { clave: { precio, nota } }
+  const [editados, setEditados] = useState({})
   const [cargando, setCargando] = useState(true)
 
   useEffect(() => {
     let vivo = true
     async function cargar() {
-      // Última compra de cada tipo. Se piden las entradas recientes y se toma
-      // la primera de cada tipo: una sola consulta en vez de una por pieza.
-      const { data } = await supabase.from('entradas_deposito')
-        .select('tipo, precio_kg, fecha')
-        .eq('eliminado', false)
-        .gt('precio_kg', 0)
-        .order('fecha', { ascending: false })
-        .limit(400)
+      const out = {}
+      if (isSucursal) {
+        // Lo que le cobra la central: la lista de carnicerías del catálogo
+        // compartido (sucursal_id NULL). Es el precio del remito.
+        const { data } = await supabase.from('precios')
+          .select('nombre, categoria, precio_carniceria')
+          .in('categoria', ['bovino_mr', 'bovino_pieza'])
+          .is('sucursal_id', null)
+        const lista = (data || []).filter(p => Number(p.precio_carniceria) > 0)
+        const mr = lista.find(p => p.categoria === 'bovino_mr')
+        if (mr) out.bovino_mr = { precio: Number(mr.precio_carniceria), nota: 'lista de carnicerías' }
+        Object.entries(PIEZAS).forEach(([nombre, def]) => {
+          const prod = lista.find(p => p.categoria === 'bovino_pieza' && norm(p.nombre).includes(def.kw))
+          if (prod) out['pz_' + nombre] = { precio: Number(prod.precio_carniceria), nota: 'lista de carnicerías' }
+        })
+      } else {
+        // La central compra al frigorífico: su costo es su última entrada.
+        const { data } = await supabase.from('entradas_deposito')
+          .select('tipo, precio_kg, fecha')
+          .eq('eliminado', false).gt('precio_kg', 0)
+          .order('fecha', { ascending: false }).limit(400)
+        const ultimo = {}
+        ;(data || []).forEach(e => {
+          // Los numeric de Supabase llegan como STRING.
+          if (!ultimo[e.tipo]) ultimo[e.tipo] = { precio: Number(e.precio_kg) || 0, fecha: e.fecha }
+        })
+        if (ultimo.bovino_mr) out.bovino_mr = { precio: ultimo.bovino_mr.precio, nota: 'tu última compra ' + fFecha(ultimo.bovino_mr.fecha) }
+        Object.entries(PIEZAS).forEach(([nombre, def]) => {
+          const u = ultimo[def.tipo]
+          if (u) out['pz_' + nombre] = { precio: u.precio, nota: 'tu última compra ' + fFecha(u.fecha) }
+        })
+      }
       if (!vivo) return
-      const ultimo = {}
-      ;(data || []).forEach(e => {
-        // Los numeric de Supabase llegan como STRING.
-        if (!ultimo[e.tipo]) ultimo[e.tipo] = { precio: Number(e.precio_kg) || 0, fecha: e.fecha }
-      })
-      setPrecios(ultimo)
+      setPrecios(out)
       setCargando(false)
     }
     cargar()
     return () => { vivo = false }
-  }, [])
+  }, [isSucursal])
 
   const filas = useMemo(() => {
     const out = []
-    // Media res entera → cortes
     ;(config?.media_res || []).forEach(m => {
-      const clave = 'mr_' + m.id
       out.push({
-        clave, grupo: '🐄 Media res a cortes', nombre: m.label,
-        merma: Number(m.merma) || 0,
-        precioSugerido: precios['bovino_mr']?.precio || 0,
-        fecha: precios['bovino_mr']?.fecha || null,
-        propio: !!m.propio,
+        clave: 'mr_' + m.id, grupo: '🐄 Media res a cortes', nombre: m.label,
+        merma: Number(m.merma) || 0, ref: precios.bovino_mr, propio: !!m.propio,
       })
     })
-    // Pieza → cortes
     Object.entries(config?.piezas || {}).forEach(([nombre, pct]) => {
-      const tipo = TIPO_DE_PIEZA[nombre]
       out.push({
         clave: 'pz_' + nombre, grupo: '🍖 Pieza a cortes', nombre,
-        merma: Number(pct) || 0,
-        precioSugerido: (tipo && precios[tipo]?.precio) || 0,
-        fecha: (tipo && precios[tipo]?.fecha) || null,
+        merma: Number(pct) || 0, ref: precios['pz_' + nombre],
       })
     })
     return out
@@ -102,11 +121,11 @@ export default function CostoConMerma({ config }) {
       <div className="card-title">💲 Costo con merma</div>
       <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14, lineHeight: 1.6 }}>
         Lo que pagás por kilo <strong>no</strong> es lo que te cuesta el kilo que vendés: al
-        despostar se va hueso, grasa y recorte, y la misma plata queda repartida entre menos
-        kilos. Acá ves a cuánto te queda el kilo real de cada cosa.
+        despostar se va hueso, grasa y recorte, y la misma plata queda repartida entre menos kilos.
         <br />
-        El <strong>%</strong> lo define la central y no se toca. El <strong>precio</strong> es tuyo:
-        viene con el de tu última compra y lo podés cambiar para sacar cuentas.
+        El <strong>%</strong> lo define la central y no se toca. El <strong>precio</strong> viene{' '}
+        {isSucursal ? 'de la lista con la que te vende la central' : 'de tu última compra'} y lo
+        podés cambiar para sacar cuentas.
       </div>
 
       {Object.entries(grupos).map(([grupo, items]) => (
@@ -124,9 +143,10 @@ export default function CostoConMerma({ config }) {
               <tbody>
                 {items.map(f => {
                   const texto = editados[f.clave]
-                  const precio = texto !== undefined ? parseNumero(texto) : f.precioSugerido
-                  // La merma nunca llega a 100, pero el guard evita un Infinity
-                  // en pantalla si alguien carga un disparate.
+                  const base = f.ref?.precio || 0
+                  const precio = texto !== undefined ? parseNumero(texto) : base
+                  // El guard evita un Infinity en pantalla si alguien carga un
+                  // disparate en el %.
                   const factor = f.merma < 100 ? 1 - f.merma / 100 : 0
                   const costo = factor > 0 ? precio / factor : 0
                   const recargo = precio > 0 && costo > 0 ? ((costo / precio) - 1) * 100 : 0
@@ -135,14 +155,17 @@ export default function CostoConMerma({ config }) {
                       <td style={{ ...td, fontWeight: 600 }}>
                         {f.nombre}
                         {f.propio && <span style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 400 }}> · tuyo</span>}
-                        {f.fecha && precio > 0 && texto === undefined && (
-                          <div style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 400 }}>última compra {f.fecha.slice(8, 10)}/{f.fecha.slice(5, 7)}</div>
+                        {f.ref?.nota && texto === undefined && (
+                          <div style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 400 }}>{f.ref.nota}</div>
+                        )}
+                        {!f.ref && (
+                          <div style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 400 }}>sin precio cargado — poné el tuyo</div>
                         )}
                       </td>
                       <td style={{ ...td, textAlign: 'center', fontWeight: 700 }}>{f.merma}%</td>
                       <td style={{ ...td, textAlign: 'right' }}>
                         <input type="text" inputMode="decimal" style={inp}
-                          value={texto !== undefined ? texto : (f.precioSugerido || '')}
+                          value={texto !== undefined ? texto : (base || '')}
                           placeholder="0"
                           onChange={e => setEditados(x => ({ ...x, [f.clave]: e.target.value }))} />
                       </td>
@@ -162,10 +185,15 @@ export default function CostoConMerma({ config }) {
       ))}
 
       <div style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.6, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
-        La cuenta es <strong>precio ÷ (1 − merma)</strong>. Con una pierna a {fmtPrecio(10000)} y 29% de
-        merma, el kilo de corte te sale {fmtPrecio(10000 / 0.71)} — no {fmtPrecio(10000)}. Ese es el número
-        sobre el que tenés que poner tu ganancia, no el de la factura.
+        La cuenta es <strong>precio ÷ (1 − merma)</strong>. Ese es el número sobre el que va tu
+        ganancia, no el del remito.
       </div>
     </div>
   )
+}
+
+function fFecha(f) {
+  if (!f || !/^\d{4}-\d{2}-\d{2}/.test(String(f))) return ''
+  const [y, m, d] = String(f).slice(0, 10).split('-')
+  return `${d}/${m}/${y.slice(2)}`
 }
