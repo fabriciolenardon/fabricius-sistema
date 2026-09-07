@@ -164,8 +164,13 @@ export default async function handler(req, res) {
     const tipo = msg.type === 'text' ? 'text'
       : (msg.type === 'image' ? 'image' : (msg.type === 'document' ? 'document' : (msg.type === 'audio' || msg.type === 'voice' ? 'audio' : 'other')))
     const texto = (msg.text?.body || '').trim()
+    // Los tipos que no son texto/foto/archivo/audio (botones, listas, ubicación,
+    // contactos, y los que la Cloud API marca 'unsupported') traían SOLO el
+    // rótulo "📎 [adjunto]" y su contenido se perdía. Pasó con el código de
+    // verificación que mandó Meta para asociar Instagram (07/09): llegó, quedó
+    // guardado como adjunto y el código no se pudo leer en ningún lado.
     const textoMostrable = tipo === 'text' ? texto
-      : (msg[msg.type]?.caption ? `${etiquetaTipo(tipo)} ${msg[msg.type].caption}` : etiquetaTipo(tipo))
+      : (msg[msg.type]?.caption ? `${etiquetaTipo(tipo)} ${msg[msg.type].caption}` : contenidoNoTexto(msg))
 
     // Estado previo del contacto (para saber si Iris está pausada y el conteo).
     const contacto = await getContacto(from)
@@ -184,7 +189,17 @@ export default async function handler(req, res) {
     await upsertContacto(from, nombreContacto, textoMostrable, contacto)
 
     // Comprobantes (imágenes/PDF/audio) → NO se responden. Quedan en el panel.
-    if (tipo !== 'text' || !texto) return res.status(200).end()
+    if (tipo !== 'text' || !texto) {
+      // Los tipos raros (botones, 'unsupported', avisos de Meta) no los ve
+      // nadie: Iris no contesta y no hay foto para mirar. Se marcan pendientes
+      // para que el chat suba arriba de todo en Conversaciones — así un código
+      // de verificación o un aviso de Meta no queda enterrado.
+      if (tipo === 'other') {
+        try { await marcarPendiente(from, 'Llegó un mensaje que Iris no puede contestar — miralo vos') }
+        catch (e) { console.error('marcar pendiente mensaje raro', e) }
+      }
+      return res.status(200).end()
+    }
 
     // Si un humano tomó el control de este chat, Iris no responde.
     if (pausada) return res.status(200).end()
@@ -370,6 +385,37 @@ export default async function handler(req, res) {
     console.error('WhatsApp handler error:', err)
     return res.status(200).end()
   }
+}
+
+// Rescata algo legible de un mensaje que no es texto plano. Recorre las formas
+// conocidas de la Cloud API (botón, lista interactiva, ubicación, contacto,
+// reacción, aviso del sistema) y, si el tipo no lo conocemos, guarda el JSON
+// crudo del mensaje: preferimos ver algo feo a perder el contenido. Así un
+// código de verificación, un botón de "copiar código" o cualquier tipo nuevo
+// que invente Meta queda VISIBLE en el panel de Conversaciones.
+function contenidoNoTexto(msg) {
+  const rotulo = etiquetaTipo(msg.type === 'image' ? 'image' : msg.type === 'document' ? 'document'
+    : (msg.type === 'audio' || msg.type === 'voice') ? 'audio' : 'other')
+  const partes = []
+  const push = (v) => { const t = String(v || '').trim(); if (t && !partes.includes(t)) partes.push(t) }
+
+  push(msg.button?.text); push(msg.button?.payload)
+  push(msg.interactive?.button_reply?.title); push(msg.interactive?.list_reply?.title)
+  push(msg.interactive?.list_reply?.description); push(msg.interactive?.nfm_reply?.body)
+  push(msg.reaction?.emoji)
+  push(msg.location?.name); push(msg.location?.address)
+  if (msg.location?.latitude != null) push(`📍 ${msg.location.latitude}, ${msg.location.longitude}`)
+  for (const c of (msg.contacts || [])) { push(c?.name?.formatted_name); for (const t of (c?.phones || [])) push(t?.phone) }
+  push(msg.order?.text)
+  push(msg.system?.body)
+  for (const e of (msg.errors || [])) { push(e?.title); push(e?.details) }
+
+  if (partes.length) return `${rotulo} ${partes.join(' · ')}`.slice(0, 1500)
+  // Nada conocido: el JSON crudo, sin los campos de ruteo que no aportan.
+  try {
+    const { from, id, timestamp, ...resto } = msg
+    return `${rotulo} ${JSON.stringify(resto)}`.slice(0, 1500)
+  } catch { return rotulo }
 }
 
 function etiquetaTipo(tipo) {
