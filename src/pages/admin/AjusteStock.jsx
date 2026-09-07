@@ -85,7 +85,6 @@ const LABELS = {
   pieza_paleta: '🥩 Pieza — Paleta',
   pieza_parrillero: '🥩 Pieza — Parrillero',
   insumos: '🧰 Insumos',
-  cerdo_corte: '🐷 Cerdo — Cortes (bucket viejo)',
   caja_cb: '📦 Caja CB',
   caja_pt: '📦 Caja PT',
 }
