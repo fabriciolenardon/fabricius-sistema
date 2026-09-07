@@ -402,7 +402,12 @@ export function diffItemsRemito(itemsAntes, itemsDespues) {
 const CATEGORIA_A_STOCK = {
   bovino_mr: 'bovino_mr',
   bovino_corte: 'bovino_corte',
-  bovino_brosa: 'bovino_brosa',
+  // bovino_brosa: los 11 productos de brosa tienen su stock_origen propio
+  // (brosa_*, mig 89), que manda sobre este mapeo. El genérico se ELIMINÓ el
+  // 07/09/2026: estaba congelado desde mayo con 56,391 kg que no existían e
+  // inflaba el Dashboard. null = sin stock_origen no descuenta, igual que
+  // cerdo_pieza — así no se recrea el bucket fantasma.
+  bovino_brosa: null,
   bovino_pieza: 'bovino_pieza',
   bovino_caja_cb: 'caja_cb',
   bovino_caja_pt: 'caja_pt',
