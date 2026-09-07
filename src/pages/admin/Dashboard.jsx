@@ -306,7 +306,10 @@ export default function Dashboard() {
   )
   const stockPollo = Math.max(0, stock.pollo || 0)
   // Brosas = genérico legacy + suma de los buckets por producto (brosa_*, mig 89)
-  const stockBrosas = Math.max(0, (Number(stock.bovino_brosa) || 0) +
+  // El genérico `bovino_brosa` salió de la suma el 07/09/2026: tenía 56,391 kg
+  // congelados desde mayo que no existían en la cámara, y hacían que este
+  // widget mostrara 156 kg cuando las brosas reales eran 99.
+  const stockBrosas = Math.max(0,
     Object.entries(stock).reduce((s, [t, v]) => t.startsWith('brosa_') ? s + (Number(v) || 0) : s, 0))
   // Embutidos = suma EN VIVO de los buckets por producto de elaboración
   // propia (emb_*, mig 60). El bucket genérico 'embutido' fue eliminado;

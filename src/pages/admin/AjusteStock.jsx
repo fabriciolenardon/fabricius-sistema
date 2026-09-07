@@ -30,7 +30,6 @@ const LABELS = {
   bovino_mr: '🐄 Media Reses',
   bovino_corte: '🥩 Bovino Cortes',
   bovino_pieza: '🍖 Piezas Bovinas',
-  bovino_brosa: '🫀 Brosa (genérico legacy — repartir y dejar en 0)',
   brosa_chinchulin: '🫀 Brosa — Chinchulín',
   brosa_corazon: '🫀 Brosa — Corazón',
   brosa_entrana: '🫀 Brosa — Entraña de Costillar',
