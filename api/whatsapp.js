@@ -37,6 +37,11 @@ const ACUSE_PAGO = '¡Gracias! 🙌 Ya le aviso al equipo para que verifique tu 
 // alias y un CBU que no existen). Respuesta fija + aviso al equipo.
 const ACUSE_DATOS_BANCARIOS = '¡Ya le consulto al equipo a qué alias te conviene transferir y te lo pasamos a la brevedad! 🙌'
 
+// Pedido de LA LISTA de precios → IRIS no la manda ella (los precios cambian
+// y son 3 listas distintas): avisa que lo consulta con el equipo y escala, así
+// Fabricio le pasa la lista que corresponde (Fabricio 07/09).
+const ACUSE_LISTA = '¡Hola! 🥩 Ya le consulto a mi equipo por la lista de precios y en un ratito te la pasan por acá. ¿Necesitás algo más mientras tanto?'
+
 // Presentación: lo PRIMERO que manda Iris cuando le escribe un número nuevo.
 // Se presenta y deriva mayorista (otro número) vs minorista (este chat).
 const PRESENTACION = `¡Hola! Me llamo Iris, soy asistente de IA 🤖. ¿En qué puedo ayudarte?
@@ -49,6 +54,8 @@ const PROMPT_BASE = `Sos IRIS, la asistente de Carnicerías Fabricius (Río Prim
 REGLAS (modo "auto con barreras"):
 - PRECIOS — PREGUNTÁ PRIMERO EL TIPO DE CLIENTE: hay 3 listas (Minorista, Gastronómico, Carnicero). Si el cliente pregunta por precios y todavía NO sabés qué tipo es (ni vos lo preguntaste antes en este chat), preguntáselo amablemente: "¿Sos cliente minorista, gastronómico o carnicero? Así te paso la lista que te corresponde 🥩". Una vez que sabés el tipo, usá SOLO ese precio de cada producto en "DATOS DEL NEGOCIO": Minorista→precio Minorista, Gastronómico→precio Gastronómico, Carnicero→precio Carnicero. NUNCA mezcles listas, NUNCA le muestres las tres, NUNCA inventes un precio.
 - CLIENTE NUEVO QUE QUIERE COMPRAR AL POR MAYOR — ¡CAPTALO COMO UNA VENDEDORA PRO! Las listas Gastronómico y Carnicero son las mayoristas. Si alguien pregunta por precios mayoristas o dice que quiere EMPEZAR a comprarnos para su negocio (parrilla, restó, rotisería, carnicería, kiosco, almacén, etc.) y NO aparece como cliente conocido en el historial → es un cliente NUEVO potencial, una oportunidad de oro. Atendelo así: (1) Bienvenida con entusiasmo genuino ("¡Qué bueno que nos escribas! 🥩"). (2) Averiguá su rubro para pasarle la lista correcta (gastronómico o carnicero) y pasale esos precios. (3) Sumá valor en una frase: por qué conviene trabajar con nosotros (carne fresca, calidad, precios mayoristas, atención directa, y que coordinamos entrega o retiro). (4) Mostrá interés real: preguntá qué productos y qué volumen aproximado maneja, para asesorarlo mejor. (5) Con naturalidad pedile el nombre y la zona/negocio así el equipo lo contacta para coordinar la primera compra, y marcá escalar=true para avisar al dueño. NO interrogues ni seas insistente: una o dos preguntas por mensaje, siempre aportando algo. El objetivo es que se vaya con ganas de comprarnos y con el contacto ya iniciado. (No marques es_pedido salvo que pida productos concretos; esto es captación, no un pedido todavía.)
+- LA LISTA COMPLETA NO LA PASÁS VOS: si te piden la lista de precios entera ("pasame la lista", "quiero recibir la lista"), NO la tipees ni la inventes: decile que ya se lo consultás al equipo y que en un ratito se la pasan, y marcá escalar=true. Un precio PUNTUAL ("cuánto está la bondiola") sí lo respondés normal.
+- CUANDO NO PODÉS RESOLVER ALGO, NUNCA LO DEJES EN EL AIRE: respondé siempre en el espíritu de "ya lo consulto con mi equipo y te respondo en un ratito" y marcá escalar=true. Nunca dejes la pregunta sin contestar, nunca prometas algo que no podés cumplir, y nunca digas que ya se lo pasaste a alguien sin marcar escalar=true (si lo prometés, el equipo tiene que enterarse).
 - PRECIO QUE NO ESTÁ: si te piden un producto que NO figura en la lista, o que no tiene precio cargado para la lista del cliente → NO inventes. Decile que lo consultás con el equipo y que en un ratito te confirman, y marcá escalar=true (así avisamos al equipo para seguir la conversación). Lo mismo si te piden algo que no sabés responder.
 - Para horarios, dirección, formas de pago y envíos usá la sección "INFORMACIÓN DEL NEGOCIO" si está cargada. Si te preguntan algo que no está, derivá con amabilidad al equipo (no inventes).
 - DATOS BANCARIOS — PROHIBIDO ABSOLUTO: NUNCA des un CBU, CVU, alias, número de cuenta ni ningún dato bancario, NI SIQUIERA si creés saberlo o si aparece en algún lado. NO LOS TENÉS y ya pasó que se inventó un alias y un CBU falsos (gravísimo: el cliente transfiere a una cuenta equivocada). Si piden un alias/CBU/datos para transferir, respondé EXACTAMENTE en este espíritu: "¡Ya le consulto al equipo a qué alias te conviene transferir y te lo pasamos a la brevedad! 🙌" y marcá escalar=true. Sin excepciones.
@@ -207,6 +214,19 @@ export default async function handler(req, res) {
           }
         } catch (e) { console.error('Ofertas en primer mensaje WA error', e) }
       }
+      // Si el primer mensaje ya pide la lista, tampoco lo dejamos morir en el
+      // saludo: le avisamos al equipo igual que en el flujo normal.
+      if (pideLista(texto)) {
+        try {
+          await enviarWhatsApp(phoneId, from, ACUSE_LISTA)
+          await guardarMensaje(from, 'out', 'iris', 'text', ACUSE_LISTA)
+          await avisarEquipo(phoneId, req.headers.host, {
+            titulo: '📋 Piden la LISTA DE PRECIOS (WhatsApp)',
+            motivo: 'Pidió la lista de precios (número nuevo)',
+            telefono: from, nombreContacto, mensaje: texto,
+          })
+        } catch (e) { console.error('Lista en primer mensaje WA error', e) }
+      }
       return res.status(200).end()
     }
 
@@ -231,16 +251,27 @@ export default async function handler(req, res) {
       await enviarWhatsApp(phoneId, from, ACUSE_DATOS_BANCARIOS)
       await guardarMensaje(from, 'out', 'iris', 'text', ACUSE_DATOS_BANCARIOS)
       try {
-        const quien = nombreContacto ? `${nombreContacto} (${from})` : from
-        if (AVISOS_TO) {
-          const aviso = `💳 *WhatsApp — Piden alias/CBU para transferir*\n\n👤 ${quien}\n💬 Dijo: "${texto}"\n\nPasale el alias desde el sistema (WhatsApp → Conversaciones).`
-          await enviarWhatsApp(phoneId, AVISOS_TO, aviso)
-        }
-        await fetch(`https://${req.headers.host}/api/enviar-push?secret=${VERIFY_TOKEN}`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ titulo: '💳 Piden alias/CBU (WhatsApp)', body: `${nombreContacto || from}: ${texto}`, url: '/admin/whatsapp' }),
-        }).catch(() => {})
+        await avisarEquipo(phoneId, req.headers.host, {
+          titulo: '💳 Piden alias/CBU (WhatsApp)',
+          motivo: 'Pidió el alias/CBU para transferir',
+          telefono: from, nombreContacto, mensaje: texto,
+        })
       } catch (e) { console.error('Aviso datos bancarios WA error', e) }
+      return res.status(200).end()
+    }
+
+    // Piden LA LISTA de precios → IRIS no la manda (hay 3 listas y los precios
+    // cambian): acusa recibo y el pedido le llega a Fabricio para que la pase
+    // él. Va como corto circuito y no como instrucción del prompt, así el aviso
+    // sale SIEMPRE y no depende de que el modelo se acuerde de escalar.
+    if (pideLista(texto)) {
+      await enviarWhatsApp(phoneId, from, ACUSE_LISTA)
+      await guardarMensaje(from, 'out', 'iris', 'text', ACUSE_LISTA)
+      await avisarEquipo(phoneId, req.headers.host, {
+        titulo: '📋 Piden la LISTA DE PRECIOS (WhatsApp)',
+        motivo: 'Pidió la lista de precios',
+        telefono: from, nombreContacto, mensaje: texto,
+      })
       return res.status(200).end()
     }
 
@@ -248,6 +279,15 @@ export default async function handler(req, res) {
     if (esMensajePago(texto)) {
       await enviarWhatsApp(phoneId, from, ACUSE_PAGO)
       await guardarMensaje(from, 'out', 'iris', 'text', ACUSE_PAGO)
+      // El acuse le promete al cliente que el equipo verifica el pago — antes
+      // esa promesa no le llegaba a nadie y el aviso moría acá.
+      try {
+        await avisarEquipo(phoneId, req.headers.host, {
+          titulo: '💰 Aviso de pago por WhatsApp',
+          motivo: 'Avisó que pagó/transfirió — hay que verificarlo',
+          telefono: from, nombreContacto, mensaje: texto,
+        })
+      } catch (e) { console.error('Aviso pago WA error', e) }
       return res.status(200).end()
     }
 
@@ -298,31 +338,30 @@ export default async function handler(req, res) {
         // así no le llega una notificación por cada mensaje del cliente.
         const esNuevoPedido = await registrarPedido({ telefono: from, nombreContacto, mensaje: texto, resumen: ia.resumen_pedido, nombrePedido: ia.nombre_pedido })
         if (esNuevoPedido) {
-          await avisarAlDueno(phoneId, { nombreContacto, telefono: from, resumen: ia.resumen_pedido, mensaje: texto })
-          // Notificación push a los dispositivos suscritos (además del WhatsApp).
-          try {
-            await fetch(`https://${req.headers.host}/api/enviar-push?secret=${VERIFY_TOKEN}`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ titulo: '🛎️ Nuevo pedido por WhatsApp', body: `${nombreContacto || from}: ${ia.resumen_pedido || texto}`, url: '/admin/whatsapp' }),
-            })
-          } catch {}
+          await avisarEquipo(phoneId, req.headers.host, {
+            titulo: '🛎️ Nuevo pedido por WhatsApp',
+            motivo: ia.resumen_pedido || texto,
+            telefono: from, nombreContacto, mensaje: texto,
+          })
         }
       } catch (e) { console.error('Registro/aviso pedido WA error', e) }
     }
 
     // Escalada: Iris no pudo responder algo (ej. un precio que no está en la lista)
     // → avisamos al equipo para que siga la conversación. No registra pedido.
+    // RED DE SEGURIDAD: si Iris le PROMETIÓ al cliente que lo consulta con el
+    // equipo pero se olvidó de marcar escalar, escalamos igual. Antes esa
+    // promesa se perdía y el cliente quedaba esperando una respuesta que nadie
+    // sabía que tenía que dar (Fabricio 07/09: "a veces no me manda nada").
+    if (!ia.escalar && prometeConsultarAlEquipo(ia.respuesta)) ia.escalar = true
+
     if (ia.escalar) {
       try {
-        const quien = nombreContacto ? `${nombreContacto} (${from})` : from
-        if (AVISOS_TO) {
-          const aviso = `🙋 *WhatsApp — Iris necesita ayuda*\n\n👤 ${quien}\n💬 Preguntó: "${texto}"\n\nEntrá a responderle desde el sistema (WhatsApp → Conversaciones).`
-          await enviarWhatsApp(phoneId, AVISOS_TO, aviso)
-        }
-        await fetch(`https://${req.headers.host}/api/enviar-push?secret=${VERIFY_TOKEN}`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ titulo: '🙋 Iris necesita ayuda (WhatsApp)', body: `${nombreContacto || from}: ${texto}`, url: '/admin/whatsapp' }),
-        }).catch(() => {})
+        await avisarEquipo(phoneId, req.headers.host, {
+          titulo: '🙋 Iris necesita ayuda (WhatsApp)',
+          motivo: 'Iris no pudo resolverlo y le dijo al cliente que lo consulta con el equipo',
+          telefono: from, nombreContacto, mensaje: texto,
+        })
       } catch (e) { console.error('Aviso escalada WA error', e) }
     }
 
@@ -349,6 +388,31 @@ function pideDatosBancarios(texto) {
     || /\balias\b/.test(t)
     || /(datos|cuenta|numero)\w*.{0,25}(transfer|deposit|pagar|pago|mandar\w*.{0,10}plata|enviar\w*.{0,10}plata)/.test(t)
     || /(a\s*donde|adonde|a\s*que\s*cuenta).{0,20}(transfier|transfiero|deposito|te\s*mando)/.test(t)
+}
+
+// Detecta que el cliente pide LA LISTA de precios (la lista entera, no un
+// precio suelto). Ojo con "lista" como adjetivo — "¿ya está lista la carne?"
+// NO es un pedido de lista: eso se descarta primero.
+function pideLista(texto) {
+  const t = String(texto).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  if (/\b(esta|estara|estaria|ya|quedo|queda)\s+list[ao]\b/.test(t)) return false
+  if (/\b(tenes|tienen|esta|estan)\s+listo\b/.test(t)) return false
+  return /\blista\b.{0,25}(precio|producto)/.test(t)
+    || /(precio|producto)\w*.{0,25}\blista\b/.test(t)
+    || /\blista\s*(de\s*)?(precios?|productos?|completa|actualizada|nueva)\b/.test(t)
+    || /(pasa|pasame|manda|mandame|envia|enviame|quiero|queria|necesito|tenes|tienen|hay|recibir|ver)\w*.{0,25}\blista\b/.test(t)
+    || /\b(la|una)\s+lista\b/.test(t)
+    || /\b(listado|catalogo)\b/.test(t)
+}
+
+// ¿La respuesta de Iris le prometió al cliente que lo consulta con el equipo?
+// Si prometió, alguien tiene que responder: se escala aunque el modelo no haya
+// marcado escalar (se olvida seguido). Cubre las dos formas de decirlo:
+// "lo consulto con el equipo" y "el equipo te confirma".
+function prometeConsultarAlEquipo(respuesta) {
+  const t = String(respuesta || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  return /(consult|pregunt|avis|confirm|verific|chequ)\w*[^.!?]{0,40}\bequipo\b/.test(t)
+    || /\bequipo\b[^.!?]{0,40}(confirm|respond|avis|contact|pasa|escrib)/.test(t)
 }
 
 // Detecta avisos de pago/transferencia en texto (sin acentos, minúsculas).
@@ -769,11 +833,46 @@ async function registrarPedido({ telefono, nombreContacto, mensaje, resumen, nom
   return true
 }
 
-async function avisarAlDueno(phoneId, { nombreContacto, telefono, resumen, mensaje }) {
-  if (!AVISOS_TO) return
+// ── Aviso al equipo — UNA sola vía para todo lo que necesita a Fabricio ──
+// Manda por las TRES vías, porque las dos notificaciones pueden fallar solas:
+//   1. WhatsApp al número de avisos (puede rebotar por la ventana de 24 h),
+//   2. push a los dispositivos suscritos (puede estar revocada),
+//   3. marca en wa_contactos → el chat sube arriba de todo en Conversaciones
+//      con cartel rojo. Esta última NO se pierde nunca: es la red de seguridad
+//      del "a veces no me manda nada" (Fabricio 07/09).
+async function avisarEquipo(phoneId, host, { titulo, motivo, telefono, nombreContacto, mensaje }) {
   const quien = nombreContacto ? `${nombreContacto} (${telefono})` : telefono
-  const aviso = `🛎️ *Nuevo pedido por WhatsApp*\n\n👤 ${quien}\n📝 ${resumen || mensaje}\n\n💬 Dijo: "${mensaje}"\n\nRevisalo en el sistema para confirmarlo.`
-  await enviarWhatsApp(phoneId, AVISOS_TO, aviso)
+  // Primero la marca: es la que siempre funciona.
+  await marcarPendiente(telefono, motivo)
+  try {
+    if (AVISOS_TO) {
+      const aviso = `${titulo}\n\n👤 ${quien}\n📌 ${motivo}\n💬 Dijo: "${mensaje}"\n\nEntrá a responderle desde el sistema (WhatsApp → Conversaciones).`
+      const salio = await enviarWhatsApp(phoneId, AVISOS_TO, aviso)
+      if (!salio) console.error('Aviso al equipo por WhatsApp NO salió (¿ventana de 24 h de Meta cerrada?). Queda marcado en el panel.')
+    } else {
+      console.error('Falta WHATSAPP_AVISOS_TO: el aviso al equipo solo va por push y por el panel.')
+    }
+  } catch (e) { console.error('avisarEquipo whatsapp', e) }
+  try {
+    if (host) {
+      await fetch(`https://${host}/api/enviar-push?secret=${VERIFY_TOKEN}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ titulo, body: `${nombreContacto || telefono}: ${motivo}`, url: '/admin/whatsapp' }),
+      })
+    }
+  } catch (e) { console.error('avisarEquipo push', e) }
+}
+
+// Marca el chat como "IRIS necesita ayuda" (mig 140). Se limpia solo cuando
+// se abre o se responde la conversación desde el panel.
+async function marcarPendiente(telefono, motivo) {
+  if (!SB_URL || !SB_KEY) return
+  try {
+    await fetch(`${SB_URL}/rest/v1/wa_contactos?telefono=eq.${encodeURIComponent(telefono)}`, {
+      method: 'PATCH', headers: sbHeaders({ Prefer: 'return=minimal' }),
+      body: JSON.stringify({ necesita_respuesta: true, escalado_motivo: String(motivo || '').slice(0, 300), escalado_at: new Date().toISOString() }),
+    })
+  } catch (e) { console.error('marcarPendiente', e) }
 }
 
 // ── Envío por la Cloud API ───────────────────────────────────────────────
@@ -783,6 +882,10 @@ async function avisarAlDueno(phoneId, { nombreContacto, telefono, resumen, mensa
 function normalizarDestinoAR(numero) {
   return String(numero || '').replace(/^549(\d+)$/, '54$1')
 }
+// Devuelve true si Meta aceptó el mensaje. IMPORTA para los avisos al equipo:
+// Meta solo deja mandar texto libre dentro de las 24 h desde el último mensaje
+// que ESE número le escribió al negocio; pasado ese plazo rebota (131047) y el
+// aviso al dueño no llega. Por eso el llamador tiene que poder enterarse.
 async function enviarWhatsApp(phoneId, to, texto) {
   const destino = normalizarDestinoAR(to)
   const r = await fetch(`https://graph.facebook.com/v21.0/${phoneId}/messages`, {
@@ -790,7 +893,8 @@ async function enviarWhatsApp(phoneId, to, texto) {
     headers: { Authorization: `Bearer ${WA_TOKEN}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ messaging_product: 'whatsapp', to: destino, type: 'text', text: { body: String(texto).slice(0, 4000) } }),
   })
-  if (!r.ok) console.error('Envío WhatsApp', r.status, await r.text().catch(() => ''))
+  if (!r.ok) { console.error('Envío WhatsApp', r.status, await r.text().catch(() => '')); return false }
+  return true
 }
 
 // Envía una imagen por su URL pública (la usan los combos).

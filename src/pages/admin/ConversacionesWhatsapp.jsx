@@ -56,7 +56,13 @@ export default function ConversacionesWhatsapp() {
 
   async function cargarContactos() {
     const { data } = await supabase.from('wa_contactos').select('*').order('ultimo_at', { ascending: false })
-    setContactos(data || [])
+    // Los chats donde IRIS prometió que responde el equipo van ARRIBA DE TODO.
+    // Es la red de seguridad del aviso (mig 140): el WhatsApp al dueño puede
+    // rebotar por la ventana de 24 h de Meta y el push puede estar revocado,
+    // pero esto se ve siempre al entrar al panel.
+    const filas = data || []
+    filas.sort((a, b) => (b.necesita_respuesta ? 1 : 0) - (a.necesita_respuesta ? 1 : 0))
+    setContactos(filas)
     setCargando(false)
   }
 
@@ -85,8 +91,10 @@ export default function ConversacionesWhatsapp() {
   }
 
   async function marcarLeido(tel) {
-    await supabase.from('wa_contactos').update({ no_leidos: 0 }).eq('telefono', tel)
-    setContactos(cs => cs.map(c => c.telefono === tel ? { ...c, no_leidos: 0 } : c))
+    // Abrir el chat cuenta como "ya lo vi": se limpia el no leído y también la
+    // marca de pendiente que dejó IRIS al escalar.
+    await supabase.from('wa_contactos').update({ no_leidos: 0, necesita_respuesta: false }).eq('telefono', tel)
+    setContactos(cs => cs.map(c => c.telefono === tel ? { ...c, no_leidos: 0, necesita_respuesta: false } : c))
   }
 
   const contactoSel = contactos.find(c => c.telefono === sel)
@@ -178,7 +186,7 @@ export default function ConversacionesWhatsapp() {
             ) : contactos.map(c => (
               <div key={c.telefono} onClick={() => setSel(c.telefono)}
                 style={{ padding: '12px 14px', borderBottom: '1px solid var(--border)', cursor: 'pointer', background: sel === c.telefono ? 'var(--surface2)' : 'transparent', display: 'flex', gap: 10, alignItems: 'center' }}>
-                <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'var(--surface2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>{c.iris_pausada ? '🙋' : '🤖'}</div>
+                <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'var(--surface2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0, border: c.necesita_respuesta ? '2px solid #ff6b6b' : 'none' }}>{c.iris_pausada ? '🙋' : '🤖'}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
                     <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayNombre(c)}</span>
@@ -188,6 +196,12 @@ export default function ConversacionesWhatsapp() {
                     <span style={{ fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.ultimo_mensaje || ''}</span>
                     {c.no_leidos > 0 && <span style={{ background: 'var(--green)', color: '#000', borderRadius: 10, fontSize: 10, fontWeight: 700, padding: '1px 6px', flexShrink: 0 }}>{c.no_leidos}</span>}
                   </div>
+                  {c.necesita_respuesta && (
+                    <div title={c.escalado_motivo || 'IRIS le dijo al cliente que el equipo le responde'}
+                      style={{ marginTop: 4, background: '#3a1a1a', border: '1px solid #ff6b6b', color: '#ff6b6b', borderRadius: 6, padding: '2px 6px', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      🙋 TE ESPERA — {c.escalado_motivo || 'Iris no pudo resolverlo'}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
