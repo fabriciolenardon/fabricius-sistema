@@ -11,7 +11,7 @@ import BadgeCobranzaTerceros, { FILA_COBRANZA_TERCEROS } from '../../components/
 import { recomputarSaldoCliente } from '../../lib/ctaCorriente'
 import { getCampoPrecio, LISTAS, listasDeVenta } from '../../lib/listasPrecios'
 import CuentaCorrienteProveedor from './CuentaCorrienteProveedor'
-import { agregarMovimiento, eliminarMovimiento, registrarCompraDesdeEntrada, revertirCompraDeEntrada } from '../../lib/ctaProveedores'
+import { agregarMovimiento, eliminarMovimiento, registrarCompraDesdeEntrada, actualizarCompraDesdeEntrada, revertirCompraDeEntrada } from '../../lib/ctaProveedores'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 import ModalEditarCliente from '../../components/ModalEditarCliente'
 import FlujoDeposito from './FlujoDeposito'
@@ -3814,6 +3814,11 @@ async function ejecutarAnulacion(entrada) {
       descripcion: entrada.descripcion || '',
       kg: entrada.kg || '',
       precioKg: entrada.precio_kg || '',
+      // Los tipos que NO se compran por kg (almacén, bebidas, embutidos…)
+      // llevan importe TOTAL. Antes el editor no lo mostraba y el guardado
+      // hacía importe = kg × precio/kg = 0: editar los kg de una entrada de
+      // almacén le borraba el importe (y con él la compra del proveedor).
+      importe: entrada.importe || '',
       proveedor: entrada.proveedor_nombre || '',
       destino: entrada.destino || 'DEPOSITO',
     })
@@ -3825,21 +3830,108 @@ async function ejecutarAnulacion(entrada) {
     const kgNuevo = parseNumero(formEdit.kg)
     const kgReal = kgNuevo * (1 - (entrada.merma_pct || 0) / 100)
     const diferencia = kgReal - kgAnterior
+    // Mismo criterio que al crear la entrada: los tipos por kg calculan el
+    // importe (kg × precio/kg), el resto lleva el importe total a mano.
+    const esPorKg = TIPOS_COMPRA_POR_KG.has(entrada.tipo)
+    const precioNuevo = parseNumero(formEdit.precioKg)
+    const importeNuevo = esPorKg ? kgNuevo * precioNuevo : parseNumero(formEdit.importe)
+    // Red de seguridad: una entrada que valía plata no puede quedar en $0 por
+    // una edición (dejaría la compra y la cuenta del proveedor en cero). Las
+    // entradas internas (desposte/elaboración) sí valen 0 y se pueden editar.
+    if (Number(entrada.importe) > 0 && !(importeNuevo > 0)) {
+      showAlert({ type: 'error', msg: esPorKg
+        ? '⛔ Cargá los kg y el precio por kg — la entrada no puede quedar en $0.'
+        : '⛔ Cargá el importe — la entrada no puede quedar en $0.' })
+      return
+    }
     await supabase.from('entradas_deposito').update({
       fecha: formEdit.fecha,
       descripcion: formEdit.descripcion,
       kg: kgNuevo,
       kg_real: kgReal,
-      precio_kg: parseNumero(formEdit.precioKg),
+      precio_kg: precioNuevo,
       proveedor_nombre: formEdit.proveedor,
       destino: formEdit.destino,
-      importe: kgNuevo * (parseNumero(formEdit.precioKg))
+      importe: importeNuevo,
     }).eq('id', entrada.id)
     if (diferencia !== 0) await actualizarStock(entrada.tipo, diferencia)
+
+    // ── RECONCILIAR LAS OTRAS TRES PUNTAS DE LA COMPRA ──────────────────
+    // Una compra vive en 3 tablas paralelas (entradas_deposito +
+    // compras_proveedores + movimientos_proveedores) y, si es media res o
+    // pieza, además en su ficha individual (medias_stock / piezas_stock).
+    // Editar solo la entrada dejaba a las otras con el número VIEJO.
+    // Bug real del 07/09/2026: la media MR-486 se cargó a $101/kg y se
+    // corrigió a $10.100 acá; el Historial de Medias siguió mostrando $101 y
+    // la cuenta de EMANUEL SARAVIA quedó con $10.847 en vez de $1.084.740.
+    await sincronizarCompraDeEntrada(entrada, {
+      fecha: formEdit.fecha,
+      proveedor: formEdit.proveedor,
+      descripcion: formEdit.descripcion,
+      kgNuevo, kgReal, precioNuevo, importeNuevo,
+    })
+
     setEditando(null)
-    showAlert({ type: 'success', msg: '✅ Entrada actualizada' })
+    showAlert({ type: 'success', msg: '✅ Entrada actualizada — compra, cuenta del proveedor y ficha al día' })
     cargarHistorial()
     onSaved()
+  }
+
+  // Replica los datos de una entrada editada en las tablas que se escribieron
+  // cuando se creó. Best effort: si algo falla queda en consola pero la
+  // edición de la entrada (que ya se guardó) no se pierde.
+  async function sincronizarCompraDeEntrada(entrada, { fecha, proveedor, descripcion, kgNuevo, kgReal, precioNuevo, importeNuevo }) {
+    // 1) compras_proveedores — alimenta "Comprado esta semana" del dashboard
+    //    y las columnas por rubro del legajo del proveedor.
+    const { data: compras } = await supabase
+      .from('compras_proveedores').select('id').eq('entrada_id', entrada.id)
+    if (compras && compras.length > 0) {
+      const { error } = await supabase.from('compras_proveedores').update({
+        fecha, proveedor_nombre: proveedor, producto: descripcion,
+        kg: kgNuevo, importe: importeNuevo,
+      }).in('id', compras.map(c => c.id))
+      if (error) console.warn('No se pudo actualizar la compra del proveedor:', error.message)
+    } else if (importeNuevo > 0 && Number(entrada.importe) > 0) {
+      // La entrada valía plata pero perdió su fila de compra (carga vieja):
+      // se recrea para que el dashboard no la siga ignorando.
+      await supabase.from('compras_proveedores').insert({
+        fecha, proveedor_nombre: proveedor, producto: descripcion,
+        kg: kgNuevo, importe: importeNuevo, entrada_id: entrada.id,
+      })
+    }
+
+    // 2) movimientos_proveedores — la cuenta corriente (a quién le debo).
+    //    Recalcula el saldo del proveedor por dentro.
+    if (importeNuevo > 0) {
+      await actualizarCompraDesdeEntrada({
+        entradaId: entrada.id, proveedorNombre: proveedor,
+        fecha, importe: importeNuevo, descripcion,
+      })
+    }
+
+    // 3) medias_stock — la ficha MR-XXX guarda su propio costo/kg, que es el
+    //    que después costea los cortes al despostar. Los kg solo se tocan si
+    //    la media sigue en stock: si ya se despostó o se vendió, cambiarle el
+    //    peso falsearía esa salida (el stock ya se ajustó por la diferencia).
+    const cantidad = Math.max(1, Number(entrada.cantidad) || 1)
+    const { error: errM } = await supabase.from('medias_stock').update({
+      fecha_ingreso: fecha, proveedor_origen: proveedor,
+      precio_costo_kg: precioNuevo, descripcion,
+    }).eq('entrada_id', entrada.id)
+    if (errM) console.warn('No se pudo actualizar la ficha de la media res:', errM.message)
+    if (kgReal !== (entrada.kg_real || entrada.kg || 0)) {
+      await supabase.from('medias_stock').update({ kg: kgReal / cantidad })
+        .eq('entrada_id', entrada.id).in('estado', ['disponible', 'reservada'])
+    }
+
+    // 4) piezas_stock — mismo criterio para las piezas compradas directas.
+    await supabase.from('piezas_stock').update({
+      fecha_ingreso: fecha, proveedor_origen: proveedor, precio_costo_kg: precioNuevo || null,
+    }).eq('entrada_id', entrada.id)
+    if (kgNuevo !== (Number(entrada.kg) || 0)) {
+      await supabase.from('piezas_stock').update({ kg: kgNuevo / cantidad })
+        .eq('entrada_id', entrada.id).eq('estado', 'disponible')
+    }
   }
 
   const TIPOS = {
@@ -4327,7 +4419,19 @@ async function ejecutarAnulacion(entrada) {
                   <td><input value={formEdit.proveedor} onChange={x => setFormEdit(f => ({ ...f, proveedor: x.target.value }))} style={{ ...inp, width: 110 }} /></td>
                   <td><input value={formEdit.descripcion} onChange={x => setFormEdit(f => ({ ...f, descripcion: x.target.value }))} style={{ ...inp, width: 130 }} /></td>
                   <td><input type="text" inputMode="decimal" value={formEdit.kg} onChange={x => setFormEdit(f => ({ ...f, kg: x.target.value }))} style={{ ...inp, width: 70, borderColor: 'var(--gold)' }} /></td>
-                  <td><input type="text" inputMode="decimal" value={formEdit.precioKg} onChange={x => setFormEdit(f => ({ ...f, precioKg: x.target.value }))} style={{ ...inp, width: 90 }} /></td>
+                  {/* Por kg (media res, capón, piezas) se edita el $/kg y el
+                      importe se recalcula. El resto lleva importe total: si
+                      acá se mostrara el $/kg (que es 0), guardar dejaría la
+                      entrada — y la compra del proveedor — en $0. */}
+                  <td>
+                    {TIPOS_COMPRA_POR_KG.has(e.tipo) ? (
+                      <input type="text" inputMode="decimal" placeholder="$/kg" value={formEdit.precioKg}
+                        onChange={x => setFormEdit(f => ({ ...f, precioKg: x.target.value }))} style={{ ...inp, width: 90 }} />
+                    ) : (
+                      <input type="text" inputMode="decimal" placeholder="$ total" value={formEdit.importe}
+                        onChange={x => setFormEdit(f => ({ ...f, importe: x.target.value }))} style={{ ...inp, width: 90 }} />
+                    )}
+                  </td>
                   <td>
                     <div style={{ display: 'flex', gap: 4 }}>
                       <button onClick={() => guardarEdicion(e)} style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>💾</button>
