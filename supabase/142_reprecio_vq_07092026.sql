@@ -157,3 +157,19 @@ from (
 where c.id = t.cliente_id;
 
 commit;
+
+-- ── AÑADIDO · el desposte a kilo de MR-479 ──────────────────
+-- MR-479 se despostó "a kilo" el 07/09 y el desposte congela el costo del
+-- kilo neto (precio_kg / (1 - merma)) dentro de despostes.piezas. Con el
+-- precio viejo daba $13.968/kg; con $9.750 de costo y 27,69% de merma da
+-- $13.484/kg. Es el número que Reportes usa para costear "Bovino cortes
+-- por kilo", así que también hay que bajarlo.
+update despostes d
+set piezas = (
+  select jsonb_agg(
+    case when p ? 'precio_costo_kg'
+         then p || jsonb_build_object('precio_costo_kg', round(9750 / (1 - d.merma_pct/100)))
+         else p end order by ord)
+  from jsonb_array_elements(d.piezas) with ordinality as t(p, ord)
+)
+where d.entrada_id = '922d398c-cf0c-47fb-8d6d-a807ab41376a';
