@@ -37,6 +37,10 @@ const ACUSE_PAGO = '¡Gracias! 🙌 Ya le aviso al equipo para que verifique tu 
 // alias y un CBU que no existen). Respuesta fija + aviso al equipo.
 const ACUSE_DATOS_BANCARIOS = '¡Ya le consulto al equipo a qué alias te conviene transferir y te lo pasamos a la brevedad! 🙌'
 
+// Carnicerías / reventa → Iris no da NINGÚN precio: las atiende el equipo en
+// persona desde el número mayorista (Fabricio 08/09).
+const ACUSE_CARNICERIA = '¡Gracias por escribirnos! 🥩 A las carnicerías las atendemos directo desde nuestro número mayorista: *3861431971*. Escribiles por ahí y te pasan la lista y las condiciones. ¡Gracias!'
+
 // Pedido de LA LISTA de precios → IRIS no la manda ella (los precios cambian
 // y son 3 listas distintas): avisa que lo consulta con el equipo y escala, así
 // Fabricio le pasa la lista que corresponde (Fabricio 07/09).
@@ -52,8 +56,9 @@ const PRESENTACION = `¡Hola! Me llamo Iris, soy asistente de IA 🤖. ¿En qué
 const PROMPT_BASE = `Sos IRIS, la asistente de Carnicerías Fabricius (Río Primero, Córdoba), atendiendo el WhatsApp del negocio. Sos MUJER, cálida, simpática y profesional. Es un chat de WhatsApp: respondé BREVE (1-3 frases), en español argentino, sin tecnicismos, con alguna emoji si pinta 🥩.
 
 REGLAS (modo "auto con barreras"):
-- PRECIOS — PREGUNTÁ PRIMERO EL TIPO DE CLIENTE: hay 3 listas (Minorista, Gastronómico, Carnicero). Si el cliente pregunta por precios y todavía NO sabés qué tipo es (ni vos lo preguntaste antes en este chat), preguntáselo amablemente: "¿Sos cliente minorista, gastronómico o carnicero? Así te paso la lista que te corresponde 🥩". Una vez que sabés el tipo, usá SOLO ese precio de cada producto en "DATOS DEL NEGOCIO": Minorista→precio Minorista, Gastronómico→precio Gastronómico, Carnicero→precio Carnicero. NUNCA mezcles listas, NUNCA le muestres las tres, NUNCA inventes un precio.
-- CLIENTE NUEVO QUE QUIERE COMPRAR AL POR MAYOR — ¡CAPTALO COMO UNA VENDEDORA PRO! Las listas Gastronómico y Carnicero son las mayoristas. Si alguien pregunta por precios mayoristas o dice que quiere EMPEZAR a comprarnos para su negocio (parrilla, restó, rotisería, carnicería, kiosco, almacén, etc.) y NO aparece como cliente conocido en el historial → es un cliente NUEVO potencial, una oportunidad de oro. Atendelo así: (1) Bienvenida con entusiasmo genuino ("¡Qué bueno que nos escribas! 🥩"). (2) Averiguá su rubro para pasarle la lista correcta (gastronómico o carnicero) y pasale esos precios. (3) Sumá valor en una frase: por qué conviene trabajar con nosotros (carne fresca, calidad, precios mayoristas, atención directa, y que coordinamos entrega o retiro). (4) Mostrá interés real: preguntá qué productos y qué volumen aproximado maneja, para asesorarlo mejor. (5) Con naturalidad pedile el nombre y la zona/negocio así el equipo lo contacta para coordinar la primera compra, y marcá escalar=true para avisar al dueño. NO interrogues ni seas insistente: una o dos preguntas por mensaje, siempre aportando algo. El objetivo es que se vaya con ganas de comprarnos y con el contacto ya iniciado. (No marques es_pedido salvo que pida productos concretos; esto es captación, no un pedido todavía.)
+- PRECIOS — PREGUNTÁ PRIMERO EL TIPO DE CLIENTE: vos manejás DOS listas, Minorista y Gastronómico (mayorista). Si el cliente pregunta por precios y todavía NO sabés qué tipo es (ni vos lo preguntaste antes en este chat), preguntáselo amablemente: "¿Sos cliente minorista, gastronómico o carnicero? Así te paso la lista que te corresponde 🥩". Una vez que sabés el tipo: Minorista→precio Minorista, Gastronómico→precio Gastronómico. NUNCA mezcles listas, NUNCA le muestres las dos juntas, NUNCA inventes un precio.
+- CARNICERÍAS Y REVENTA — NO LES DES NINGÚN PRECIO, DERIVALAS: si el cliente dice que es carnicero, que tiene una carnicería, o que compra para revender, NO le pases precios de NINGUNA lista (ni la minorista ni la gastronómica). A esos clientes los atiende el equipo en persona desde el número mayorista. Respondé en este espíritu: "¡Gracias por escribirnos! 🥩 A las carnicerías las atendemos directo desde nuestro número mayorista: *3861431971*. Escribiles por ahí y te pasan la lista y las condiciones." y marcá escalar=true (así el equipo sabe que se contactó una carnicería). No importa si insiste: los precios para carnicería no los tenés y no se pasan por acá. Esto vale también para un precio suelto ("¿cuánto está la nalga?"): si ya sabés que es carnicería, derivá.
+- CLIENTE NUEVO QUE QUIERE COMPRAR AL POR MAYOR — ¡CAPTALO COMO UNA VENDEDORA PRO! Esto es para GASTRONÓMICOS (parrilla, restó, rotisería, hotel, catering); las carnicerías van derivadas al número mayorista, ver la regla de arriba. Si alguien pregunta por precios mayoristas o dice que quiere EMPEZAR a comprarnos para su negocio (parrilla, restó, rotisería, carnicería, kiosco, almacén, etc.) y NO aparece como cliente conocido en el historial → es un cliente NUEVO potencial, una oportunidad de oro. Atendelo así: (1) Bienvenida con entusiasmo genuino ("¡Qué bueno que nos escribas! 🥩"). (2) Averiguá su rubro: si es gastronómico pasale la lista gastronómica; si es carnicería, derivalo al 3861431971 sin dar precios. (3) Sumá valor en una frase: por qué conviene trabajar con nosotros (carne fresca, calidad, precios mayoristas, atención directa, y que coordinamos entrega o retiro). (4) Mostrá interés real: preguntá qué productos y qué volumen aproximado maneja, para asesorarlo mejor. (5) Con naturalidad pedile el nombre y la zona/negocio así el equipo lo contacta para coordinar la primera compra, y marcá escalar=true para avisar al dueño. NO interrogues ni seas insistente: una o dos preguntas por mensaje, siempre aportando algo. El objetivo es que se vaya con ganas de comprarnos y con el contacto ya iniciado. (No marques es_pedido salvo que pida productos concretos; esto es captación, no un pedido todavía.)
 - LA LISTA COMPLETA NO LA PASÁS VOS: si te piden la lista de precios entera ("pasame la lista", "quiero recibir la lista"), NO la tipees ni la inventes: decile que ya se lo consultás al equipo y que en un ratito se la pasan, y marcá escalar=true. Un precio PUNTUAL ("cuánto está la bondiola") sí lo respondés normal.
 - CUANDO NO PODÉS RESOLVER ALGO, NUNCA LO DEJES EN EL AIRE: respondé siempre en el espíritu de "ya lo consulto con mi equipo y te respondo en un ratito" y marcá escalar=true. Nunca dejes la pregunta sin contestar, nunca prometas algo que no podés cumplir, y nunca digas que ya se lo pasaste a alguien sin marcar escalar=true (si lo prometés, el equipo tiene que enterarse).
 - PRECIO QUE NO ESTÁ: si te piden un producto que NO figura en la lista, o que no tiene precio cargado para la lista del cliente → NO inventes. Decile que lo consultás con el equipo y que en un ratito te confirman, y marcá escalar=true (así avisamos al equipo para seguir la conversación). Lo mismo si te piden algo que no sabés responder.
@@ -107,7 +112,8 @@ Cuando el cliente pregunte por combos o bolsones, pasale los que apliquen con su
 const OFERTAS = `=== OFERTAS DE LA SEMANA (placas que cambian cada semana) ===
 Aparte de los combos, cada semana hay placas de OFERTAS con precios especiales. Esos precios CAMBIAN seguido: NO te los sabés de memoria y NUNCA los inventes — están en la imagen. Hay dos placas: OFERTAS MAYORISTAS y OFERTAS SEMANALES (minorista).
 Cuando el cliente pregunte por ofertas, promociones o precios especiales de la semana, poné el campo enviar_ofertas según quién es:
-- mayorista, gastronómico o carnicero → enviar_ofertas="may"
+- mayorista o gastronómico (parrilla, restó, rotisería) → enviar_ofertas="may"
+- carnicería / reventa → NO le mandes ninguna placa: derivala al número mayorista *3861431971* (la placa mayorista lleva precios y a las carnicerías las atiende el equipo en persona)
 - minorista / cliente de mostrador → enviar_ofertas="min"
 - si todavía no sabés qué tipo de cliente es → preguntáselo primero; si igual insiste, poné enviar_ofertas="ambas"
 El sistema le manda la(s) placa(s) con los precios; tu texto va corto (ej "¡Sí! Te paso las ofertas de esta semana 🥩"). Aclará que las ofertas MAYORISTAS son únicamente en efectivo/transferencia y se despachan en la Casa Central (Av. Mitre 670). No mezcles OFERTAS (placas semanales) con COMBOS (bolsones armados): si pide combos → enviar_combos; si pide ofertas → enviar_ofertas.`
@@ -275,6 +281,20 @@ export default async function handler(req, res) {
       return res.status(200).end()
     }
 
+    // Se presenta como carnicería / reventa → derivar al número mayorista sin
+    // dar un solo precio. Va ANTES del pedido de lista: un "soy carnicero,
+    // pasame la lista" tiene que caer acá, no en el acuse de la lista.
+    if (esCarniceria(texto)) {
+      await enviarWhatsApp(phoneId, from, ACUSE_CARNICERIA)
+      await guardarMensaje(from, 'out', 'iris', 'text', ACUSE_CARNICERIA)
+      await avisarEquipo(phoneId, req.headers.host, {
+        titulo: '🔪 Escribió una carnicería (WhatsApp)',
+        motivo: 'Dijo que es carnicería/reventa — derivada al número mayorista',
+        telefono: from, nombreContacto, mensaje: texto,
+      })
+      return res.status(200).end()
+    }
+
     // Piden LA LISTA de precios → IRIS no la manda (hay 3 listas y los precios
     // cambian): acusa recibo y el pedido le llega a Fabricio para que la pase
     // él. Va como corto circuito y no como instrucción del prompt, así el aviso
@@ -434,6 +454,22 @@ function pideDatosBancarios(texto) {
     || /\balias\b/.test(t)
     || /(datos|cuenta|numero)\w*.{0,25}(transfer|deposit|pagar|pago|mandar\w*.{0,10}plata|enviar\w*.{0,10}plata)/.test(t)
     || /(a\s*donde|adonde|a\s*que\s*cuenta).{0,20}(transfier|transfiero|deposito|te\s*mando)/.test(t)
+}
+
+// Detecta que el cliente DECLARA ser carnicería o comprar para revender.
+// Es a propósito estrecho: solo cuando habla de SÍ MISMO ("soy carnicero",
+// "tengo una carnicería") o cuando la respuesta entera es "carnicero" (que es
+// justo lo que contesta cuando Iris le pregunta el tipo de cliente). Un
+// "en la carnicería de la esquina" NO cuenta: derivar a un minorista por
+// nombrar la palabra sería peor que no derivar.
+function esCarniceria(texto) {
+  const t = String(texto || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
+  const solo = t.replace(/[.!¡?¿,;:🥩\s]+/g, ' ').trim()
+  if (/^(soy|somos|tengo|tenemos)?\s*(un|una)?\s*(carnicer[oa]s?|carniceri[ao]s?)$/.test(solo)) return true
+  return /\b(soy|somos|tengo|tenemos|abri|abrimos)\s+(un[ao]?\s+)?(carnicer[oa]|carniceria)/.test(t)
+    || /\b(para|de|en)\s+mi\s+(carniceria|negocio de carne)/.test(t)
+    || /\bmi\s+carniceria\b/.test(t)
+    || /\b(para|de)\s+(revender|reventa)\b/.test(t)
 }
 
 // Detecta que el cliente pide LA LISTA de precios (la lista entera, no un
@@ -624,7 +660,11 @@ async function traerDatosNegocio() {
   try {
     const inCats = `(${CATEGORIAS_PUBLICAS.join(',')})`
     const [precios, stock] = await Promise.all([
-      sbGet(`precios?select=nombre,categoria,precio_minorista,precio_mayorista,precio_carniceria&categoria=in.${inCats}&order=categoria,nombre`, sbHeaders()),
+      // OJO: precio_carniceria NO se trae a propósito (Fabricio 08/09). A las
+      // carnicerías las atiende él en persona desde el número mayorista, así
+      // que Iris no tiene que poder decir esos precios ni por error: la única
+      // garantía de verdad es que nunca los tenga a mano.
+      sbGet(`precios?select=nombre,categoria,precio_minorista,precio_mayorista&categoria=in.${inCats}&order=categoria,nombre`, sbHeaders()),
       sbGet('stock_actual?select=tipo,kg_disponible', sbHeaders()),
     ])
     const listaPrecios = (precios || [])
@@ -633,7 +673,6 @@ async function traerDatosNegocio() {
         const partes = []
         if (Number(p.precio_minorista) > 0) partes.push(`Minorista ${formatearPesos(p.precio_minorista)}`)
         if (Number(p.precio_mayorista) > 0) partes.push(`Gastronómico ${formatearPesos(p.precio_mayorista)}`)
-        if (Number(p.precio_carniceria) > 0) partes.push(`Carnicero ${formatearPesos(p.precio_carniceria)}`)
         if (!partes.length) return null
         return `- ${p.nombre.trim()}: ${partes.join(' · ')}`
       })
@@ -642,7 +681,7 @@ async function traerDatosNegocio() {
       .filter(s => Number(s.kg_disponible) > 0)
       .map(s => `- ${s.tipo}: ${Math.round(Number(s.kg_disponible))} kg`).join('\n')
     let out = ''
-    if (listaPrecios) out += `PRECIOS POR LISTA (por kg salvo que el nombre diga lo contrario). Cada producto trae su precio en las 3 listas — usá SOLO la que corresponde al tipo de cliente:\n${listaPrecios}\n`
+    if (listaPrecios) out += `PRECIOS POR LISTA (por kg salvo que el nombre diga lo contrario). Cada producto trae su precio en las DOS listas que podés usar — usá SOLO la que corresponde al tipo de cliente. La lista de CARNICERO no está acá y no la tenés: a las carnicerías se las deriva al número mayorista:\n${listaPrecios}\n`
     if (lineasStock) out += `\nSTOCK ORIENTATIVO disponible hoy:\n${lineasStock}\n`
     return out
   } catch (e) { console.error('traerDatosNegocio error', e); return '' }
