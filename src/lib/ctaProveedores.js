@@ -199,3 +199,62 @@ export async function registrarCompraDesdeEntrada({ proveedorNombre, fecha, impo
   })
   return { creado: true }
 }
+
+// Sincroniza el movimiento de COMPRA (debe) de una entrada al depósito cuando
+// esa entrada se EDITA (cambió el importe, la fecha, el proveedor o la
+// descripción).
+//
+// Sin esto la corrección quedaba SOLO en entradas_deposito y la cuenta
+// corriente seguía con el número viejo. Bug real del 07/09/2026: una media res
+// (MR-486) se cargó a $101/kg, se corrigió a $10.100 desde Ingresos, y en la
+// cuenta de EMANUEL SARAVIA quedó por $10.847 en lugar de $1.084.740 — casi
+// $1.074.000 de deuda subdeclarada en una sola línea.
+//
+// Casos que contempla:
+//   - la entrada NO tenía movimiento (proveedor sin cta cte al cargarla, o
+//     importe 0): se crea ahora si corresponde
+//   - cambió el PROVEEDOR de la entrada: se anula el movimiento en la cuenta
+//     vieja y se crea en la nueva
+//   - duplicados (más de un movimiento vigente para la misma entrada): se
+//     corrige el primero y se anulan los sobrantes, que nunca debieron existir
+export async function actualizarCompraDesdeEntrada({ entradaId, proveedorNombre, fecha, importe, descripcion }) {
+  if (!entradaId) return { actualizado: false }
+  const { data: movs } = await supabase
+    .from('movimientos_proveedores')
+    .select('id, proveedor_id, anulado')
+    .eq('entrada_id', entradaId)
+    .order('id', { ascending: true })
+  const vigentes = (movs || []).filter(m => !m.anulado)
+
+  // ¿A qué proveedor corresponde AHORA la entrada?
+  const { data: prov } = proveedorNombre
+    ? await supabase.from('proveedores').select('id, nombre').ilike('nombre', proveedorNombre).maybeSingle()
+    : { data: null }
+
+  // Se le cambió el proveedor a la entrada: la compra tiene que salir de la
+  // cuenta vieja y entrar en la nueva (no alcanza con pisar el nombre).
+  if (vigentes.length > 0 && prov && vigentes.some(m => m.proveedor_id !== prov.id)) {
+    await revertirCompraDeEntrada(entradaId)
+    return await registrarCompraDesdeEntrada({ proveedorNombre, fecha, importe, descripcion, entradaId })
+  }
+
+  if (vigentes.length === 0) {
+    return await registrarCompraDesdeEntrada({ proveedorNombre, fecha, importe, descripcion, entradaId })
+  }
+
+  const [principal, ...sobrantes] = vigentes
+  await supabase.from('movimientos_proveedores').update({
+    fecha,
+    debe: Number(importe) || 0,
+    descripcion: descripcion || 'Compra',
+    proveedor_nombre: prov?.nombre || proveedorNombre || null,
+  }).eq('id', principal.id)
+  for (const m of sobrantes) {
+    await supabase.from('movimientos_proveedores')
+      .update({ anulado: true, anulado_por: 'sistema (duplicado de la misma entrada)', anulado_en: new Date().toISOString() })
+      .eq('id', m.id)
+  }
+  const provIds = new Set(vigentes.map(m => m.proveedor_id).filter(Boolean))
+  for (const pid of provIds) await recalcularSaldo(pid)
+  return { actualizado: true }
+}

@@ -31,7 +31,7 @@ mergean a `main` se deployan solos a Vercel.
 ## Modelo de datos — conceptos clave
 
 ### Compras a proveedores: 3 tablas paralelas
-Una compra vive en `entradas_deposito` (stock) + `movimientos_proveedores` (cta cte, debe/haber) + `compras_proveedores` (dashboard "comprado esta semana"). Linkean por `entrada_id`. Corregir un importe exige tocar las TRES.
+Una compra vive en `entradas_deposito` (stock) + `movimientos_proveedores` (cta cte, debe/haber) + `compras_proveedores` (dashboard "comprado esta semana"). Linkean por `entrada_id`. Corregir un importe exige tocar las TRES (+ la ficha individual en `medias_stock`/`piezas_stock` si es media res o pieza): editar el ingreso desde Depósito ya lo hace solo (`sincronizarCompraDeEntrada` + `actualizarCompraDesdeEntrada`), pero cualquier corrección por SQL tiene que replicarlas a mano o el dashboard y la cta cte del proveedor quedan con el número viejo.
 - Entradas con `destino='desposte'` o `'elaboracion'` son **internas** (importe 0, mercadería ya comprada que se transforma) — nunca contarlas como compras.
 - Compras cargadas a mano desde el legajo viven solo en `movimientos_proveedores` con `entrada_id IS NULL`.
 - Movimientos con `anulado=true` no suman.
