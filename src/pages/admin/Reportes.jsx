@@ -19,6 +19,7 @@ import { supabase, fetchAllRows } from '../../lib/supabase'
 import { fmtPrecio, fmtKg } from '../../lib/formatos'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
 import { totalesConceptos, fechaImputacionConcepto } from '../../lib/cierreAuto'
+import { KPI, Bloque, Tabla, Nota } from '../../components/ui'
 
 const fmt = n => fmtPrecio(Number(n) || 0)
 const fmtK = n => fmtKg(Number(n) || 0)
@@ -356,14 +357,14 @@ export function ReporteCajas({ periodo }) {
   return (
     <>
       {/* KPIs principales */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>
+      <div className="fx-kpis">
         <KPI label="📦 TOTAL DISPONIBLES" valor={stats.cantTotal} sub={`${fmtK(stats.kgTotal)} en stock`} color="var(--gold)" />
         <KPI label="🐄 CAJAS CB" valor={stats.cantCB} sub={`${fmtK(stats.kgCB)} · prom ${fmtK(stats.promCB)}`} color="#7db5ff" />
         <KPI label="🥩 CAJAS PT" valor={stats.cantPT} sub={`${fmtK(stats.kgPT)} · prom ${fmtK(stats.promPT)}`} color="#ffd17a" />
         <KPI label={stats.sinAsignar > 0 ? '⚠️ SIN PRODUCTO' : '✅ TODAS ASIGNADAS'}
              valor={stats.sinAsignar}
              sub={stats.sinAsignar > 0 ? 'Asignalas en Depósito > Cajas' : 'Todo en orden'}
-             color={stats.sinAsignar > 0 ? '#ff8b8b' : '#7dff7d'} />
+             tono={stats.sinAsignar > 0 ? 'mal' : 'bien'} />
       </div>
 
       {/* Alertas */}
@@ -549,7 +550,7 @@ export function ReporteMargen({ data }) {
   return (
     <>
       {/* KPIs totales del período */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 16 }}>
+      <div className="fx-kpis">
         <KPI label="🛒 COMPRAS"
              valor={fmt(totales.comprasMonto)}
              sub={`${fmtK(totales.comprasKg)} comprados`}
@@ -557,65 +558,61 @@ export function ReporteMargen({ data }) {
         <KPI label="💵 VENTAS"
              valor={fmt(totales.ventasMonto)}
              sub={`${fmtK(totales.ventasKg)} vendidos`}
-             color="var(--gold)" />
+             tono="oro" />
         <KPI label="📈 GANANCIA BRUTA"
              valor={fmt(totales.ventasMonto - totales.comprasMonto)}
              sub={`${fmtPct(totales.margen)} sobre ventas`}
-             color={totales.margen >= 0 ? '#7dff7d' : '#ff8b8b'} />
+             tono={totales.margen >= 0 ? 'bien' : 'mal'} />
         <KPI label="🎯 MARKUP SOBRE COSTO"
              valor={fmtPct(totales.margenSobreCosto)}
              sub="(Venta − Costo) / Costo"
-             color={totales.margenSobreCosto >= 0 ? '#7dff7d' : '#ff8b8b'} />
+             tono={totales.margenSobreCosto >= 0 ? 'bien' : 'mal'} />
       </div>
 
-      {/* Tabla semanal */}
-      <div className="card">
-        <div className="card-title">📅 Desglose semanal</div>
-        <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: -8, marginBottom: 10 }}>
+      {/* Tabla semanal — primera pantalla armada con las piezas comunes
+          (components/ui.jsx). Los importes van en monoespaciada tabular:
+          la coma decimal cae siempre en la misma columna. */}
+      <Bloque titulo="📅 Desglose semanal">
+        <Tabla
+          filas={semanas}
+          vacio="Sin datos en el período."
+          cols={[
+            { k: 'semana', label: 'Semana', render: w => (
+              <b>{w.semanaIni} → {w.semanaFin}</b>
+            ) },
+            { k: 'comprasMonto', label: 'Compras $', num: true, render: w => (
+              <span style={{ color: '#ff8b8b' }}>{fmt(w.comprasMonto)}</span>
+            ) },
+            { k: 'comprasKg', label: 'Compras kg', num: true, render: w => (
+              <span style={{ color: 'var(--muted)' }}>{fmtK(w.comprasKg)}</span>
+            ) },
+            { k: 'ventasMonto', label: 'Ventas $', num: true, render: w => (
+              <b style={{ color: 'var(--gold)' }}>{fmt(w.ventasMonto)}</b>
+            ) },
+            { k: 'ventasKg', label: 'Ventas kg', num: true, render: w => (
+              <span style={{ color: 'var(--muted)' }}>{fmtK(w.ventasKg)}</span>
+            ) },
+            { k: 'ganancia', label: 'Ganancia $', num: true, render: w => {
+              const g = w.ventasMonto - w.comprasMonto
+              return <b style={{ color: g >= 0 ? '#7dff7d' : '#ff8b8b' }}>{fmt(g)}</b>
+            } },
+            { k: 'pctVenta', label: '% s/venta', num: true, render: w => {
+              const g = w.ventasMonto - w.comprasMonto
+              const v = w.ventasMonto > 0 ? (g / w.ventasMonto) * 100 : 0
+              return <span style={{ color: g >= 0 ? '#7dff7d' : '#ff8b8b' }}>{fmtPct(v)}</span>
+            } },
+            { k: 'pctCosto', label: '% s/costo', num: true, render: w => {
+              const g = w.ventasMonto - w.comprasMonto
+              const v = w.comprasMonto > 0 ? (g / w.comprasMonto) * 100 : 0
+              return <span style={{ color: g >= 0 ? '#7dff7d' : '#ff8b8b' }}>{fmtPct(v)}</span>
+            } },
+          ]}
+        />
+        <Nota>
           ⚠️ Las compras y ventas de una misma semana NO son del mismo lote (algo comprado hace 2 semanas
           se vende esta semana). El % es referencial — sirve para ver tendencia, no es el margen real por producto.
-        </p>
-        {semanas.length === 0 ? (
-          <p style={{ color: 'var(--muted)', fontSize: 13 }}>Sin datos en el período.</p>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', fontSize: 12, minWidth: 720 }}>
-              <thead>
-                <tr>
-                  <th style={{ textAlign: 'left' }}>Semana</th>
-                  <th style={{ textAlign: 'right', color: '#ff8b8b' }}>Compras $</th>
-                  <th style={{ textAlign: 'right', color: '#ff8b8b' }}>Compras kg</th>
-                  <th style={{ textAlign: 'right', color: 'var(--gold)' }}>Ventas $</th>
-                  <th style={{ textAlign: 'right', color: 'var(--gold)' }}>Ventas kg</th>
-                  <th style={{ textAlign: 'right' }}>Ganancia $</th>
-                  <th style={{ textAlign: 'right' }}>% s/venta</th>
-                  <th style={{ textAlign: 'right' }}>% s/costo</th>
-                </tr>
-              </thead>
-              <tbody>
-                {semanas.map(s => {
-                  const ganancia = s.ventasMonto - s.comprasMonto
-                  const pctVenta = s.ventasMonto > 0 ? (ganancia / s.ventasMonto) * 100 : 0
-                  const pctCosto = s.comprasMonto > 0 ? (ganancia / s.comprasMonto) * 100 : 0
-                  const colorG = ganancia >= 0 ? '#7dff7d' : '#ff8b8b'
-                  return (
-                    <tr key={s.semanaIni} style={{ borderTop: '1px solid var(--border)' }}>
-                      <td style={{ padding: '6px 4px', fontWeight: 600 }}>{s.semanaIni} → {s.semanaFin}</td>
-                      <td style={{ padding: '6px 4px', textAlign: 'right', color: '#ff8b8b' }}>{fmt(s.comprasMonto)}</td>
-                      <td style={{ padding: '6px 4px', textAlign: 'right', color: 'var(--muted)' }}>{fmtK(s.comprasKg)}</td>
-                      <td style={{ padding: '6px 4px', textAlign: 'right', color: 'var(--gold)', fontWeight: 700 }}>{fmt(s.ventasMonto)}</td>
-                      <td style={{ padding: '6px 4px', textAlign: 'right', color: 'var(--muted)' }}>{fmtK(s.ventasKg)}</td>
-                      <td style={{ padding: '6px 4px', textAlign: 'right', color: colorG, fontWeight: 700 }}>{fmt(ganancia)}</td>
-                      <td style={{ padding: '6px 4px', textAlign: 'right', color: colorG }}>{fmtPct(pctVenta)}</td>
-                      <td style={{ padding: '6px 4px', textAlign: 'right', color: colorG }}>{fmtPct(pctCosto)}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+        </Nota>
+      </Bloque>
 
       {/* Comparativa kg comprados vs vendidos por categoría */}
       <ComparativaKgCategoria data={data} />
@@ -724,7 +721,7 @@ export function ReporteCliente({ data }) {
 
   return (
     <>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 16 }}>
+      <div className="fx-kpis">
         <KPI label="👥 CLIENTES MAYORISTAS ACTIVOS" valor={ranking.length} sub={`En el período`} color="var(--gold)" />
         <KPI label="💰 FACTURADO MAYORISTA" valor={fmt(totalMayorista)} sub={`Total clientes`} color="#7a9dff" />
         <KPI label="🏪 FACTURADO CAJA (sin cliente)" valor={fmt(totalCaja)} sub={`Venta minorista directa`} color="#7dff7d" />
@@ -1236,7 +1233,7 @@ export function ReporteFlujo({ data }) {
 
   return (
     <>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginBottom: 16 }}>
+      <div className="fx-kpis">
         <KPI label="💰 INGRESOS"
              valor={fmt(ingresos.total)}
              sub={`Caja ${fmt(ingresos.caja)} · Cobranzas ${fmt(ingresos.cobranzasCtacte)}`}
@@ -1248,7 +1245,7 @@ export function ReporteFlujo({ data }) {
         <KPI label={saldoNeto >= 0 ? '✅ SALDO NETO' : '⚠️ SALDO NETO'}
              valor={fmt(saldoNeto)}
              sub={saldoNeto >= 0 ? 'Período en positivo' : 'Período en negativo'}
-             color={saldoNeto >= 0 ? '#7dff7d' : '#ff8b8b'} />
+             tono={saldoNeto >= 0 ? 'bien' : 'mal'} />
       </div>
 
       {/* Facturación vs cobranzas */}
@@ -1400,7 +1397,7 @@ export function ReporteGastos({ data }) {
 
   return (
     <>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 16 }}>
+      <div className="fx-kpis">
         <KPI label="💸 GASTOS TOTAL"  valor={fmt(totales.total)}    sub={`${fmtPct(totales.pctTotal)} sobre facturación`} color="#ff8b8b" />
         <KPI label="🧾 FIJOS"         valor={fmt(totales.fijos)}     sub="Alquileres, servicios, etc." color="#ffd17a" />
         <KPI label="📦 VARIABLES"     valor={fmt(totales.variables)} sub="Gastos no recurrentes" color="#7a9dff" />
@@ -1558,13 +1555,13 @@ export function ReporteInteranual() {
 
   return (
     <>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 16 }}>
+      <div className="fx-kpis">
         <KPI label={`${mesesData.anioActual} (acum)`}   valor={fmt(totalEste)} sub={`Año en curso`} color="var(--gold)" />
         <KPI label={`${mesesData.anioAnterior} (acum)`} valor={fmt(totalAnt)}  sub={`Mismo período año pasado`} color="#7a9dff" />
         <KPI label="↗️ DIFERENCIA"
              valor={fmt(diffTotal)}
              sub={pctTotal !== 0 ? `${diffTotal >= 0 ? '+' : ''}${pctTotal.toFixed(1)}% vs año pasado` : 'Sin datos comparables'}
-             color={diffTotal >= 0 ? '#7dff7d' : '#ff8b8b'} />
+             tono={diffTotal >= 0 ? 'bien' : 'mal'} />
         {mesActFila && (
           <KPI label={`📅 ${mesActFila.nombre} ${mesesData.anioActual}`}
                valor={fmt(mesActFila.este)}
@@ -1686,10 +1683,10 @@ export function ReporteTemporal({ data }) {
 
   return (
     <>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginBottom: 16 }}>
-        <KPI label="🏆 MEJOR DÍA"     valor={mejorDia.dia} sub={fmt(mejorDia.total)} color="#7dff7d" />
-        <KPI label="📉 PEOR DÍA"      valor={peorDia.dia || '—'} sub={peorDia.total !== Infinity ? fmt(peorDia.total) : 'Sin datos'} color="#ff8b8b" />
-        <KPI label="⏰ HORA PICO"     valor={`${String(horaPico.hora).padStart(2, '0')}:00`} sub={fmt(horaPico.total)} color="var(--gold)" />
+      <div className="fx-kpis">
+        <KPI label="🏆 MEJOR DÍA"     valor={mejorDia.dia} sub={fmt(mejorDia.total)} tono="bien" />
+        <KPI label="📉 PEOR DÍA"      valor={peorDia.dia || '—'} sub={peorDia.total !== Infinity ? fmt(peorDia.total) : 'Sin datos'} tono="mal" />
+        <KPI label="⏰ HORA PICO"     valor={`${String(horaPico.hora).padStart(2, '0')}:00`} sub={fmt(horaPico.total)} tono="oro" />
       </div>
 
       <div className="card" style={{ marginBottom: 16 }}>
@@ -1740,15 +1737,7 @@ export function ReporteTemporal({ data }) {
 // ═══════════════════════════════════════════════════════════════
 // HELPERS
 // ═══════════════════════════════════════════════════════════════
-function KPI({ label, valor, sub, color }) {
-  return (
-    <div className="card" style={{ padding: 16 }}>
-      <div style={{ fontSize: 10, color: 'var(--muted)', letterSpacing: 1 }}>{label}</div>
-      <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 32, color: color || 'var(--gold)', lineHeight: 1.1 }}>{valor}</div>
-      {sub && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{sub}</div>}
-    </div>
-  )
-}
+// KPI vive ahora en components/ui.jsx — lo comparten todas las pantallas.
 
 function sumarVentasMonto(data) {
   return data.ventasCaja.reduce((s, v) => s + (Number(v.total) || 0), 0)

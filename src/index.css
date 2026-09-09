@@ -261,3 +261,226 @@ tr:hover td { background: var(--surface2); }
   .stat-value { font-size: 18px; }
   .page-title { font-size: 22px; }
 }
+
+/* ================================================================
+   PIEZAS COMUNES (src/components/ui.jsx)
+   ================================================================
+   El molde que van a compartir las pantallas. Todo con prefijo `fx-`
+   para no pisar ni una clase de arriba: mientras una pantalla no
+   importe ui.jsx, nada de esto la toca.
+
+   Los colores son los mismos de siempre (--gold, --green, --amber,
+   --red). Lo único nuevo es la monoespaciada de los números: la coma
+   decimal cae siempre en el mismo lugar y una columna de importes se
+   lee sin contar dígitos.
+   ================================================================ */
+
+/* Números: IBM Plex Mono con cifras de ancho fijo */
+.fx-kpi-valor,
+.fx-tabla td.num,
+.fx-dato {
+  font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Encabezado de módulo ── */
+.fx-pagina-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.fx-pagina-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 13px;
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  flex: none;
+  background: linear-gradient(140deg, var(--gold), var(--gold-dark));
+  box-shadow: 0 12px 26px -14px rgba(201, 168, 76, 0.9);
+}
+.fx-pagina-txt h1 {
+  font-family: 'Bebas Neue', cursive;
+  font-size: 28px;
+  letter-spacing: 2px;
+  line-height: 1;
+}
+.fx-pagina-txt p {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 5px;
+  max-width: 70ch;
+  line-height: 1.5;
+}
+.fx-pagina-acc {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ── Números grandes ── */
+.fx-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.fx-kpi {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 15px;
+}
+.fx-kpi-label {
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.fx-kpi-valor {
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  font-weight: 500;
+  color: var(--gold);
+  line-height: 1.15;
+  margin-top: 7px;
+}
+.fx-kpi-sub {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+/* El tono pinta el borde y el número: se ve cómo viene antes de leerlo */
+.fx-kpi.oro  { border-color: var(--gold-dark); background: linear-gradient(160deg, rgba(201,168,76,0.10), var(--surface)); }
+.fx-kpi.bien { border-color: rgba(39, 174, 96, 0.55); }
+.fx-kpi.ojo  { border-color: rgba(230, 126, 34, 0.60); }
+.fx-kpi.mal  { border-color: rgba(192, 57, 43, 0.65); }
+.fx-kpi.bien .fx-kpi-valor { color: #7dff7d; }
+.fx-kpi.ojo  .fx-kpi-valor { color: #ffd17a; }
+.fx-kpi.mal  .fx-kpi-valor { color: #ff8b8b; }
+
+/* ── Bloques ── */
+.fx-bloque {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.fx-bloque-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.fx-bloque-head h2 {
+  font-family: 'Bebas Neue', cursive;
+  font-size: 18px;
+  letter-spacing: 1.5px;
+  font-weight: 400;
+}
+.fx-bloque-extra {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* ── Tablas ── */
+.fx-tabla-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.fx-tabla {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.fx-tabla th {
+  text-align: left;
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 0 9px 9px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.fx-tabla td {
+  padding: 10px 9px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.fx-tabla th.num,
+.fx-tabla td.num { text-align: right; }
+.fx-tabla td.num { white-space: nowrap; }
+.fx-tabla tr:last-child td { border-bottom: none; }
+.fx-tabla tr.clic { cursor: pointer; }
+.fx-tabla tr.clic:hover td { background: var(--surface2); }
+
+.fx-vacio {
+  text-align: center;
+  padding: 28px 16px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* ── Estados ── */
+.fx-chip {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  border: 1px solid var(--border2);
+  color: var(--muted);
+  border-radius: 20px;
+  padding: 3px 9px;
+  white-space: nowrap;
+}
+.fx-chip.bien { color: #7dff7d; border-color: rgba(39, 174, 96, 0.6);  background: rgba(39, 174, 96, 0.12); }
+.fx-chip.ojo  { color: #ffd17a; border-color: rgba(230, 126, 34, 0.6); background: rgba(230, 126, 34, 0.12); }
+.fx-chip.mal  { color: #ff8b8b; border-color: rgba(192, 57, 43, 0.6);  background: rgba(192, 57, 43, 0.14); }
+.fx-chip.oro  { color: var(--gold); border-color: var(--gold-dark);    background: rgba(201, 168, 76, 0.13); }
+
+/* ── Barras de proporción ── */
+.fx-barra {
+  height: 8px;
+  border-radius: 20px;
+  background: var(--surface3);
+  overflow: hidden;
+  min-width: 60px;
+}
+.fx-barra-fill { height: 100%; border-radius: 20px; }
+.fx-barra-fill.oro  { background: linear-gradient(90deg, var(--gold-dark), var(--gold)); }
+.fx-barra-fill.bien { background: linear-gradient(90deg, #1e8449, #2ecc71); }
+.fx-barra-fill.ojo  { background: linear-gradient(90deg, #b9770e, #f5b041); }
+.fx-barra-fill.mal  { background: linear-gradient(90deg, #922b21, #e74c3c); }
+
+/* ── Nota al pie de un bloque ── */
+.fx-nota {
+  border-left: 2px solid var(--gold-dark);
+  padding: 2px 0 2px 12px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+@media (max-width: 768px) {
+  .fx-kpis { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .fx-kpi-valor { font-size: 20px; }
+  .fx-pagina-txt h1 { font-size: 24px; }
+  .fx-pagina-acc { margin-left: 0; }
+  .fx-bloque { padding: 14px; border-radius: 10px; }
+  .fx-tabla { min-width: 520px; }
+}
+@media (max-width: 480px) {
+  .fx-kpis { grid-template-columns: 1fr; }
+}
