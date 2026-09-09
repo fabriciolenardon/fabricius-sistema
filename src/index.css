@@ -211,7 +211,17 @@ tr:hover td { background: var(--surface2); }
   padding: 14px;
 }
 .stat-label { font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
-.stat-value { font-family: 'Bebas Neue', cursive; font-size: 24px; letter-spacing: 1px; }
+/* El número de una tarjeta de estadística. Va en monoespaciada tabular
+   (no en Bebas) porque son cifras que se comparan entre tarjetas: así la
+   coma decimal cae siempre en el mismo lugar. Un poco más chico que antes
+   porque la monoespaciada es más ancha que la condensada. */
+.stat-value {
+  font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 21px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
 .stat-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
 
 /* PAGE */
@@ -243,7 +253,7 @@ tr:hover td { background: var(--surface2); }
 
   /* Stat */
   .stat { padding: 12px; }
-  .stat-value { font-size: 20px; }
+  .stat-value { font-size: 18px; }
 
   /* Tables — siempre con scroll */
   table { min-width: 520px; }
@@ -258,7 +268,7 @@ tr:hover td { background: var(--surface2); }
 
 @media (max-width: 480px) {
   .grid2 { grid-template-columns: 1fr; }
-  .stat-value { font-size: 18px; }
+  .stat-value { font-size: 17px; }
   .page-title { font-size: 22px; }
 }
 

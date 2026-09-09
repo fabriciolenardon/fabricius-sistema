@@ -568,15 +568,15 @@ async function eliminarMovimiento(mov) {
                 <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
                   <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, textAlign: 'center' }}>
                     <div style={{ fontSize: 10, color: 'var(--muted)' }}>COMPRARON EN EL PERÍODO</div>
-                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 26, color: 'var(--amber)' }}>{fmt(tComprado)}</div>
+                    <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 21, color: 'var(--amber)' }}>{fmt(tComprado)}</div>
                   </div>
                   <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, textAlign: 'center' }}>
                     <div style={{ fontSize: 10, color: 'var(--muted)' }}>PAGARON EN EL PERÍODO</div>
-                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 26, color: 'var(--green)' }}>{fmt(tPagado)}</div>
+                    <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 21, color: 'var(--green)' }}>{fmt(tPagado)}</div>
                   </div>
                   <div style={{ background: 'rgba(255,107,107,0.08)', border: '1px solid var(--red-light)', borderRadius: 8, padding: 12, textAlign: 'center' }}>
                     <div style={{ fontSize: 10, color: 'var(--muted)' }}>POR COBRAR DEL PERÍODO</div>
-                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 30, color: 'var(--red-light)' }}>{fmt(tPendiente)}</div>
+                    <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 24, color: 'var(--red-light)' }}>{fmt(tPendiente)}</div>
                   </div>
                 </div>
 
@@ -920,16 +920,16 @@ async function eliminarMovimiento(mov) {
               <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
                 <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, textAlign: 'center' }}>
                   <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>SALDO</div>
-                  <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 24, color: seleccionado.saldo > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(seleccionado.saldo)}</div>
+                  <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 20, color: seleccionado.saldo > 0 ? 'var(--red-light)' : 'var(--green)' }}>{fmt(seleccionado.saldo)}</div>
                   <div style={{ fontSize: 10, color: 'var(--muted)' }}>{seleccionado.saldo > 0 ? 'DEBE' : seleccionado.saldo < 0 ? 'A FAVOR' : 'AL DÍA'}</div>
                 </div>
                 <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, textAlign: 'center' }}>
                   <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>TOTAL COMPRAS</div>
-                  <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 24, color: 'var(--amber)' }}>{fmt(movimientos.filter(m => m.debe > 0).reduce((s, m) => s + m.debe, 0))}</div>
+                  <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 20, color: 'var(--amber)' }}>{fmt(movimientos.filter(m => m.debe > 0).reduce((s, m) => s + m.debe, 0))}</div>
                 </div>
                 <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, textAlign: 'center' }}>
                   <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>TOTAL PAGADO</div>
-                  <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 24, color: 'var(--green)' }}>{fmt(movimientos.filter(m => m.haber > 0).reduce((s, m) => s + m.haber, 0))}</div>
+                  <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 20, color: 'var(--green)' }}>{fmt(movimientos.filter(m => m.haber > 0).reduce((s, m) => s + m.haber, 0))}</div>
                 </div>
               </div>
 
@@ -984,13 +984,13 @@ async function eliminarMovimiento(mov) {
                       }}>
                         <div>
                           <div style={{ fontSize: 10, color: 'var(--muted)' }}>VAS A REGISTRAR</div>
-                          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 28, color: importeParseado > 0 ? 'var(--green)' : 'var(--red-light)' }}>
+                          <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 23, color: importeParseado > 0 ? 'var(--green)' : 'var(--red-light)' }}>
                             {fmt(importeParseado)}
                           </div>
                         </div>
                         <div style={{ textAlign: 'right' }}>
                           <div style={{ fontSize: 10, color: 'var(--muted)' }}>SALDO DESPUÉS DEL PAGO</div>
-                          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: saldoDespues > 0 ? 'var(--red-light)' : 'var(--green)' }}>
+                          <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 18, color: saldoDespues > 0 ? 'var(--red-light)' : 'var(--green)' }}>
                             {fmt(saldoDespues)} {saldoDespues > 0 ? 'debe' : saldoDespues < 0 ? 'a favor' : '✅ al día'}
                           </div>
                         </div>
@@ -1053,7 +1053,7 @@ async function eliminarMovimiento(mov) {
             <div onClick={e => e.stopPropagation()} style={{ background: 'var(--surface)', border: `1px solid ${color}`, borderRadius: 16, padding: 20, maxWidth: 720, width: '100%', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
                 <div>
-                  <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 24, color, letterSpacing: 1 }}>
+                  <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 20, color, letterSpacing: 1 }}>
                     {esMora ? '🔴 En mora real — quién falta pagar' : '🔵 Por cobrar — semana pasada'}
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, lineHeight: 1.5 }}>
@@ -1124,7 +1124,7 @@ async function eliminarMovimiento(mov) {
           <div onClick={e => e.stopPropagation()} style={{ background: 'var(--surface)', border: '1px solid var(--gold)', borderRadius: 16, padding: 24, maxWidth: 520, width: '100%' }}>
             {modalPortal.tipo === 'habilitar' && (
               <>
-                <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 24, color: 'var(--gold)', letterSpacing: 1, marginBottom: 8 }}>📱 Habilitar portal — {modalPortal.cliente.nombre}</div>
+                <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 20, color: 'var(--gold)', letterSpacing: 1, marginBottom: 8 }}>📱 Habilitar portal — {modalPortal.cliente.nombre}</div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>
                   Ingresá un email para el cliente. El sistema generará una contraseña aleatoria que vas a poder copiar y pasarle por WhatsApp.
                 </div>
@@ -1148,7 +1148,7 @@ async function eliminarMovimiento(mov) {
 
             {modalPortal.tipo === 'credenciales' && (
               <>
-                <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 24, color: 'var(--green)', letterSpacing: 1, marginBottom: 8 }}>✅ Portal habilitado</div>
+                <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 20, color: 'var(--green)', letterSpacing: 1, marginBottom: 8 }}>✅ Portal habilitado</div>
                 <div style={{ fontSize: 13, marginBottom: 4 }}>Cliente: <strong>{modalPortal.cliente.nombre}</strong></div>
                 <div style={{ background: '#2a1a0a', border: '1px solid var(--gold)', borderRadius: 10, padding: 16, marginTop: 14, marginBottom: 14 }}>
                   <div style={{ fontSize: 11, color: 'var(--gold)', fontWeight: 700, marginBottom: 8 }}>⚠️ COPIÁ ESTOS DATOS AHORA — la contraseña no se vuelve a mostrar</div>
@@ -1186,7 +1186,7 @@ async function eliminarMovimiento(mov) {
 
             {modalPortal.tipo === 'compartir' && (
               <>
-                <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 24, color: 'var(--gold)', letterSpacing: 1, marginBottom: 8 }}>💬 Compartir acceso — {modalPortal.cliente.nombre}</div>
+                <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 20, color: 'var(--gold)', letterSpacing: 1, marginBottom: 8 }}>💬 Compartir acceso — {modalPortal.cliente.nombre}</div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
                   El portal ya está habilitado. Escribí la contraseña que le diste al cliente para armar el mensaje de WhatsApp con todos los datos.
                   <br /><br />
@@ -1226,7 +1226,7 @@ async function eliminarMovimiento(mov) {
 
             {modalPortal.tipo === 'revocar' && (
               <>
-                <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 24, color: 'var(--red-light)', letterSpacing: 1, marginBottom: 8 }}>❌ Revocar acceso</div>
+                <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 20, color: 'var(--red-light)', letterSpacing: 1, marginBottom: 8 }}>❌ Revocar acceso</div>
                 <div style={{ fontSize: 13, marginBottom: 16 }}>
                   Vas a revocar el acceso al portal de <strong>{modalPortal.cliente.nombre}</strong>. El cliente ya no podrá ingresar.
                   <br /><br />

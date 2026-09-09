@@ -764,11 +764,11 @@ export default function Precios() {
                             {p.enOferta && <span style={{ marginLeft: 8, background: '#4a8a2a', color: '#fff', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700 }}>🏷️ OFERTA</span>}
                           </td>
                           {filtro === 'insumos' ? (
-                            <td style={{ color: 'var(--gold)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_carniceria)}</td>
+                            <td style={{ color: 'var(--gold)', fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 14 }}>{fmt(p.precio_carniceria)}</td>
                           ) : (<>
-                            {!esSucursal && <td style={{ color: p.enOferta ? '#7dff7d' : 'var(--red-light)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_carniceria)}</td>}
-                            <td style={{ color: p.enOferta ? '#7dff7d' : 'var(--amber)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_mayorista)}</td>
-                            <td style={{ color: p.enOferta ? '#7dff7d' : 'var(--green)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_minorista)}</td>
+                            {!esSucursal && <td style={{ color: p.enOferta ? '#7dff7d' : 'var(--red-light)', fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 14 }}>{fmt(p.precio_carniceria)}</td>}
+                            <td style={{ color: p.enOferta ? '#7dff7d' : 'var(--amber)', fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 14 }}>{fmt(p.precio_mayorista)}</td>
+                            <td style={{ color: p.enOferta ? '#7dff7d' : 'var(--green)', fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 14 }}>{fmt(p.precio_minorista)}</td>
                           </>)}
                         </tr>
                       )
@@ -975,9 +975,9 @@ export default function Precios() {
                   <tr key={p.id}>
                     <td style={{ fontWeight: 500 }}>{p.nombre}</td>
                     <td>{p.codigo_balanza ? <span style={{ background: 'var(--gold)', color: '#000', padding: '2px 8px', borderRadius: 4, fontFamily: 'monospace', fontSize: 12, fontWeight: 700 }}>{p.codigo_balanza}</span> : <span style={{ color: 'var(--muted)', fontSize: 11 }}>—</span>}</td>
-                    {!esSucursal && <td style={{ color: 'var(--red-light)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_carniceria)}</td>}
-                    <td style={{ color: 'var(--amber)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_mayorista)}</td>
-                    <td style={{ color: 'var(--green)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(p.precio_minorista)}</td>
+                    {!esSucursal && <td style={{ color: 'var(--red-light)', fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 14 }}>{fmt(p.precio_carniceria)}</td>}
+                    <td style={{ color: 'var(--amber)', fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 14 }}>{fmt(p.precio_mayorista)}</td>
+                    <td style={{ color: 'var(--green)', fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 14 }}>{fmt(p.precio_minorista)}</td>
                     <td>
                       <div style={{ display: 'flex', gap: 6 }}>
                         <button onClick={() => editar(p)} style={{ padding: '4px 10px', background: 'var(--gold)', color: '#000', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>✏️</button>
@@ -1356,7 +1356,7 @@ export default function Precios() {
                       </td>
                       <td>
                         <div style={{ color: 'var(--muted)', textDecoration: 'line-through', fontSize: 11 }}>{fmt(baseRef)}</div>
-                        <div style={{ color: 'var(--green)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{fmt(resultante)}</div>
+                        <div style={{ color: 'var(--green)', fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 14 }}>{fmt(resultante)}</div>
                       </td>
                       <td style={{ fontSize: 11, color: 'var(--muted)' }}>{o.fecha_inicio} → {o.fecha_fin}</td>
                       <td>
@@ -2050,7 +2050,7 @@ function PLUTab({ precios, ofertas = [], onRecargar, categoriasOrden = [], esSuc
                     </span>
                   </td>
                   <td style={{ fontWeight: 500 }}>{p.nombre}</td>
-                  <td style={{ color: 'var(--green)', fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>
+                  <td style={{ color: 'var(--green)', fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 14 }}>
                     ${Number(p.precio || 0).toLocaleString('es-AR')}
                   </td>
                   <td style={{ fontSize: 11, color: 'var(--muted)' }}>{p.categoria}</td>
