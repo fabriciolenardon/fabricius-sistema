@@ -46,6 +46,14 @@ const ACUSE_CARNICERIA = '¡Gracias por escribirnos! 🥩 A las carnicerías las
 // Fabricio le pasa la lista que corresponde (Fabricio 07/09).
 const ACUSE_LISTA = '¡Hola! 🥩 Ya le consulto a mi equipo por la lista de precios y en un ratito te la pasan por acá. ¿Necesitás algo más mientras tanto?'
 
+// MEDIA RES FAMILIAR → la atiende Ariel en persona (precio, cortes y entrega
+// se arreglan uno por uno). Iris se presenta y pasa el contacto (Fabricio 08/09).
+const ARIEL_MEDIA_RES = '3574444900'
+const DERIVA_MEDIA_RES = `Por la *media res familiar* te atiende Ariel de forma personalizada 🥩: escribile al *${ARIEL_MEDIA_RES}* y te pasa el precio, los cortes y cómo la entregamos. ¡Gracias por escribirnos!`
+const ACUSE_MEDIA_RES = `¡Hola! Me llamo Iris, soy la asistente de IA de Fabricius 🤖.
+
+${DERIVA_MEDIA_RES}`
+
 // Presentación: lo PRIMERO que manda Iris cuando le escribe un número nuevo.
 // Se presenta y deriva mayorista (otro número) vs minorista (este chat).
 const PRESENTACION = `¡Hola! Me llamo Iris, soy asistente de IA 🤖. ¿En qué puedo ayudarte?
@@ -58,6 +66,7 @@ const PROMPT_BASE = `Sos IRIS, la asistente de Carnicerías Fabricius (Río Prim
 REGLAS (modo "auto con barreras"):
 - PRECIOS — PREGUNTÁ PRIMERO EL TIPO DE CLIENTE: vos manejás DOS listas, Minorista y Gastronómico (mayorista). Si el cliente pregunta por precios y todavía NO sabés qué tipo es (ni vos lo preguntaste antes en este chat), preguntáselo amablemente: "¿Sos cliente minorista, gastronómico o carnicero? Así te paso la lista que te corresponde 🥩". Una vez que sabés el tipo: Minorista→precio Minorista, Gastronómico→precio Gastronómico. NUNCA mezcles listas, NUNCA le muestres las dos juntas, NUNCA inventes un precio.
 - CARNICERÍAS Y REVENTA — NO LES DES NINGÚN PRECIO, DERIVALAS: si el cliente dice que es carnicero, que tiene una carnicería, o que compra para revender, NO le pases precios de NINGUNA lista (ni la minorista ni la gastronómica). A esos clientes los atiende el equipo en persona desde el número mayorista. Respondé en este espíritu: "¡Gracias por escribirnos! 🥩 A las carnicerías las atendemos directo desde nuestro número mayorista: *3861431971*. Escribiles por ahí y te pasan la lista y las condiciones." y marcá escalar=true (así el equipo sabe que se contactó una carnicería). No importa si insiste: los precios para carnicería no los tenés y no se pasan por acá. Esto vale también para un precio suelto ("¿cuánto está la nalga?"): si ya sabés que es carnicería, derivá.
+- MEDIA RES FAMILIAR — DERIVALA A ARIEL: si consultan por la media res familiar (o por una media res / media ternera para la familia, el freezer, etc.), NO des precio ni cierres nada: presentate y pasale el contacto de Ariel, que la atiende en persona. Respondé en este espíritu: "¡Hola! Me llamo Iris, soy la asistente de IA de Fabricius 🤖. Por la *media res familiar* te atiende Ariel de forma personalizada 🥩: escribile al *3574444900* y te pasa el precio, los cortes y cómo la entregamos." y marcá escalar=true.
 - CLIENTE NUEVO QUE QUIERE COMPRAR AL POR MAYOR — ¡CAPTALO COMO UNA VENDEDORA PRO! Esto es para GASTRONÓMICOS (parrilla, restó, rotisería, hotel, catering); las carnicerías van derivadas al número mayorista, ver la regla de arriba. Si alguien pregunta por precios mayoristas o dice que quiere EMPEZAR a comprarnos para su negocio (parrilla, restó, rotisería, carnicería, kiosco, almacén, etc.) y NO aparece como cliente conocido en el historial → es un cliente NUEVO potencial, una oportunidad de oro. Atendelo así: (1) Bienvenida con entusiasmo genuino ("¡Qué bueno que nos escribas! 🥩"). (2) Averiguá su rubro: si es gastronómico pasale la lista gastronómica; si es carnicería, derivalo al 3861431971 sin dar precios. (3) Sumá valor en una frase: por qué conviene trabajar con nosotros (carne fresca, calidad, precios mayoristas, atención directa, y que coordinamos entrega o retiro). (4) Mostrá interés real: preguntá qué productos y qué volumen aproximado maneja, para asesorarlo mejor. (5) Con naturalidad pedile el nombre y la zona/negocio así el equipo lo contacta para coordinar la primera compra, y marcá escalar=true para avisar al dueño. NO interrogues ni seas insistente: una o dos preguntas por mensaje, siempre aportando algo. El objetivo es que se vaya con ganas de comprarnos y con el contacto ya iniciado. (No marques es_pedido salvo que pida productos concretos; esto es captación, no un pedido todavía.)
 - LA LISTA COMPLETA NO LA PASÁS VOS: si te piden la lista de precios entera ("pasame la lista", "quiero recibir la lista"), NO la tipees ni la inventes: decile que ya se lo consultás al equipo y que en un ratito se la pasan, y marcá escalar=true. Un precio PUNTUAL ("cuánto está la bondiola") sí lo respondés normal.
 - CUANDO NO PODÉS RESOLVER ALGO, NUNCA LO DEJES EN EL AIRE: respondé siempre en el espíritu de "ya lo consulto con mi equipo y te respondo en un ratito" y marcá escalar=true. Nunca dejes la pregunta sin contestar, nunca prometas algo que no podés cumplir, y nunca digas que ya se lo pasaste a alguien sin marcar escalar=true (si lo prometés, el equipo tiene que enterarse).
@@ -248,6 +257,21 @@ export default async function handler(req, res) {
           })
         } catch (e) { console.error('Lista en primer mensaje WA error', e) }
       }
+      // Si el primer mensaje ya pregunta por la media res, la derivamos a Ariel
+      // en el acto (antes el contenido moría en la presentación — caso Pilar
+      // 08/09: "quiero consultar por la media res familiar"). La presentación ya
+      // salió recién, así que va solo la derivación.
+      if (esConsultaMediaRes(texto)) {
+        try {
+          await enviarWhatsApp(phoneId, from, DERIVA_MEDIA_RES)
+          await guardarMensaje(from, 'out', 'iris', 'text', DERIVA_MEDIA_RES)
+          await avisarEquipo(phoneId, req.headers.host, {
+            titulo: '🥩 Consultan por la MEDIA RES (WhatsApp)',
+            motivo: `Consultó por la media res (número nuevo) — derivado a Ariel (${ARIEL_MEDIA_RES})`,
+            telefono: from, nombreContacto, mensaje: texto,
+          })
+        } catch (e) { console.error('Media res en primer mensaje WA error', e) }
+      }
       return res.status(200).end()
     }
 
@@ -292,6 +316,22 @@ export default async function handler(req, res) {
         motivo: 'Dijo que es carnicería/reventa — derivada al número mayorista',
         telefono: from, nombreContacto, mensaje: texto,
       })
+      return res.status(200).end()
+    }
+
+    // Consultan por la MEDIA RES FAMILIAR → se presenta y deriva a Ariel, que la
+    // atiende en persona. Va antes del pedido de lista y de los precios: no
+    // damos precio de media res por acá.
+    if (esConsultaMediaRes(texto)) {
+      await enviarWhatsApp(phoneId, from, ACUSE_MEDIA_RES)
+      await guardarMensaje(from, 'out', 'iris', 'text', ACUSE_MEDIA_RES)
+      try {
+        await avisarEquipo(phoneId, req.headers.host, {
+          titulo: '🥩 Consultan por la MEDIA RES (WhatsApp)',
+          motivo: `Consultó por la media res — derivado a Ariel (${ARIEL_MEDIA_RES})`,
+          telefono: from, nombreContacto, mensaje: texto,
+        })
+      } catch (e) { console.error('Aviso media res WA error', e) }
       return res.status(200).end()
     }
 
@@ -485,6 +525,17 @@ function pideLista(texto) {
     || /(pasa|pasame|manda|mandame|envia|enviame|quiero|queria|necesito|tenes|tienen|hay|recibir|ver)\w*.{0,25}\blista\b/.test(t)
     || /\b(la|una)\s+lista\b/.test(t)
     || /\b(listado|catalogo)\b/.test(t)
+}
+
+// Detecta consultas por la MEDIA RES (familiar, para el freezer, etc.) → las
+// atiende Ariel en persona. Va DESPUÉS del sorteo (la rifa también es de una
+// media res) y después de carnicería (a esas las atiende el número mayorista).
+function esConsultaMediaRes(texto) {
+  const t = String(texto || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  return /\bmedias?\s*res\b/.test(t)
+    || /\bmediares\b/.test(t)
+    || /\b1\s*\/\s*2\s*res\b/.test(t)
+    || /\bmedia\s+(ternera|vaca|novillo)\b/.test(t)
 }
 
 // ¿La respuesta de Iris le prometió al cliente que lo consulta con el equipo?
