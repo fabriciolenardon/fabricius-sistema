@@ -9,7 +9,7 @@
 //     de monotributo (semáforo 70/85/95%)
 //   - Importador CSV opcional para volcado del contador
 // ============================================================
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 import {
@@ -33,6 +33,8 @@ import {
 } from '../../lib/arca'
 import { imprimirComprobante } from '../../lib/comprobantePdf'
 import TabBalance from './BalanceEjercicio'
+import SinFacturar from '../../components/SinFacturar'
+import { yaTieneFactura, vincularOrigen } from '../../lib/facturarVenta'
 
 const fmt$ = n => fmtPrecio(Math.abs(Number(n) || 0))
 const fmtPct = n => (n || 0).toFixed(1) + '%'
@@ -1479,6 +1481,9 @@ function TabHistorial({ cuentas, facturas, contrapartes, onChange }) {
 // ============================================================
 function TabFacturas({ cuentas, facturas, contrapartes, onChange }) {
   const [filtroCuenta, setFiltroCuenta] = useState('todas')
+  // Venta o remito que se está por facturar (lo elige el panel de arriba).
+  // Con esto el formulario abre completo en vez de en blanco.
+  const [precarga, setPrecarga] = useState(null)
   const [filtroTipo, setFiltroTipo] = useState('todas')
   const [mostrarForm, setMostrarForm] = useState(false)
   const [mostrarLibro, setMostrarLibro] = useState(false)
@@ -1625,6 +1630,12 @@ function TabFacturas({ cuentas, facturas, contrapartes, onChange }) {
         </div>
       )}
 
+      {/* Lo vendido que todavía no tiene comprobante */}
+      <SinFacturar
+        recargar={facturas.length}
+        onFacturar={p => { setPrecarga(p); setMostrarForm(true) }}
+      />
+
       {/* Tabla */}
       <div className="card" style={{ padding: 0 }}>
         <div style={{ overflowX: 'auto' }}>
@@ -1706,7 +1717,9 @@ function TabFacturas({ cuentas, facturas, contrapartes, onChange }) {
       </div>
 
       {mostrarForm && (
-        <FormFactura cuentas={cuentas} contrapartes={contrapartes} facturas={facturas} onCerrar={() => setMostrarForm(false)} onGuardado={() => { setMostrarForm(false); onChange() }} />
+        <FormFactura cuentas={cuentas} contrapartes={contrapartes} facturas={facturas} precarga={precarga}
+          onCerrar={() => { setMostrarForm(false); setPrecarga(null) }}
+          onGuardado={() => { setMostrarForm(false); setPrecarga(null); onChange() }} />
       )}
       {mostrarLibro && (
         <ModalLibroIva cuentas={cuentas} facturas={facturas} onCerrar={() => setMostrarLibro(false)} />
@@ -1729,9 +1742,12 @@ function receptorArcaDesde(condIvaTexto, cuit) {
   }
 }
 
-function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInicial, onCerrar, onGuardado }) {
+function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInicial, precarga, onCerrar, onGuardado }) {
+  // Si viene de una venta, arranca con una cuenta que pueda emitir en ARCA:
+  // el sentido de este camino es no tener que tocar nada antes de emitir.
+  const cuentaArca = cuentas.find(c => c.arca_habilitado)
   const VACIO = {
-    cuenta_id: cuentaInicial || cuentas[0]?.id || '',
+    cuenta_id: cuentaInicial || (precarga && cuentaArca?.id) || cuentas[0]?.id || '',
     tipo: tipoInicial || 'emitida',
     clasificacion: 'compra', // para recibidas en RI: 'compra' | 'gasto'
     fecha: hoyISO(),
@@ -1755,12 +1771,21 @@ function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInici
     cond_iva_receptor: 5,
     iva_id: 4, // 10,5% (carne) por defecto
     items: [{ descripcion: '', cantidad: 1, precio_unit: '', iva_id: 4 }],
+    // Lo que trae la venta o el remito: fecha, ítems, importe y receptor.
+    ...(precarga?.form || {}),
   }
   const [form, setForm] = useState(VACIO)
   const [cbteAsoc, setCbteAsoc] = useState(null) // factura original asociada (NC/ND)
   const [guardando, setGuardando] = useState(false)
   const [archivoSubido, setArchivoSubido] = useState(null)
-  const [modoArca, setModoArca] = useState(false)
+  // Viniendo de una venta el modo ARCA arranca prendido: se entró acá
+  // justamente para sacar el CAE.
+  const [modoArca, setModoArca] = useState(!!precarga)
+  // 🔒 Candado del doble click. Tiene que ser un ref y prenderse ANTES del
+  // primer await: `emitiendo` es estado de React y entre dos clicks rápidos
+  // todavía no se re-renderizó — así nacieron los remitos mellizos. Acá el
+  // costo de fallar es un CAE de más, que solo se saca con nota de crédito.
+  const emitiendoRef = useRef(false)
   const [emitiendo, setEmitiendo] = useState(false)
   const [resultadoCae, setResultadoCae] = useState(null)
   const [errorArca, setErrorArca] = useState(null)
@@ -1946,7 +1971,26 @@ function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInici
     if (esNotaCD && !cbteAsoc) {
       return alert('Una Nota de Crédito/Débito necesita la factura original asociada. Elegila en "Comprobante asociado".')
     }
+    // 🔒 El candado se prende ACÁ, antes de cualquier await. Un CAE de más
+    // no se borra: se anula con nota de crédito.
+    if (emitiendoRef.current) return
+    emitiendoRef.current = true
     setEmitiendo(true); setErrorArca(null)
+
+    // ¿Alguien ya facturó esta misma venta? (la otra pestaña, el celular).
+    // Se pregunta a la base, no al estado de esta pantalla.
+    if (precarga?.origen) {
+      const previa = await yaTieneFactura({
+        ventaId: precarga.origen.tipo === 'venta' ? precarga.origen.id : null,
+        remitoId: precarga.origen.tipo === 'remito' ? precarga.origen.id : null,
+      })
+      if (previa) {
+        emitiendoRef.current = false
+        setEmitiendo(false)
+        setErrorArca(`Esta ${precarga.origen.tipo === 'venta' ? 'venta' : 'remito'} ya tiene el comprobante ${previa.punto_venta}-${previa.numero}${previa.cae ? ` (CAE ${previa.cae})` : ''}. No se emite otro.`)
+        return
+      }
+    }
     const r = await emitirComprobante({
       cuenta_id: Number(form.cuenta_id),
       comprobante_codigo: Number(form.comprobante_codigo),
@@ -1979,7 +2023,20 @@ function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInici
       contraparte_iva: form.contraparte_iva || null,
     })
     setEmitiendo(false)
+    emitiendoRef.current = false
     if (!r.ok) { setErrorArca(r.error); return }
+
+    // El CAE ya está. Ahora se anota de qué venta salió, para que no
+    // vuelva a aparecer en "Sin facturar". Si esto fallara, el
+    // comprobante existe igual y hay que decirlo con el número a la
+    // vista: lo que queda pendiente es el vínculo, no la factura.
+    let avisoVinculo = null
+    if (precarga?.origen) {
+      const v = await vincularOrigen(r.data.factura_id, precarga.origen)
+      if (!v.ok) {
+        avisoVinculo = `⚠️ El comprobante salió bien, pero no se pudo marcar la ${precarga.origen.tipo} como facturada (${v.error}). Va a seguir apareciendo en "Sin facturar" — no la factures de nuevo.`
+      }
+    }
     // Éxito: armar QR y mostrar panel
     const qrUrl = buildQrUrl({
       fecha: form.fecha,
@@ -1992,7 +2049,7 @@ function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInici
       nroDocRec: Number(String(form.doc_nro || '0').replace(/\D/g, '')) || 0,
       codAut: r.data.cae,
     })
-    setResultadoCae({ ...r.data, qrUrl, cuentaNombre: cuentaSel?.nombre })
+    setResultadoCae({ ...r.data, qrUrl, cuentaNombre: cuentaSel?.nombre, avisoVinculo })
   }
 
   // ---- Panel de éxito: comprobante emitido con CAE ----
@@ -2008,6 +2065,12 @@ function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInici
           <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
             {comp?.label || 'Factura'} · {resultadoCae.cuentaNombre}
           </div>
+
+          {resultadoCae.avisoVinculo && (
+            <div className="alert alert-error" style={{ textAlign: 'left' }}>
+              {resultadoCae.avisoVinculo}
+            </div>
+          )}
 
           <div style={{ background: '#fff', borderRadius: 8, padding: 10, display: 'inline-block' }}>
             <img src={qrImgUrl(resultadoCae.qrUrl, 180)} alt="QR ARCA" width={180} height={180}
@@ -2064,6 +2127,11 @@ function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInici
         style={{ background: 'var(--surface)', border: '1px solid var(--gold)', borderRadius: 12, padding: 20, maxWidth: 720, width: '100%', maxHeight: '90vh', overflow: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
           <div style={{ fontSize: 18, fontWeight: 700 }}>{modoArca ? '⚡ Emitir factura electrónica' : form.tipo === 'recibida' ? '📥 Cargar comprobante recibido (compra / gasto)' : '🧾 Cargar venta / factura'}</div>
+          {precarga?.origen && (
+            <div style={{ fontSize: 12, color: 'var(--gold)', marginTop: 2 }}>
+              📄 {precarga.origen.etiqueta}
+            </div>
+          )}
           <button onClick={onCerrar} style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: 20, cursor: 'pointer' }}>✕</button>
         </div>
 
@@ -2323,6 +2391,26 @@ function FormFactura({ cuentas, contrapartes, facturas, cuentaInicial, tipoInici
                 {!esFacturaC && <span style={{ color: 'var(--muted)' }}>IVA: <strong style={{ color: 'var(--text)' }}>{fmt$(totalesItems.iva)}</strong></span>}
                 <span style={{ color: 'var(--muted)' }}>Total: <strong style={{ color: 'var(--gold)', fontSize: 16 }}>{fmt$(totalesItems.total)}</strong></span>
               </div>
+              {/* Cuadre contra la venta de origen: la balanza redondea cada
+                  línea, así que kg × precio puede no dar exactamente el total
+                  que cobró la caja. Se muestran las dos cifras en vez de
+                  suponer que cierran — avisa, no traba. */}
+              {precarga?.totalOriginal > 0 && (() => {
+                const dif = Math.round((totalesItems.total - precarga.totalOriginal) * 100) / 100
+                const cierra = Math.abs(dif) < 1
+                return (
+                  <div style={{
+                    marginTop: 8, padding: '8px 12px', borderRadius: 8, fontSize: 12,
+                    background: cierra ? 'rgba(39,174,96,0.10)' : 'rgba(230,126,34,0.12)',
+                    border: `1px solid ${cierra ? 'var(--green)' : 'var(--amber)'}`,
+                    color: cierra ? '#7dff7d' : '#ffd17a',
+                  }}>
+                    {cierra
+                      ? <>✅ Cierra con la {precarga.origen?.tipo === 'remito' ? 'del remito' : 'venta'}: {fmt$(precarga.totalOriginal)}</>
+                      : <>⚠️ La {precarga.origen?.tipo === 'remito' ? 'del remito' : 'venta'} fue de <strong>{fmt$(precarga.totalOriginal)}</strong> y la factura da <strong>{fmt$(totalesItems.total)}</strong> ({dif > 0 ? '+' : ''}{fmt$(dif)}). Son los redondeos de cada línea — revisá antes de emitir.</>}
+                  </div>
+                )
+              })()}
               <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 6 }}>
                 {esFacturaC
                   ? 'Factura C (monotributo): no discrimina IVA. ARCA recibe solo el total; el detalle va en la impresión.'
