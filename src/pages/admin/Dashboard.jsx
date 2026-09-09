@@ -575,7 +575,7 @@ export default function Dashboard() {
           ].filter(Boolean).map(s => (
             <div key={s.label} style={{ background: s.bajo ? '#3a1a1a' : 'var(--surface2)', border: `1px solid ${s.bajo ? 'var(--red-light)' : 'var(--border)'}`, borderRadius: 10, padding: '12px 14px', textAlign: 'center', cursor: 'pointer', transition: 'transform 0.1s, border-color 0.1s' }} onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--gold)'} onMouseLeave={e => e.currentTarget.style.borderColor = s.bajo ? 'var(--red-light)' : 'var(--border)'} onClick={() => { if (s.esConteo) navigate('/admin/precios'); else if (s.tiposEntradas) abrirDetalle(s) }}>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>{s.label}</div>
-              <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 26, color: s.bajo ? 'var(--red-light)' : s.color }}>{s.valor}</div>
+              <div className="fx-kpi-valor" style={{ fontSize: 22, marginTop: 0, color: s.bajo ? 'var(--red-light)' : s.color }}>{s.valor}</div>
               <div style={{ fontSize: 11, color: 'var(--muted)' }}>{s.aprox}</div>
               {s.bajo && <div style={{ fontSize: 10, color: 'var(--red-light)', fontWeight: 700, marginTop: 4 }}>⚠️ Stock bajo</div>}
             </div>
@@ -715,7 +715,7 @@ export default function Dashboard() {
                 <div key={s.id}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 8 }}>
                     <span style={{ fontWeight: 600 }}>{s.nombre} ({pct}%)</span>
-                    <span style={{ color, fontFamily: "'Bebas Neue', cursive", fontSize: 20 }}>{fmt(totMesGanancia * pct / 100)}</span>
+                    <span className="fx-dato" style={{ color, fontSize: 17, fontWeight: 500 }}>{fmt(totMesGanancia * pct / 100)}</span>
                   </div>
                   <div style={{ background: 'var(--border)', borderRadius: 8, height: 10 }}>
                     <div style={{ height: 10, borderRadius: 8, background: color, width: Math.min(pct, 100) + '%' }} />
@@ -739,7 +739,7 @@ export default function Dashboard() {
             {/* Tarjeta de stock disponible */}
             <div style={{ background: detalleAbierto.bajo ? '#3a1a1a' : 'linear-gradient(135deg, var(--surface2) 0%, var(--surface) 100%)', border: `2px solid ${detalleAbierto.bajo ? 'var(--red-light)' : 'var(--gold)'}`, borderRadius: 12, padding: '18px 22px', marginBottom: 20, textAlign: 'center' }}>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Stock disponible</div>
-              <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 48, color: detalleAbierto.bajo ? 'var(--red-light)' : 'var(--gold)' }}>
+              <div className="fx-dato" style={{ fontSize: 40, fontWeight: 500, color: detalleAbierto.bajo ? 'var(--red-light)' : 'var(--gold)' }}>
                 {(detalleAbierto.tiposEntradas && (detalleAbierto.tiposEntradas[0] === 'almacen' || detalleAbierto.tiposEntradas[0] === 'bebidas'))
                   ? Math.round(detalleAbierto.stockKg || 0) + ' u'
                   : fmtKg(detalleAbierto.stockKg)}

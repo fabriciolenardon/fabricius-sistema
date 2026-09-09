@@ -105,17 +105,24 @@ function Delta({ pct }) {
   )
 }
 
+// La barra del kit (clases fx-*), con el color que le pasa cada pestaña:
+// acá el color distingue una boca de otra, no un estado.
 function BarraH({ valor, max, color }) {
-  const pct = max > 0 ? Math.max(2, (valor / max) * 100) : 0
+  const pct = max > 0 ? Math.max(2, Math.min(100, (valor / max) * 100)) : 0
   return (
-    <div style={{ flex: 1, height: 14, background: 'var(--surface2)', borderRadius: 7, overflow: 'hidden' }}>
-      <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 7 }} />
+    <div className="fx-barra" style={{ flex: 1, height: 14 }}>
+      <div className="fx-barra-fill" style={{ width: `${pct}%`, background: color }} />
     </div>
   )
 }
 
 const thStyle = { textAlign: 'right', padding: '6px 8px', fontSize: 11, color: 'var(--muted)', fontWeight: 700, letterSpacing: 0.5, whiteSpace: 'nowrap' }
-const tdStyle = { textAlign: 'right', padding: '6px 8px', fontSize: 13, whiteSpace: 'nowrap' }
+// Las celdas de números de las cuatro pestañas salen de acá: una línea y
+// toda la pantalla queda con la coma decimal en la misma columna.
+const tdStyle = {
+  textAlign: 'right', padding: '6px 8px', fontSize: 13, whiteSpace: 'nowrap',
+  fontFamily: "'IBM Plex Mono', ui-monospace, monospace", fontVariantNumeric: 'tabular-nums',
+}
 
 // ──────────────────────────────────────────────────────────
 // TAB 1: POR HORA (Caja)

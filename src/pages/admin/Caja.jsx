@@ -1250,7 +1250,7 @@ export default function Caja() {
             <div style={{ marginTop: 14, padding: 16, background: 'linear-gradient(135deg,#1a1408,#0a0a08)', border: '1px solid var(--gold)', borderRadius: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                 <div style={{ fontSize: 13, color: 'var(--muted)' }}>TOTAL ({carrito.length} items)</div>
-                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 42, color: 'var(--gold)', lineHeight: 1 }}>{fmt(total)}</div>
+                <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 34, color: 'var(--gold)', lineHeight: 1 }}>{fmt(total)}</div>
               </div>
               <button
                 onClick={() => { setMostrarCierre(true); setTimeout(() => efectivoRef.current?.focus(), 100) }}
@@ -1662,13 +1662,13 @@ export default function Caja() {
               {descuentoAplicado > 0 ? (
                 <>
                   <div style={{ fontSize: 16, color: 'var(--muted)', textDecoration: 'line-through' }}>{fmt(total)}</div>
-                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 48, color: '#7ec8ff' }}>{fmt(totalACobrar)}</div>
+                  <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 38, color: '#7ec8ff' }}>{fmt(totalACobrar)}</div>
                   <div style={{ fontSize: 12, color: '#7ec8ff', fontWeight: 700 }}>
                     🔵 Descuento Blangino −{BLANGINO_PCT}%: ahorra {fmt(blanginoDescuento)}
                   </div>
                 </>
               ) : (
-                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 48, color: 'var(--gold)' }}>{fmt(totalACobrar)}</div>
+                <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 38, color: 'var(--gold)' }}>{fmt(totalACobrar)}</div>
               )}
             </div>
 
@@ -2045,7 +2045,7 @@ function TicketManualCaja({ onGuardado }) {
             ))}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, alignItems: 'center', paddingTop: 10 }}>
               <span style={{ fontSize: 12, color: 'var(--muted)' }}>TOTAL</span>
-              <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 26, color: 'var(--gold)' }}>{fmt(total)}</span>
+              <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 21, color: 'var(--gold)' }}>{fmt(total)}</span>
             </div>
           </div>
         )}

@@ -1569,7 +1569,7 @@ async function confirmarDesposteCerdo() {
                       {e.precio_kg > 0 && <div style={{ fontSize: 11, color: 'var(--amber)' }}>{fmtPrecio(e.precio_kg)}/kg</div>}
                     </div>
                     <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{fmtKg(e.kg_real || e.kg || 0, { decimales: 2 })}</div>
+                      <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 18, color: 'var(--gold)' }}>{fmtKg(e.kg_real || e.kg || 0, { decimales: 2 })}</div>
                       <div style={{ fontSize: 10, color: 'var(--muted)' }}>Neto: {fmtKg((e.kg_real || e.kg || 0) * (1 - mermaFrio), { decimales: 2 })}</div>
                     </div>
                   </div>
@@ -1581,18 +1581,18 @@ async function confirmarDesposteCerdo() {
             <div className="card" style={{ borderColor: 'var(--gold)' }}>
               <div className="card-title">🔪 Despostar en piezas: {seleccionada.descripcion || 'Media Res'}</div>
               <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-                <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg entrada</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{fmtKg(kgBase, { decimales: 2 })}</div></div>
+                <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg entrada</div><div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16 }}>{fmtKg(kgBase, { decimales: 2 })}</div></div>
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ fontSize: 10, color: 'var(--muted)' }}>Merma real</div>
                   {kgTotalPiezas > 0 ? (
-                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--red-light)' }}>
+                    <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, color: 'var(--red-light)' }}>
                       -{fmtKg(mermaDesposteKg, { decimales: 2 })} · {mermaDesposteRealPct.toFixed(1)}%
                     </div>
                   ) : (
                     <div style={{ fontSize: 12, color: 'var(--muted)', paddingTop: 6 }}>al cargar las piezas</div>
                   )}
                 </div>
-                <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg en piezas</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--green)' }}>{fmtKg(kgTotalPiezas, { decimales: 2 })}</div></div>
+                <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg en piezas</div><div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, color: 'var(--green)' }}>{fmtKg(kgTotalPiezas, { decimales: 2 })}</div></div>
               </div>
               <div className="form-row" style={{ marginBottom: 14 }}>
                 <div className="form-group"><label>Fecha</label><input type="date" value={fecha} onChange={e => setFecha(e.target.value)} style={inp} /></div>
@@ -1632,19 +1632,19 @@ async function confirmarDesposteCerdo() {
               <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
                 <div>
                   <div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg en piezas</div>
-                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{fmtKg(kgTotalPiezas, { decimales: 2 })}</div>
+                  <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, color: 'var(--gold)' }}>{fmtKg(kgTotalPiezas, { decimales: 2 })}</div>
                 </div>
                 <div>
                   <div style={{ fontSize: 10, color: 'var(--muted)' }}>
                     Merma desposte <span style={{ opacity: 0.7 }}>(sug. {mermaDesposteSugeridaPct.toFixed(0)}%)</span>
                   </div>
-                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: Math.abs(mermaDesposteRealPct - mermaDesposteSugeridaPct) > 3 ? 'var(--red-light)' : (Math.abs(mermaDesposteRealPct - mermaDesposteSugeridaPct) > 1.5 ? 'var(--amber)' : 'var(--green)') }}>
+                  <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, color: Math.abs(mermaDesposteRealPct - mermaDesposteSugeridaPct) > 3 ? 'var(--red-light)' : (Math.abs(mermaDesposteRealPct - mermaDesposteSugeridaPct) > 1.5 ? 'var(--amber)' : 'var(--green)') }}>
                     {fmtKg(mermaDesposteKg, { decimales: 2 })} · {mermaDesposteRealPct.toFixed(1)}%
                   </div>
                 </div>
                 <div>
                   <div style={{ fontSize: 10, color: 'var(--muted)' }}>Valor total</div>
-                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--green)' }}>{fmtPrecio(piezas.reduce((s, p) => s + (p.kg_editado || 0) * (p.precio_venta || 0), 0))}</div>
+                  <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, color: 'var(--green)' }}>{fmtPrecio(piezas.reduce((s, p) => s + (p.kg_editado || 0) * (p.precio_venta || 0), 0))}</div>
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
@@ -1682,7 +1682,7 @@ async function confirmarDesposteCerdo() {
                       <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.fecha} · {e.proveedor_nombre}</div>
                       {e.precio_kg > 0 && <div style={{ fontSize: 11, color: 'var(--amber)' }}>Costo: {fmtPrecio(e.precio_kg)}/kg</div>}
                     </div>
-                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--blue)' }}>{fmtKg(e.kg_real || e.kg || 0, { decimales: 2 })}</div>
+                    <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 18, color: 'var(--blue)' }}>{fmtKg(e.kg_real || e.kg || 0, { decimales: 2 })}</div>
                   </div>
                 </div>
               )) })()}
@@ -1720,14 +1720,14 @@ async function confirmarDesposteCerdo() {
               </div>
               <div style={{ background: 'var(--surface2)', borderRadius: 10, padding: 16, marginBottom: 16 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
-                  <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>Kg entrada</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24 }}>{fmtKg(kgBase, { decimales: 2 })}</div></div>
-                  <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>Merma {(mermaKiloAplicada * 100).toFixed(2)}% <span style={{ opacity: 0.7 }}>(frío incluido)</span></div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: 'var(--red-light)' }}>-{fmtKg(kgBase * mermaKiloAplicada, { decimales: 2 })}</div></div>
-                  <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>Kg vendibles</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: 'var(--green)' }}>{fmtKg(kgNetoKilo, { decimales: 2 })}</div></div>
+                  <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>Kg entrada</div><div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 20 }}>{fmtKg(kgBase, { decimales: 2 })}</div></div>
+                  <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>Merma {(mermaKiloAplicada * 100).toFixed(2)}% <span style={{ opacity: 0.7 }}>(frío incluido)</span></div><div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 20, color: 'var(--red-light)' }}>-{fmtKg(kgBase * mermaKiloAplicada, { decimales: 2 })}</div></div>
+                  <div style={{ textAlign: 'center' }}><div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>Kg vendibles</div><div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 20, color: 'var(--green)' }}>{fmtKg(kgNetoKilo, { decimales: 2 })}</div></div>
                 </div>
                 {seleccionada.precio_kg > 0 && (
                   <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ fontSize: 12, color: 'var(--muted)' }}>Costo compra: <strong style={{ color: 'var(--text)' }}>{fmtPrecio(seleccionada.precio_kg)}/kg</strong></div>
-                    <div style={{ fontSize: 13, fontWeight: 700 }}>Costo real: <span style={{ color: 'var(--amber)', fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{fmtPrecio(precioCostoKilo)}/kg</span></div>
+                    <div style={{ fontSize: 13, fontWeight: 700 }}>Costo real: <span style={{ color: 'var(--amber)', fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16 }}>{fmtPrecio(precioCostoKilo)}/kg</span></div>
                   </div>
                 )}
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>ℹ️ El costo real sube porque el mismo precio pagado rinde menos kg útiles.</div>
@@ -1794,7 +1794,7 @@ async function confirmarDesposteCerdo() {
                       </div>
                     </div>
                     <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{fmtKg(pz.kg || 0, { decimales: 2 })}</div>
+                      <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 18, color: 'var(--gold)' }}>{fmtKg(pz.kg || 0, { decimales: 2 })}</div>
                       {pz.precio_costo_kg > 0 && <div style={{ fontSize: 10, color: 'var(--amber)' }}>{fmtPrecio(pz.precio_costo_kg)}/kg costo</div>}
                     </div>
                   </div>
@@ -1839,9 +1839,9 @@ async function confirmarDesposteCerdo() {
       {kgPiezaConvertir > 0 && (
         <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, marginBottom: 14 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
-            <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg pieza</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{fmtKg(parseNumero(kgPiezaConvertir), { decimales: 2 })}</div></div>
-            <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Merma {mermaPieza}%</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--red-light)' }}>-{fmtKg(parseFloat(kgPiezaConvertir) * mermaPieza / 100, { decimales: 2 })}</div></div>
-            <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg a cortes</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--green)' }}>{fmtKg(parseFloat(kgPiezaConvertir) * (1 - mermaPieza / 100), { decimales: 2 })}</div></div>
+            <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg pieza</div><div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16 }}>{fmtKg(parseNumero(kgPiezaConvertir), { decimales: 2 })}</div></div>
+            <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Merma {mermaPieza}%</div><div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, color: 'var(--red-light)' }}>-{fmtKg(parseFloat(kgPiezaConvertir) * mermaPieza / 100, { decimales: 2 })}</div></div>
+            <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg a cortes</div><div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, color: 'var(--green)' }}>{fmtKg(parseFloat(kgPiezaConvertir) * (1 - mermaPieza / 100), { decimales: 2 })}</div></div>
           </div>
         </div>
       )}
@@ -1858,7 +1858,7 @@ async function confirmarDesposteCerdo() {
             <div style={{ marginTop: 8, padding: '10px 12px', background: 'rgba(201,168,76,0.1)', border: '1px solid var(--amber)', borderRadius: 8 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: 12, color: 'var(--muted)' }}>💰 Costo real <span style={{ fontSize: 10 }}>(bruto ÷ kg con merma)</span></span>
-                <span style={{ fontSize: 22, fontWeight: 700, color: 'var(--amber)', fontFamily: "'Bebas Neue',cursive" }}>{fmtPrecio(costoReal)}/kg</span>
+                <span style={{ fontSize: 18, fontWeight: 700, color: 'var(--amber)', fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums' }}>{fmtPrecio(costoReal)}/kg</span>
               </div>
               <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
                 {fmtKg(parseNumero(kgPiezaConvertir), { decimales: 2 })} × {fmtPrecio(base)} = {fmtPrecio(bruto)} ÷ {fmtKg(kgN, { decimales: 2 })} kg
@@ -1900,7 +1900,7 @@ async function confirmarDesposteCerdo() {
         ].map(p => (
           <div key={p.tipo} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: 'var(--surface2)', borderRadius: 8, border: '1px solid var(--border)' }}>
             <span style={{ fontSize: 12, fontWeight: 600 }}>{p.label}</span>
-            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: (piezasStock[p.tipo] || 0) > 0 ? 'var(--amber)' : 'var(--muted)' }}>
+            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 15, color: (piezasStock[p.tipo] || 0) > 0 ? 'var(--amber)' : 'var(--muted)' }}>
               {fmtKg(piezasStock[p.tipo] || 0, { decimales: 2 })}
             </span>
           </div>
@@ -1918,7 +1918,7 @@ async function confirmarDesposteCerdo() {
               <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.fecha} · {e.proveedor_nombre}</div>
               {e.precio_kg > 0 && <div style={{ fontSize: 11, color: 'var(--amber)' }}>{fmtPrecio(e.precio_kg)}/kg</div>}
             </div>
-            <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--amber)' }}>{(Number(e.kg_real) || Number(e.kg) || 0).toFixed(1)} kg</div>
+            <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 18, color: 'var(--amber)' }}>{(Number(e.kg_real) || Number(e.kg) || 0).toFixed(1)} kg</div>
           </div>
         </div>
       ))}
@@ -1952,11 +1952,11 @@ async function confirmarDesposteCerdo() {
         <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '10px 14px', marginBottom: 14 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span style={{ fontSize: 12, color: 'var(--muted)' }}>Kg capón:</span>
-            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18 }}>{(Number(caponSeleccionado.kg_real) || Number(caponSeleccionado.kg) || 0).toFixed(1)} kg</span>
+            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 15 }}>{(Number(caponSeleccionado.kg_real) || Number(caponSeleccionado.kg) || 0).toFixed(1)} kg</span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span style={{ fontSize: 12, color: 'var(--muted)' }}>Kg registrados:</span>
-            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: 'var(--amber)' }}>
+            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 15, color: 'var(--amber)' }}>
               {Object.values(piezasCerdo).reduce((s, v) => s + parseNumero(v), 0).toFixed(1)} kg
             </span>
           </div>
@@ -2071,7 +2071,7 @@ async function confirmarDesposteCerdo() {
         ].map(p => (
           <div key={p.tipo} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
             <span style={{ fontSize: 12, fontWeight: 600 }}>{p.label}</span>
-            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: (piezasStock[p.tipo] || 0) > 0 ? 'var(--amber)' : 'var(--muted)' }}>
+            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 15, color: (piezasStock[p.tipo] || 0) > 0 ? 'var(--amber)' : 'var(--muted)' }}>
               {fmtKg(piezasStock[p.tipo] || 0, { decimales: 2 })}
             </span>
           </div>
@@ -2084,14 +2084,14 @@ async function confirmarDesposteCerdo() {
         {Object.entries(LABEL_BUCKET_EMB).map(([tipo, label]) => (
           <div key={tipo} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
             <span style={{ fontSize: 12, fontWeight: 600 }}>{label}</span>
-            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: (piezasStock[tipo] || 0) > 0 ? 'var(--green)' : 'var(--muted)' }}>
+            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 15, color: (piezasStock[tipo] || 0) > 0 ? 'var(--green)' : 'var(--muted)' }}>
               {fmtKg(piezasStock[tipo] || 0, { decimales: 2 })}
             </span>
           </div>
         ))}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0 2px' }}>
           <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--gold)' }}>TOTAL EMBUTIDOS</span>
-          <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>
+          <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, color: 'var(--gold)' }}>
             {fmtKg(Object.keys(LABEL_BUCKET_EMB).reduce((s, t) => s + (piezasStock[t] || 0), 0), { decimales: 2 })}
           </span>
         </div>
@@ -2103,14 +2103,14 @@ async function confirmarDesposteCerdo() {
         {Object.entries(LABEL_BUCKET_HAMB).map(([tipo, label]) => (
           <div key={tipo} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
             <span style={{ fontSize: 12, fontWeight: 600 }}>{label}</span>
-            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: (piezasStock[tipo] || 0) > 0 ? 'var(--green)' : 'var(--muted)' }}>
+            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 15, color: (piezasStock[tipo] || 0) > 0 ? 'var(--green)' : 'var(--muted)' }}>
               {fmtKg(piezasStock[tipo] || 0, { decimales: 2 })}
             </span>
           </div>
         ))}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0 2px' }}>
           <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--gold)' }}>TOTAL HAMBURGUESAS</span>
-          <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>
+          <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, color: 'var(--gold)' }}>
             {fmtKg(Object.keys(LABEL_BUCKET_HAMB).reduce((s, t) => s + (piezasStock[t] || 0), 0), { decimales: 2 })}
           </span>
         </div>
@@ -2122,14 +2122,14 @@ async function confirmarDesposteCerdo() {
           {Object.entries(LABEL_BUCKET_MILA).map(([tipo, label]) => (
             <div key={tipo} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
               <span style={{ fontSize: 12, fontWeight: 600 }}>{label}</span>
-              <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: (piezasStock[tipo] || 0) > 0 ? 'var(--green)' : 'var(--muted)' }}>
+              <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 15, color: (piezasStock[tipo] || 0) > 0 ? 'var(--green)' : 'var(--muted)' }}>
                 {fmtKg(piezasStock[tipo] || 0, { decimales: 2 })}
               </span>
             </div>
           ))}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0 2px' }}>
             <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--gold)' }}>TOTAL MILANESAS</span>
-            <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>
+            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, color: 'var(--gold)' }}>
               {fmtKg(Object.keys(LABEL_BUCKET_MILA).reduce((s, t) => s + (piezasStock[t] || 0), 0), { decimales: 2 })}
             </span>
           </div>
@@ -2206,17 +2206,17 @@ async function confirmarDesposteCerdo() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, background: 'var(--surface2)', borderRadius: 8, padding: '12px 14px', marginBottom: 14, textAlign: 'center' }}>
                 <div>
                   <div style={{ fontSize: 10, color: 'var(--muted)' }}>MATERIA PRIMA</div>
-                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{fmtKg(kgIn, { decimales: 2 })}</div>
+                  <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16 }}>{fmtKg(kgIn, { decimales: 2 })}</div>
                 </div>
                 <div>
                   <div style={{ fontSize: 10, color: 'var(--muted)' }}>REBOZADO</div>
-                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: pct >= 0 ? 'var(--green)' : 'var(--amber)' }}>
+                  <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, color: pct >= 0 ? 'var(--green)' : 'var(--amber)' }}>
                     {pct >= 0 ? '+' : ''}{pct.toFixed(1)}%
                   </div>
                 </div>
                 <div>
                   <div style={{ fontSize: 10, color: 'var(--muted)' }}>AL STOCK</div>
-                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{fmtKg(kgOut, { decimales: 2 })}</div>
+                  <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, color: 'var(--gold)' }}>{fmtKg(kgOut, { decimales: 2 })}</div>
                 </div>
               </div>
             )}
@@ -2297,9 +2297,9 @@ async function confirmarDesposteCerdo() {
             </div>
             <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, marginBottom: 14 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
-                <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg materia prima</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{kgOrigenH.toFixed(1)} kg</div></div>
-                <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>{pctH === null ? 'Merma / incremento' : `${pctH >= 0 ? '+' : ''}${pctH.toFixed(1)}% ${pctH >= 0 ? 'incremento' : 'merma'}`}</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: (kgFinalH - kgOrigenH) >= 0 ? 'var(--green)' : 'var(--red-light)' }}>{pctH === null ? '—' : `${(kgFinalH - kgOrigenH) >= 0 ? '+' : ''}${(kgFinalH - kgOrigenH).toFixed(1)} kg`}</div></div>
-                <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg finales al stock</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{kgFinalH.toFixed(1)} kg</div></div>
+                <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg materia prima</div><div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16 }}>{kgOrigenH.toFixed(1)} kg</div></div>
+                <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>{pctH === null ? 'Merma / incremento' : `${pctH >= 0 ? '+' : ''}${pctH.toFixed(1)}% ${pctH >= 0 ? 'incremento' : 'merma'}`}</div><div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, color: (kgFinalH - kgOrigenH) >= 0 ? 'var(--green)' : 'var(--red-light)' }}>{pctH === null ? '—' : `${(kgFinalH - kgOrigenH) >= 0 ? '+' : ''}${(kgFinalH - kgOrigenH).toFixed(1)} kg`}</div></div>
+                <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg finales al stock</div><div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, color: 'var(--gold)' }}>{kgFinalH.toFixed(1)} kg</div></div>
               </div>
             </div>
           </>
@@ -2332,12 +2332,12 @@ async function confirmarDesposteCerdo() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px dashed var(--border)', paddingTop: 8 }}>
               <div>
                 <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Total elaborado</div>
-                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: 'var(--gold)' }}>{totalElab.toFixed(1)} kg</div>
+                <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 20, color: 'var(--gold)' }}>{totalElab.toFixed(1)} kg</div>
               </div>
               {mermaCalc !== null && (
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Merma calculada</div>
-                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: mermaCalc < 0 ? 'var(--red-light)' : 'var(--green)' }}>{mermaCalc >= 0 ? '+' : ''}{mermaCalc.toFixed(1)}%</div>
+                  <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 20, color: mermaCalc < 0 ? 'var(--red-light)' : 'var(--green)' }}>{mermaCalc >= 0 ? '+' : ''}{mermaCalc.toFixed(1)}%</div>
                 </div>
               )}
             </div>
@@ -2380,15 +2380,15 @@ async function confirmarDesposteCerdo() {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
                   <div>
                     <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>① Materia prima</div>
-                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 26 }}>{kgTotal.toFixed(1)} kg</div>
+                    <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 21 }}>{kgTotal.toFixed(1)} kg</div>
                   </div>
                   <div>
                     <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>② Frescos embutidos</div>
-                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 26, color: 'var(--gold)' }}>{kgFrescos > 0 ? `${kgFrescos.toFixed(1)} kg` : '—'}</div>
+                    <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 21, color: 'var(--gold)' }}>{kgFrescos > 0 ? `${kgFrescos.toFixed(1)} kg` : '—'}</div>
                   </div>
                   <div>
                     <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>{pctFresco === null ? 'Merma / incremento' : pctFresco >= 0 ? 'Incremento 1ª etapa' : 'Merma 1ª etapa'}</div>
-                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 26, color: pctFresco === null ? 'var(--muted)' : pctFresco >= 0 ? 'var(--green)' : 'var(--red-light)' }}>
+                    <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 21, color: pctFresco === null ? 'var(--muted)' : pctFresco >= 0 ? 'var(--green)' : 'var(--red-light)' }}>
                       {pctFresco === null ? '—' : `${pctFresco >= 0 ? '+' : ''}${pctFresco.toFixed(1)}%`}
                     </div>
                   </div>
@@ -2405,9 +2405,9 @@ async function confirmarDesposteCerdo() {
           const pctMostrar = kgTotal > 0 ? ((kgFinal / kgTotal - 1) * 100) : 0
           return (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
-              <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg carne total</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20 }}>{kgTotal.toFixed(1)} kg</div></div>
-              <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>{`${pctMostrar >= 0 ? '+' : ''}${pctMostrar.toFixed(1)}% ${usaReal ? '(real)' : pctMostrar >= 0 ? 'agregados' : 'merma'}`}</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: (kgFinal - kgTotal) >= 0 ? 'var(--green)' : 'var(--red-light)' }}>{(kgFinal - kgTotal) >= 0 ? '+' : ''}{(kgFinal - kgTotal).toFixed(1)} kg</div></div>
-              <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg finales</div><div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{kgFinal.toFixed(1)} kg</div></div>
+              <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg carne total</div><div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16 }}>{kgTotal.toFixed(1)} kg</div></div>
+              <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>{`${pctMostrar >= 0 ? '+' : ''}${pctMostrar.toFixed(1)}% ${usaReal ? '(real)' : pctMostrar >= 0 ? 'agregados' : 'merma'}`}</div><div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, color: (kgFinal - kgTotal) >= 0 ? 'var(--green)' : 'var(--red-light)' }}>{(kgFinal - kgTotal) >= 0 ? '+' : ''}{(kgFinal - kgTotal).toFixed(1)} kg</div></div>
+              <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg finales</div><div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, color: 'var(--gold)' }}>{kgFinal.toFixed(1)} kg</div></div>
             </div>
           )
         })()}
@@ -2581,7 +2581,7 @@ async function confirmarDesposteCerdo() {
               <span style={{ background: e.tipo === 'salame' ? '#2a1a0a' : '#1a2a1a', color: e.tipo === 'salame' ? 'var(--amber)' : 'var(--green)', borderRadius: 6, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>
                 {e.tipo === 'salame' ? 'SALAME' : 'EMBUTIDO'}
               </span>
-              <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: 'var(--gold)', marginTop: 4 }}>
+              <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 15, color: 'var(--gold)', marginTop: 4 }}>
                 {e.tipo === 'salame' ? `${(Number(e.kg_elaborado) || 0).toFixed(1)} kg salame` : `${(Number(e.kg_final) || 0).toFixed(1)} kg`}
               </div>
             </div>
@@ -2681,17 +2681,17 @@ function MediasResesTab() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>
         <div style={{ ...card, borderColor: 'var(--gold)' }}>
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>🐄 Disponibles ahora</div>
-          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 30, color: 'var(--gold)' }}>{disponibles.length}</div>
+          <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 25, color: 'var(--gold)' }}>{disponibles.length}</div>
           <div style={{ fontSize: 12, color: 'var(--muted)' }}>{fmtKg(kgDisponibles, { decimales: 2 })}</div>
         </div>
         <div style={card}>
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>🟡 Reservadas</div>
-          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 30, color: reservadas.length ? '#ffd17a' : 'var(--muted)' }}>{reservadas.length}</div>
+          <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 25, color: reservadas.length ? '#ffd17a' : 'var(--muted)' }}>{reservadas.length}</div>
           <div style={{ fontSize: 12, color: 'var(--muted)' }}>{fmtKg(reservadas.reduce((s, m) => s + (Number(m.kg) || 0), 0), { decimales: 2 })}</div>
         </div>
         <div style={{ ...card, borderColor: hayDescuadre ? 'var(--red-light)' : 'var(--border)' }}>
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>Stock del sistema (bovino_mr)</div>
-          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 30, color: hayDescuadre ? 'var(--red-light)' : 'var(--green)' }}>
+          <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 25, color: hayDescuadre ? 'var(--red-light)' : 'var(--green)' }}>
             {stockMR == null ? '—' : fmtKg(stockMR, { decimales: 2 })}
           </div>
           <div style={{ fontSize: 11, color: hayDescuadre ? 'var(--red-light)' : 'var(--green)' }}>
@@ -2719,7 +2719,7 @@ function MediasResesTab() {
               <div key={m.id} style={{ ...card, borderColor: '#ffd17a' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                   <span style={{ background: '#ffd17a', color: '#000', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 800 }}>{m.codigo}</span>
-                  <span style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: '#ffd17a' }}>{fmtKg(m.kg || 0, { decimales: 1 })}</span>
+                  <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 18, color: '#ffd17a' }}>{fmtKg(m.kg || 0, { decimales: 1 })}</span>
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--text)', marginTop: 6 }}>
                   Para: <strong>{m.reservada_para || '—'}</strong>
@@ -2753,7 +2753,7 @@ function MediasResesTab() {
                   )}
                 </div>
                 <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                  <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: 'var(--gold)' }}>
+                  <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 20, color: 'var(--gold)' }}>
                     {fmtKg(m.kg || 0, { decimales: 1 })}
                   </div>
                   <button onClick={() => { setReservando({ media: m, para: '' }); setMsg(null) }}
@@ -2777,7 +2777,7 @@ function MediasResesTab() {
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 1500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
           <div onClick={e => e.stopPropagation()}
             style={{ background: 'var(--surface)', border: '1px solid #ffd17a', borderRadius: 14, padding: 24, width: '100%', maxWidth: 420 }}>
-            <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: '#ffd17a', letterSpacing: 2, marginBottom: 8 }}>
+            <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 18, color: '#ffd17a', letterSpacing: 2, marginBottom: 8 }}>
               🔒 RESERVAR {reservando.media.codigo}
             </div>
             <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
@@ -2878,7 +2878,7 @@ function HistorialMedias({ medias }) {
                     </td>
                     <td style={td}>{m.fecha_ingreso}</td>
                     <td style={td}>{m.proveedor_origen || '—'}</td>
-                    <td style={{ ...td, textAlign: 'right', fontFamily: "'Bebas Neue',cursive", fontSize: 15, color: 'var(--gold)' }}>
+                    <td style={{ ...td, textAlign: 'right', fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 12, color: 'var(--gold)' }}>
                       {Number(m.kg || 0).toFixed(1)}
                     </td>
                     <td style={{ ...td, textAlign: 'right', color: 'var(--amber)' }}>
@@ -3054,7 +3054,7 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, onEditarProd
                 <span style={{ background: e.tipo === 'salame' ? '#2a1a0a' : e.tipo === 'hamburguesa' ? '#2a1a1a' : '#1a2a1a', color: e.tipo === 'salame' ? 'var(--amber)' : e.tipo === 'hamburguesa' ? '#ff9b7a' : 'var(--green)', borderRadius: 6, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>
                   {e.tipo === 'salame' ? 'SALAME' : e.tipo === 'hamburguesa' ? 'HAMBURGUESA' : 'EMBUTIDO'}
                 </span>
-                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: 'var(--gold)', marginTop: 4 }}>
+                <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 15, color: 'var(--gold)', marginTop: 4 }}>
                   {e.tipo === 'salame'
                     ? (e.maduracion_completa ? fmtKg(e.kg_final) : `${fmtKg(e.kg_elaborado)} netos`)
                     : fmtKg(e.kg_final)}
@@ -4483,7 +4483,7 @@ async function ejecutarAnulacion(entrada) {
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 1500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
           <div onClick={ev => ev.stopPropagation()}
             style={{ background: 'var(--surface)', border: '1px solid #5a2a2a', borderRadius: 14, padding: 24, width: '100%', maxWidth: 460, boxShadow: '0 16px 48px rgba(0,0,0,0.6)' }}>
-            <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 22, color: 'var(--red-light)', letterSpacing: 2, marginBottom: 10 }}>
+            <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 18, color: 'var(--red-light)', letterSpacing: 2, marginBottom: 10 }}>
               🗑️ ANULAR INGRESO
             </div>
             <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6, marginBottom: 14 }}>
@@ -5467,7 +5467,7 @@ for (const item of items) {
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.fecha} · {e.proveedor_nombre}</div>
           {e.reservada_para_txt && <div style={{ fontSize: 11, color: '#ffd17a', fontWeight: 700 }}>🔒 RESERVADA — {e.reservada_para_txt}</div>}
         </div>
-        <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--gold)' }}>{(Number(e.kg_real) || Number(e.kg) || 0).toFixed(1)} kg</div>
+        <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 18, color: 'var(--gold)' }}>{(Number(e.kg_real) || Number(e.kg) || 0).toFixed(1)} kg</div>
       </div>
     )) })()}
   </div>
@@ -5495,7 +5495,7 @@ for (const item of items) {
               <div style={{ fontWeight: 600, fontSize: 12 }}>#{pz.id} · {pz.tipo_pieza}</div>
               <div style={{ fontSize: 10, color: 'var(--muted)' }}>{pz.proveedor_origen || '—'} · MR del {pz.fecha_ingreso}{pz.modelo_desposte && ' · Mod. ' + pz.modelo_desposte}</div>
             </div>
-            <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{(Number(pz.kg) || 0).toFixed(1)} kg</div>
+            <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, color: 'var(--gold)' }}>{(Number(pz.kg) || 0).toFixed(1)} kg</div>
           </div>
         ))}
       </div>
@@ -5666,7 +5666,7 @@ for (const item of items) {
                     onMouseOut={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = 'var(--surface2)' }}>
                     <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>🧺 {cb.nombre}</div>
                     <div style={{ fontSize: 11, color: 'var(--muted)' }}>{cant} producto{cant === 1 ? '' : 's'}</div>
-                    <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{fmtPrecio(cb.precio)}</div>
+                    <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, color: 'var(--gold)' }}>{fmtPrecio(cb.precio)}</div>
                   </div>
                 )
               })}
@@ -5723,7 +5723,7 @@ for (const item of items) {
                           <div style={{ fontWeight: 700, fontSize: 13 }}>📦 Caja {c.tipo_caja} #{c.id}</div>
                           <div style={{ fontSize: 10, color: 'var(--muted)' }}>{c.proveedor_origen || 's/proveedor'} · {c.fecha_ingreso}</div>
                         </div>
-                        <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--gold)' }}>{Number(c.kg).toFixed(1)} kg</div>
+                        <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, color: 'var(--gold)' }}>{Number(c.kg).toFixed(1)} kg</div>
                       </div>
                     </div>
                   ))}
@@ -5823,7 +5823,7 @@ for (const item of items) {
                 })}
               </tbody>
             </table>
-            <div style={{ textAlign: 'right', fontFamily: "'Bebas Neue', cursive", fontSize: 28, color: 'var(--gold)', marginTop: 8 }}>
+            <div style={{ textAlign: 'right', fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 23, color: 'var(--gold)', marginTop: 8 }}>
               TOTAL: ${Math.round(total).toLocaleString('es-AR')}
             </div>
           </div>
@@ -6423,7 +6423,7 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
           </div>
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontSize: 11, color: 'var(--muted)' }}>Total original</div>
-            <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 20, color: 'var(--muted)', textDecoration: 'line-through' }}>${Math.round(editando.total).toLocaleString('es-AR')}</div>
+            <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, color: 'var(--muted)', textDecoration: 'line-through' }}>${Math.round(editando.total).toLocaleString('es-AR')}</div>
           </div>
         </div>
 
@@ -6490,7 +6490,7 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
               <span style={{ fontWeight: 700, color: nuevoTotal - editando.total >= 0 ? 'var(--green)' : 'var(--red-light)' }}>{nuevoTotal - editando.total >= 0 ? '+' : ''}{fmt(nuevoTotal - editando.total)}</span>
               {editando.cliente_id && <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 8 }}>(se ajusta en cta. cte.)</span>}
             </div>
-            <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 32, color: 'var(--gold)' }}>TOTAL: ${Math.round(nuevoTotal).toLocaleString('es-AR')}</div>
+            <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 26, color: 'var(--gold)' }}>TOTAL: ${Math.round(nuevoTotal).toLocaleString('es-AR')}</div>
           </div>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 12 }}>
             <button className="btn btn-ghost" onClick={() => setEditando(null)}>Cancelar</button>
@@ -6557,7 +6557,7 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
             <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 600 }}>
               {fCliente === 'todos' ? '💰 Total vendido' : `💰 Total — ${fCliente}`}
             </div>
-            <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 30, color: 'var(--gold)' }}>{fmt(totalFiltrado)}</div>
+            <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 25, color: 'var(--gold)' }}>{fmt(totalFiltrado)}</div>
             <div style={{ fontSize: 11, color: 'var(--muted)' }}>
               {remitosValidos.length} remito(s){anuladosEnFiltro > 0 ? ` · ${anuladosEnFiltro} anulado(s) excluido(s)` : ''}
             </div>
@@ -6574,7 +6574,7 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
               <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 600 }}>
                 🥩 Producto — {fProducto.trim()}
               </div>
-              <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 30, color: 'var(--amber)' }}>{fmt(statsProducto.plata)}</div>
+              <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 25, color: 'var(--amber)' }}>{fmt(statsProducto.plata)}</div>
               <div style={{ fontSize: 11, color: 'var(--muted)' }}>
                 {statsProducto.cant.toLocaleString('es-AR', { maximumFractionDigits: 2 })} kg/un ·
                 {' '}en {statsProducto.nRemitos} remito(s) · {statsProducto.nClientes} cliente(s)
@@ -6954,7 +6954,7 @@ export function ProveedoresTab() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div style={{ flex: 1 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 32, color: 'var(--amber)', letterSpacing: 2 }}>🏭 {legajoAbierto.nombre}</div>
+                <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 26, color: 'var(--amber)', letterSpacing: 2 }}>🏭 {legajoAbierto.nombre}</div>
                 <button onClick={() => setModalDatosProv(true)} title="Ver y editar contacto, CUIT, dirección, nombre, etc." style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#000' }}>📋 Ver/Editar datos del proveedor</button>
               </div>
               <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>Legajo de proveedor</div>
@@ -6962,14 +6962,14 @@ export function ProveedoresTab() {
             </div>
             <div style={{ textAlign: 'right' }}>
               <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Saldo</div>
-              <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 36, color: saldo > 0 ? 'var(--red-light)' : saldo < 0 ? 'var(--green)' : 'var(--muted)' }}>{fmt(saldo)}</div>
+              <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 30, color: saldo > 0 ? 'var(--red-light)' : saldo < 0 ? 'var(--green)' : 'var(--muted)' }}>{fmt(saldo)}</div>
               <div style={{ fontSize: 11, color: saldo > 0 ? 'var(--red-light)' : saldo < 0 ? 'var(--green)' : 'var(--muted)' }}>{saldo > 0 ? '⚠️ Le debemos' : saldo < 0 ? '✅ Saldo a favor' : '✅ Al día'}</div>
             </div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginTop: 16 }}>
-            <div style={{ background: 'var(--surface)', borderRadius: 8, padding: '10px 14px', textAlign: 'center' }}><div style={{ fontSize: 11, color: 'var(--muted)' }}>Total compras</div><div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 22, color: 'var(--amber)' }}>{fmt(totalCompras)}</div></div>
-            <div style={{ background: 'var(--surface)', borderRadius: 8, padding: '10px 14px', textAlign: 'center' }}><div style={{ fontSize: 11, color: 'var(--muted)' }}>Total pagado</div><div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 22, color: 'var(--green)' }}>{fmt(totalEntregado)}</div></div>
-            <div style={{ background: 'var(--surface)', borderRadius: 8, padding: '10px 14px', textAlign: 'center' }}><div style={{ fontSize: 11, color: 'var(--muted)' }}>Compras registradas</div><div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 22, color: 'var(--gold)' }}>{comprasProv.length}</div></div>
+            <div style={{ background: 'var(--surface)', borderRadius: 8, padding: '10px 14px', textAlign: 'center' }}><div style={{ fontSize: 11, color: 'var(--muted)' }}>Total compras</div><div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 18, color: 'var(--amber)' }}>{fmt(totalCompras)}</div></div>
+            <div style={{ background: 'var(--surface)', borderRadius: 8, padding: '10px 14px', textAlign: 'center' }}><div style={{ fontSize: 11, color: 'var(--muted)' }}>Total pagado</div><div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 18, color: 'var(--green)' }}>{fmt(totalEntregado)}</div></div>
+            <div style={{ background: 'var(--surface)', borderRadius: 8, padding: '10px 14px', textAlign: 'center' }}><div style={{ fontSize: 11, color: 'var(--muted)' }}>Compras registradas</div><div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 18, color: 'var(--gold)' }}>{comprasProv.length}</div></div>
           </div>
         </div>
 
@@ -6995,14 +6995,14 @@ export function ProveedoresTab() {
                     value={nombreEditando}
                     onChange={e => setNombreEditando(e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter') guardarNombreProveedor(legajoAbierto); if (e.key === 'Escape') cancelarEditarNombre() }}
-                    style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 24, color: 'var(--amber)', letterSpacing: 2, background: 'var(--surface2)', border: '2px solid var(--gold)', borderRadius: 8, padding: '4px 12px', textTransform: 'uppercase', flex: 1, minWidth: 180 }}
+                    style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 20, color: 'var(--amber)', letterSpacing: 2, background: 'var(--surface2)', border: '2px solid var(--gold)', borderRadius: 8, padding: '4px 12px', textTransform: 'uppercase', flex: 1, minWidth: 180 }}
                   />
                   <button onClick={() => guardarNombreProveedor(legajoAbierto)} title="Guardar" style={{ background: 'var(--green)', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#fff' }}>✓ Guardar</button>
                   <button onClick={cancelarEditarNombre} title="Cancelar" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13, color: 'var(--muted)' }}>✕</button>
                 </div>
               ) : (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
-                  <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 24, color: 'var(--amber)', letterSpacing: 2 }}>🏭 {legajoAbierto.nombre}</div>
+                  <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 20, color: 'var(--amber)', letterSpacing: 2 }}>🏭 {legajoAbierto.nombre}</div>
                   <button onClick={() => iniciarEditarNombre(legajoAbierto)} title="Editar nombre (se actualizan también compras, pagos, entradas y cheques)" style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#000' }}>✏️ Editar nombre</button>
                 </div>
               )}
@@ -7134,15 +7134,15 @@ export function ProveedoresTab() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 4 }}>
               <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, textAlign: 'center' }}>
                 <div style={{ fontSize: 10, color: 'var(--muted)' }}>REMITOS ENCONTRADOS</div>
-                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 28, color: 'var(--gold)' }}>{comprasFiltradas.length}</div>
+                <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 23, color: 'var(--gold)' }}>{comprasFiltradas.length}</div>
               </div>
               <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, textAlign: 'center' }}>
                 <div style={{ fontSize: 10, color: 'var(--muted)' }}>KG TOTALES</div>
-                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 28, color: 'var(--amber)' }}>{kgFiltrados > 0 ? kgFiltrados.toFixed(0) + ' kg' : '—'}</div>
+                <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 23, color: 'var(--amber)' }}>{kgFiltrados > 0 ? kgFiltrados.toFixed(0) + ' kg' : '—'}</div>
               </div>
               <div style={{ background: 'rgba(255,209,122,0.06)', border: '1px solid var(--amber)', borderRadius: 8, padding: 12, textAlign: 'center' }}>
                 <div style={{ fontSize: 10, color: 'var(--muted)' }}>SUMA TOTAL $</div>
-                <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 32, color: 'var(--amber)' }}>{fmt(sumaFiltrada)}</div>
+                <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 26, color: 'var(--amber)' }}>{fmt(sumaFiltrada)}</div>
               </div>
             </div>
           </div>
@@ -7440,7 +7440,7 @@ function ComprasSemanaLegajo({ entradas, proveedorNombre, fmt }) {
         <div className="card-title" style={{ margin: 0 }}>🛒 Comprado en la semana</div>
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontSize: 10, color: 'var(--muted)' }}>TOTAL {fechaCorta(desde)} → {fechaCorta(hasta)}</div>
-          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 26, color: 'var(--amber)', lineHeight: 1 }}>{fmt(totSemana)}</div>
+          <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 21, color: 'var(--amber)', lineHeight: 1 }}>{fmt(totSemana)}</div>
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>{fmtKg(totKgSemana)} kg</div>
         </div>
       </div>
@@ -7517,7 +7517,7 @@ function RemitoIngresoDetalle({ remitoDetalle, onClose, fmt }) {
         style={{ background: 'var(--surface)', border: '1px solid var(--gold)', borderRadius: 16, padding: 24, maxWidth: 600, width: '100%', maxHeight: '90vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <div>
-            <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 24, color: 'var(--gold)', letterSpacing: 2 }}>📥 REMITO DE INGRESO</div>
+            <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 20, color: 'var(--gold)', letterSpacing: 2 }}>📥 REMITO DE INGRESO</div>
             <div style={{ fontSize: 12, color: 'var(--muted)' }}>
               {compra.fecha} · {compra.proveedor_nombre}
             </div>
@@ -7668,21 +7668,21 @@ function PiezasTab() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 20 }}>
         <div style={card}>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Total piezas registradas</div>
-          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 28 }}>{stats.total}</div>
+          <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 23 }}>{stats.total}</div>
         </div>
         <div style={{ ...card, borderColor: 'var(--green)' }}>
           <div style={{ fontSize: 11, color: 'var(--green)', marginBottom: 4 }}>Disponibles</div>
-          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 28, color: 'var(--green)' }}>{stats.disponibles}</div>
+          <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 23, color: 'var(--green)' }}>{stats.disponibles}</div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{stats.kgDisp.toFixed(1)} kg en stock</div>
         </div>
         <div style={{ ...card, borderColor: 'var(--blue)' }}>
           <div style={{ fontSize: 11, color: 'var(--blue)', marginBottom: 4 }}>Convertidas a cortes</div>
-          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 28, color: 'var(--blue)' }}>{stats.convertidas}</div>
+          <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 23, color: 'var(--blue)' }}>{stats.convertidas}</div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{stats.kgConv.toFixed(1)} kg</div>
         </div>
         <div style={{ ...card, borderColor: 'var(--gold)' }}>
           <div style={{ fontSize: 11, color: 'var(--gold)', marginBottom: 4 }}>Vendidas enteras</div>
-          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 28, color: 'var(--gold)' }}>{stats.vendidas}</div>
+          <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 23, color: 'var(--gold)' }}>{stats.vendidas}</div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{stats.kgVend.toFixed(1)} kg · ${Math.round(stats.valorVend).toLocaleString('es-AR')}</div>
         </div>
       </div>
@@ -7749,7 +7749,7 @@ function PiezasTab() {
                     <tr key={p.id} style={{ opacity: disabled ? 0.65 : 1 }}>
                       <td style={{ color: 'var(--muted)', fontSize: 11 }}>#{p.id}</td>
                       <td style={{ fontWeight: 600 }}>{p.tipo_pieza}</td>
-                      <td style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 16, color: 'var(--gold)' }}>{(Number(p.kg) || 0).toFixed(1)}</td>
+                      <td style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 13, color: 'var(--gold)' }}>{(Number(p.kg) || 0).toFixed(1)}</td>
                       <td style={{ fontSize: 11 }}>
                         <div style={{ color: 'var(--text)' }}>{p.proveedor_origen || '—'}</div>
                         <div style={{ color: 'var(--muted)' }}>{p.descripcion_origen || ''}{p.modelo_desposte && ' · Mod. ' + p.modelo_desposte}</div>

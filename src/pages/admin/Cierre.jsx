@@ -278,27 +278,28 @@ function recomputeDerived(c) {
   }
 }
 
+// El número grande del Cierre. Ahora usa las clases del kit (las fx-* de
+// index.css), así que los importes van en monoespaciada tabular: en una
+// fila de seis tarjetas las comas quedan a la misma altura y se comparan
+// de un vistazo. La firma no cambió — los usos siguen todos igual.
 function MetricCard({ label, value, color, sub, big, editable, rawValue, onCommit }) {
   return (
-    <div style={{
-      background: 'var(--surface2)', border: `1px solid ${editable ? 'var(--gold)' : (color || 'var(--border)')}`,
-      borderRadius: 10, padding: '14px 18px', minWidth: 200, flex: '1 1 200px'
+    <div className="fx-kpi" style={{
+      background: 'var(--surface2)',
+      borderColor: editable ? 'var(--gold)' : (color || 'var(--border)'),
+      minWidth: 200, flex: '1 1 200px',
     }}>
-      <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 600, letterSpacing: 0.5 }}>{label}</div>
+      <div className="fx-kpi-label">{label}</div>
       {editable ? (
         <div style={{ marginTop: 6 }}>
           <InputNum value={rawValue} color={color} onCommit={onCommit} ancho={160} />
         </div>
       ) : (
-        <div style={{
-          fontFamily: "'Bebas Neue', cursive",
-          fontSize: big ? 28 : 22,
-          color: color || 'var(--text)',
-          marginTop: 4,
-          lineHeight: 1.1
-        }}>{value}</div>
+        <div className="fx-kpi-valor" style={{ fontSize: big ? 26 : 21, color: color || 'var(--text)' }}>
+          {value}
+        </div>
       )}
-      {sub && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>{sub}</div>}
+      {sub && <div className="fx-kpi-sub">{sub}</div>}
     </div>
   )
 }
