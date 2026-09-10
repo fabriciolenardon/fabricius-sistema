@@ -575,7 +575,7 @@ export default function Dashboard() {
           ].filter(Boolean).map(s => (
             <div key={s.label} style={{ background: s.bajo ? '#3a1a1a' : 'var(--surface2)', border: `1px solid ${s.bajo ? 'var(--red-light)' : 'var(--border)'}`, borderRadius: 10, padding: '12px 14px', textAlign: 'center', cursor: 'pointer', transition: 'transform 0.1s, border-color 0.1s' }} onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--gold)'} onMouseLeave={e => e.currentTarget.style.borderColor = s.bajo ? 'var(--red-light)' : 'var(--border)'} onClick={() => { if (s.esConteo) navigate('/admin/precios'); else if (s.tiposEntradas) abrirDetalle(s) }}>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>{s.label}</div>
-              <div className="fx-kpi-valor" style={{ fontSize: 22, marginTop: 0, color: s.bajo ? 'var(--red-light)' : s.color }}>{s.valor}</div>
+              <div className="fx-kpi-valor" style={{ marginTop: 0, color: s.bajo ? 'var(--red-light)' : s.color }}>{s.valor}</div>
               <div style={{ fontSize: 11, color: 'var(--muted)' }}>{s.aprox}</div>
               {s.bajo && <div style={{ fontSize: 10, color: 'var(--red-light)', fontWeight: 700, marginTop: 4 }}>⚠️ Stock bajo</div>}
             </div>

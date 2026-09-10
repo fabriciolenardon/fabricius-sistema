@@ -295,7 +295,7 @@ function MetricCard({ label, value, color, sub, big, editable, rawValue, onCommi
           <InputNum value={rawValue} color={color} onCommit={onCommit} ancho={160} />
         </div>
       ) : (
-        <div className="fx-kpi-valor" style={{ fontSize: big ? 26 : 21, color: color || 'var(--text)' }}>
+        <div className={'fx-kpi-valor' + (big ? ' big' : '')} style={{ color: color || 'var(--text)' }}>
           {value}
         </div>
       )}

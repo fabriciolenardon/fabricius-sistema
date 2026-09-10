@@ -344,6 +344,9 @@ tr:hover td { background: var(--surface2); }
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 14px 15px;
+  /* Para que el número de adentro pueda medirse contra el ancho REAL de
+     su tarjeta y achicarse solo. Ver .fx-kpi-valor. */
+  container-type: inline-size;
 }
 .fx-kpi-label {
   font-size: 10px;
@@ -352,12 +355,26 @@ tr:hover td { background: var(--surface2); }
   color: var(--muted);
 }
 .fx-kpi-valor {
+  /* El valor se achica SOLO cuando la tarjeta es angosta. En el Cierre hay
+     ocho KPIs en una fila: cada uno queda en ~200px y "$46.327.419,57" a
+     22px se salía del cuadro. 1cqi = 1% del ancho de la tarjeta, así que
+     el número siempre entra, sin importar cuántas tarjetas haya ni cuán
+     grande sea la cifra.
+     El font-size fijo de arriba queda de red por si el navegador no
+     entiende container queries: en ese caso manda ese y nada se rompe. */
   font-size: 22px;
+  font-size: clamp(12px, 8cqi, 22px);
+  white-space: nowrap;      /* que no se parta el número en dos renglones */
   letter-spacing: -0.02em;
   font-weight: 500;
   color: var(--gold);
   line-height: 1.15;
   margin-top: 7px;
+}
+/* El valor destacado (una sola tarjeta ancha) puede permitirse más. */
+.fx-kpi-valor.big {
+  font-size: 28px;
+  font-size: clamp(14px, 11cqi, 28px);
 }
 .fx-kpi-sub {
   font-size: 11px;
