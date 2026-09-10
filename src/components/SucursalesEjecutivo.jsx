@@ -23,6 +23,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase, fetchAllRows } from '../lib/supabase'
 import { fmtPrecio, fmtKg } from '../lib/formatos'
+import { fechaHoyARG } from '../lib/fechas'
 
 const NEON = {
   oro: '#ffd17a', verde: '#51ffb0', rojo: '#ff5c6c', cian: '#00d4ff',
@@ -99,8 +100,16 @@ export default function SucursalesEjecutivo() {
       ])
       setMeses(ms || [])
       setSucursales(sc || [])
-      const claves = [...new Set((ms || []).map(m => m.mes))].sort().reverse()
-      if (claves.length) setMesKey(claves[0])
+      // Arranca en el mes que se esta VIVIENDO, no en el mas nuevo de la
+      // lista. Una boca puede tener el proximo mes ya abierto (Monte Cristo
+      // abrio octubre el 06/10) y entonces la pantalla salia vacia: octubre
+      // todavia no empezo, y la central ni siquiera lo creo.
+      const hoy = fechaHoyARG()
+      const vigente = (ms || []).find(m => hoy >= m.fecha_inicio && hoy <= m.fecha_cierre)
+      const empezados = (ms || []).filter(m => m.fecha_inicio <= hoy).map(m => m.mes).sort().reverse()
+      const todas = [...new Set((ms || []).map(m => m.mes))].sort().reverse()
+      const elegida = vigente ? vigente.mes : (empezados[0] || todas[0])
+      if (elegida) setMesKey(elegida)
     })()
   }, [])
 
@@ -125,9 +134,13 @@ export default function SucursalesEjecutivo() {
     return sucursalId => {
       const propio = idx.get(`${sucursalId}|${mesKey}`)
       if (propio) return { desde: propio.fecha_inicio, hasta: propio.fecha_cierre, propio: true, etiqueta: propio.etiqueta }
-      const central = idx.get(`${SUCURSAL_CENTRAL}|${mesKey}`)
-      return central
-        ? { desde: central.fecha_inicio, hasta: central.fecha_cierre, propio: false, etiqueta: central.etiqueta }
+      // No abrio ese mes: se lo mide con el de la central, y si la central
+      // tampoco lo tiene, con el de la boca que si lo haya abierto. Antes
+      // devolvia null y la boca desaparecia del cuadro, que se lee como "no
+      // vendio nada" y no como "no cargo el mes".
+      const ajeno = idx.get(`${SUCURSAL_CENTRAL}|${mesKey}`) || meses.find(m => m.mes === mesKey)
+      return ajeno
+        ? { desde: ajeno.fecha_inicio, hasta: ajeno.fecha_cierre, propio: false, etiqueta: ajeno.etiqueta }
         : null
     }
   }, [meses, mesKey])
@@ -321,7 +334,7 @@ export default function SucursalesEjecutivo() {
                         {b.rango && (
                           <div style={{ fontSize: 10, color: b.rango.propio ? NEON.muted : NEON.ambar, marginTop: 2 }}>
                             📅 {fechaCorta(b.rango.desde)} → {fechaCorta(b.rango.hasta)}
-                            {!b.rango.propio && ' · todavía no abrió su mes, va con el de la central'}
+                            {!b.rango.propio && ' · todavía no abrió este mes, va con fechas prestadas'}
                           </div>
                         )}
                       </td>
