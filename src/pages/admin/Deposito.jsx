@@ -7418,6 +7418,28 @@ function ComprasSemanaLegajo({ entradas, proveedorNombre, fmt }) {
     historicoProv.forEach(e => { const g = grupoDeEntrada(e); if (g) s.add(g.key) })
     return s
   }, [historicoProv])
+  // Total HISTÓRICO por rubro: todos los kilos que se le compraron a este
+  // proveedor desde siempre, no los de la semana elegida. Sale del mismo
+  // historial que define las columnas, así que un rubro aparece acá con la
+  // primera compra y no hay nada que configurar.
+  // Los kg con el mismo criterio que filaDe (kg_real manda; Number() porque
+  // los numeric de Supabase llegan string).
+  const historicoPorGrupo = useMemo(() => {
+    const acc = new Map()
+    historicoProv.forEach(e => {
+      const g = grupoDeEntrada(e)
+      if (!g) return
+      const a = acc.get(g.key) || { key: g.key, titulo: g.titulo, unidad: g.unidad, kg: 0, ingresos: 0 }
+      a.kg += Number(e.kg_real) || Number(e.kg) || 0
+      a.ingresos++
+      acc.set(g.key, a)
+    })
+    return GRUPOS_COMPRA.filter(g => acc.has(g.key)).map(g => acc.get(g.key))
+  }, [historicoProv])
+  // Como en el header de la semana: el total no mezcla unidades con kilos
+  // (almacén y bebidas se cuentan por unidad, sumarlas daría un número falso).
+  const totKgHistorico = historicoPorGrupo.filter(g => g.unidad !== 'u').reduce((s, g) => s + g.kg, 0)
+
   const grupos = GRUPOS_COMPRA.filter(g => keysVisibles.has(g.key)).map(g => {
     const items = delPeriodo.filter(e => grupoDeEntrada(e)?.key === g.key).map(filaDe)
     return {
@@ -7455,6 +7477,36 @@ function ComprasSemanaLegajo({ entradas, proveedorNombre, fmt }) {
         <button style={btnSem} onClick={setSemanaAnterior}>Semana anterior</button>
         <button style={btnSem} onClick={setSemanaActual}>Semana actual</button>
       </div>
+
+      {/* Lo comprado DE SIEMPRE, por rubro. Va pegado al selector y con su
+          propio título porque estos kilos NO se mueven cuando se cambia la
+          semana: es la foto de toda la relación con el proveedor. */}
+      {historicoPorGrupo.length > 0 && (
+        <div style={{ background: 'var(--surface2)', borderRadius: 10, padding: '10px 12px', marginBottom: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 10, marginBottom: 8 }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 700 }}>
+              📊 Histórico — todo lo que se le compró
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+              Total{' '}
+              <b style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 14, color: 'var(--gold)' }}>
+                {fmtKg(totKgHistorico)} kg
+              </b>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {historicoPorGrupo.map(g => (
+              <div key={g.key} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', minWidth: 120 }}>
+                <div style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{g.titulo}</div>
+                <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, fontWeight: 700, color: 'var(--amber)', lineHeight: 1.3 }}>
+                  {fmtKg(g.kg)}<span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 400 }}> {g.unidad === 'u' ? 'u' : 'kg'}</span>
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--muted)' }}>{g.ingresos} ingreso{g.ingresos === 1 ? '' : 's'}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {grupos.length === 0 ? (
         <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic', padding: '6px 0' }}>
