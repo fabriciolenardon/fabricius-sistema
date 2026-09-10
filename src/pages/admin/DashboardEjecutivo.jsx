@@ -2052,10 +2052,16 @@ function ModoTV({ onSalir }) {
 
               {/* ⚔️ Canales del mes compitiendo */}
               <CanalesEnVivo canales={data.canalesMes} />
-              <BocasEnVivo bocas={data.ventaPorBoca} />
 
-              {/* Curva del día en vivo: hoy vs ayer */}
-              <CurvaDia hoy={data.curvaHoy} ayer={data.curvaAyer} tv />
+              {/* Curva del día + la boca, en la MISMA fila. La curva tiene
+                  flex:1 y se comia todo el sobrante de la columna, asi que
+                  la franja de bocas quedaba aplastada a altura cero: se
+                  dibujaba con sus datos y no se veia. Compartiendo la fila
+                  cada una tiene su lugar asegurado. */}
+              <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '2.7fr 1fr', gap: '0.9vw' }}>
+                <CurvaDia hoy={data.curvaHoy} ayer={data.curvaAyer} tv />
+                <BocasEnVivo bocas={data.ventaPorBoca} />
+              </div>
             </div>
 
             {/* Columna derecha */}
@@ -2550,39 +2556,44 @@ function CanalesEnVivo({ canales }) {
 // ════════════════════════════════════════════════════════════
 function BocasEnVivo({ bocas }) {
   const items = bocas || []
-  if (items.length === 0) return null
-  const maxV = Math.max(...items.map(b => Number(b.total) || 0))
   return (
-    // flexShrink 0: la columna del TV es un flex vertical y sus hijos se
-    // encogen. Sin esto la franja quedaba con altura CERO — se renderizaba,
-    // la consulta traia los datos, y no se veia nada. Le paso lo mismo al
-    // bloque de alertas.
-    <div className="dej-in hud" style={{ ...glass, padding: '0.6vw 1.3vw', display: 'flex', alignItems: 'center', gap: '1.2vw', flexShrink: 0 }}>
-      <div style={{ fontSize: '0.8vw', letterSpacing: 3, color: NEON.cian, fontWeight: 800, lineHeight: 1.3, flexShrink: 0 }}>
-        🏪 BOCAS<br /><span style={{ color: NEON.muted, fontSize: '0.6vw', letterSpacing: 2 }}>HOY</span>
+    <div className="dej-in hud" style={{ ...glass, padding: '1vw 1.2vw', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+      <div style={{ fontSize: '0.8vw', letterSpacing: 3, color: NEON.cian, fontWeight: 800, lineHeight: 1.3, marginBottom: '0.7vw', flexShrink: 0 }}>
+        🏪 BOCAS<br /><span style={{ color: NEON.muted, fontSize: '0.6vw', letterSpacing: 2 }}>VENTA DE HOY</span>
       </div>
-      {items.map(b => {
-        const total = Number(b.total) || 0
-        const lider = items.length > 1 && total === maxV
-        return (
-          <div key={b.sucursal_id ?? b.nombre} style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: '0.65vw', letterSpacing: 2, color: NEON.muted, fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {lider && '👑 '}{b.nombre}
+
+      {items.length === 0 ? (
+        <div style={{ color: NEON.muted, fontSize: '0.7vw', lineHeight: 1.5 }}>
+          Todavía sin ventas hoy.
+        </div>
+      ) : items.map(b => (
+        <div key={b.sucursal_id ?? b.nombre} style={{ marginBottom: '0.9vw' }}>
+          <div style={{ fontSize: '0.68vw', letterSpacing: 1.5, color: NEON.muted, fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {b.nombre}
+          </div>
+          <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '2vw', lineHeight: 1.05, color: NEON.oro, textShadow: '0 0 14px rgba(255,209,122,0.4)' }}>
+            {fmtArs(Number(b.total) || 0)}
+          </div>
+          {/* Partido en dos: al mostrador se le mira el ticket y al mayorista
+              el remito. Juntos esconden cual de los dos movio el dia. */}
+          <div style={{ marginTop: '0.5vw', display: 'flex', flexDirection: 'column', gap: '0.3vw' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5vw', fontSize: '0.62vw', color: NEON.muted }}>
+              <span>🛒 mostrador</span>
+              <b style={{ color: NEON.verde, fontFamily: "'IBM Plex Mono',monospace" }}>{fmtArs(Number(b.minorista) || 0)}</b>
             </div>
-            <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '1.5vw', lineHeight: 1.1, color: lider ? NEON.oro : NEON.cianHi,
-              textShadow: lider ? '0 0 12px rgba(255,209,122,0.45)' : 'none' }}>
-              {fmtArs(total)}
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5vw', fontSize: '0.55vw', color: NEON.muted, opacity: 0.75 }}>
+              <span>{b.tickets} tickets</span>
             </div>
-            {/* Partido en dos: al mostrador se le mira el ticket y al
-                mayorista el remito. Mezclarlos esconde cuál de los dos
-                movió la aguja del día. */}
-            <div style={{ display: 'flex', gap: '0.9vw', fontSize: '0.6vw', color: NEON.muted, marginTop: '0.15vw', whiteSpace: 'nowrap' }}>
-              <span>🛒 <b style={{ color: NEON.verde }}>{fmtArs(Number(b.minorista) || 0)}</b> · {b.tickets} tk</span>
-              <span>🚚 <b style={{ color: NEON.azul }}>{fmtArs(Number(b.mayorista) || 0)}</b> · {b.remitos} rem</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5vw', fontSize: '0.62vw', color: NEON.muted, marginTop: '0.25vw' }}>
+              <span>🚚 mayorista</span>
+              <b style={{ color: NEON.azul, fontFamily: "'IBM Plex Mono',monospace" }}>{fmtArs(Number(b.mayorista) || 0)}</b>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5vw', fontSize: '0.55vw', color: NEON.muted, opacity: 0.75 }}>
+              <span>{b.remitos} remito{b.remitos === 1 ? '' : 's'}</span>
             </div>
           </div>
-        )
-      })}
+        </div>
+      ))}
     </div>
   )
 }
