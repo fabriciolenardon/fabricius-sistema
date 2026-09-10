@@ -2,7 +2,7 @@
 // INSTAGRAM — publicar en la cuenta del negocio (Graph API de Meta)
 // ───────────────────────────────────────────────────────────
 // Misma app de Meta que WhatsApp. Publica foto, carrusel o reel en
-// @carniceriafabricius. Igual que wa-send: valida que quien llama sea
+// @carniceriasfabricius. Igual que wa-send: valida que quien llama sea
 // admin (JWT de Supabase → profiles.rol) y el token nunca sale al navegador.
 //
 // La imagen/video tiene que estar en una URL PÚBLICA: Meta la va a buscar
@@ -124,7 +124,7 @@ export default async function handler(req, res) {
             ok: false,
             error: 'El token anda, pero ninguna de tus páginas tiene una cuenta de Instagram de empresa vinculada.',
             revisar: [
-              'Que @carniceriafabricius sea Cuenta de empresa (no personal ni de creador)',
+              'Que @carniceriasfabricius sea Cuenta de empresa (no personal ni de creador)',
               'Que esté vinculada a una página de Facebook',
               'Que el token tenga los permisos instagram_basic y pages_show_list',
             ],
