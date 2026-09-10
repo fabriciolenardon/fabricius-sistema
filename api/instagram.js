@@ -102,7 +102,43 @@ export default async function handler(req, res) {
 
     // ── Diagnóstico: ¿el token sirve? ¿a qué cuenta apunta? ──
     if (req.method === 'GET') {
-      if (!IG_USER_ID) return res.status(500).json({ error: 'falta INSTAGRAM_USER_ID' })
+      // Sin INSTAGRAM_USER_ID cargado, lo busca solo: recorre las páginas de
+      // Facebook del token y devuelve la cuenta de Instagram vinculada a cada
+      // una. Así alcanza con cargar el token para saber qué ID poner.
+      if (!IG_USER_ID) {
+        const paginas = await graph('me/accounts', {
+          params: { fields: 'id,name,instagram_business_account{id,username,followers_count}' },
+        })
+        const encontradas = (paginas?.data || [])
+          .filter((p) => p.instagram_business_account)
+          .map((p) => ({
+            pagina: p.name,
+            paginaId: p.id,
+            instagramUserId: p.instagram_business_account.id,
+            usuario: p.instagram_business_account.username,
+            seguidores: p.instagram_business_account.followers_count,
+          }))
+
+        if (!encontradas.length) {
+          return res.status(200).json({
+            ok: false,
+            error: 'El token anda, pero ninguna de tus páginas tiene una cuenta de Instagram de empresa vinculada.',
+            revisar: [
+              'Que @carniceriafabricius sea Cuenta de empresa (no personal ni de creador)',
+              'Que esté vinculada a una página de Facebook',
+              'Que el token tenga los permisos instagram_basic y pages_show_list',
+            ],
+            paginasVistas: (paginas?.data || []).map((p) => p.name),
+          })
+        }
+
+        return res.status(200).json({
+          ok: true,
+          mensaje: 'Cargá este instagramUserId como INSTAGRAM_USER_ID en Vercel y redeployá.',
+          cuentas: encontradas,
+        })
+      }
+
       const cuenta = await graph(IG_USER_ID, {
         params: { fields: 'username,name,followers_count,media_count' },
       })
