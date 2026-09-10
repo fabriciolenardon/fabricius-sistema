@@ -7429,9 +7429,18 @@ function ComprasSemanaLegajo({ entradas, proveedorNombre, fmt }) {
     historicoProv.forEach(e => {
       const g = grupoDeEntrada(e)
       if (!g) return
-      const a = acc.get(g.key) || { key: g.key, titulo: g.titulo, unidad: g.unidad, kg: 0, ingresos: 0 }
-      a.kg += Number(e.kg_real) || Number(e.kg) || 0
+      const f = filaDe(e)
+      const a = acc.get(g.key) || { key: g.key, titulo: g.titulo, unidad: g.unidad, kg: 0, importe: 0, ingresos: 0, ultFecha: '', ultPrecio: 0 }
+      a.kg += f._kg
+      a.importe += f._importe
       a.ingresos++
+      // Último precio pagado del rubro. El promedio solo no alcanza: con la
+      // inflación arrastra compras de hace un año y aplasta el número. El
+      // promedio dice cuánto salió en total; el último, cómo viene hoy.
+      if (f._precio > 0 && String(e.fecha || '') >= a.ultFecha) {
+        a.ultFecha = String(e.fecha || '')
+        a.ultPrecio = f._precio
+      }
       acc.set(g.key, a)
     })
     return GRUPOS_COMPRA.filter(g => acc.has(g.key)).map(g => acc.get(g.key))
@@ -7502,6 +7511,14 @@ function ComprasSemanaLegajo({ entradas, proveedorNombre, fmt }) {
                   {fmtKg(g.kg)}<span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 400 }}> {g.unidad === 'u' ? 'u' : 'kg'}</span>
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--muted)' }}>{g.ingresos} ingreso{g.ingresos === 1 ? '' : 's'}</div>
+                {g.kg > 0 && g.importe > 0 && (
+                  <div style={{ fontSize: 10, color: 'var(--muted)', whiteSpace: 'nowrap', marginTop: 2 }}>
+                    prom <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums' }}>{fmt(g.importe / g.kg)}</span>
+                    {g.ultPrecio > 0 && (
+                      <> · últ <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', color: 'var(--gold)' }}>{fmt(g.ultPrecio)}</span></>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
