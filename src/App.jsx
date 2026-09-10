@@ -49,6 +49,7 @@ const Ventas = lazy(() => import('./pages/admin/Ventas'))
 const Etiquetas = lazy(() => import('./pages/admin/Etiquetas'))
 const Pedidos = lazy(() => import('./pages/admin/Pedidos'))
 const Whatsapp = lazy(() => import('./pages/admin/Whatsapp'))
+const Instagram = lazy(() => import('./pages/admin/Instagram'))
 const Proveedores = lazy(() => import('./pages/admin/Proveedores'))
 const Presupuestos = lazy(() => import('./pages/admin/Presupuestos'))
 const Productividad = lazy(() => import('./pages/admin/Productividad'))
@@ -175,6 +176,7 @@ export default function App() {
           <Route path="clientes" element={<Clientes />} />
           <Route path="pedidos" element={<Pedidos />} />
           <Route path="whatsapp" element={<Whatsapp />} />
+          <Route path="instagram" element={<Instagram />} />
           <Route path="pedidos-whatsapp" element={<Navigate to="/admin/whatsapp?tab=pedidos" replace />} />
           <Route path="conversaciones" element={<Navigate to="/admin/whatsapp" replace />} />
           <Route path="cheques" element={<Cheques />} />
