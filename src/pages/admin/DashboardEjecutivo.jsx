@@ -1964,7 +1964,6 @@ function ModoTV({ onSalir }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [onSalir])
 
-  const alertas = useMemo(() => data ? calcularAlertas(data).slice(0, 4) : [], [data])
 
   const flecha = (v) => v == null ? '' : v >= 0 ? '▲' : '▼'
   const signo  = (v) => v == null ? '' : v >= 0 ? '+' : ''
@@ -2109,28 +2108,12 @@ function ModoTV({ onSalir }) {
               {/* 🏆 Podio de clientes mayoristas */}
               <PodioClientes clientes={data.topClientesMes} />
 
-              {/* Alertas */}
-              <div className="dej-in hud" style={{ ...glass, padding: '0.9vw 1.4vw', flex: 1, minHeight: 0, overflow: 'hidden',
-                borderColor: alertas.some(a => a.tipo === 'danger') ? 'rgba(255,92,108,0.4)' : alertas.length ? 'rgba(255,179,92,0.35)' : 'rgba(81,255,176,0.3)' }}>
-                <div style={{ fontSize: '0.85vw', letterSpacing: 4, fontWeight: 800, marginBottom: '0.5vw',
-                  color: alertas.some(a => a.tipo === 'danger') ? NEON.rojo : alertas.length ? NEON.ambar : NEON.verde }}>
-                  {alertas.length > 0 ? `🚨 ALERTAS (${alertas.length})` : '✅ TODO EN ORDEN'}
-                </div>
-                {alertas.length === 0 ? (
-                  <div style={{ color: NEON.muted, fontSize: '1.05vw' }}>No hay alertas activas. El negocio está marchando bien. 🎉</div>
-                ) : (
-                  alertas.map((a, i) => (
-                    <div key={i} style={{ display: 'flex', gap: '0.8vw', alignItems: 'flex-start', padding: '0.6vw 0.9vw', borderRadius: '0.7vw', marginBottom: '0.5vw',
-                      background: a.tipo === 'danger' ? 'rgba(255,107,129,0.08)' : 'rgba(255,184,107,0.07)' }}>
-                      <span style={{ fontSize: '1.2vw' }}>{a.icono}</span>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: '1.05vw', fontWeight: 700, color: a.tipo === 'danger' ? NEON.rojo : NEON.ambar }}>{a.titulo}</div>
-                        <div style={{ fontSize: '0.8vw', color: NEON.muted }}>{a.detalle}</div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
+              {/* Las alertas salieron de la TV (pedido de Fabricio 10/09/2026):
+                  el bloque tenia flex:1 con overflow hidden y quedaba
+                  aplastado entre el podio y las compras, asi que mostraba el
+                  titulo "ALERTAS (4)" y ninguna alerta. Una barra que ocupa
+                  lugar y no dice nada es peor que no estar.
+                  Siguen calculandose y se ven en el panel del celular. */}
 
               {/* Compras de la semana por proveedor */}
               <PanelProveedoresSemana items={data.comprasSemanaProv} total={data.comprasSemanaTotal} tv />
