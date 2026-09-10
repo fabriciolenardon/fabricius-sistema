@@ -100,6 +100,58 @@ export default async function handler(req, res) {
     const guard = await exigirAdmin(req)
     if (guard.error) return res.status(guard.code).json({ error: guard.error })
 
+    // ── Rendimiento: qué se publicó y cómo le fue ──
+    // Trae las publicaciones con sus likes y comentarios. Las metricas de
+    // alcance (reach/saved) vienen anidadas en la MISMA llamada — pedirlas de a
+    // una serian 50 llamadas y el endpoint se corta. Si el token no tiene el
+    // permiso instagram_manage_insights, Meta rechaza toda la consulta, asi que
+    // se reintenta sin insights en vez de quedarse sin nada.
+    if (req.method === 'GET' && req.query?.posts) {
+      if (!IG_USER_ID) return res.status(500).json({ error: 'falta INSTAGRAM_USER_ID' })
+
+      const base = 'id,caption,media_type,media_product_type,permalink,thumbnail_url,media_url,timestamp,like_count,comments_count'
+      let media = null
+      let conAlcance = true
+
+      try {
+        media = await graph(`${IG_USER_ID}/media`, {
+          params: { fields: `${base},insights.metric(reach,saved,shares)`, limit: '50' },
+        })
+      } catch {
+        conAlcance = false
+        media = await graph(`${IG_USER_ID}/media`, { params: { fields: base, limit: '50' } })
+      }
+
+      const posts = (media?.data || []).map((m) => {
+        const ins = {}
+        for (const x of (m.insights?.data || [])) ins[x.name] = x.values?.[0]?.value ?? null
+        const likes = m.like_count || 0
+        const comentarios = m.comments_count || 0
+        const alcance = ins.reach ?? null
+        return {
+          id: m.id,
+          permalink: m.permalink,
+          miniatura: m.thumbnail_url || m.media_url || null,
+          tipo: m.media_product_type === 'REELS' ? 'reel'
+            : m.media_type === 'CAROUSEL_ALBUM' ? 'carrusel'
+            : m.media_type === 'VIDEO' ? 'video' : 'foto',
+          fecha: m.timestamp,
+          texto: (m.caption || '').slice(0, 300),
+          likes,
+          comentarios,
+          guardados: ins.saved ?? null,
+          compartidos: ins.shares ?? null,
+          alcance,
+          // Con alcance, el % que interactuó. Sin alcance, likes+comentarios
+          // pelado: comparable entre posts porque los seguidores son los mismos.
+          interaccion: alcance ? (likes + comentarios) / alcance : null,
+          total: likes + comentarios,
+        }
+      })
+
+      return res.status(200).json({ ok: true, conAlcance, posts })
+    }
+
     // ── Diagnóstico: ¿el token sirve? ¿a qué cuenta apunta? ──
     if (req.method === 'GET') {
       // Sin INSTAGRAM_USER_ID cargado, lo busca solo: recorre las páginas de
