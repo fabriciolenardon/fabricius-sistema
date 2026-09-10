@@ -81,11 +81,11 @@ const NAV_GRUPOS = [
     { to: '/admin/precios',      icon: '💲', label: 'Precios' },
     { to: '/admin/presupuestos', icon: '📋', label: 'Presupuestos' },
     { to: '/admin/etiquetas',    icon: '🏷️', label: 'Etiquetas' },
-    { to: '/admin/instagram',    icon: '📸', label: 'Instagram' },
     { to: '/admin/clientes',     icon: '👥', label: 'Clientes' },
-    // Los canales por donde se habla con el cliente van juntos y al final.
-    // WhatsApp estaba en Operacion, que es donde se despacha, no donde se
-    // vende. Instagram entra aca al lado cuando este conectado.
+    // Los dos canales por donde se le habla al cliente, JUNTOS y al final.
+    // WhatsApp estaba en Operacion (donde se despacha, no donde se vende) e
+    // Instagram habia quedado en el medio, separado por Clientes.
+    { to: '/admin/instagram',    icon: '📸', label: 'Instagram' },
     { to: '/admin/whatsapp',     icon: '💬', label: 'WhatsApp' },
   ] },
   { label: 'Finanzas', icon: '💰', items: [
