@@ -2043,8 +2043,8 @@ function ModoTV({ onSalir }) {
 
               {/* Semana / Mes / Año pasado */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.9vw' }}>
-                <TvKPI label="7 DÍAS" valor={fmtArs(data.totalSemana)} sub={`${fmtArs(data.totalSemana / 7)}/día`} color={NEON.azul} />
-                <TvKPI label="ESTE MES" valor={fmtArs(data.totalMes)}
+                <TvKPI label="MINORISTA · 7 DÍAS" valor={fmtArs(data.totalSemana)} sub={`${fmtArs(data.totalSemana / 7)}/día`} color={NEON.azul} />
+                <TvKPI label="MINORISTA · ESTE MES" valor={fmtArs(data.totalMes)}
                   sub={data.totalMesAnt > 0 ? `${flecha(data.variacion)} ${signo(data.variacion)}${data.variacion.toFixed(0)}% vs mismo período mes ant.` : '—'}
                   color={colorVar(data.variacion)} />
                 <TvWhatsapp />
@@ -2307,8 +2307,8 @@ function ModoTVMovil({ onSalir }) {
 
           {/* ── 7 días / Este mes ── */}
           <div style={{ display: 'flex', gap: 12 }}>
-            <MTvKpi label="7 DÍAS" valor={fmtArs(data.totalSemana)} sub={`${fmtArs(data.totalSemana / 7)}/día`} color={NEON.azul} />
-            <MTvKpi label="ESTE MES" valor={fmtArs(data.totalMes)}
+            <MTvKpi label="MINORISTA · 7 DÍAS" valor={fmtArs(data.totalSemana)} sub={`${fmtArs(data.totalSemana / 7)}/día`} color={NEON.azul} />
+            <MTvKpi label="MINORISTA · ESTE MES" valor={fmtArs(data.totalMes)}
               sub={data.totalMesAnt > 0 ? `${flecha(data.variacion)} ${signo(data.variacion)}${data.variacion.toFixed(0)}% vs mes ant.` : '—'}
               color={colorVar(data.variacion)} />
           </div>
