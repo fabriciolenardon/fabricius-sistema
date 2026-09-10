@@ -20,6 +20,7 @@ import { useCentroActividad } from '../../lib/useCentroActividad'
 import { totalesConceptos } from '../../lib/cierreAuto'
 import { ultimoArqueoPorDia } from '../../lib/arqueos'
 import { cargarSocios, comoLoLlamamos } from '../../lib/socios'
+import SucursalesEjecutivo from '../../components/SucursalesEjecutivo'
 import {
   useReportesData, SelectorPeriodo,
   ReporteMargen, ReporteCliente, ReporteCanal, ReporteTemporal,
@@ -28,6 +29,7 @@ import {
 
 const SUB_TABS = [
   { id: 'resumen',    icon: '◈', label: 'Resumen' },
+  { id: 'sucursales', icon: '🏪', label: 'Sucursales' },
   { id: 'flujo',      icon: '💵', label: 'Flujo Caja' },
   { id: 'margen',     icon: '💰', label: 'Margen' },
   { id: 'cliente',    icon: '👥', label: 'Por Cliente' },
@@ -893,6 +895,7 @@ function ReportePanel({ tab }) {
       </>
     )
   }
+  if (tab === 'sucursales') return <SucursalesEjecutivo />
   if (tab === 'interanual') return <ReporteInteranual />
   return <ReportePanelData tab={tab} periodo={periodo} setPeriodo={setPeriodo} />
 }
