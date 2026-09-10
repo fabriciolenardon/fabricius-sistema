@@ -75,13 +75,16 @@ const NAV_GRUPOS = [
     { to: '/admin/ventas',    icon: '📋', label: 'Ventas Cta/Cte' },
     { to: '/admin/deposito',  icon: '🏭', label: 'Depósito' },
     { to: '/admin/pedidos',   icon: '📥', label: 'Pedidos Mayoristas' },
-    { to: '/admin/whatsapp',  icon: '💬', label: 'WhatsApp' },
   ] },
   { label: 'Comercial', icon: '🏷️', items: [
     { to: '/admin/precios',      icon: '💲', label: 'Precios' },
     { to: '/admin/presupuestos', icon: '📋', label: 'Presupuestos' },
     { to: '/admin/etiquetas',    icon: '🏷️', label: 'Etiquetas' },
     { to: '/admin/clientes',     icon: '👥', label: 'Clientes' },
+    // Los canales por donde se habla con el cliente van juntos y al final.
+    // WhatsApp estaba en Operacion, que es donde se despacha, no donde se
+    // vende. Instagram entra aca al lado cuando este conectado.
+    { to: '/admin/whatsapp',     icon: '💬', label: 'WhatsApp' },
   ] },
   { label: 'Finanzas', icon: '💰', items: [
     { to: '/admin/proveedores', icon: '🏭', label: 'Proveedores' },
