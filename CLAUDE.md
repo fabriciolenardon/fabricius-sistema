@@ -16,7 +16,7 @@ mergean a `main` se deployan solos a Vercel.
 
 - **Siempre `npm run build` antes de mergear.** Es la única verificación (no hay tests). Un build roto tumba el deploy de Vercel.
 - **PRs**: crear el PR con `gh` y **mergearlo directamente** (`gh pr merge N --squash`) sin preguntar — Fabricio lo pidió así. Avisarle solo lo que queda de su lado (ej. migraciones).
-- **Migraciones SQL**: los archivos van numerados en `supabase/`. NO se aplican solas: Fabricio las corre a mano en el SQL Editor de Supabase. Si algo tira error de "schema cache" o columna inexistente, casi siempre es una migración sin aplicar.
+- **Migraciones SQL**: los archivos van numerados en `supabase/` y **las aplica Claude** con `apply_migration` del MCP de Supabase (pedido de Fabricio, 10/09/2026 — antes las corría él a mano). Igual se commitea el archivo: es el registro histórico. Después de aplicar hay que **verificar contra la base** (consultar `pg_policies`, `information_schema.columns`, lo que la migración haya tocado), no confiar en el `success`. Si algo tira error de "schema cache" o columna inexistente, casi siempre es una migración sin aplicar.
 - Commits y PRs en español, estilo `feat(modulo): descripción` / `fix(modulo): descripción`.
 
 ## Reglas de oro (bugs históricos — no repetir)
