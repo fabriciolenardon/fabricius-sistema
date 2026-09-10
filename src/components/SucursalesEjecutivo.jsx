@@ -35,15 +35,33 @@ const SUCURSAL_CENTRAL = 1
 const num = v => Number(v) || 0
 const fmt$ = v => fmtPrecio(num(v))
 
-// Kilos de un item de venta/remito. Los cajones vienen en unidades y hay
-// que abrirlos por su kg_por_unidad (un cajón de pechuga son 20 kg, no 1).
+// Somos carniceria: acá solo entra la CARNE. El almacén y las bebidas
+// quedan afuera de la plata y de los kilos.
+//
+// En los kilos no es un detalle de gusto, es que el número sale mal: en
+// almacén y bebidas el campo kg guarda UNIDADES, así que una gaseosa suma
+// "1 kg" y ensucia el $/kg de toda la boca.
+//
+// Las ventas del mostrador marcan el rubro en `categoria` y los remitos en
+// `tipo`, por eso se miran los dos.
+const NO_CARNE = new Set(['almacen', 'bebidas', 'insumo', 'insumos'])
+const esCarne = i => !NO_CARNE.has(String(i.categoria || i.tipo || '').toLowerCase())
+
+// Los cajones vienen en unidades y hay que abrirlos por su kg_por_unidad
+// (un cajón de pechuga son 20 kg, no 1).
 const kgDeItem = i => {
   const kg = num(i.kg)
   return String(i.unidad) === 'u' && num(i.kg_por_unidad) > 0
     ? kg * num(i.kg_por_unidad)
     : kg
 }
-const kgDeItems = items => (Array.isArray(items) ? items : []).reduce((s, i) => s + kgDeItem(i), 0)
+const itemsCarne = items => (Array.isArray(items) ? items : []).filter(esCarne)
+const kgDeItems = items => itemsCarne(items).reduce((s, i) => s + kgDeItem(i), 0)
+// La plata sale de sumar los items de carne, NO del total del comprobante:
+// el total incluiría el almacén. Diferencia conocida: un descuento de
+// convenio (Blangino) vive en el total y no en el item, así que por ese
+// lado esto queda apenas por encima — es menos del 0,3%.
+const platoDeItems = items => itemsCarne(items).reduce((s, i) => s + num(i.importe), 0)
 
 // ── Caja de número ──────────────────────────────────────────────────────
 function Kpi({ label, valor, sub, color = NEON.cianHi }) {
@@ -63,34 +81,74 @@ const tdN = { ...td, textAlign: 'right', fontFamily: "'IBM Plex Mono',monospace"
 
 export default function SucursalesEjecutivo() {
   const [meses, setMeses] = useState([])
-  const [mesId, setMesId] = useState('')
+  const [mesKey, setMesKey] = useState('')
   const [sucursales, setSucursales] = useState([])
   const [datos, setDatos] = useState(null)
   const [cargando, setCargando] = useState(true)
 
-  // Los meses operativos DE LA CENTRAL: son los que Fabricio ya usa para
-  // mirar el sistema, y sirven de regla común para todas las bocas.
+  // Los meses operativos de TODAS las bocas. Cada una abre y cierra el suyo
+  // cuando quiere (la central arranca septiembre el 31/08 y Monte Cristo el
+  // 01/09), asi que cada boca se mide con SU mes: es el numero que el
+  // encargado ve en su propio sistema.
   useEffect(() => {
     (async () => {
       const [{ data: ms }, { data: sc }] = await Promise.all([
-        supabase.from('meses_operativos').select('id, etiqueta, mes, fecha_inicio, fecha_cierre')
-          .eq('sucursal_id', SUCURSAL_CENTRAL).order('fecha_inicio', { ascending: false }),
+        supabase.from('meses_operativos').select('id, sucursal_id, etiqueta, mes, fecha_inicio, fecha_cierre')
+          .order('fecha_inicio', { ascending: false }),
         supabase.from('sucursales').select('id, nombre, direccion, tipo').order('id'),
       ])
       setMeses(ms || [])
       setSucursales(sc || [])
-      if (ms && ms.length) setMesId(ms[0].id)
+      const claves = [...new Set((ms || []).map(m => m.mes))].sort().reverse()
+      if (claves.length) setMesKey(claves[0])
     })()
   }, [])
 
-  const mes = useMemo(() => meses.find(m => m.id === mesId) || null, [meses, mesId])
+  // El selector lista la UNION de los meses: hay meses que solo tiene una
+  // boca (octubre lo abrio Monte Cristo y la central todavia no).
+  const opcionesMes = useMemo(() => {
+    const porClave = new Map()
+    meses.forEach(m => {
+      const prev = porClave.get(m.mes)
+      // La etiqueta que se muestra es la de la central si la hay: es la que
+      // Fabricio reconoce ("Septiembre 2026" y no "septiembre").
+      if (!prev || m.sucursal_id === SUCURSAL_CENTRAL) porClave.set(m.mes, m)
+    })
+    return [...porClave.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([mes, fila]) => ({ mes, etiqueta: fila.etiqueta }))
+  }, [meses])
+
+  // El mes de UNA boca. Si esa boca todavia no abrio ese mes, se usa el de
+  // la central como referencia y la fila lo avisa.
+  const rangoDe = useMemo(() => {
+    const idx = new Map()
+    meses.forEach(m => idx.set(`${m.sucursal_id}|${m.mes}`, m))
+    return sucursalId => {
+      const propio = idx.get(`${sucursalId}|${mesKey}`)
+      if (propio) return { desde: propio.fecha_inicio, hasta: propio.fecha_cierre, propio: true, etiqueta: propio.etiqueta }
+      const central = idx.get(`${SUCURSAL_CENTRAL}|${mesKey}`)
+      return central
+        ? { desde: central.fecha_inicio, hasta: central.fecha_cierre, propio: false, etiqueta: central.etiqueta }
+        : null
+    }
+  }, [meses, mesKey])
 
   useEffect(() => {
-    if (!mes) return
+    if (!mesKey || !sucursales.length) return
     let vivo = true
     ;(async () => {
       setCargando(true)
-      const desde = mes.fecha_inicio, hasta = mes.fecha_cierre
+      // Cada boca tiene su propio mes, asi que se traen los dias que cubren
+      // a TODAS (la union) y despues cada venta se cuenta solo si cae dentro
+      // del mes de SU boca.
+      const rangos = new Map(sucursales.map(x => [x.id, rangoDe(x.id)]).filter(([, r]) => r))
+      const todos = [...rangos.values()]
+      if (!todos.length) { setDatos({ bocas: [], franquicias: [] }); setCargando(false); return }
+      const desde = todos.map(r => r.desde).sort()[0]
+      const hasta = todos.map(r => r.hasta).sort().slice(-1)[0]
+      const enSuMes = (sucursalId, fecha) => {
+        const r = rangos.get(sucursalId)
+        return !!r && fecha >= r.desde && fecha <= r.hasta
+      }
       // Paginado: un mes de mostrador pasa las 1000 filas sin despeinarse y
       // Supabase corta ahí en silencio.
       const [ventasR, remitosR, clientesR, histR] = await Promise.all([
@@ -123,8 +181,9 @@ export default function SucursalesEjecutivo() {
         return porBoca.get(id)
       }
       ventas.forEach(v => {
+        if (!enSuMes(v.sucursal_id, v.fecha)) return
         const b = boca(v.sucursal_id)
-        b.mostrador += num(v.total)
+        b.mostrador += platoDeItems(v.items)
         b.kgMostrador += kgDeItems(v.items)
         b.tickets++
       })
@@ -132,8 +191,9 @@ export default function SucursalesEjecutivo() {
         // La venta a una franquicia NO es venta de la boca: es mercadería
         // que sale para adentro del grupo. Va en el cuadro de abajo.
         if (esFranquicia.get(r.cliente_id)) return
+        if (!enSuMes(r.sucursal_id, r.fecha)) return
         const b = boca(r.sucursal_id)
-        b.mayorista += num(r.total)
+        b.mayorista += platoDeItems(r.items)
         b.kgMayorista += kgDeItems(r.items)
         b.remitos++
       })
@@ -142,12 +202,15 @@ export default function SucursalesEjecutivo() {
       const porFranquicia = new Map()
       remitos.forEach(r => {
         if (!esFranquicia.get(r.cliente_id)) return
+        // Estos remitos los emite la CENTRAL, asi que se miden con el mes de
+        // la central aunque la franquicia tenga el suyo.
+        if (!enSuMes(SUCURSAL_CENTRAL, r.fecha)) return
         const k = r.cliente_id
         if (!porFranquicia.has(k)) porFranquicia.set(k, { id: k, nombre: nombreCli.get(k) || 'Franquicia', remitos: 0, kilos: 0, plata: 0 })
         const f = porFranquicia.get(k)
         f.remitos++
         f.kilos += kgDeItems(r.items)
-        f.plata += num(r.total)
+        f.plata += platoDeItems(r.items)
       })
 
       // Acumulado historico por franquicia (toda la relacion, no el mes)
@@ -157,7 +220,7 @@ export default function SucursalesEjecutivo() {
         if (!esFranquicia.get(r.cliente_id)) return
         const h = hist.get(r.cliente_id) || { kilos: 0, plata: 0, remitos: 0 }
         h.kilos += kgDeItems(r.items)
-        h.plata += num(r.total)
+        h.plata += platoDeItems(r.items)
         h.remitos++
         hist.set(r.cliente_id, h)
       })
@@ -176,20 +239,20 @@ export default function SucursalesEjecutivo() {
       setCargando(false)
     })()
     return () => { vivo = false }
-  }, [mes])
+  }, [mesKey, sucursales, rangoDe])
 
   const bocas = useMemo(() => {
     if (!datos) return []
     return sucursales
       .map(s => {
         const d = datos.bocas.find(b => b.sucursal_id === s.id) || { mostrador: 0, kgMostrador: 0, tickets: 0, mayorista: 0, kgMayorista: 0, remitos: 0 }
-        return { ...s, ...d, total: d.mostrador + d.mayorista }
+        return { ...s, ...d, total: d.mostrador + d.mayorista, rango: rangoDe(s.id) }
       })
       // Una boca sin una sola venta no ocupa una fila con ceros: se nombra
       // abajo, con el motivo. Hoy es Alvear, que no tiene el sistema.
       .filter(b => b.total > 0 || b.tickets > 0)
       .sort((a, b) => b.total - a.total)
-  }, [datos, sucursales])
+  }, [datos, sucursales, rangoDe])
 
   const sinDatos = useMemo(() => {
     if (!datos) return []
@@ -211,15 +274,13 @@ export default function SucursalesEjecutivo() {
       {/* Selector de mes operativo */}
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
         <span style={{ fontSize: 11, color: NEON.muted, textTransform: 'uppercase', letterSpacing: 1 }}>Mes operativo</span>
-        <select value={mesId} onChange={e => setMesId(e.target.value)}
+        <select value={mesKey} onChange={e => setMesKey(e.target.value)}
           style={{ background: 'rgba(0,212,255,0.05)', border: '1px solid rgba(0,212,255,0.3)', color: NEON.texto, borderRadius: 8, padding: '7px 12px', fontSize: 13, fontFamily: "'DM Sans',sans-serif", width: 'auto' }}>
-          {meses.map(m => <option key={m.id} value={m.id} style={{ background: '#06121c' }}>{m.etiqueta}</option>)}
+          {opcionesMes.map(o => <option key={o.mes} value={o.mes} style={{ background: '#06121c' }}>{o.etiqueta}</option>)}
         </select>
-        {mes && (
-          <span style={{ fontSize: 11, color: NEON.muted }}>
-            {fechaCorta(mes.fecha_inicio)} → {fechaCorta(mes.fecha_cierre)}
-          </span>
-        )}
+        <span style={{ fontSize: 11, color: NEON.muted }}>
+          cada boca con las fechas de SU mes operativo
+        </span>
       </div>
 
       {cargando ? (
@@ -237,7 +298,7 @@ export default function SucursalesEjecutivo() {
           <div style={{ background: 'rgba(0,212,255,0.02)', border: '1px solid rgba(0,212,255,0.15)', borderRadius: 12, padding: 16, marginBottom: 20 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: NEON.cian, letterSpacing: 1, marginBottom: 4 }}>🏪 LO QUE VENDE CADA BOCA</div>
             <div style={{ fontSize: 11, color: NEON.muted, marginBottom: 12 }}>
-              Venta propia: mostrador + sus mayoristas. La casa central va <b>sin</b> lo que le vende a las franquicias — eso no es venta a la calle y se mira en el cuadro de abajo.
+              Solo CARNE: el almacén y las bebidas no suman ni en plata ni en kilos. Venta propia = mostrador + sus mayoristas, y la casa central va <b>sin</b> lo que le vende a las franquicias — eso no es venta a la calle y se mira en el cuadro de abajo. Cada boca se mide con las fechas de su propio mes operativo.
             </div>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
@@ -257,6 +318,12 @@ export default function SucursalesEjecutivo() {
                       <td style={td}>
                         <div style={{ fontWeight: 700, color: NEON.texto }}>{b.nombre}</div>
                         <div style={{ fontSize: 10, color: NEON.muted }}>{b.tipo === 'central' ? 'Casa central' : 'Franquicia'} · {b.direccion}</div>
+                        {b.rango && (
+                          <div style={{ fontSize: 10, color: b.rango.propio ? NEON.muted : NEON.ambar, marginTop: 2 }}>
+                            📅 {fechaCorta(b.rango.desde)} → {fechaCorta(b.rango.hasta)}
+                            {!b.rango.propio && ' · todavía no abrió su mes, va con el de la central'}
+                          </div>
+                        )}
                       </td>
                       <td style={{ ...tdN, color: NEON.cianHi }}>{fmt$(b.mostrador)}</td>
                       <td style={{ ...tdN, color: NEON.muted }}>{b.tickets.toLocaleString('es-AR')}</td>
@@ -283,7 +350,7 @@ export default function SucursalesEjecutivo() {
           <div style={{ background: 'rgba(255,179,92,0.03)', border: '1px solid rgba(255,179,92,0.25)', borderRadius: 12, padding: 16 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: NEON.ambar, letterSpacing: 1, marginBottom: 4 }}>🚚 LO QUE LAS FRANQUICIAS LE COMPRAN A LA CENTRAL</div>
             <div style={{ fontSize: 11, color: NEON.muted, marginBottom: 12 }}>
-              Los remitos que salen de la central para las bocas, en kilos y en plata. Están todas, tengan el sistema instalado o no.
+              Los remitos de CARNE que salen de la central para las bocas, en kilos y en plata. Están todas, tengan el sistema instalado o no. Van con el mes operativo de la central, que es la que los emite.
             </div>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 620 }}>
