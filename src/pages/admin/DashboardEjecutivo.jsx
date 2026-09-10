@@ -289,7 +289,7 @@ function useDashboardData(refreshMs = 120000) {
       fetchAllRows(() => supabase.from('movimientos_ctacte').select('cliente_id, debe, fecha').gte('fecha', lunesPasado).gt('debe', 0)),
       // Mercadería que INGRESÓ hoy al depósito (para el rotativo del footer)
       supabase.from('entradas_deposito').select('proveedor_nombre, descripcion, kg, importe, destino, cantidad')
-        .eq('fecha', hoy).eq('eliminado', false),,
+        .eq('fecha', hoy).eq('eliminado', false),
       // Venta de HOY de las bocas franquiciadas. Va por RPC de totales: la
       // RLS aisla cada sucursal a proposito y abrirla infla el resto del
       // sistema (paso con la 144). Ver supabase/149.
