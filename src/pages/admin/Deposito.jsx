@@ -7371,6 +7371,14 @@ function labelTipoEntrada(t) {
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
+// fmtKg YA devuelve el valor con ' kg' pegado, asi que la unidad no se
+// agrega aparte: hacerlo mostraba "120,00 kg kg x $10.200,00/kg" en todo el
+// legajo. Almacen y bebidas se cuentan por unidad, y ahi fmtKg no sirve:
+// se formatea el numero solo y se le pone la 'u'.
+const fmtCant = (n, unidad) => unidad === 'u'
+  ? (Number(n) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' u'
+  : fmtKg(n)
+
 function ComprasSemanaLegajo({ entradas, proveedorNombre, fmt }) {
   // Default: SEMANA ANTERIOR (lun→dom) — es lo que se controla al liquidar.
   const [desde, setDesde] = useState(() => fechaRelativaARG(-7, new Date(lunesDeLaSemana() + 'T12:00')))
@@ -7429,9 +7437,18 @@ function ComprasSemanaLegajo({ entradas, proveedorNombre, fmt }) {
     historicoProv.forEach(e => {
       const g = grupoDeEntrada(e)
       if (!g) return
-      const a = acc.get(g.key) || { key: g.key, titulo: g.titulo, unidad: g.unidad, kg: 0, ingresos: 0 }
-      a.kg += Number(e.kg_real) || Number(e.kg) || 0
+      const f = filaDe(e)
+      const a = acc.get(g.key) || { key: g.key, titulo: g.titulo, unidad: g.unidad, kg: 0, importe: 0, ingresos: 0, ultFecha: '', ultPrecio: 0 }
+      a.kg += f._kg
+      a.importe += f._importe
       a.ingresos++
+      // Último precio pagado del rubro. El promedio solo no alcanza: con la
+      // inflación arrastra compras de hace un año y aplasta el número. El
+      // promedio dice cuánto salió en total; el último, cómo viene hoy.
+      if (f._precio > 0 && String(e.fecha || '') >= a.ultFecha) {
+        a.ultFecha = String(e.fecha || '')
+        a.ultPrecio = f._precio
+      }
       acc.set(g.key, a)
     })
     return GRUPOS_COMPRA.filter(g => acc.has(g.key)).map(g => acc.get(g.key))
@@ -7463,7 +7480,7 @@ function ComprasSemanaLegajo({ entradas, proveedorNombre, fmt }) {
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontSize: 10, color: 'var(--muted)' }}>TOTAL {fechaCorta(desde)} → {fechaCorta(hasta)}</div>
           <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 21, color: 'var(--amber)', lineHeight: 1 }}>{fmt(totSemana)}</div>
-          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{fmtKg(totKgSemana)} kg</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{fmtKg(totKgSemana)}</div>
         </div>
       </div>
 
@@ -7490,7 +7507,7 @@ function ComprasSemanaLegajo({ entradas, proveedorNombre, fmt }) {
             <div style={{ fontSize: 11, color: 'var(--muted)' }}>
               Total{' '}
               <b style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 14, color: 'var(--gold)' }}>
-                {fmtKg(totKgHistorico)} kg
+                {fmtKg(totKgHistorico)}
               </b>
             </div>
           </div>
@@ -7499,9 +7516,17 @@ function ComprasSemanaLegajo({ entradas, proveedorNombre, fmt }) {
               <div key={g.key} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', minWidth: 120 }}>
                 <div style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{g.titulo}</div>
                 <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, fontWeight: 700, color: 'var(--amber)', lineHeight: 1.3 }}>
-                  {fmtKg(g.kg)}<span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 400 }}> {g.unidad === 'u' ? 'u' : 'kg'}</span>
+                  {fmtCant(g.kg, g.unidad)}
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--muted)' }}>{g.ingresos} ingreso{g.ingresos === 1 ? '' : 's'}</div>
+                {g.kg > 0 && g.importe > 0 && (
+                  <div style={{ fontSize: 10, color: 'var(--muted)', whiteSpace: 'nowrap', marginTop: 2 }}>
+                    prom <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums' }}>{fmt(g.importe / g.kg)}</span>
+                    {g.ultPrecio > 0 && (
+                      <> · últ <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', color: 'var(--gold)' }}>{fmt(g.ultPrecio)}</span></>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -7536,14 +7561,14 @@ function ComprasSemanaLegajo({ entradas, proveedorNombre, fmt }) {
                         <span style={{ fontSize: 13, color: 'var(--amber)', fontWeight: 700, whiteSpace: 'nowrap' }}>{fmt(e._importe)}</span>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
-                        <span>{fmtKg(e._kg)} {u} × {fmt(e._precio)}/{u}</span>
+                        <span>{fmtCant(e._kg, g.unidad)} × {fmt(e._precio)}/{u}</span>
                         {e.descripcion && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 140 }} title={e.descripcion}>{e.descripcion}</span>}
                       </div>
                     </div>
                   ))
                 )}
                 <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 8, fontSize: 12, fontWeight: 700 }}>
-                  <span style={{ color: 'var(--muted)' }}>Total: {fmtKg(g.totKg)} {u}</span>
+                  <span style={{ color: 'var(--muted)' }}>Total: {fmtCant(g.totKg, g.unidad)}</span>
                   <span style={{ color: 'var(--amber)' }}>{fmt(g.totImporte)}</span>
                 </div>
               </div>
