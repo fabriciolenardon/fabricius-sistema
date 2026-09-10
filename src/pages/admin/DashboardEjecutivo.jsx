@@ -224,11 +224,11 @@ function useDashboardData(refreshMs = 120000) {
     const anioPasadoMesIni = `${hoyDt.getFullYear() - 1}-${String(hoyDt.getMonth() + 1).padStart(2, '0')}-01`
     const anioPasadoHoy    = `${hoyDt.getFullYear() - 1}-${String(hoyDt.getMonth() + 1).padStart(2, '0')}-${String(hoyDt.getDate()).padStart(2, '0')}`
     const [ventasHoy, ventasAyer, ventasSemana, ventasMes, ventasMesAnt, ventasAnioPasado,
-           salidasMes, cuentas, facturas12m, stock, bocasQ, cheques, clientes,
+           salidasMes, cuentas, facturas12m, stock, cheques, clientes,
            gastosMes, sueldosMes, pagosProvMes, movCtacteMes, todasCajas, todosDeudores,
            comprasMesQ, cierresQ, comprasSemQ, remitosHoyQ, cobranzaQ, arqueosSemQ,
            cobranzaTotalQ, conceptosQ,
-           piezasQ, mediasQ, movSemanasQ, entradasHoyQ] = await Promise.all([
+           piezasQ, mediasQ, movSemanasQ, entradasHoyQ, bocasHoyQ] = await Promise.all([
       // sucursal_id: el panel de la TV muestra la venta de cada boca por separado
       supabase.from('ventas_minoristas').select('total, efectivo, debito, transferencia, items, fecha, hora, sucursal_id').eq('origen', 'caja').eq('fecha', hoy),
       // hora incluida: alimenta la curva "hoy vs ayer a esta hora"
@@ -246,8 +246,6 @@ function useDashboardData(refreshMs = 120000) {
       supabase.from('cuentas_fiscales').select('*').eq('activa', true).then(r => r).catch(() => ({ data: null })),
       supabase.from('facturas').select('cuenta_id, monto_total, fecha').eq('tipo', 'emitida').gte('fecha', fechaHaceDias(365)).then(r => r).catch(() => ({ data: null })),
       supabase.from('stock_actual').select('*'),
-      // Las bocas, para ponerle nombre a la venta de cada una en la TV
-      supabase.from('sucursales').select('id, nombre, tipo').order('id'),
       supabase.from('cheques').select('*').gte('fecha_pago', hoy).lte('fecha_pago', fechaHaceDias(-15)),
       supabase.from('clientes').select('nombre, saldo').gt('saldo', 0).order('saldo', { ascending: false }).limit(15),
       // solo_balance: facturas a nombre de la SAS que paga un tercero — no son gasto nuestro
@@ -291,27 +289,21 @@ function useDashboardData(refreshMs = 120000) {
       fetchAllRows(() => supabase.from('movimientos_ctacte').select('cliente_id, debe, fecha').gte('fecha', lunesPasado).gt('debe', 0)),
       // Mercadería que INGRESÓ hoy al depósito (para el rotativo del footer)
       supabase.from('entradas_deposito').select('proveedor_nombre, descripcion, kg, importe, destino, cantidad')
-        .eq('fecha', hoy).eq('eliminado', false),
+        .eq('fecha', hoy).eq('eliminado', false),,
+      // Venta de HOY de las bocas franquiciadas. Va por RPC de totales: la
+      // RLS aisla cada sucursal a proposito y abrirla infla el resto del
+      // sistema (paso con la 144). Ver supabase/149.
+      supabase.rpc('ejecutivo_bocas_hoy')
     ])
 
     const totalHoy  = (ventasHoy.data || []).reduce((s, v) => s + (Number(v.total) || 0), 0)
 
-    // ── 🏪 VENTA DE HOY POR BOCA ────────────────────────────────────────
-    // El total de arriba suma TODAS las bocas: hasta ahora la TV mostraba un
-    // solo número sin decir de quién era. Esto lo abre por sucursal.
-    // Alvear no aparece porque todavía no tiene el sistema: no carga ventas.
-    // Cuando se lo instalen entra sola, sin tocar nada.
-    const bocas = bocasQ.data || []
-    const nombreBoca = new Map(bocas.map(b => [b.id, b.nombre]))
-    const acumBoca = new Map()
-    ;(ventasHoy.data || []).forEach(v => {
-      const k = v.sucursal_id
-      const a = acumBoca.get(k) || { sucursal_id: k, nombre: nombreBoca.get(k) || 'Sin boca', total: 0, tickets: 0 }
-      a.total += Number(v.total) || 0
-      a.tickets++
-      acumBoca.set(k, a)
-    })
-    const ventaPorBoca = [...acumBoca.values()].sort((a, b) => b.total - a.total)
+    // ── 🏪 VENTA DE HOY DE LAS BOCAS FRANQUICIADAS ──────────────────
+    // Solo las franquicias: la venta de la central ya es el numero grande de
+    // arriba del panel, repetirla abajo es ruido. Minorista + mayorista de
+    // cada una. Alvear entra sola el dia que le instalen el sistema.
+    const ventaPorBoca = (Array.isArray(bocasHoyQ?.data) ? bocasHoyQ.data : [])
+      .filter(b => (Number(b.total) || 0) > 0 || (Number(b.tickets) || 0) > 0)
     const totalAyer = (ventasAyer.data || []).reduce((s, v) => s + (Number(v.total) || 0), 0)
     const variacionHoyVsAyer = totalAyer > 0 ? ((totalHoy - totalAyer) / totalAyer) * 100 : null
     const cantHoy  = (ventasHoy.data || []).length
@@ -2558,42 +2550,44 @@ function CanalesEnVivo({ canales }) {
 }
 
 // ════════════════════════════════════════════════════════════
-// 🏪 BOCAS EN VIVO — cuánto vendió hoy cada local
+// 🏪 BOCAS EN VIVO — lo que hizo hoy cada franquicia
 // ────────────────────────────────────────────────────────────
-// El facturado grande de arriba suma TODAS las bocas y no decía
-// de quién era cada peso. Esto lo abre por local, en vivo.
-// Alvear no figura porque todavía no tiene el sistema y no carga
-// ventas; el día que se lo instalen aparece sola, sin tocar nada.
-// (Lo que las sucursales COMPRAN ya está en ⚔️ CANALES.)
+// SOLO las franquicias: la venta de la central ya es el número
+// grande de arriba del panel, repetirla acá abajo es ruido.
+// De cada una, lo del día partido en MINORISTA (mostrador) y
+// MAYORISTA (los remitos que ella emite a sus clientes).
+// Alvear aparece sola el día que le instalen el sistema; hasta
+// entonces no carga ventas y la franja no la muestra.
+// Los datos salen de la rpc `ejecutivo_bocas_hoy` (supabase/149):
+// totales agregados, sin abrir las tablas de la otra boca.
 // ════════════════════════════════════════════════════════════
 function BocasEnVivo({ bocas }) {
-  const items = (bocas || []).filter(b => Number(b.total) > 0)
+  const items = bocas || []
   if (items.length === 0) return null
-  const total = items.reduce((s, b) => s + Number(b.total), 0)
-  const maxV = Math.max(...items.map(b => Number(b.total)))
+  const maxV = Math.max(...items.map(b => Number(b.total) || 0))
   return (
-    <div className="dej-in hud" style={{ ...glass, padding: '0.6vw 1.3vw', display: 'flex', alignItems: 'center', gap: '1vw' }}>
+    <div className="dej-in hud" style={{ ...glass, padding: '0.6vw 1.3vw', display: 'flex', alignItems: 'center', gap: '1.2vw' }}>
       <div style={{ fontSize: '0.8vw', letterSpacing: 3, color: NEON.cian, fontWeight: 800, lineHeight: 1.3, flexShrink: 0 }}>
-        🏪 BOCAS<br /><span style={{ color: NEON.muted, fontSize: '0.6vw', letterSpacing: 2 }}>VENTA DE HOY</span>
+        🏪 BOCAS<br /><span style={{ color: NEON.muted, fontSize: '0.6vw', letterSpacing: 2 }}>HOY</span>
       </div>
       {items.map(b => {
-        const v = Number(b.total)
-        const lider = total > 0 && v === maxV
+        const total = Number(b.total) || 0
+        const lider = items.length > 1 && total === maxV
         return (
-          <div key={b.sucursal_id ?? b.nombre} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.7vw', minWidth: 0 }}>
-            <HudGauge pct={total > 0 ? (v / total) * 100 : 0} label="🏪"
-              color={lider ? NEON.oro : NEON.cian} size="4.2vw" fsValor="1.05vw" fsLabel="0.85vw" />
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: '0.65vw', letterSpacing: 2, color: NEON.muted, fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {lider && '👑 '}{b.nombre}
-              </div>
-              <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '1.45vw', lineHeight: 1.1, color: lider ? NEON.oro : NEON.cian,
-                textShadow: lider ? '0 0 12px rgba(255,209,122,0.45)' : 'none' }}>
-                {fmtArs(v)}
-              </div>
-              <div style={{ fontSize: '0.55vw', color: NEON.muted, letterSpacing: 1 }}>
-                {b.tickets} ticket{b.tickets === 1 ? '' : 's'}
-              </div>
+          <div key={b.sucursal_id ?? b.nombre} style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: '0.65vw', letterSpacing: 2, color: NEON.muted, fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {lider && '👑 '}{b.nombre}
+            </div>
+            <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: '1.5vw', lineHeight: 1.1, color: lider ? NEON.oro : NEON.cianHi,
+              textShadow: lider ? '0 0 12px rgba(255,209,122,0.45)' : 'none' }}>
+              {fmtArs(total)}
+            </div>
+            {/* Partido en dos: al mostrador se le mira el ticket y al
+                mayorista el remito. Mezclarlos esconde cuál de los dos
+                movió la aguja del día. */}
+            <div style={{ display: 'flex', gap: '0.9vw', fontSize: '0.6vw', color: NEON.muted, marginTop: '0.15vw', whiteSpace: 'nowrap' }}>
+              <span>🛒 <b style={{ color: NEON.verde }}>{fmtArs(Number(b.minorista) || 0)}</b> · {b.tickets} tk</span>
+              <span>🚚 <b style={{ color: NEON.azul }}>{fmtArs(Number(b.mayorista) || 0)}</b> · {b.remitos} rem</span>
             </div>
           </div>
         )
