@@ -27,6 +27,10 @@ import {
   ReporteCajas, ReporteFlujo, ReporteGastos, ReporteInteranual,
 } from './Reportes'
 
+// 'YYYY-MM-DD' -> '31/08'. Sin new Date(): un date pelado se parsea como
+// medianoche UTC y en Argentina cae al dia anterior.
+const fechaCortaDM = f => (f ? `${String(f).slice(8, 10)}/${String(f).slice(5, 7)}` : '')
+
 const SUB_TABS = [
   { id: 'resumen',    icon: '◈', label: 'Resumen' },
   { id: 'sucursales', icon: '🏪', label: 'Sucursales' },
@@ -651,6 +655,7 @@ function useDashboardData(refreshMs = 120000) {
 
     setData({
       totalHoy, mayoristaHoy, cantHoy, ticketProm, totalSemana, ventaPorBoca,
+      mesIni,   // desde que dia cuenta el mes: es el operativo, no el calendario
       mesCerrado,
       totalMes: totalCajaMes,
       mayoristaMes: totalSalidasMes,
@@ -2044,8 +2049,12 @@ function ModoTV({ onSalir }) {
               {/* Semana / Mes / Año pasado */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.9vw' }}>
                 <TvKPI label="MINORISTA · 7 DÍAS" valor={fmtArs(data.totalSemana)} sub={`${fmtArs(data.totalSemana / 7)}/día`} color={NEON.azul} />
-                <TvKPI label="MINORISTA · ESTE MES" valor={fmtArs(data.totalMes)}
-                  sub={data.totalMesAnt > 0 ? `${flecha(data.variacion)} ${signo(data.variacion)}${data.variacion.toFixed(0)}% vs mismo período mes ant.` : '—'}
+                {/* Dice MES OPERATIVO y desde que dia arranca: el de septiembre
+                    empieza el 31/08, asi que este numero no es el del 1 al 10.
+                    Sin eso no cerraba con lo que contesta Iris, que cuenta por
+                    mes calendario cuando se le pide "del 1 al 10". */}
+                <TvKPI label="MINORISTA · MES OPERATIVO" valor={fmtArs(data.totalMes)}
+                  sub={`desde ${fechaCortaDM(data.mesIni)}${data.totalMesAnt > 0 ? ` · ${flecha(data.variacion)} ${signo(data.variacion)}${data.variacion.toFixed(0)}% vs mismo período mes ant.` : ''}`}
                   color={colorVar(data.variacion)} />
                 <TvWhatsapp />
               </div>
@@ -2308,7 +2317,7 @@ function ModoTVMovil({ onSalir }) {
           {/* ── 7 días / Este mes ── */}
           <div style={{ display: 'flex', gap: 12 }}>
             <MTvKpi label="MINORISTA · 7 DÍAS" valor={fmtArs(data.totalSemana)} sub={`${fmtArs(data.totalSemana / 7)}/día`} color={NEON.azul} />
-            <MTvKpi label="MINORISTA · ESTE MES" valor={fmtArs(data.totalMes)}
+            <MTvKpi label="MINORISTA · MES OP." valor={fmtArs(data.totalMes)}
               sub={data.totalMesAnt > 0 ? `${flecha(data.variacion)} ${signo(data.variacion)}${data.variacion.toFixed(0)}% vs mes ant.` : '—'}
               color={colorVar(data.variacion)} />
           </div>
