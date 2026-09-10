@@ -3,7 +3,7 @@
 // Authorization, así que no se puede abrir la URL a mano en el navegador) y
 // muestra el resultado en criollo: si el token anda, a qué cuenta llega, y qué
 // falta cargar. Todo el trabajo pesado está en api/instagram.js.
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useEsMovil } from '../../lib/useEsMovil'
 
@@ -13,6 +13,10 @@ export default function Instagram() {
   const [res, setRes] = useState(null)     // respuesta parseada
   const [err, setErr] = useState('')       // error de red o del endpoint
   const [copiado, setCopiado] = useState('')
+
+  // Consulta el estado al entrar: si no, recargar la página deja la pantalla
+  // como si estuviera desconectada y asusta.
+  useEffect(() => { probar() }, [])
 
   async function probar() {
     setCargando(true); setErr(''); setRes(null); setCopiado('')
@@ -77,7 +81,7 @@ export default function Instagram() {
             width: esMovil ? '100%' : 'auto',
           }}
         >
-          {cargando ? 'Probando…' : '🔌 Probar conexión'}
+          {cargando ? 'Probando…' : '🔌 Probar de nuevo'}
         </button>
         <p style={{ color: 'var(--muted)', fontSize: 13.5, margin: '12px 0 0', lineHeight: 1.5 }}>
           Verifica el token contra Meta y busca la cuenta de Instagram. No publica nada.
