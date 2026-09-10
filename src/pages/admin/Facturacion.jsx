@@ -23,7 +23,7 @@ import { generarLibroVentas, generarLibroCompras, descargarCSV } from '../../lib
 import {
   proyectarFacturacionAnual, distribuirEntreCuentas, calcularAvisos,
 } from '../../lib/facturacionHelpers'
-import { fechaHoyARG } from '../../lib/fechas'
+import { fechaHoyARG, fmtFechaARG as fmtFecha } from '../../lib/fechas'
 import { fmtPrecio, parseNumero } from '../../lib/formatos'
 import {
   COMPROBANTES, DOC_TIPOS, COND_IVA_RECEPTOR, IVA_ALICUOTAS,
@@ -38,7 +38,6 @@ import { yaTieneFactura, vincularOrigen } from '../../lib/facturarVenta'
 
 const fmt$ = n => fmtPrecio(Math.abs(Number(n) || 0))
 const fmtPct = n => (n || 0).toFixed(1) + '%'
-const fmtFecha = d => d ? new Date(d).toLocaleDateString('es-AR') : '—'
 // Nombre del mes en curso en hora ARG. Con la TZ del navegador, el último día
 // del mes después de las 21 el título ya decía el mes siguiente.
 const mesActualARG = () => new Date()
