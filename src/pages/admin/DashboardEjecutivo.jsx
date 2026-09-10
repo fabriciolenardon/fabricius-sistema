@@ -2066,8 +2066,11 @@ function ModoTV({ onSalir }) {
                   💼 MES EN VIVO · 01→{fechaHoyARG().slice(8, 10)}
                 </div>
                 <div style={{ display: 'flex', gap: '1.2vw', alignItems: 'center' }}>
-                  <HudGauge pct={data.panelControl.pctCobrado} label="COBRADO" size="5.6vw" fsValor="1.4vw" fsLabel="0.5vw"
-                    color={data.panelControl.pctCobrado < 50 ? NEON.rojo : data.panelControl.pctCobrado < 75 ? NEON.ambar : NEON.verde} />
+                  {/* Sacado el medidor "COBRADO": no pertenecia a esta tarjeta,
+                      que muestra VENTAS - COMPRAS - GASTOS del mes, y encima
+                      mentia. Comparaba los cobros del mes contra lo facturado
+                      del mes, pero en los cobros entra la deuda vieja: por eso
+                      marcaba 100% con $50,4M pendientes de cobrar abajo. */}
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.4vw', minWidth: 0 }}>
                     <TvMini label="VENTAS" valor={fmtArs(data.mensualVivo.ventas)} color={NEON.cianHi} chico />
                     <TvMini label="COMPRAS" valor={fmtArs(data.mensualVivo.compras)} color={NEON.ambar} chico />
@@ -2308,8 +2311,9 @@ function ModoTVMovil({ onSalir }) {
           <div className="dej-in hud" style={mCard}>
             <div style={{ ...mLbl, letterSpacing: 3, marginBottom: 10 }}>💼 MES EN VIVO · 01→{fechaHoyARG().slice(8, 10)}</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <HudGauge pct={data.panelControl.pctCobrado} label="COBRADO" size="86px" fsValor="22px" fsLabel="9px"
-                color={data.panelControl.pctCobrado < 50 ? NEON.rojo : data.panelControl.pctCobrado < 75 ? NEON.ambar : NEON.verde} />
+              {/* Mismo caso que en la TV: el medidor "COBRADO" no es de esta
+                  tarjeta y ademas engaña (mezcla cobros de deuda vieja con
+                  la facturacion del mes). */}
               <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 7 }}>
                 <MtvLinea label="VENTAS" valor={fmtArs(data.mensualVivo.ventas)} color={NEON.cianHi} />
                 <MtvLinea label="COMPRAS" valor={fmtArs(data.mensualVivo.compras)} color={NEON.ambar} />
@@ -2549,7 +2553,11 @@ function BocasEnVivo({ bocas }) {
   if (items.length === 0) return null
   const maxV = Math.max(...items.map(b => Number(b.total) || 0))
   return (
-    <div className="dej-in hud" style={{ ...glass, padding: '0.6vw 1.3vw', display: 'flex', alignItems: 'center', gap: '1.2vw' }}>
+    // flexShrink 0: la columna del TV es un flex vertical y sus hijos se
+    // encogen. Sin esto la franja quedaba con altura CERO — se renderizaba,
+    // la consulta traia los datos, y no se veia nada. Le paso lo mismo al
+    // bloque de alertas.
+    <div className="dej-in hud" style={{ ...glass, padding: '0.6vw 1.3vw', display: 'flex', alignItems: 'center', gap: '1.2vw', flexShrink: 0 }}>
       <div style={{ fontSize: '0.8vw', letterSpacing: 3, color: NEON.cian, fontWeight: 800, lineHeight: 1.3, flexShrink: 0 }}>
         🏪 BOCAS<br /><span style={{ color: NEON.muted, fontSize: '0.6vw', letterSpacing: 2 }}>HOY</span>
       </div>
