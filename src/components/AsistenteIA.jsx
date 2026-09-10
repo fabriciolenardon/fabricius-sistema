@@ -226,6 +226,13 @@ REGLAS DE OPERACIÓN:
 5. Si te falta el cliente_id para un pago, USÁ buscar_cliente primero — nunca inventes IDs.
 6. FECHAS RELATIVAS — ANCLATE A HOY: cada mensaje del usuario arranca con su fecha entre corchetes (ej "[2026-07-07] ¿cuánto vendimos?"). "Hoy", "ayer", "esta semana" (lunes → hoy), "la semana pasada", "este mes", etc. se calculan SIEMPRE a partir de la FECHA DE HOY que te doy al final de estas instrucciones — NUNCA a partir de fechas de mensajes viejos del historial (la charla puede venir de días o semanas atrás y esas fechas ya no valen). NUNCA copies la marca [fecha] en tus respuestas.
 
+7. "ESTE MES" ES AMBIGUO — PREGUNTÁ CUÁL. El negocio maneja DOS meses distintos:
+   · MES OPERATIVO: el que Fabricio abre y cierra a mano. NO arranca el 01 (el de septiembre 2026 empieza el 31/08). Es el que usan el panel ejecutivo, el Cierre y la TV.
+   · MES CALENDARIO: del 01 al día de hoy.
+   Si te preguntan "cuánto llevo este mes", "cómo viene el mes" o similar SIN aclarar cuál, PREGUNTÁ primero cuál quiere, nombrando las fechas de cada uno (te paso el rango del operativo al final de estas instrucciones). No adivines: la diferencia puede ser de más de un millón y el número no cierra con el panel.
+   Si el usuario TE DA las fechas ("del 1 al 10"), usá esas y no preguntes nada.
+   Cuando respondas un total mensual, decí SIEMPRE desde qué día lo contaste.
+
 MUNDO EXTERIOR (también podés salir del sistema):
 - buscar_en_internet: para info ACTUAL que no está en el sistema (dólar, precio de la hacienda, noticias, feriados, leyes nuevas, datos de empresas). Usala sin miedo cuando la pregunta lo pida — mencioná de dónde salió.
 - consultar_pronostico: clima real de Río Primero (clave para planificar el finde parrillero).
@@ -361,6 +368,24 @@ export default function AsistenteIA() {
       { rol: 'asistente', texto: '¡Hola! Soy Iris, tu asistente. Manejo todo el sistema (gastos, depósito, pagos, deudas, stock) y también te asesoro como profesional: temas laborales, decisiones de negocio, producción, marketing, ventas y finanzas. 🎤 También podés hablarme con el micrófono.' }
     ]
   })
+
+  // 📅 MES OPERATIVO vigente. Fabricio abre y cierra el mes a mano, asi que
+  // "este mes" del sistema no arranca el 01 (el de septiembre empieza el
+  // 31/08). Sin este dato Iris contestaba por mes calendario y su numero no
+  // cerraba con el panel ni con el Cierre: 7.939.489 contra 9.141.702.
+  const [mesOp, setMesOp] = useState(null)
+  useEffect(() => {
+    const hoy = fechaHoyARG()
+    supabase.from('meses_operativos')
+      .select('etiqueta, fecha_inicio, fecha_cierre')
+      .lte('fecha_inicio', hoy).gte('fecha_cierre', hoy)
+      // Sin filtro de sucursal a proposito: la RLS de meses_operativos ya
+      // aisla por boca, asi que cada usuario recibe el SUYO. Con permisos de
+      // servicio esta misma consulta devuelve el de Monte Cristo (01/09), no
+      // el de la central (31/08) — no confundirse al probarla desde SQL.
+      .order('fecha_inicio', { ascending: false }).limit(1)
+      .then(({ data }) => setMesOp(data?.[0] || null))
+  }, [])
 
   // 👤 Quién está logueado — para que FABRI te reconozca sin preguntar
   const [usuario, setUsuario] = useState(null)
@@ -716,7 +741,7 @@ export default function AsistenteIA() {
           historial: historialActualizado,
           // Contexto vivo: quién está hablando, qué día es y la memoria
           // acumulada — así FABRI reconoce, recuerda y se adapta.
-          systemPrompt: `${SYSTEM_PROMPT}${skillsTxt}\n\nUSUARIO LOGUEADO AHORA: ${usuario?.nombre || 'desconocido'}${usuario?.rol ? ` (rol: ${usuario.rol})` : ''}. FECHA DE HOY: ${diaSemanaARG()} ${fechaHoyARG()} (todo "hoy/esta semana/este mes" se calcula desde acá).${memoriaTxt}`,
+          systemPrompt: `${SYSTEM_PROMPT}${skillsTxt}\n\nUSUARIO LOGUEADO AHORA: ${usuario?.nombre || 'desconocido'}${usuario?.rol ? ` (rol: ${usuario.rol})` : ''}. FECHA DE HOY: ${diaSemanaARG()} ${fechaHoyARG()} (todo "hoy/esta semana/este mes" se calcula desde acá).${mesOp ? ` MES OPERATIVO EN CURSO: "${mesOp.etiqueta}", del ${mesOp.fecha_inicio} al ${mesOp.fecha_cierre} — es el que usan el panel y el Cierre. El mes calendario va del 01 a hoy. Si te preguntan por "este mes" sin aclarar cuál, preguntá primero (regla 7).` : ''}${memoriaTxt}`,
           tools: DEFINICIONES_TOOLS
         })
 
