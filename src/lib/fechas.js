@@ -60,3 +60,27 @@ export function fechaRelativaARG(diasOffset, base = new Date()) {
 export function esFechaFutura(fecha) {
   return !!fecha && fecha > fechaHoyARG()
 }
+
+// Formatea para pantalla una fecha que viene de la base, en DD/MM/YYYY.
+//
+// Bug histórico (Facturación): una columna `date` de Postgres llega como
+// 'YYYY-MM-DD' pelado, y `new Date('2026-09-09')` se parsea como MEDIANOCHE
+// UTC. Al mostrarlo en Argentina (UTC-3) eso cae el día anterior a las 21:00,
+// así que una factura emitida el 09/09 figuraba como 08/09. La fecha estaba
+// bien en la base, en ARCA y en el PDF: se corría sólo al pintarla.
+//
+// Una fecha sola no tiene hora ni zona horaria, así que no se convierte nada:
+// se da vuelta como texto. Si en cambio viene con hora (un timestamp), ahí sí
+// se traduce al reloj de Argentina.
+export function fmtFechaARG(valor, vacio = '—') {
+  if (!valor) return vacio
+  const s = String(valor)
+  const soloFecha = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
+  if (soloFecha) return `${soloFecha[3]}/${soloFecha[2]}/${soloFecha[1]}`
+  const t = new Date(s)
+  if (isNaN(t.getTime())) return s   // lo raro se muestra crudo, no se esconde
+  return new Intl.DateTimeFormat('es-AR', {
+    timeZone: TZ_ARG,
+    day: '2-digit', month: '2-digit', year: 'numeric',
+  }).format(t)
+}
