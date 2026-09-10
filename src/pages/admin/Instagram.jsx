@@ -6,6 +6,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useEsMovil } from '../../lib/useEsMovil'
+import InstagramRendimiento from './InstagramRendimiento'
 
 export default function Instagram() {
   const esMovil = useEsMovil()
@@ -221,6 +222,8 @@ export default function Instagram() {
           </p>
         </div>
       )}
+
+      {yaConfigurada && <InstagramRendimiento />}
     </div>
   )
 }
