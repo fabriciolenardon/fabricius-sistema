@@ -6665,6 +6665,9 @@ export function ProveedoresTab() {
   const [alert, setAlert] = useState(null)
   const [nuevoProveedor, setNuevoProveedor] = useState('')
   const [legajoAbierto, setLegajoAbierto] = useState(null)
+  // Pestaña abierta dentro del legajo. Arranca en el resumen: lo primero que
+  // se quiere ver de un proveedor es cuánto se le compra y a cuánto viene.
+  const [legajoTab, setLegajoTab] = useState('resumen')
   const [editandoLegajo, setEditandoLegajo] = useState(false)
   // Modal "Ver/Editar datos del proveedor" (contacto, CUIT, nombre, etc.) —
   // reemplaza a la card fija de datos que ocupaba media pantalla del legajo.
@@ -6848,6 +6851,7 @@ export function ProveedoresTab() {
 
   function abrirLegajo(prov) {
     setLegajoAbierto(prov)
+    setLegajoTab('resumen')   // cada proveedor se abre por su resumen
     setFormLegajo({ contacto: prov.contacto || '', telefono: prov.telefono || '', cuit: prov.cuit || '', direccion: prov.direccion || '', producto_principal: prov.producto_principal || '', notas: prov.notas || '' })
     setEditandoLegajo(false)
     setModalDatosProv(false)
@@ -6950,31 +6954,47 @@ export function ProveedoresTab() {
       <div>
         <button onClick={() => setLegajoAbierto(null)} className="btn btn-ghost" style={{ marginBottom: 16 }}>← Volver a proveedores</button>
         {alert && <div style={{ background: alert.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${alert.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: alert.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>{alert.msg}</div>}
-        <div style={{ background: 'linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%)', border: '1px solid var(--amber)', borderRadius: 16, padding: 24, marginBottom: 20 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 26, color: 'var(--amber)', letterSpacing: 2 }}>🏭 {legajoAbierto.nombre}</div>
-                <button onClick={() => setModalDatosProv(true)} title="Ver y editar contacto, CUIT, dirección, nombre, etc." style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#000' }}>📋 Ver/Editar datos del proveedor</button>
-              </div>
-              <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>Legajo de proveedor</div>
-              {legajoAbierto.producto_principal && <div style={{ fontSize: 12, color: 'var(--gold)', marginTop: 4 }}>🥩 {legajoAbierto.producto_principal}</div>}
+        {/* Cabecera compacta: el saldo y los totales quedan SIEMPRE a la
+            vista, en dos renglones, sin importar en qué pestaña esté. */}
+        <div style={{ background: 'linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%)', border: '1px solid var(--amber)', borderRadius: 14, padding: '14px 18px', marginBottom: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 20, color: 'var(--amber)', letterSpacing: 1.5 }}>🏭 {legajoAbierto.nombre}</div>
+              {legajoAbierto.producto_principal && <span style={{ fontSize: 11, color: 'var(--gold)' }}>🥩 {legajoAbierto.producto_principal}</span>}
+              <button onClick={() => setModalDatosProv(true)} title="Ver y editar contacto, CUIT, dirección, nombre, etc." style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: 6, padding: '3px 9px', cursor: 'pointer', fontSize: 11, fontWeight: 600, color: 'var(--muted)' }}>📋 Datos</button>
             </div>
             <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Saldo</div>
-              <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 30, color: saldo > 0 ? 'var(--red-light)' : saldo < 0 ? 'var(--green)' : 'var(--muted)' }}>{fmt(saldo)}</div>
+              <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 26, lineHeight: 1, color: saldo > 0 ? 'var(--red-light)' : saldo < 0 ? 'var(--green)' : 'var(--muted)' }}>{fmt(saldo)}</div>
               <div style={{ fontSize: 11, color: saldo > 0 ? 'var(--red-light)' : saldo < 0 ? 'var(--green)' : 'var(--muted)' }}>{saldo > 0 ? '⚠️ Le debemos' : saldo < 0 ? '✅ Saldo a favor' : '✅ Al día'}</div>
             </div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginTop: 16 }}>
-            <div style={{ background: 'var(--surface)', borderRadius: 8, padding: '10px 14px', textAlign: 'center' }}><div style={{ fontSize: 11, color: 'var(--muted)' }}>Total compras</div><div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 18, color: 'var(--amber)' }}>{fmt(totalCompras)}</div></div>
-            <div style={{ background: 'var(--surface)', borderRadius: 8, padding: '10px 14px', textAlign: 'center' }}><div style={{ fontSize: 11, color: 'var(--muted)' }}>Total pagado</div><div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 18, color: 'var(--green)' }}>{fmt(totalEntregado)}</div></div>
-            <div style={{ background: 'var(--surface)', borderRadius: 8, padding: '10px 14px', textAlign: 'center' }}><div style={{ fontSize: 11, color: 'var(--muted)' }}>Compras registradas</div><div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 18, color: 'var(--gold)' }}>{comprasProv.length}</div></div>
+          {/* Los tres totales en un renglón de texto: antes eran tres cajas
+              grandes que repetían lo que la cuenta corriente ya dice abajo. */}
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 10, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            <span>Compras <b style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', color: 'var(--amber)' }}>{fmt(totalCompras)}</b></span>
+            <span>Pagado <b style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', color: 'var(--green)' }}>{fmt(totalEntregado)}</b></span>
+            <span>Registradas <b style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', color: 'var(--gold)' }}>{comprasProv.length}</b></span>
           </div>
         </div>
 
-        {/* COMPRADO POR SEMANA — media res / piezas bovinas / capones */}
-        <ComprasSemanaLegajo entradas={entradas} proveedorNombre={legajoAbierto.nombre} fmt={fmt} />
+        {/* Pestañas: el legajo era una sola columna infinita y para llegar a
+            la cuenta corriente había que pasar por todos los ingresos. */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+          {[['resumen', '📊 Resumen'], ['compras', '🛒 Compras'], ['ctacte', '💰 Cuenta corriente']].map(([id, label]) => (
+            <button key={id} onClick={() => setLegajoTab(id)}
+              style={{ padding: '7px 16px', borderRadius: 8, border: `1px solid ${legajoTab === id ? 'var(--amber)' : 'var(--border)'}`, background: legajoTab === id ? 'var(--amber)' : 'transparent', color: legajoTab === id ? '#fff' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {legajoTab === 'resumen' && (
+          <HistoricoRubrosLegajo entradas={entradas} proveedorNombre={legajoAbierto.nombre} fmt={fmt} />
+        )}
+
+        {legajoTab === 'compras' && (
+          <ComprasSemanaLegajo entradas={entradas} proveedorNombre={legajoAbierto.nombre} fmt={fmt} />
+        )}
 
         {/* MODAL — Ver/Editar datos del proveedor (contacto, CUIT, nombre…).
             Antes era una card fija; ahora se abre desde el botón del header. */}
@@ -7035,22 +7055,24 @@ export function ProveedoresTab() {
           </div>
         )}
 
-        {/* CUENTA CORRIENTE (nuevo libro mayor DEBE/HABER/SALDO) */}
-        <div style={{ marginBottom: 16 }}>
+        {/* El historial completo va con las compras; el libro mayor, solo. */}
+        {legajoTab === 'compras' && (
+          <div className="card">
+            <ComprasProveedorPaginadas
+              compras={comprasProv}
+              fmt={fmt}
+              onVerDetalle={abrirDetalleRemito}
+            />
+          </div>
+        )}
+
+        {legajoTab === 'ctacte' && (
           <CuentaCorrienteProveedor
             proveedor={legajoAbierto}
             saldoSugerido={saldo}
             onSaldoChange={fetchAll}
           />
-        </div>
-
-        <div className="card">
-          <ComprasProveedorPaginadas
-            compras={comprasProv}
-            fmt={fmt}
-            onVerDetalle={abrirDetalleRemito}
-          />
-        </div>
+        )}
 
         {/* Modal de detalle también disponible dentro del legajo */}
         {remitoDetalle && (
@@ -7371,6 +7393,50 @@ function labelTipoEntrada(t) {
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
+// Historial de compras REALES del proveedor: sin las eliminadas y sin las
+// internas (destino desposte/elaboración, que son piezas de mercadería YA
+// comprada que solo cambia de forma). Lo comparten el histórico y la semana.
+function historialDeProveedor(entradas, proveedorNombre) {
+  const nombreUp = (proveedorNombre || '').toUpperCase()
+  return (entradas || []).filter(e =>
+    !e.eliminado &&
+    e.destino !== 'desposte' && e.destino !== 'elaboracion' &&
+    (e.proveedor_nombre || '').toUpperCase().includes(nombreUp)
+  )
+}
+
+// Kg / precio / importe con el mismo criterio que el Cierre: si la entrada
+// no trae importe, se deriva kg×precio. Number() porque numeric llega string.
+const filaDeEntrada = e => {
+  const kg = Number(e.kg_real) || Number(e.kg) || 0
+  const importe = Number(e.importe) > 0 ? Number(e.importe) : kg * (Number(e.precio_kg) || 0)
+  const precio = Number(e.precio_kg) || (kg > 0 && importe > 0 ? importe / kg : 0)
+  return { ...e, _kg: kg, _precio: precio, _importe: importe }
+}
+
+// Totales de TODA la relación con el proveedor, agrupados por rubro.
+function totalesHistoricosPorRubro(historial) {
+  const acc = new Map()
+  ;(historial || []).forEach(e => {
+    const g = grupoDeEntrada(e)
+    if (!g) return
+    const f = filaDeEntrada(e)
+    const a = acc.get(g.key) || { key: g.key, titulo: g.titulo, unidad: g.unidad, kg: 0, importe: 0, ingresos: 0, ultFecha: '', ultPrecio: 0 }
+    a.kg += f._kg
+    a.importe += f._importe
+    a.ingresos++
+    // Último precio pagado del rubro. El promedio solo no alcanza: con la
+    // inflación arrastra compras de hace un año y aplasta el número. El
+    // promedio dice cuánto salió en total; el último, cómo viene hoy.
+    if (f._precio > 0 && String(e.fecha || '') >= a.ultFecha) {
+      a.ultFecha = String(e.fecha || '')
+      a.ultPrecio = f._precio
+    }
+    acc.set(g.key, a)
+  })
+  return GRUPOS_COMPRA.filter(g => acc.has(g.key)).map(g => acc.get(g.key))
+}
+
 // fmtKg YA devuelve el valor con ' kg' pegado, asi que la unidad no se
 // agrega aparte: hacerlo mostraba "120,00 kg kg x $10.200,00/kg" en todo el
 // legajo. Almacen y bebidas se cuentan por unidad, y ahi fmtKg no sirve:
@@ -7378,6 +7444,79 @@ function labelTipoEntrada(t) {
 const fmtCant = (n, unidad) => unidad === 'u'
   ? (Number(n) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' u'
   : fmtKg(n)
+
+// ── HISTÓRICO POR RUBRO ────────────────────────────────────────────────
+// La foto de toda la relación con el proveedor: cuántos kilos se le lleva
+// comprado de cada cosa, a cuánto en promedio y a cuánto la última vez.
+// Los rubros salen solos del historial (los mismos de la semana), así que
+// aparecen con la primera compra y no hay nada que configurar.
+function HistoricoRubrosLegajo({ entradas, proveedorNombre, fmt }) {
+  const rubros = useMemo(
+    () => totalesHistoricosPorRubro(historialDeProveedor(entradas, proveedorNombre)),
+    [entradas, proveedorNombre])
+  // El total no mezcla unidades con kilos: almacén y bebidas se cuentan por
+  // unidad y sumarlas daría un número falso.
+  const totKg = rubros.filter(g => g.unidad !== 'u').reduce((s, g) => s + g.kg, 0)
+  const totImporte = rubros.reduce((s, g) => s + g.importe, 0)
+  const totIngresos = rubros.reduce((s, g) => s + g.ingresos, 0)
+
+  if (rubros.length === 0) {
+    return (
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-title">📊 Histórico por producto</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic', paddingTop: 6 }}>
+          Este proveedor todavía no tiene ingresos registrados en el depósito. Los productos aparecen solos con la primera compra.
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
+        <div className="card-title" style={{ margin: 0 }}>📊 Histórico por producto</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+          {totIngresos} ingresos ·{' '}
+          <b style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', color: 'var(--gold)', fontSize: 15 }}>{fmtKg(totKg)}</b>
+          {' '}por{' '}
+          <b style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', color: 'var(--amber)' }}>{fmt(totImporte)}</b>
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
+        {rubros.map(g => {
+          // Sube / baja / igual: el último precio contra el promedio de todo
+          // lo comprado. Es lo que contesta "¿me viene aumentando?".
+          const prom = g.kg > 0 ? g.importe / g.kg : 0
+          const dif = prom > 0 && g.ultPrecio > 0 ? (g.ultPrecio - prom) / prom : 0
+          const sube = dif > 0.02, baja = dif < -0.02
+          return (
+            <div key={g.key} style={{ background: 'var(--surface2)', borderRadius: 10, padding: '10px 12px' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>{g.titulo}</div>
+              <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 20, fontWeight: 700, color: 'var(--amber)', lineHeight: 1.2 }}>
+                {fmtCant(g.kg, g.unidad)}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 6 }}>
+                {g.ingresos} ingreso{g.ingresos === 1 ? '' : 's'} · {fmt(g.importe)}
+              </div>
+              {prom > 0 && (
+                <div style={{ fontSize: 11, color: 'var(--muted)', borderTop: '1px solid var(--border)', paddingTop: 6 }}>
+                  <div>prom <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>{fmt(prom)}</span></div>
+                  {g.ultPrecio > 0 && (
+                    <div>
+                      últ <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', color: 'var(--gold)' }}>{fmt(g.ultPrecio)}</span>
+                      {sube && <span style={{ color: 'var(--red-light)', marginLeft: 5 }}>▲ {(dif * 100).toFixed(0)}%</span>}
+                      {baja && <span style={{ color: 'var(--green)', marginLeft: 5 }}>▼ {(Math.abs(dif) * 100).toFixed(0)}%</span>}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 
 function ComprasSemanaLegajo({ entradas, proveedorNombre, fmt }) {
   // Default: SEMANA ANTERIOR (lun→dom) — es lo que se controla al liquidar.
@@ -7397,28 +7536,17 @@ function ComprasSemanaLegajo({ entradas, proveedorNombre, fmt }) {
     setHasta(fechaRelativaARG(dias, new Date(hasta + 'T12:00')))
   }
 
-  const nombreUp = (proveedorNombre || '').toUpperCase()
-  // Historial completo del proveedor (sin internas ni eliminadas) — define
-  // QUÉ columnas tiene este perfil: solo los rubros que alguna vez se le
-  // compraron. Una compra nueva de otro rubro hace aparecer su columna sola.
-  const historicoProv = useMemo(() =>
-    (entradas || []).filter(e =>
-      !e.eliminado &&
-      e.destino !== 'desposte' && e.destino !== 'elaboracion' &&
-      (e.proveedor_nombre || '').toUpperCase().includes(nombreUp)
-    ), [entradas, nombreUp])
+  // Historial completo del proveedor — define QUÉ columnas tiene este perfil:
+  // solo los rubros que alguna vez se le compraron. Una compra nueva de otro
+  // rubro hace aparecer su columna sola.
+  const historicoProv = useMemo(
+    () => historialDeProveedor(entradas, proveedorNombre),
+    [entradas, proveedorNombre])
   const delPeriodo = useMemo(() =>
     historicoProv.filter(e => e.fecha >= desde && e.fecha <= hasta),
     [historicoProv, desde, hasta])
 
-  // Kg / precio / importe con el mismo criterio que el Cierre: si la entrada
-  // no trae importe, se deriva kg×precio. Number() porque numeric llega string.
-  const filaDe = e => {
-    const kg = Number(e.kg_real) || Number(e.kg) || 0
-    const importe = Number(e.importe) > 0 ? Number(e.importe) : kg * (Number(e.precio_kg) || 0)
-    const precio = Number(e.precio_kg) || (kg > 0 && importe > 0 ? importe / kg : 0)
-    return { ...e, _kg: kg, _precio: precio, _importe: importe }
-  }
+  const filaDe = filaDeEntrada
 
   // Columnas visibles = rubros con al menos una compra en el historial.
   const keysVisibles = useMemo(() => {
@@ -7426,37 +7554,6 @@ function ComprasSemanaLegajo({ entradas, proveedorNombre, fmt }) {
     historicoProv.forEach(e => { const g = grupoDeEntrada(e); if (g) s.add(g.key) })
     return s
   }, [historicoProv])
-  // Total HISTÓRICO por rubro: todos los kilos que se le compraron a este
-  // proveedor desde siempre, no los de la semana elegida. Sale del mismo
-  // historial que define las columnas, así que un rubro aparece acá con la
-  // primera compra y no hay nada que configurar.
-  // Los kg con el mismo criterio que filaDe (kg_real manda; Number() porque
-  // los numeric de Supabase llegan string).
-  const historicoPorGrupo = useMemo(() => {
-    const acc = new Map()
-    historicoProv.forEach(e => {
-      const g = grupoDeEntrada(e)
-      if (!g) return
-      const f = filaDe(e)
-      const a = acc.get(g.key) || { key: g.key, titulo: g.titulo, unidad: g.unidad, kg: 0, importe: 0, ingresos: 0, ultFecha: '', ultPrecio: 0 }
-      a.kg += f._kg
-      a.importe += f._importe
-      a.ingresos++
-      // Último precio pagado del rubro. El promedio solo no alcanza: con la
-      // inflación arrastra compras de hace un año y aplasta el número. El
-      // promedio dice cuánto salió en total; el último, cómo viene hoy.
-      if (f._precio > 0 && String(e.fecha || '') >= a.ultFecha) {
-        a.ultFecha = String(e.fecha || '')
-        a.ultPrecio = f._precio
-      }
-      acc.set(g.key, a)
-    })
-    return GRUPOS_COMPRA.filter(g => acc.has(g.key)).map(g => acc.get(g.key))
-  }, [historicoProv])
-  // Como en el header de la semana: el total no mezcla unidades con kilos
-  // (almacén y bebidas se cuentan por unidad, sumarlas daría un número falso).
-  const totKgHistorico = historicoPorGrupo.filter(g => g.unidad !== 'u').reduce((s, g) => s + g.kg, 0)
-
   const grupos = GRUPOS_COMPRA.filter(g => keysVisibles.has(g.key)).map(g => {
     const items = delPeriodo.filter(e => grupoDeEntrada(e)?.key === g.key).map(filaDe)
     return {
@@ -7470,7 +7567,9 @@ function ComprasSemanaLegajo({ entradas, proveedorNombre, fmt }) {
   const totKgSemana = grupos.filter(g => g.unidad !== 'u').reduce((s, g) => s + g.totKg, 0)
 
   const fechaCorta = f => f ? `${f.slice(8, 10)}/${f.slice(5, 7)}` : ''
-  const inpFecha = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '6px 10px', fontFamily: "'DM Sans',sans-serif", fontSize: 12 }
+  // width auto a proposito: el CSS global pone input { width: 100% }, y sin
+  // esto cada campo de fecha se comia un renglon entero del legajo.
+  const inpFecha = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '6px 10px', fontFamily: "'DM Sans',sans-serif", fontSize: 12, width: 'auto', flex: '0 0 auto' }
   const btnSem = { padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap' }
 
   return (
@@ -7494,44 +7593,6 @@ function ComprasSemanaLegajo({ entradas, proveedorNombre, fmt }) {
         <button style={btnSem} onClick={setSemanaAnterior}>Semana anterior</button>
         <button style={btnSem} onClick={setSemanaActual}>Semana actual</button>
       </div>
-
-      {/* Lo comprado DE SIEMPRE, por rubro. Va pegado al selector y con su
-          propio título porque estos kilos NO se mueven cuando se cambia la
-          semana: es la foto de toda la relación con el proveedor. */}
-      {historicoPorGrupo.length > 0 && (
-        <div style={{ background: 'var(--surface2)', borderRadius: 10, padding: '10px 12px', marginBottom: 14 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 10, marginBottom: 8 }}>
-            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 700 }}>
-              📊 Histórico — todo lo que se le compró
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-              Total{' '}
-              <b style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 14, color: 'var(--gold)' }}>
-                {fmtKg(totKgHistorico)}
-              </b>
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {historicoPorGrupo.map(g => (
-              <div key={g.key} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', minWidth: 120 }}>
-                <div style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{g.titulo}</div>
-                <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, fontWeight: 700, color: 'var(--amber)', lineHeight: 1.3 }}>
-                  {fmtCant(g.kg, g.unidad)}
-                </div>
-                <div style={{ fontSize: 10, color: 'var(--muted)' }}>{g.ingresos} ingreso{g.ingresos === 1 ? '' : 's'}</div>
-                {g.kg > 0 && g.importe > 0 && (
-                  <div style={{ fontSize: 10, color: 'var(--muted)', whiteSpace: 'nowrap', marginTop: 2 }}>
-                    prom <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums' }}>{fmt(g.importe / g.kg)}</span>
-                    {g.ultPrecio > 0 && (
-                      <> · últ <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', color: 'var(--gold)' }}>{fmt(g.ultPrecio)}</span></>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {grupos.length === 0 ? (
         <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic', padding: '6px 0' }}>
