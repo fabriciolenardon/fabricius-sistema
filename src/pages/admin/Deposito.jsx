@@ -761,13 +761,30 @@ const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(n
   // de codigos. El historial completo vive en la solapa 🐄 Media Reses.
   supabase.from('medias_stock').select('*').order('id', { ascending: false }),
 ])
+// De que media res salio una pieza: el codigo y cuanto pesaba esa media.
+// Las piezas viejas (o las compradas sueltas al frigorifico) no tienen media
+// de origen, y ahi se muestra la fecha como antes.
+function origenDeLaPieza(pz) {
+  if (pz?.codigo_media) {
+    return pz.kg_media
+      ? `${pz.codigo_media} · ${fmtKg(pz.kg_media)}`
+      : pz.codigo_media
+  }
+  return `MR del ${pz?.fecha_ingreso ?? '—'}`
+}
+
 // Enriquecer cada entrada con el codigo MR-XXX y con su RESERVA (si el dueño
 // la apartó desde la solapa Media Reses, acá no se puede despostar).
 const codigoPorEntrada = {}
 const reservaPorEntrada = {}
+// Los kg de cada media, para que una pieza pueda decir de QUE media salio y
+// cuanto pesaba: sin eso, dos cortitos de 41,8 y 46,1 kg se ven iguales y no
+// hay forma de saber cual vino de la media grande.
+const kgMediaPorEntrada = {}
 ;(mediasStockData || []).forEach(m => {
   if (!m.entrada_id) return
   codigoPorEntrada[m.entrada_id] = m.codigo
+  kgMediaPorEntrada[m.entrada_id] = Number(m.kg) || null
   if (m.estado === 'reservada') reservaPorEntrada[m.entrada_id] = m.reservada_para || 'reservada'
 })
 setMediasRes((entradas || []).map(e => ({
@@ -777,7 +794,14 @@ setMediasRes((entradas || []).map(e => ({
 })))
 setDespostes(despostesData || [])
 setPrecios(preciosData || [])
-setPiezasIndividuales(piezasIndivData || [])
+// Cada pieza lleva el codigo y el peso de la media de la que salio. El
+// vinculo es entrada_id: la entrada de la media res es la misma que quedo
+// grabada en la pieza al despostarla.
+setPiezasIndividuales((piezasIndivData || []).map(pz => ({
+  ...pz,
+  codigo_media: codigoPorEntrada[pz.entrada_id] || null,
+  kg_media: kgMediaPorEntrada[pz.entrada_id] || null,
+})))
 const stockMap = {}
 ;(stockData || []).forEach(r => stockMap[r.tipo] = r.kg_disponible)
 setPiezasStock(stockMap)
@@ -1789,7 +1813,7 @@ async function confirmarDesposteCerdo() {
                     <div>
                       <div style={{ fontSize: 13, fontWeight: 600 }}>#{pz.id} · {pz.tipo_pieza}</div>
                       <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                        {pz.proveedor_origen || '—'} · MR del {pz.fecha_ingreso}
+                        {pz.proveedor_origen || '—'} · {origenDeLaPieza(pz)}
                         {pz.modelo_desposte && <span> · Mod. {pz.modelo_desposte}</span>}
                       </div>
                     </div>
@@ -5496,7 +5520,7 @@ for (const item of items) {
             style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', borderRadius: 8, marginBottom: 4, cursor: 'pointer', border: `2px solid ${piezaEnteraSeleccionada?.id === pz.id ? 'var(--gold)' : 'var(--border)'}`, background: piezaEnteraSeleccionada?.id === pz.id ? 'rgba(201,168,76,0.12)' : 'var(--surface2)' }}>
             <div>
               <div style={{ fontWeight: 600, fontSize: 12 }}>#{pz.id} · {pz.tipo_pieza}</div>
-              <div style={{ fontSize: 10, color: 'var(--muted)' }}>{pz.proveedor_origen || '—'} · MR del {pz.fecha_ingreso}{pz.modelo_desposte && ' · Mod. ' + pz.modelo_desposte}</div>
+              <div style={{ fontSize: 10, color: 'var(--muted)' }}>{pz.proveedor_origen || '—'} · {origenDeLaPieza(pz)}{pz.modelo_desposte && ' · Mod. ' + pz.modelo_desposte}</div>
             </div>
             <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, color: 'var(--gold)' }}>{(Number(pz.kg) || 0).toFixed(1)} kg</div>
           </div>
