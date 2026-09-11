@@ -3584,51 +3584,47 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
       : prodBrosa ? prodBrosa.stock_origen
       : prodHamburguesa ? prodHamburguesa.stock_origen
       : form.tipo
-    // Para bovino_mr necesitamos el id de la entrada insertada para crear
-    // la fila correspondiente en medias_stock (el codigo MR-XXX se genera
-    // automaticamente desde el id de medias_stock por columna generada).
-    const { data: entradaInsertada, error } = await supabase.from('entradas_deposito').insert({
-      fecha: form.fecha, tipo: tipoEntrada, proveedor_nombre: form.proveedor,
-      descripcion: descripcionFinal, kg: kgTotal, kg_real: kgReal,
-      // La clasificación elegida al ingresar: el desposte a kilo la lee de
-      // acá y aplica esa merma sin volver a preguntar.
-      merma_tipo_id: form.tipo === 'bovino_mr' ? (form.mermaTipoId || null) : null,
-      merma_pct: parseNumero(form.merma), precio_kg: parseNumero(form.precioKg),
-      importe, destino: form.destino, cantidad
-    }).select().single()
-    if (error) { showAlert({ type: 'error', msg: error.message }); return }
-    const kgSumar = form.tipo === 'bovino_mr' ? kgReal : kgTotal
-    await actualizarStock(tipoEntrada, kgSumar)
-
-    // Tracking individual de medias reses: una fila por cada media fisica
-    // en medias_stock, con codigo visible MR-XXX. Si la entrada agrupa varias
-    // unidades (cantidad > 1, raro en bovino_mr pero posible), creamos una
-    // fila por unidad.
-    if (form.tipo === 'bovino_mr' && entradaInsertada) {
-      const filasMedias = []
-      // Si vino 1 sola media: 1 fila con todos los kg. Si vinieron varias en
-      // una sola carga (caso raro), repartimos kg en partes iguales. Esto es
-      // best-effort — lo ideal es cargar una entrada por media res fisica.
-      const kgPorMedia = kgReal / cantidad
-      for (let i = 0; i < cantidad; i++) {
-        filasMedias.push({
-          // Solo la primera fila tiene entrada_id (la columna es UNIQUE).
-          // Las demas quedan sin referencia a entradas_deposito — el codigo
-          // MR-XXX igual las identifica. Esto solo importa si cantidad > 1.
-          entrada_id: i === 0 ? entradaInsertada.id : null,
-          kg: kgPorMedia,
-          proveedor_origen: form.proveedor,
-          fecha_ingreso: form.fecha,
-          precio_costo_kg: parseNumero(form.precioKg),
-          descripcion: descripcionFinal,
-          estado: 'disponible',
-          // Trazabilidad de la media individual: con qué clasificación entró.
-          merma_tipo_id: form.mermaTipoId || null,
-        })
-      }
-      const { error: errMedias } = await supabase.from('medias_stock').insert(filasMedias)
-      if (errMedias) console.warn('No se pudo crear fila en medias_stock:', errMedias.message)
+    // ── MEDIA RES: va por una sola operacion en el servidor ────────────
+    // Antes eran tres pasos sueltos desde aca (entrada -> stock -> media) y
+    // si se cortaba en el medio quedaba la entrada con el stock sumado y sin
+    // media: el 11/09 eso dejo el bucket 175,20 kg abajo, y el error de la
+    // media ni siquiera se mostraba (iba a console.warn). La RPC las hace en
+    // UNA transaccion: o quedan las tres, o no queda ninguna.
+    let entradaInsertada = null
+    if (form.tipo === 'bovino_mr') {
+      const { data: res, error: errRpc } = await supabase.rpc('ingresar_media_res', {
+        p_fecha: form.fecha,
+        p_proveedor: form.proveedor,
+        p_kg: kgTotal,
+        p_kg_real: kgReal,
+        p_precio_kg: parseNumero(form.precioKg),
+        p_importe: importe,
+        p_descripcion: descripcionFinal,
+        p_merma_tipo_id: form.mermaTipoId || null,
+        p_merma_pct: parseNumero(form.merma),
+        p_destino: form.destino,
+        p_cantidad: cantidad,
+      })
+      if (errRpc) { showAlert({ type: 'error', msg: 'No se registró la media res: ' + errRpc.message }); return }
+      entradaInsertada = { id: res?.entrada_id }
+    } else {
+      // Todo lo que no es media res sigue el camino de siempre.
+      const { data: entradaNoMr, error } = await supabase.from('entradas_deposito').insert({
+        fecha: form.fecha, tipo: tipoEntrada, proveedor_nombre: form.proveedor,
+        descripcion: descripcionFinal, kg: kgTotal, kg_real: kgReal,
+        // merma_tipo_id es de la media res, que ya no pasa por acá.
+        merma_tipo_id: null,
+        merma_pct: parseNumero(form.merma), precio_kg: parseNumero(form.precioKg),
+        importe, destino: form.destino, cantidad
+      }).select().single()
+      if (error) { showAlert({ type: 'error', msg: error.message }); return }
+      entradaInsertada = entradaNoMr
+      await actualizarStock(tipoEntrada, kgTotal)
     }
+
+    // (El tracking individual de cada media res — la fila en medias_stock con
+    //  su codigo MR-XXX — ahora lo hace la RPC `ingresar_media_res` junto con
+    //  la entrada y el stock, en una sola transaccion. Ver supabase/150.)
 
     // Compras DIRECTAS de piezas bovinas (pierna, cortito, etc.) al frigorífico:
     // además del stock agregado, creamos su fila individual en piezas_stock para
