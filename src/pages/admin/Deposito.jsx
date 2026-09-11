@@ -1861,7 +1861,7 @@ async function confirmarDesposteCerdo() {
                 <span style={{ fontSize: 18, fontWeight: 700, color: 'var(--amber)', fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums' }}>{fmtPrecio(costoReal)}/kg</span>
               </div>
               <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
-                {fmtKg(parseNumero(kgPiezaConvertir), { decimales: 2 })} × {fmtPrecio(base)} = {fmtPrecio(bruto)} ÷ {fmtKg(kgN, { decimales: 2 })} kg
+                {fmtKg(parseNumero(kgPiezaConvertir), { decimales: 2 })} × {fmtPrecio(base)} = {fmtPrecio(bruto)} ÷ {fmtKg(kgN, { decimales: 2 })}
               </div>
             </div>
           )
