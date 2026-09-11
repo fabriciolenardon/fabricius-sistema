@@ -59,13 +59,36 @@ export async function recalcularSaldo(proveedorId) {
 // nunca se traba por la trazabilidad.
 // Motivo: el 11/06 aparecieron 3 pagos a PRETTO y nadie pudo decir quién
 // los cargó. Desde ahora cada movimiento queda firmado.
+// El nombre del que registra NO cambia durante la sesion, pero se pedia de
+// nuevo en CADA movimiento: dos viajes al servidor (auth.getUser + profiles)
+// que sumaban ~900 ms a cada carga de mercaderia. Se resuelve una sola vez y
+// queda en memoria; al recargar la pagina se vuelve a pedir.
+let _nombreUsuario                       // undefined = todavia no se pidio
+let _nombreUsuarioPromesa                // la consulta en curso, si hay una
+
 async function nombreUsuarioActual() {
-  try {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return null
-    const { data: perfil } = await supabase.from('profiles').select('nombre').eq('id', user.id).maybeSingle()
-    return perfil?.nombre || user.email || null
-  } catch { return null }
+  if (_nombreUsuario !== undefined) return _nombreUsuario
+  // Si dos movimientos salen juntos, comparten la misma consulta en vez de
+  // disparar dos.
+  if (!_nombreUsuarioPromesa) {
+    _nombreUsuarioPromesa = (async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) return null
+        const { data: perfil } = await supabase.from('profiles').select('nombre').eq('id', user.id).maybeSingle()
+        return perfil?.nombre || user.email || null
+      } catch { return null }
+    })()
+  }
+  _nombreUsuario = await _nombreUsuarioPromesa
+  _nombreUsuarioPromesa = null
+  return _nombreUsuario
+}
+
+// Para el logout: la proxima carga tiene que volver a preguntar quien es.
+export function olvidarUsuarioCache() {
+  _nombreUsuario = undefined
+  _nombreUsuarioPromesa = null
 }
 
 // Inserta un movimiento genérico y recalcula el saldo del proveedor.

@@ -3660,19 +3660,26 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
       if (errPz) console.warn('No se pudo crear fila en piezas_stock:', errPz.message)
     }
 
-    await supabase.from('compras_proveedores').insert({
-      fecha: form.fecha, proveedor_nombre: form.proveedor,
-      producto: descripcionFinal,
-      kg: kgTotal, importe,
-      entrada_id: entradaInsertada?.id || null,  // vínculo exacto compra↔entrada (mig 57)
-    })
-    // Si el proveedor tiene cuenta corriente inicializada, esta compra
-    // va sola a su cuenta corriente (debe). Si no está inicializada, no
-    // hace nada (queda en compras_proveedores para el fallback).
-    await registrarCompraDesdeEntrada({
-      proveedorNombre: form.proveedor, fecha: form.fecha, importe,
-      descripcion: descripcionFinal, entradaId: entradaInsertada?.id,
-    })
+    // Las dos van JUNTAS: escriben tablas distintas y ninguna necesita el
+    // resultado de la otra. En serie sumaban ~750 ms de ida y vuelta a cada
+    // carga de mercaderia, y una media res son 13 llamadas encadenadas.
+    // (compras_proveedores alimenta el dashboard; la cta cte es el debe del
+    // proveedor — ver las 3 tablas paralelas en CLAUDE.md.)
+    await Promise.all([
+      supabase.from('compras_proveedores').insert({
+        fecha: form.fecha, proveedor_nombre: form.proveedor,
+        producto: descripcionFinal,
+        kg: kgTotal, importe,
+        entrada_id: entradaInsertada?.id || null,  // vínculo exacto compra↔entrada (mig 57)
+      }),
+      // Si el proveedor tiene cuenta corriente inicializada, esta compra
+      // va sola a su cuenta corriente (debe). Si no está inicializada, no
+      // hace nada (queda en compras_proveedores para el fallback).
+      registrarCompraDesdeEntrada({
+        proveedorNombre: form.proveedor, fecha: form.fecha, importe,
+        descripcion: descripcionFinal, entradaId: entradaInsertada?.id,
+      }),
+    ])
     const msgOK = esEnUnidades && cantidad > 1
       ? `✅ ${cantidad} unidades de ${descripcionBase} registradas — ${kgTotal.toFixed(1)} kg al stock`
       : '✅ Entrada registrada — Stock actualizado'
