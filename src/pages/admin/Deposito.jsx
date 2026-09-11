@@ -242,6 +242,18 @@ function coincideTextoProducto(c, q) {
   return false
 }
 
+// De que media res salio una pieza: el codigo y cuanto pesaba esa media.
+// Las piezas viejas (o las compradas sueltas al frigorifico) no tienen media
+// de origen, y ahi se muestra la fecha como antes.
+function origenDeLaPieza(pz) {
+  if (pz?.codigo_media) {
+    return pz.kg_media
+      ? `${pz.codigo_media} · ${fmtKg(pz.kg_media)}`
+      : pz.codigo_media
+  }
+  return `MR del ${pz?.fecha_ingreso ?? '—'}`
+}
+
 async function actualizarStock(tipo, kg) {
   // Devuelve { error } para que el caller pueda chequear si la operación
   // falló. Antes los errores se tragaban silenciosamente — eso causó que
@@ -761,18 +773,6 @@ const [piezaIndividualSeleccionada, setPiezaIndividualSeleccionada] = useState(n
   // de codigos. El historial completo vive en la solapa 🐄 Media Reses.
   supabase.from('medias_stock').select('*').order('id', { ascending: false }),
 ])
-// De que media res salio una pieza: el codigo y cuanto pesaba esa media.
-// Las piezas viejas (o las compradas sueltas al frigorifico) no tienen media
-// de origen, y ahi se muestra la fecha como antes.
-function origenDeLaPieza(pz) {
-  if (pz?.codigo_media) {
-    return pz.kg_media
-      ? `${pz.codigo_media} · ${fmtKg(pz.kg_media)}`
-      : pz.codigo_media
-  }
-  return `MR del ${pz?.fecha_ingreso ?? '—'}`
-}
-
 // Enriquecer cada entrada con el codigo MR-XXX y con su RESERVA (si el dueño
 // la apartó desde la solapa Media Reses, acá no se puede despostar).
 const codigoPorEntrada = {}
