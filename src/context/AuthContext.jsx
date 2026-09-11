@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { esCEO, esSucursal } from '../lib/permisos'
+import { olvidarUsuarioCache } from '../lib/ctaProveedores'
 
 const AuthContext = createContext({})
 
@@ -56,6 +57,10 @@ export function AuthProvider({ children }) {
   }
 
   async function signOut() {
+    // El nombre del que registra queda cacheado en memoria para no pedirlo en
+    // cada movimiento: si no se limpia, el proximo que entre firma con el
+    // nombre del anterior.
+    olvidarUsuarioCache()
     await supabase.auth.signOut()
     setUser(null)
     setProfile(null)
