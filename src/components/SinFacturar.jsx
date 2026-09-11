@@ -76,12 +76,14 @@ export default function SinFacturar({ onFacturar, recargar }) {
 
   const totalPendiente = filas.reduce((s, f) => s + f.total, 0)
 
-  function facturar(fila) {
+  // async: la precarga del remito resuelve la contraparte fiscal por CUIT
+  // contra la base antes de abrir el formulario.
+  async function facturar(fila) {
     if (fila.tipo === 'venta') {
       onFacturar(precargaDesdeVenta(fila.original))
     } else {
       const cliente = clientes.find(c => c.id === fila.original.cliente_id)
-      onFacturar(precargaDesdeRemito(fila.original, cliente))
+      onFacturar(await precargaDesdeRemito(fila.original, cliente))
     }
   }
 

@@ -155,10 +155,18 @@ export function precargaDesdeVenta(venta) {
   }
 }
 
-export function precargaDesdeRemito(remito, cliente) {
+export async function precargaDesdeRemito(remito, cliente) {
   const items = itemsParaArca(remito.items)
   const cuit = String(cliente?.cuit || '').replace(/\D/g, '')
   const tieneCuit = cuit.length === 11
+  // La contraparte fiscal se busca por CUIT en su propia tabla. Si el cliente
+  // no esta dado de alta ahi, la factura se guarda igual con nombre y CUIT.
+  let contraparteId = null
+  if (tieneCuit) {
+    const { data: cp } = await supabase.from('contrapartes')
+      .select('id').eq('cuit', cuit).limit(1).maybeSingle()
+    contraparteId = cp?.id ?? null
+  }
   return {
     origen: { tipo: 'remito', id: remito.id, etiqueta: `Remito #${remito.numero} · ${remito.cliente_nombre || 'sin cliente'}` },
     totalOriginal: num(remito.total),
@@ -169,7 +177,14 @@ export function precargaDesdeRemito(remito, cliente) {
       concepto: `Remito #${remito.numero}`,
       // Mayorista: casi siempre va a cuenta corriente.
       condicion_pago: remito.cobro === 'ctacte' ? 'cuenta_corriente' : 'contado',
-      contraparte_id: cliente?.id || null,
+      // OJO: NO va cliente.id. `clientes.id` es un UUID y
+      // `facturas.contraparte_id` es un INTEGER que apunta a `contrapartes`,
+      // que es otra tabla. Mandarle el uuid hacia que ARCA diera el CAE y
+      // despues explotara el guardado local ("invalid input syntax for type
+      // integer"), dejando la factura emitida y sin registrar. Los datos del
+      // receptor viajan igual por nombre/cuit/condicion, asi que el vinculo
+      // se resuelve por CUIT mas abajo y si no aparece queda en null.
+      contraparte_id: contraparteId,
       contraparte_nombre: remito.cliente_nombre || cliente?.nombre || '',
       contraparte_cuit: tieneCuit ? cuit : '',
       contraparte_iva: cliente?.condicion_iva || (tieneCuit ? 'responsable_inscripto' : 'consumidor_final'),
