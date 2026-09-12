@@ -27,6 +27,8 @@ export const NOMBRE_EMBUTIDO = {
   salame_comun: 'Salame Común',
   salame_rockeford: 'Salame Rockeford',
   salame_holanda: 'Salame Holanda',
+  bondiola_fiambre: 'Bondiola Fiambre',
+  panceta_fiambre: 'Panceta Fiambre',
   hamburguesa_carne: 'Hamburguesas de Carne',
   hamburguesa_pollo: 'Hamburguesas de Pollo',
   hamburguesa_cerdo: 'Hamburguesas de Cerdo',
@@ -42,6 +44,10 @@ export const BUCKET_EMBUTIDO = {
   salame_comun: 'emb_salame_comun',
   salame_rockeford: 'emb_salame_rockeford',
   salame_holanda: 'emb_salame_holanda',
+  // Fiambres madurados (mig 151). Los carga el admin en Deposito -> Elaborar;
+  // aca viven los mapas para que el historial del portal los nombre bien.
+  bondiola_fiambre: 'emb_bondiola_fiambre',
+  panceta_fiambre: 'emb_panceta_fiambre',
 }
 export const BUCKET_HAMBURGUESA = {
   hamburguesa_carne: 'hamb_carne',

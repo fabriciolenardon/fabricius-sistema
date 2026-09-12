@@ -44,6 +44,7 @@ export const NOMBRE_TIPO = {
   emb_chorizo_colorado: 'Chorizo colorado', emb_chorizo_saborizado: 'Chorizo saborizado',
   emb_salchicha_parrillera: 'Salchicha parrillera', emb_salame_comun: 'Salame común',
   emb_salame_rockeford: 'Salame Rockefort', emb_salame_holanda: 'Salame Holanda', emb_morcilla: 'Morcilla',
+  emb_bondiola_fiambre: 'Bondiola fiambre', emb_panceta_fiambre: 'Panceta fiambre',
   hamb_carne: 'Hamburguesas de carne', hamb_pollo: 'Hamburguesas de pollo', hamb_cerdo: 'Hamburguesas de cerdo',
   pieza_cortito: 'Cortitos', pieza_pierna: 'Piernas', pieza_entera: 'Piezas enteras',
   pieza_costillar: 'Costillar', pieza_costeletal: 'Costeletal', pieza_paleta: 'Paleta (pieza)',
