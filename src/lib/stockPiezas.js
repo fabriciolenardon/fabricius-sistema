@@ -60,6 +60,8 @@ export const BUCKETS_EMBUTIDO = {
   emb_salame_comun:         '🥩 Salame Común',
   emb_salame_holanda:       '🧀 Salame Holanda',
   emb_salame_rockeford:     '🧀 Salame Rockeford',
+  emb_bondiola_fiambre:     '🥓 Bondiola Fiambre',
+  emb_panceta_fiambre:      '🥓 Panceta Fiambre',
 }
 
 // `elaboraciones_embutidos.productos_finales` guarda el tipo SIN el prefijo
@@ -73,6 +75,8 @@ const TIPO_ELAB_A_BUCKET = {
   salame_comun: 'emb_salame_comun',
   salame_rockeford: 'emb_salame_rockeford',
   salame_holanda: 'emb_salame_holanda',
+  bondiola_fiambre: 'emb_bondiola_fiambre',
+  panceta_fiambre: 'emb_panceta_fiambre',
 }
 
 // Las dos familias que sabe mostrar la pantalla.

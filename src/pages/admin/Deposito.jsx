@@ -47,6 +47,8 @@ const NOMBRE_EMBUTIDO = {
   salame_comun: 'Salame Común',
   salame_rockeford: 'Salame Rockeford',
   salame_holanda: 'Salame Holanda',
+  bondiola_fiambre: 'Bondiola Fiambre',
+  panceta_fiambre: 'Panceta Fiambre',
   hamburguesa_carne: 'Hamburguesas de Carne',
   hamburguesa_pollo: 'Hamburguesas de Pollo',
   hamburguesa_cerdo: 'Hamburguesas de Cerdo',
@@ -126,7 +128,16 @@ const BUCKET_EMBUTIDO = {
   salame_comun: 'emb_salame_comun',
   salame_rockeford: 'emb_salame_rockeford',
   salame_holanda: 'emb_salame_holanda',
+  // Fiambres madurados (mig 151): la pieza de cerdo elegida se sala, madura
+  // con candado igual que el salame y recien al pesarla seca suma aca.
+  bondiola_fiambre: 'emb_bondiola_fiambre',
+  panceta_fiambre: 'emb_panceta_fiambre',
 }
+// Familias de elaboracion cuyo producto NO suma al stock al registrarse: entra
+// a maduracion con candado y sube recien cuando se carga el peso final seco.
+// Salames desde siempre; bondiola y panceta fiambre desde el 12/09/2026.
+const FAMILIAS_CON_MADURACION = new Set(['salame', 'fiambre'])
+const esMaduracion = e => FAMILIAS_CON_MADURACION.has(e?.tipo)
 const LABEL_BUCKET_EMB = {
   emb_chorizo_parrillero: '🌭 Chorizo Parrillero',
   emb_chorizo_saborizado: '🌭 Chorizo Saborizado',
@@ -136,6 +147,8 @@ const LABEL_BUCKET_EMB = {
   emb_salame_comun: '🥩 Salame Común Casero',
   emb_salame_holanda: '🧀 Salame Holanda',
   emb_salame_rockeford: '🧀 Salame Rockeford',
+  emb_bondiola_fiambre: '🥓 Bondiola Fiambre',
+  emb_panceta_fiambre: '🥓 Panceta Fiambre',
 }
 
 // Etiqueta/estilo de la forma de cobro de un remito. Solo 'cta_cte' es a
@@ -609,6 +622,10 @@ const [kgFinalHamb, setKgFinalHamb] = useState('')
 // Una misma tanda puede tener común, holanda y/o rockeford; al secarse se
 // carga el peso final de cada una y va a su bucket (emb_salame_*).
 const [salameNeto, setSalameNeto] = useState({ salame_comun: '', salame_rockeford: '', salame_holanda: '' })
+// Fiambres madurados (bondiola y panceta): kg de la pieza ya salada que entra
+// a madurar. Mismo candado que el salame — no suma al stock hasta el pesaje
+// final. Se cargan en su propia tanda para que el rinde de cada uno sea limpio.
+const [fiambreNeto, setFiambreNeto] = useState({ bondiola_fiambre: '', panceta_fiambre: '' })
 const [piezasEmbutido, setPiezasEmbutido] = useState({
   cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '',
   cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: ''
@@ -1259,6 +1276,58 @@ async function confirmarElaboracionSalame() {
     setLoading(false)
   }
 
+  // ── FIAMBRES MADURADOS (bondiola / panceta) — etapa 1 ──
+  // Calcado de confirmarElaboracionSalame: descuenta las piezas de cerdo
+  // elegidas y deja la tanda con candado (maduracion_completa=false), sin
+  // sumar nada al stock. La diferencia es que no lleva queso ni carne bovina:
+  // es la pieza entera salada, no una pasta.
+  async function confirmarElaboracionFiambre() {
+    const kgCerdo = Object.values(piezasEmbutido).reduce((s, v) => s + parseNumero(v), 0)
+    if (kgCerdo === 0) { showAlert('Ingresá los kg de la pieza de cerdo que entra a madurar', 'error'); return }
+    const variedades = Object.entries(fiambreNeto)
+      .filter(([, v]) => parseNumero(v) > 0)
+      .map(([tipo, v]) => ({ tipo, kg_neto: parseNumero(v) }))
+    if (variedades.length === 0) { showAlert('Cargá los kg frescos de la bondiola o de la panceta', 'error'); return }
+    const piezasUsadas = Object.entries(piezasEmbutido)
+      .filter(([, v]) => parseNumero(v) > 0)
+      .map(([tipo, v]) => ({ tipo, kg: parseNumero(v) }))
+    // Mismo freno que las hamburguesas: un numero mal tipeado no puede vaciar
+    // el deposito (ver elaboracionImposible).
+    const imposible = elaboracionImposible(piezasUsadas, piezasStock)
+    if (imposible) {
+      showAlert(`⛔ Pedís ${fmtKg(imposible.pide)} de ${imposible.tipo} y en el stock hay ${fmtKg(imposible.hay)}. Revisá el número — ¿escribiste los gramos o te faltó la coma?`, 'error')
+      return
+    }
+    setLoading(true)
+    try {
+      await supabase.from('elaboraciones_embutidos').insert({
+        fecha, tipo: 'fiambre', tipo_embutido: variedades[0].tipo,
+        piezas_usadas: piezasUsadas,
+        kg_carne_cerdo: kgCerdo,
+        kg_carne_bovina: 0,
+        kg_queso: 0, kg_queso_holanda: 0, kg_queso_rockeford: 0,
+        kg_elaborado: kgCerdo, pct_aumento: 0,
+        productos_finales: variedades,
+        kg_final: 0, maduracion_completa: false,
+        fecha_fin_maduracion: null,
+        notas,
+      })
+      for (const [tipo, v] of Object.entries(piezasEmbutido)) {
+        if (parseNumero(v) > 0) {
+          const { error } = await actualizarStock(tipo, -parseNumero(v))
+          if (error) throw new Error(`No se descontó ${tipo}: ${error.message}`)
+        }
+      }
+      const detalleVar = variedades.map(v => `${NOMBRE_EMBUTIDO[v.tipo] || v.tipo}: ${v.kg_neto.toFixed(1)} kg`).join(' · ')
+      showAlert(`✅ Fiambre en maduración — ${detalleVar} (de ${kgCerdo.toFixed(1)} kg de pieza). Cargá el peso final cuando esté listo.`)
+      setPiezasEmbutido({ cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '', cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: '' })
+      setFiambreNeto({ bondiola_fiambre: '', panceta_fiambre: '' })
+      setNotas('')
+      await cargarDatos(); onSaved()
+    } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
+    setLoading(false)
+  }
+
   // Etapa 2 del salame: una vez seco, se pesa y se cargan los kg FINALES
   // reales. Al registrar la elaboración NO se sumó nada al stock de embutidos
   // (solo se descontaron las piezas de cerdo/bovino). Recién acá, con el peso
@@ -1299,7 +1368,7 @@ async function confirmarElaboracionSalame() {
         fecha: fechaHoyARG(),
         tipo: 'embutido',
         proveedor_nombre: 'Elaboración propia',
-        descripcion: `Salame seco finalizado — ${detalle} (de ${Number(elab.kg_elaborado || 0).toFixed(1)} kg netos · merma ${pct.toFixed(1)}%)`,
+        descripcion: `${elab.tipo === 'fiambre' ? 'Fiambre madurado' : 'Salame seco'} finalizado — ${detalle} (de ${Number(elab.kg_elaborado || 0).toFixed(1)} kg netos · merma ${pct.toFixed(1)}%)`,
         kg: totalFinal,
         kg_real: totalFinal,
         merma_pct: 0,
@@ -1309,7 +1378,7 @@ async function confirmarElaboracionSalame() {
         cantidad: 1,
       })
       if (errEnt) console.warn('No se registró la entrada del salame finalizado:', errEnt.message)
-      showAlert(`✅ Salame seco finalizado — ${detalle} (cada uno a su stock)`)
+      showAlert(`✅ ${elab.tipo === 'fiambre' ? 'Fiambre madurado' : 'Salame seco'} finalizado — ${detalle} (cada uno a su stock)`)
       await cargarDatos(); onSaved()
     } catch (err) { showAlert('❌ Error: ' + err.message, 'error') }
     setLoading(false)
@@ -2040,7 +2109,7 @@ async function confirmarDesposteCerdo() {
               elaboración). Ver supabase/99. */}
           {(esSucursal
             ? [{ id: 'hamburguesa', label: '🍔 Hamburguesas' }, ...(MILANESAS_ELABORACION_ACTIVA ? [{ id: 'milanesa', label: '🍗 Milanesas' }] : [])]
-            : [{ id: 'embutido', label: '🌭 Embutidos frescos' }, { id: 'salame', label: '🥩 Salames' }, { id: 'hamburguesa', label: '🍔 Hamburguesas' }]
+            : [{ id: 'embutido', label: '🌭 Embutidos frescos' }, { id: 'salame', label: '🥩 Salames' }, { id: 'fiambre', label: '🥓 Fiambres' }, { id: 'hamburguesa', label: '🍔 Hamburguesas' }]
           ).map(t => (
             <button key={t.id} onClick={() => setTipoElaboracion(t.id)}
               style={{ flex: 1, padding: '10px', borderRadius: 8, border: `2px solid ${tipoElaboracion === t.id ? 'var(--gold)' : 'var(--border)'}`, background: tipoElaboracion === t.id ? 'rgba(201,168,76,0.1)' : 'var(--surface2)', color: tipoElaboracion === t.id ? 'var(--gold)' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
@@ -2079,6 +2148,28 @@ async function confirmarDesposteCerdo() {
               {tipoHamburguesa === 'hamburguesa_pollo' && <>Las supremas B salen del stock de <strong>Pollo</strong> y el peso final entra como <strong>Hamburguesas de Pollo</strong> (stock propio).</>}
               {tipoHamburguesa === 'hamburguesa_cerdo' && <>Las piezas de cerdo que selecciones salen de su stock y el peso final entra como <strong>Hamburguesas de Cerdo</strong> (stock propio).</>}
               {' '}Cargá los <strong>kg elaborados</strong> al final: puede haber merma o incremento por agregados.
+            </div>
+          </div>
+        )}
+        {tipoElaboracion === 'fiambre' && (
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>Fiambres de esta tanda — kg FRESCOS ya salados que entran a madurar (peso 1ª etapa)</label>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              {[
+                { id: 'bondiola_fiambre', label: '🥓 Bondiola Fiambre' },
+                { id: 'panceta_fiambre', label: '🥓 Panceta Fiambre' },
+              ].map(f => (
+                <div key={f.id} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <span style={{ fontSize: 12 }}>{f.label}</span>
+                  <input type="text" inputMode="decimal" placeholder="0 kg"
+                    value={fiambreNeto[f.id]}
+                    onChange={e => setFiambreNeto(prev => ({ ...prev, [f.id]: e.target.value }))}
+                    style={{ ...inp, width: 120, borderColor: fiambreNeto[f.id] ? 'var(--gold)' : 'var(--border)' }} />
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 6 }}>
+              Arriba elegís de qué pieza de cerdo sale y cuántos kg se descuentan del stock. Acá va el peso ya salado que entra a madurar — el peso final se carga desde el historial cuando esté listo.
             </div>
           </div>
         )}
@@ -2424,8 +2515,8 @@ async function confirmarDesposteCerdo() {
           // prima (①) y frescos embutidos (②, suma de las variedades) con su
           // merma/incremento. El tercero (③ seco) se carga desde el historial
           // al finalizar; sin merma automática en ninguna etapa.
-          if (tipoElaboracion === 'salame') {
-            const kgFrescos = Object.values(salameNeto).reduce((s, v) => s + parseNumero(v), 0)
+          if (tipoElaboracion === 'salame' || tipoElaboracion === 'fiambre') {
+            const kgFrescos = Object.values(tipoElaboracion === 'fiambre' ? fiambreNeto : salameNeto).reduce((s, v) => s + parseNumero(v), 0)
             const pctFresco = (kgTotal > 0 && kgFrescos > 0) ? ((kgFrescos / kgTotal - 1) * 100) : null
             return (
               <div>
@@ -2435,7 +2526,7 @@ async function confirmarDesposteCerdo() {
                     <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 21 }}>{kgTotal.toFixed(1)} kg</div>
                   </div>
                   <div>
-                    <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>② Frescos embutidos</div>
+                    <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>{tipoElaboracion === 'fiambre' ? '② Frescos salados' : '② Frescos embutidos'}</div>
                     <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 21, color: 'var(--gold)' }}>{kgFrescos > 0 ? `${kgFrescos.toFixed(1)} kg` : '—'}</div>
                   </div>
                   <div>
@@ -2445,7 +2536,7 @@ async function confirmarDesposteCerdo() {
                     </div>
                   </div>
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8, textAlign: 'center' }}>🔒 No suma al stock todavía. El ③ peso final se carga SECO desde el historial — ahí sale la merma total.</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8, textAlign: 'center' }}>🔒 No suma al stock todavía. El ③ peso final se carga {tipoElaboracion === 'fiambre' ? 'MADURADO' : 'SECO'} desde el historial — ahí sale la merma total.</div>
               </div>
             )
           }
@@ -2469,8 +2560,8 @@ async function confirmarDesposteCerdo() {
         <div className="form-group"><label>Fecha</label><input type="date" value={fecha} onChange={e => setFecha(e.target.value)} style={inp} /></div>
         <div className="form-group"><label>Notas</label><input placeholder="Observaciones..." value={notas} onChange={e => setNotas(e.target.value)} style={inp} /></div>
       </div>
-      <button className="btn btn-gold" onClick={tipoElaboracion === 'embutido' ? confirmarElaboracionEmbutido : tipoElaboracion === 'salame' ? confirmarElaboracionSalame : confirmarElaboracionHamburguesa} disabled={loading} style={{ width: '100%' }}>
-        {loading ? '⏳ Procesando...' : tipoElaboracion === 'embutido' ? '🌭 Confirmar elaboración de embutidos' : tipoElaboracion === 'salame' ? '🥩 Registrar salame en secado' : '🍔 Confirmar elaboración de hamburguesas'}
+      <button className="btn btn-gold" onClick={tipoElaboracion === 'embutido' ? confirmarElaboracionEmbutido : tipoElaboracion === 'salame' ? confirmarElaboracionSalame : tipoElaboracion === 'fiambre' ? confirmarElaboracionFiambre : confirmarElaboracionHamburguesa} disabled={loading} style={{ width: '100%' }}>
+        {loading ? '⏳ Procesando...' : tipoElaboracion === 'embutido' ? '🌭 Confirmar elaboración de embutidos' : tipoElaboracion === 'salame' ? '🥩 Registrar salame en secado' : tipoElaboracion === 'fiambre' ? '🥓 Registrar fiambre en maduración' : '🍔 Confirmar elaboración de hamburguesas'}
       </button>
       </>)}
     </div>
@@ -2603,7 +2694,7 @@ async function confirmarDesposteCerdo() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
             <div>
               <div style={{ fontWeight: 700, fontSize: 13 }}>
-                {e.tipo === 'salame' ? '🥩 Salame' : '🌭'} {e.tipo === 'embutido' ? e.tipo_embutido?.replace(/_/g, ' ').toUpperCase() : ''}
+                {e.tipo === 'salame' ? '🥩 Salame' : e.tipo === 'fiambre' ? '🥓 Fiambre' : '🌭'} {e.tipo === 'embutido' ? e.tipo_embutido?.replace(/_/g, ' ').toUpperCase() : ''}
               </div>
               <div style={{ fontSize: 11, color: 'var(--muted)' }}>
                 {e.fecha} · {(Number(e.kg_carne_cerdo) || 0).toFixed(1)} kg cerdo + {(Number(e.kg_carne_bovina) || 0).toFixed(1)} kg bovino
@@ -2621,20 +2712,20 @@ async function confirmarDesposteCerdo() {
                   ))}
                 </div>
               )}
-              {e.tipo === 'salame' && !e.maduracion_completa && (
+              {esMaduracion(e) && !e.maduracion_completa && (
                 <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 2 }}>⏳ En maduración hasta: {e.fecha_fin_maduracion}</div>
               )}
-              {e.tipo === 'salame' && e.maduracion_completa && (
+              {esMaduracion(e) && e.maduracion_completa && (
                 <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 2 }}>✅ Maduración completa</div>
               )}
               {e.notas && <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>{e.notas}</div>}
             </div>
             <div style={{ textAlign: 'right' }}>
-              <span style={{ background: e.tipo === 'salame' ? '#2a1a0a' : '#1a2a1a', color: e.tipo === 'salame' ? 'var(--amber)' : 'var(--green)', borderRadius: 6, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>
-                {e.tipo === 'salame' ? 'SALAME' : 'EMBUTIDO'}
+              <span style={{ background: esMaduracion(e) ? '#2a1a0a' : '#1a2a1a', color: esMaduracion(e) ? 'var(--amber)' : 'var(--green)', borderRadius: 6, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>
+                {e.tipo === 'salame' ? 'SALAME' : e.tipo === 'fiambre' ? 'FIAMBRE' : 'EMBUTIDO'}
               </span>
               <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 15, color: 'var(--gold)', marginTop: 4 }}>
-                {e.tipo === 'salame' ? `${(Number(e.kg_elaborado) || 0).toFixed(1)} kg salame` : `${(Number(e.kg_final) || 0).toFixed(1)} kg`}
+                {esMaduracion(e) ? `${(Number(e.kg_elaborado) || 0).toFixed(1)} kg ${e.tipo === 'fiambre' ? 'de pieza' : 'salame'}` : `${(Number(e.kg_final) || 0).toFixed(1)} kg`}
               </div>
             </div>
           </div>
@@ -3003,6 +3094,7 @@ function HistorialDespostes({ despostes }) {
 const PRODUCTOS_POR_FAMILIA = {
   embutido: ['chorizo_parrillero', 'chorizo_saborizado', 'chorizo_colorado', 'salchicha_parrillera', 'morcilla'],
   salame: ['salame_comun', 'salame_rockeford', 'salame_holanda'],
+  fiambre: ['bondiola_fiambre', 'panceta_fiambre'],
   hamburguesa: ['hamburguesa_carne', 'hamburguesa_pollo', 'hamburguesa_cerdo'],
 }
 
@@ -3011,7 +3103,7 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, onEditarProd
   // así no hay que scrollear todo para encontrar una tanda. Las elaboraciones
   // viejas sin `tipo` son chorizos (la familia original).
   const [familia, setFamilia] = useState('todas')
-  const familiaDe = e => (e.tipo === 'salame' || e.tipo === 'hamburguesa' || e.tipo === 'milanesa') ? e.tipo : 'embutido'
+  const familiaDe = e => (e.tipo === 'salame' || e.tipo === 'fiambre' || e.tipo === 'hamburguesa' || e.tipo === 'milanesa') ? e.tipo : 'embutido'
   const filtradas = (elaboraciones || []).filter(e => familia === 'todas' || familiaDe(e) === familia)
   const cuenta = f => (elaboraciones || []).filter(e => familiaDe(e) === f).length
   const pag = usePaginacion(filtradas, 15)
@@ -3041,6 +3133,8 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, onEditarProd
           { id: 'todas', label: `Todas (${(elaboraciones || []).length})` },
           { id: 'embutido', label: `🌭 Chorizos (${cuenta('embutido')})` },
           { id: 'salame', label: `🥩 Salames (${cuenta('salame')})` },
+          // Fiambres: la chip aparece recién cuando hay tandas cargadas.
+          ...(cuenta('fiambre') > 0 ? [{ id: 'fiambre', label: `🥓 Fiambres (${cuenta('fiambre')})` }] : []),
           { id: 'hamburguesa', label: `🍔 Hamburguesas (${cuenta('hamburguesa')})` },
           // Milanesas: elaboran solo las sucursales — la chip aparece únicamente si hay tandas.
           ...(cuenta('milanesa') > 0 ? [{ id: 'milanesa', label: `🍗 Milanesas (${cuenta('milanesa')})` }] : []),
@@ -3061,7 +3155,7 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, onEditarProd
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
               <div>
                 <div style={{ fontWeight: 700, fontSize: 13 }}>
-                  {e.tipo === 'salame' ? '🥩 Salame' : e.tipo === 'hamburguesa' ? '🍔' : '🌭'} {e.tipo === 'hamburguesa' ? (NOMBRE_EMBUTIDO[e.tipo_embutido] || e.tipo_embutido?.replace(/_/g, ' '))?.toUpperCase() : e.tipo === 'embutido' ? e.tipo_embutido?.replace(/_/g, ' ').toUpperCase() : (e.tipo_embutido?.replace(/_/g, ' ').toUpperCase() || '')}
+                  {e.tipo === 'salame' ? '🥩 Salame' : e.tipo === 'fiambre' ? '🥓 Fiambre' : e.tipo === 'hamburguesa' ? '🍔' : '🌭'} {e.tipo === 'hamburguesa' ? (NOMBRE_EMBUTIDO[e.tipo_embutido] || e.tipo_embutido?.replace(/_/g, ' '))?.toUpperCase() : e.tipo === 'embutido' ? e.tipo_embutido?.replace(/_/g, ' ').toUpperCase() : (e.tipo_embutido?.replace(/_/g, ' ').toUpperCase() || '')}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--muted)' }}>
                   {e.fecha}{e.created_at ? ` · ${fmtHora(e.created_at)}` : ''} · {e.tipo === 'hamburguesa'
@@ -3081,7 +3175,7 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, onEditarProd
                     (kg_elaborado) → ② frescos embutidos (Σ kg_neto de las
                     variedades) → ③ secos finales (kg_final), con la merma
                     de cada etapa. Pedido Fabricio 06/08/2026. */}
-                {e.tipo === 'salame' && (() => {
+                {esMaduracion(e) && (() => {
                   const prima = Number(e.kg_elaborado) || 0
                   const frescos = (Array.isArray(e.productos_finales) ? e.productos_finales : [])
                     .reduce((s, p) => s + (Number(p?.kg_neto) || 0), 0)
@@ -3090,24 +3184,24 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, onEditarProd
                   if (!e.maduracion_completa) {
                     return (
                       <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 2 }}>
-                        🔒 En secado · ① prima {fmtKg(prima)}{frescos > 0 ? <> → ② frescos {fmtKg(frescos)}{pct(prima, frescos)}</> : ''} · no suma al stock todavía
+                        🔒 {e.tipo === 'fiambre' ? 'En maduración' : 'En secado'} · ① prima {fmtKg(prima)}{frescos > 0 ? <> → ② frescos {fmtKg(frescos)}{pct(prima, frescos)}</> : ''} · no suma al stock todavía
                       </div>
                     )
                   }
                   return (
                     <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 2 }}>
-                      ✅ ① prima {fmtKg(prima)}{frescos > 0 ? <> → ② frescos {fmtKg(frescos)}{pct(prima, frescos)}</> : ''} → ③ secos {fmtKg(seco)}{frescos > 0 ? pct(frescos, seco) : pct(prima, seco)} al stock{prima > 0 ? ` · merma total ${(((seco / prima) - 1) * 100).toFixed(1)}%` : ''}
+                      ✅ ① prima {fmtKg(prima)}{frescos > 0 ? <> → ② frescos {fmtKg(frescos)}{pct(prima, frescos)}</> : ''} → ③ {e.tipo === 'fiambre' ? 'madurados' : 'secos'} {fmtKg(seco)}{frescos > 0 ? pct(frescos, seco) : pct(prima, seco)} al stock{prima > 0 ? ` · merma total ${(((seco / prima) - 1) * 100).toFixed(1)}%` : ''}
                     </div>
                   )
                 })()}
                 {e.notas && <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>{e.notas}</div>}
               </div>
               <div style={{ textAlign: 'right' }}>
-                <span style={{ background: e.tipo === 'salame' ? '#2a1a0a' : e.tipo === 'hamburguesa' ? '#2a1a1a' : '#1a2a1a', color: e.tipo === 'salame' ? 'var(--amber)' : e.tipo === 'hamburguesa' ? '#ff9b7a' : 'var(--green)', borderRadius: 6, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>
-                  {e.tipo === 'salame' ? 'SALAME' : e.tipo === 'hamburguesa' ? 'HAMBURGUESA' : 'EMBUTIDO'}
+                <span style={{ background: esMaduracion(e) ? '#2a1a0a' : e.tipo === 'hamburguesa' ? '#2a1a1a' : '#1a2a1a', color: esMaduracion(e) ? 'var(--amber)' : e.tipo === 'hamburguesa' ? '#ff9b7a' : 'var(--green)', borderRadius: 6, padding: '2px 10px', fontSize: 11, fontWeight: 700 }}>
+                  {e.tipo === 'salame' ? 'SALAME' : e.tipo === 'fiambre' ? 'FIAMBRE' : e.tipo === 'hamburguesa' ? 'HAMBURGUESA' : 'EMBUTIDO'}
                 </span>
                 <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 15, color: 'var(--gold)', marginTop: 4 }}>
-                  {e.tipo === 'salame'
+                  {esMaduracion(e)
                     ? (e.maduracion_completa ? fmtKg(e.kg_final) : `${fmtKg(e.kg_elaborado)} netos`)
                     : fmtKg(e.kg_final)}
                 </div>
@@ -3116,7 +3210,7 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, onEditarProd
             {/* Etapa 2: candado de secado. Cerrado = en proceso; al abrirlo se
                 cargan los kg finales reales (pesados secos) y recién ahí suben
                 al stock de embutidos. */}
-            {e.tipo === 'salame' && !e.maduracion_completa && onFinalizarSalame && (
+            {esMaduracion(e) && !e.maduracion_completa && onFinalizarSalame && (
               finId === e.id ? (() => {
                 // Variedades a finalizar: de productos_finales (multi) o el tipo único (legacy)
                 const vars = Array.isArray(e.productos_finales) && e.productos_finales.length
@@ -3124,7 +3218,7 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, onEditarProd
                   : [{ tipo: e.tipo_embutido || 'salame_comun' }]
                 return (
                   <div style={{ marginTop: 8, padding: 10, background: 'var(--surface2)', borderRadius: 8 }}>
-                    <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>🔓 Peso final pesado seco de cada variedad — cada uno va a su stock:</div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>🔓 Peso final de cada {e.tipo === 'fiambre' ? 'fiambre ya madurado' : 'variedad pesada seca'} — cada uno va a su stock:</div>
                     {vars.map(v => (
                       <div key={v.tipo} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                         <span style={{ fontSize: 13 }}>{NOMBRE_EMBUTIDO[v.tipo] || v.tipo}{Number(v.kg_neto) > 0 ? ` · ${Number(v.kg_neto).toFixed(1)} kg netos` : ''}</span>
@@ -3150,18 +3244,18 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, onEditarProd
               })() : (
                 <button
                   className="btn"
-                  title="Desbloquear para cargar el peso final del salame seco"
+                  title={e.tipo === 'fiambre' ? 'Desbloquear para cargar el peso final del fiambre madurado' : 'Desbloquear para cargar el peso final del salame seco'}
                   onClick={() => { setFinId(e.id); setKgFinales({}) }}
                   style={{ fontSize: 12, marginTop: 6, borderColor: 'var(--gold)', color: 'var(--gold)' }}
                 >
-                  🔒 Cargar peso final (secado listo)
+                  🔒 Cargar peso final ({e.tipo === 'fiambre' ? 'maduración lista' : 'secado listo'})
                 </button>
               )
             )}
             {/* Corrección de una elaboración YA confirmada (embutidos,
                 hamburguesas o salames finalizados): editar kg por producto o
                 agregar el que faltó. El stock se ajusta por diferencia. */}
-            {onEditarProductos && (e.tipo !== 'salame' || e.maduracion_completa) && (
+            {onEditarProductos && (!esMaduracion(e) || e.maduracion_completa) && (
               editId === e.id ? (
                 <div style={{ marginTop: 8, padding: 10, background: 'var(--surface2)', borderRadius: 8 }}>
                   <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
@@ -4018,6 +4112,8 @@ async function ejecutarAnulacion(entrada) {
     emb_salame_comun: '🥩 Salame',
     emb_salame_holanda: '🥩 Salame',
     emb_salame_rockeford: '🥩 Salame',
+    emb_bondiola_fiambre: '🥓 Fiambre',
+    emb_panceta_fiambre: '🥓 Fiambre',
     // Hamburguesas de elaboración propia (mig 85): la entrada informativa
     // de la elaboración se guarda con el tipo del bucket hamb_*.
     hamb_carne: '🍔 Hamburguesa',

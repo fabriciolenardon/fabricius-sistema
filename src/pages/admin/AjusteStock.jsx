@@ -68,6 +68,8 @@ const LABELS = {
   emb_salame_comun: '🥩 Salame Común Casero (elab.)',
   emb_salame_holanda: '🧀 Salame Holanda (elab.)',
   emb_salame_rockeford: '🧀 Salame Rockeford (elab.)',
+  emb_bondiola_fiambre: '🥓 Bondiola Fiambre (elab.)',
+  emb_panceta_fiambre: '🥓 Panceta Fiambre (elab.)',
   mila_carne: '🍢 Milanesas de Carne (elab.)',
   mila_cerdo: '🍢 Milanesas de Cerdo (elab.)',
   mila_pollo: '🍢 Milanesas de Pollo (elab.)',

@@ -183,7 +183,7 @@ export default function Dashboard() {
         if (e.tipo === 'embutido' && buckets.has('cerdo_cabeza') && Number(e.kg_carne_bovina) > 0) {
           kg += Number(e.kg_carne_bovina); partes.push(`retazos ${fmtKg(e.kg_carne_bovina)}`)
         }
-        if (e.tipo === 'salame' && buckets.has('bovino_corte') && Number(e.kg_carne_bovina) > 0) {
+        if ((e.tipo === 'salame' || e.tipo === 'fiambre') && buckets.has('bovino_corte') && Number(e.kg_carne_bovina) > 0) {
           kg += Number(e.kg_carne_bovina); partes.push(`bovino ${fmtKg(e.kg_carne_bovina)}`)
         }
         if (kg <= 0) return null
@@ -323,7 +323,9 @@ export default function Dashboard() {
     (stock.emb_morcilla || 0) +
     (stock.emb_salame_comun || 0) +
     (stock.emb_salame_holanda || 0) +
-    (stock.emb_salame_rockeford || 0)
+    (stock.emb_salame_rockeford || 0) +
+    (stock.emb_bondiola_fiambre || 0) +
+    (stock.emb_panceta_fiambre || 0)
   )
   // Hamburguesas de elaboración propia (hamb_*, mig 85) — mismo modelo que embutidos
   const stockHamburguesas = Math.max(0,
@@ -567,7 +569,7 @@ export default function Dashboard() {
             { label: '🍗 Pollo', valor: fmtKg(stockPollo), color: 'var(--blue)', aprox: Math.round(stockPollo / 20) + ' cajones', bajo: stockPollo < 50, stockKg: stockPollo, tiposEntradas: ['pollo'], tiposSalidas: ['pollo'], elaboraciones: true },
             { label: '🐑 Animalitos', valor: fmtKg(animalitos.count > 0 ? animalitos.kg : stockAnimalitos), color: 'var(--amber)', aprox: animalitos.count + (animalitos.count === 1 ? ' entero' : ' enteros'), bajo: false, stockKg: animalitos.count > 0 ? animalitos.kg : stockAnimalitos, tiposEntradas: ['animal_lechon', 'animal_cabrito', 'animal_cordero'], tiposSalidas: ['animal_lechon', 'animal_cabrito', 'animal_cordero'] },
             { label: '🫀 Brosas', valor: fmtKg(stockBrosas), color: 'var(--amber)', aprox: 'al peso', bajo: stockBrosas < 20, stockKg: stockBrosas, tiposEntradas: ['bovino_brosa', 'brosa_chinchulin', 'brosa_corazon', 'brosa_entrana', 'brosa_higado', 'brosa_lengua', 'brosa_molleja', 'brosa_mondongo', 'brosa_rabo', 'brosa_rinon', 'brosa_sesos', 'brosa_tripa_gorda'], tiposSalidas: ['bovino_brosa', 'brosa_chinchulin', 'brosa_corazon', 'brosa_entrana', 'brosa_higado', 'brosa_lengua', 'brosa_molleja', 'brosa_mondongo', 'brosa_rabo', 'brosa_rinon', 'brosa_sesos', 'brosa_tripa_gorda'] },
-            { label: '🌭 Embutidos', valor: fmtKg(stockEmbutido), color: 'var(--purple)', aprox: 'al peso', bajo: stockEmbutido < 20, stockKg: stockEmbutido, tiposEntradas: ['embutido', 'emb_chorizo_parrillero', 'emb_chorizo_saborizado', 'emb_chorizo_colorado', 'emb_salchicha_parrillera', 'emb_morcilla', 'emb_salame_comun', 'emb_salame_holanda', 'emb_salame_rockeford'], tiposSalidas: ['embutido', 'emb_chorizo_parrillero', 'emb_chorizo_saborizado', 'emb_chorizo_colorado', 'emb_salchicha_parrillera', 'emb_morcilla', 'emb_salame_comun', 'emb_salame_holanda', 'emb_salame_rockeford'] },
+            { label: '🌭 Embutidos', valor: fmtKg(stockEmbutido), color: 'var(--purple)', aprox: 'al peso', bajo: stockEmbutido < 20, stockKg: stockEmbutido, tiposEntradas: ['embutido', 'emb_chorizo_parrillero', 'emb_chorizo_saborizado', 'emb_chorizo_colorado', 'emb_salchicha_parrillera', 'emb_morcilla', 'emb_salame_comun', 'emb_salame_holanda', 'emb_salame_rockeford', 'emb_bondiola_fiambre', 'emb_panceta_fiambre'], tiposSalidas: ['embutido', 'emb_chorizo_parrillero', 'emb_chorizo_saborizado', 'emb_chorizo_colorado', 'emb_salchicha_parrillera', 'emb_morcilla', 'emb_salame_comun', 'emb_salame_holanda', 'emb_salame_rockeford', 'emb_bondiola_fiambre', 'emb_panceta_fiambre'] },
             { label: '🍔 Hamburguesas', valor: fmtKg(stockHamburguesas), color: 'var(--purple)', aprox: 'al peso', bajo: false, stockKg: stockHamburguesas, tiposEntradas: ['hamb_carne', 'hamb_pollo', 'hamb_cerdo'], tiposSalidas: ['hamb_carne', 'hamb_pollo', 'hamb_cerdo'] },
             { label: '🧊 Rebozados/Congelados', valor: fmtKg(stockRebozado), color: 'var(--blue)', aprox: 'al peso', bajo: stockRebozado < 20, stockKg: stockRebozado, tiposEntradas: ['rebozado'], tiposSalidas: ['rebozado'] },
             { label: '🛒 Almacén', valor: Math.round(stockAlmacen) + ' u', color: 'var(--gold)', aprox: cantAlmacen + ' productos cargados', bajo: stockAlmacen < 10, stockKg: stockAlmacen, tiposEntradas: ['almacen'], tiposSalidas: ['almacen'] },
