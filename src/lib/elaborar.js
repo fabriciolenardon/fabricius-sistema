@@ -14,8 +14,14 @@
 import { supabase } from './supabase'
 import { fechaHoyARG } from './fechas'
 import { redondearStock } from './stockHelpers'
+import { parseNumero } from './formatos'
 
-const n = v => Number(v) || 0
+// Los kg llegan de dos lados: tipeados por el depostero en el tablet (con coma
+// decimal argentina) y leidos de la base (numeric, que vuelve como string con
+// punto). Number() resuelve bien el segundo y COME el primero: Number('8,3')
+// es NaN -> 0, y una variedad podia perderse sin aviso al finalizar un salame.
+// parseNumero entiende los dos formatos. Ver [[project-coma-decimal]].
+const n = v => parseNumero(v)
 
 // Nombre legible de cada tipo (mismas claves que el admin)
 export const NOMBRE_EMBUTIDO = {
