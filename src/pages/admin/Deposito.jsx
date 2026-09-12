@@ -7797,6 +7797,9 @@ function fechaDiaARG(iso) {
 // =============================================
 function PiezasTab() {
   const [piezas, setPiezas] = useState([])
+  // Contadores de stock_actual para los buckets pieza_* (la RLS los limita a la
+  // sucursal del usuario, igual que las fichas). null = todavia no cargaron.
+  const [contadores, setContadores] = useState(null)
   const [loading, setLoading] = useState(true)
   const [filtroEstado, setFiltroEstado] = useState('todas')
   const [filtroTipo, setFiltroTipo] = useState('todos')
@@ -7807,13 +7810,27 @@ function PiezasTab() {
 
   async function cargar() {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('piezas_stock')
-      .select('*')
-      .order('fecha_ingreso', { ascending: false })
-      .order('id', { ascending: false })
-    if (error) console.warn('Error cargando piezas_stock:', error.message)
-    setPiezas(data || [])
+    const [fichas, buckets] = await Promise.all([
+      supabase
+        .from('piezas_stock')
+        .select('*')
+        .order('fecha_ingreso', { ascending: false })
+        .order('id', { ascending: false }),
+      supabase
+        .from('stock_actual')
+        .select('tipo, kg_disponible')
+        .like('tipo', 'pieza%'),
+    ])
+    if (fichas.error) console.warn('Error cargando piezas_stock:', fichas.error.message)
+    setPiezas(fichas.data || [])
+    if (buckets.error) {
+      console.warn('Error cargando stock_actual:', buckets.error.message)
+      setContadores(null)
+    } else {
+      const mapa = {}
+      for (const b of (buckets.data || [])) mapa[b.tipo] = Number(b.kg_disponible) || 0
+      setContadores(mapa)
+    }
     setLoading(false)
   }
 
@@ -7852,8 +7869,37 @@ function PiezasTab() {
     valorVend:   piezas.filter(p => p.estado === 'vendida').reduce((s, p) => s + (Number(p.total_venta) || 0), 0),
   }
 
+  // -- Control: el contador contra las fichas ------------------
+  // stock_actual.pieza_X tiene que ser la suma de los kg de las piezas
+  // 'disponible' de ese tipo. Si no coinciden, el bueno es el de las fichas
+  // (cada una es una pieza real en la camara) -- igual que en Media Reses.
+  // El generico bovino_pieza queda afuera a proposito: solo recibe debitos
+  // (MEDIA RES vendida por kg), nunca creditos, asi que nunca cuadra.
+  const fichasPorBucket = {}
+  for (const p of piezas) {
+    if (p.estado !== 'disponible') continue
+    const bucket = p.tipo_stock || bucketDePiezaBovina(p.tipo_pieza)
+    if (!bucket || !String(bucket).startsWith('pieza_')) continue
+    const acc = fichasPorBucket[bucket] || (fichasPorBucket[bucket] = { kg: 0, n: 0 })
+    acc.kg += Number(p.kg) || 0
+    acc.n += 1
+  }
+  const bucketsControlados = [...new Set([
+    ...Object.keys(fichasPorBucket),
+    ...Object.keys(contadores || {}).filter(t => t.startsWith('pieza_')),
+  ])].sort()
+  const descuadresPiezas = contadores == null ? [] : bucketsControlados
+    .map(bucket => {
+      const f = fichasPorBucket[bucket] || { kg: 0, n: 0 }
+      const contador = Number(contadores[bucket]) || 0
+      return { bucket, contador, fichas: f.kg, n: f.n, dif: contador - f.kg }
+    })
+    // Tolerancia de 10 gramos: el residuo de float no es un descuadre real.
+    .filter(d => Math.abs(d.dif) > 0.01)
+
   const card = { background: 'var(--surface2)', borderRadius: 10, padding: '12px 16px', border: '1px solid var(--border)' }
   const inp = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, padding: '8px 10px', color: 'var(--text)', fontSize: 12, width: '100%' }
+  const mono = { fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums' }
 
   return (
     <div>
@@ -7879,6 +7925,52 @@ function PiezasTab() {
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{stats.kgVend.toFixed(1)} kg · ${Math.round(stats.valorVend).toLocaleString('es-AR')}</div>
         </div>
       </div>
+
+      {/* Control contador vs fichas */}
+      {!loading && contadores != null && (
+        <div className="card" style={{ marginBottom: 16, ...(descuadresPiezas.length > 0 ? { borderColor: 'var(--red-light)' } : {}) }}>
+          <div className="card-title">🧮 Contador de stock vs piezas disponibles</div>
+          {descuadresPiezas.length === 0 ? (
+            <div style={{ fontSize: 12, color: 'var(--green)' }}>
+              ✅ Todos los contadores coinciden con las piezas que hay en la cámara.
+            </div>
+          ) : (
+            <>
+              <div style={{ fontSize: 12, color: 'var(--red-light)', marginBottom: 10 }}>
+                ⚠️ {descuadresPiezas.length === 1 ? 'Un contador no coincide' : descuadresPiezas.length + ' contadores no coinciden'} con las fichas.
+                El número bueno es el de las fichas: cada una es una pieza real. Se corrige desde Ajuste de Stock.
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%' }}>
+                  <thead>
+                    <tr>
+                      <th>Pieza</th>
+                      <th>Contador del sistema</th>
+                      <th>Suma de las fichas</th>
+                      <th>Diferencia</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {descuadresPiezas.map(d => (
+                      <tr key={d.bucket}>
+                        <td style={{ fontWeight: 600 }}>{labelTipoEntrada(d.bucket)}</td>
+                        <td style={{ ...mono, fontSize: 13 }}>{fmtKg(d.contador, { decimales: 2 })}</td>
+                        <td style={{ ...mono, fontSize: 13 }}>
+                          {fmtKg(d.fichas, { decimales: 2 })}
+                          <span style={{ color: 'var(--muted)', fontSize: 11 }}> ({d.n} {d.n === 1 ? 'pieza' : 'piezas'})</span>
+                        </td>
+                        <td style={{ ...mono, fontSize: 13, color: 'var(--red-light)', fontWeight: 700 }}>
+                          {d.dif > 0 ? 'sobran ' : 'faltan '}{fmtKg(Math.abs(d.dif), { decimales: 2 })}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Filtros */}
       <div className="card" style={{ marginBottom: 16 }}>
