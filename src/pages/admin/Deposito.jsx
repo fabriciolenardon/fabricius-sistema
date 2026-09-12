@@ -1003,6 +1003,12 @@ async function confirmarElaboracionEmbutido() {
     const piezasUsadas = Object.entries(piezasEmbutido)
       .filter(([, v]) => parseNumero(v) > 0)
       .map(([tipo, v]) => ({ tipo, kg: parseNumero(v) }))
+    const imposibleEmb = elaboracionImposible(piezasUsadas, piezasStock)
+    if (imposibleEmb) {
+      showAlert(`⛔ Pedís ${fmtKg(imposibleEmb.pide)} de ${imposibleEmb.tipo} y en el stock hay ${fmtKg(imposibleEmb.hay)}. Revisá el número — ¿escribiste los gramos o te faltó la coma?`, 'error')
+      setLoading(false)
+      return
+    }
     await supabase.from('elaboraciones_embutidos').insert({
       fecha, tipo: 'embutido', tipo_embutido: tipoEmbutido,
       piezas_usadas: piezasUsadas,
@@ -1065,6 +1071,23 @@ async function confirmarElaboracionEmbutido() {
 // suma los kg FINALES producidos al bucket propio (hamb_*). No hay etapa de
 // secado: se confirma con el peso ya elaborado, y la merma (o incremento por
 // agregados) se calcula sola comparando origen vs final.
+// Un tipeo no puede vaciar el deposito. El 11/09 se cargo "16100" en vez de
+// "16,1" en la carnaza: el sistema descontó 16 TONELADAS de un bucket que
+// tenia 15,4 kg y lo dejo en -16.084 kg sin una sola advertencia.
+//
+// No se bloquea cualquier faltante: que el stock quede un poco corto es
+// normal (la balanza y el sistema nunca coinciden al gramo, y a veces se usa
+// algo mas de lo cargado). Solo se frena lo que NO puede ser real: pedir mas
+// del DOBLE de lo que hay y ademas pasarse por mas de 5 kg. Eso siempre es
+// un numero mal escrito, no una elaboracion.
+function elaboracionImposible(piezasUsadas, stockPorTipo) {
+  for (const p of piezasUsadas) {
+    const hay = Number(stockPorTipo?.[p.tipo]) || 0
+    if (p.kg > hay * 2 && p.kg - hay > 5) return { tipo: p.tipo, pide: p.kg, hay }
+  }
+  return null
+}
+
 async function confirmarElaboracionHamburguesa() {
   const esCerdo = tipoHamburguesa === 'hamburguesa_cerdo'
   const piezasUsadas = esCerdo
@@ -1077,6 +1100,11 @@ async function confirmarElaboracionHamburguesa() {
   }
   const kgFinal = parseNumero(kgFinalHamb)
   if (kgFinal <= 0) { showAlert('Ingresá los kg de hamburguesas elaboradas (peso final)', 'error'); return }
+  const imposible = elaboracionImposible(piezasUsadas, piezasStock)
+  if (imposible) {
+    showAlert(`⛔ Pedís ${fmtKg(imposible.pide)} de ${imposible.tipo} y en el stock hay ${fmtKg(imposible.hay)}. Revisá el número — ¿escribiste los gramos o te faltó la coma?`, 'error')
+    return
+  }
   setLoading(true)
   try {
     const bucket = BUCKET_HAMBURGUESA[tipoHamburguesa]
