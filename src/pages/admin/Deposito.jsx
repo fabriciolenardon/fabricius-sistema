@@ -2153,7 +2153,7 @@ async function confirmarDesposteCerdo() {
         )}
         {tipoElaboracion === 'fiambre' && (
           <div style={{ marginBottom: 12 }}>
-            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>Fiambres de esta tanda — kg FRESCOS ya salados que entran a madurar (peso 1ª etapa)</label>
+            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>② Fiambres de esta tanda — kg FRESCOS ya salados que entran a madurar</label>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               {[
                 { id: 'bondiola_fiambre', label: '🥓 Bondiola Fiambre' },
@@ -2169,7 +2169,7 @@ async function confirmarDesposteCerdo() {
               ))}
             </div>
             <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 6 }}>
-              Arriba elegís de qué pieza de cerdo sale y cuántos kg se descuentan del stock. Acá va el peso ya salado que entra a madurar — el peso final se carga desde el historial cuando esté listo.
+              ② Acá va el peso ya salado que entra a madurar (los kg de la pieza van en el panel "Elaborar fiambres"). El ③ peso final se carga desde el historial cuando esté listo.
             </div>
           </div>
         )}
@@ -2280,7 +2280,7 @@ async function confirmarDesposteCerdo() {
       )}
     </div>
     <div className="card">
-      <div className="card-title">{tipoElaboracion === 'milanesa' ? '🍗 Elaborar milanesas' : tipoElaboracion === 'hamburguesa' ? '🍔 Elaborar hamburguesas' : `🌭 ${tipoElaboracion === 'embutido' ? 'Elaborar embutidos' : 'Elaborar salames'}`}</div>
+      <div className="card-title">{tipoElaboracion === 'milanesa' ? '🍗 Elaborar milanesas' : tipoElaboracion === 'hamburguesa' ? '🍔 Elaborar hamburguesas' : tipoElaboracion === 'fiambre' ? '🥓 Elaborar fiambres' : `🌭 ${tipoElaboracion === 'embutido' ? 'Elaborar embutidos' : 'Elaborar salames'}`}</div>
 
       {/* ── FORMULARIO DE MILANESAS ────────────────────────────
           Se pesa lo que entra y se carga lo que sale. Con el rebozado
@@ -2387,7 +2387,9 @@ async function confirmarDesposteCerdo() {
       <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
         {tipoElaboracion === 'hamburguesa' && tipoHamburguesa !== 'hamburguesa_cerdo'
           ? 'Ingresá los kg de materia prima usados y el peso final elaborado.'
-          : 'Ingresá los kg de cada pieza que vas a usar.'}
+          : tipoElaboracion === 'fiambre'
+            ? '① Ingresá acá los kg de la pieza que usaste — Bondiola para la bondiola fiambre, Tocino para la panceta. Se descuentan del stock al registrar.'
+            : 'Ingresá los kg de cada pieza que vas a usar.'}
       </div>
       {(tipoElaboracion !== 'hamburguesa' || tipoHamburguesa === 'hamburguesa_cerdo') && (
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
@@ -2409,7 +2411,9 @@ async function confirmarDesposteCerdo() {
         ))}
       </div>
       )}
-      {tipoElaboracion !== 'hamburguesa' && (
+      {/* En un fiambre no hay mezcla: es la pieza de cerdo entera salada, así
+          que no se ofrece ni carne bovina ni retazos. */}
+      {tipoElaboracion !== 'hamburguesa' && tipoElaboracion !== 'fiambre' && (
       <div className="form-group" style={{ marginBottom: 10 }}>
         <label>{tipoElaboracion === 'embutido' ? '🐷 Retazos cerdo (kg) — se descuentan de Cabezas de cerdo' : '🥩 Carne bovina (kg)'}</label>
         <input type="text" inputMode="decimal" placeholder="0" value={kgCarneBovinaEmbutido} onChange={e => setKgCarneBovinaEmbutido(e.target.value)} style={{ ...inp, borderColor: 'var(--gold)' }} />
@@ -2508,8 +2512,14 @@ async function confirmarDesposteCerdo() {
       <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 12, marginBottom: 14 }}>
         {(() => {
           const kgCerdo = Object.values(piezasEmbutido).reduce((s, v) => s + parseNumero(v), 0)
-          const kgBovino = parseNumero(kgCarneBovinaEmbutido)
-          const kgQueso = parseNumero(kgQuesoEmbutido) + parseNumero(kgQuesoRockefordEmbutido)
+          // En un fiambre la materia prima es SOLO la pieza de cerdo. Los campos
+          // de bovino y queso estan ocultos en esa solapa, pero si quedo algo
+          // tipeado al venir de Salames no puede sumar aca: confirmarElaboracion-
+          // Fiambre guarda 0 en los dos, y el resumen tiene que mostrar lo mismo
+          // que se va a guardar.
+          const esFiambreForm = tipoElaboracion === 'fiambre'
+          const kgBovino = esFiambreForm ? 0 : parseNumero(kgCarneBovinaEmbutido)
+          const kgQueso = esFiambreForm ? 0 : parseNumero(kgQuesoEmbutido) + parseNumero(kgQuesoRockefordEmbutido)
           const kgTotal = kgCerdo + kgBovino + kgQueso
           // SALAME: se muestran los DOS primeros pesos de la tanda — materia
           // prima (①) y frescos embutidos (②, suma de las variedades) con su
