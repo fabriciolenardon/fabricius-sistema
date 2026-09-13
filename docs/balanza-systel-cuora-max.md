@@ -1,4 +1,9 @@
-# Balanza Systel Cuora Max + Qendra — manual de integración
+# Balanza Systel Cuora Max
+
+> 🆕 La central sumó una **Cuora NEO** el 13/09/2026 — es otro equipo: no usa Qendra, se configura
+> por pantalla táctil y web. Su procedimiento está en
+> [`balanza-systel-cuora-neo.md`](balanza-systel-cuora-neo.md). Los conceptos de este documento
+> (los dos modos, el formato del código, cómo lo lee la Caja) valen para las dos. + Qendra — manual de integración
 
 Todo lo necesario para conectar una balanza **Systel Cuora Max** (administrada con el software de PC
 **Qendra**) al sistema, desde cero. Escrito a partir de la instalación real de Fabricius —
