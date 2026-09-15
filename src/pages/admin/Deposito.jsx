@@ -2803,6 +2803,10 @@ async function confirmarDesposteCerdo() {
 // marcarse (o al revés) y el depósito empieza a mentir.
 // ═══════════════════════════════════════════════════════════
 function MediasResesTab() {
+  // El rinde vive en su propia sub-pestana: ocupaba toda la pantalla y tapaba
+  // lo que hay que ver de entrada, que son las medias en camara (Fabricio,
+  // 15/09/2026).
+  const [sub, setSub] = useState('medias')
   const [medias, setMedias] = useState([])
   const [stockMR, setStockMR] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -2867,8 +2871,39 @@ function MediasResesTab() {
 
   const card = { background: 'var(--surface2)', borderRadius: 10, padding: '12px 16px', border: '1px solid var(--border)' }
 
+  const subTabs = (
+    <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+      {[['medias', '🐄 Medias en stock'], ['rinde', '📉 Rinde']].map(([id, label]) => (
+        <button key={id} onClick={() => setSub(id)}
+          style={{ padding: '7px 16px', borderRadius: 8, cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
+            fontFamily: "'DM Sans',sans-serif",
+            border: `1px solid ${sub === id ? 'var(--gold)' : 'var(--border)'}`,
+            background: sub === id ? 'var(--gold)' : 'transparent',
+            color: sub === id ? '#000' : 'var(--muted)' }}>{label}</button>
+      ))}
+    </div>
+  )
+
+  // Los dos caminos de una media res, POR SEPARADO: son ciclos distintos y
+  // mezclarlos no diria nada. Despostar a piezas deja casi todo (la pieza
+  // sigue con hueso) y despostar para venta por kilo se lleva un cuarto.
+  if (sub === 'rinde') return (
+    <div>
+      {subTabs}
+      <HistorialRinde
+        tipos={['kilo', 'bovino']}
+        titulo="📉 Rinde · media res → venta por KILO"
+        queEntra="Media" queSale="Cortes" />
+      <HistorialRinde
+        tipos={['piezas']}
+        titulo="📉 Rinde · media res → PIEZAS"
+        queEntra="Media" queSale="Piezas" />
+    </div>
+  )
+
   return (
     <div>
+      {subTabs}
       {/* ── EN LA CÁMARA AHORA ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>
         <div style={{ ...card, borderColor: 'var(--gold)' }}>
@@ -2893,20 +2928,6 @@ function MediasResesTab() {
           </div>
         </div>
       </div>
-
-      {/* ── RINDE: los dos caminos de una media res, POR SEPARADO ──
-          Pedido de Fabricio (15/09/2026). Son ciclos distintos y mezclarlos no
-          diria nada: despostar a piezas deja casi todo (merma ~4%, la pieza
-          sigue con hueso) y despostar para venta por kilo se lleva un cuarto
-          del animal. */}
-      <HistorialRinde
-        tipos={['kilo', 'bovino']}
-        titulo="📉 Rinde · media res → venta por KILO"
-        queEntra="Media" queSale="Cortes" />
-      <HistorialRinde
-        tipos={['piezas']}
-        titulo="📉 Rinde · media res → PIEZAS"
-        queEntra="Media" queSale="Piezas" />
 
       {msg && (
         <div className={`alert alert-${msg.tipo === 'error' ? 'error' : 'success'}`} style={{ marginBottom: 12 }}>{msg.txt}</div>
@@ -7959,6 +7980,8 @@ function fechaDiaARG(iso) {
 // PESTAÑA HISTORIAL/STOCK DE PIEZAS INDIVIDUALES
 // =============================================
 function PiezasTab() {
+  // Mismo criterio que en Media Reses: el rinde en su propia sub-pestana.
+  const [sub, setSub] = useState('piezas')
   const [piezas, setPiezas] = useState([])
   // Contadores de stock_actual para los buckets pieza_* (la RLS los limita a la
   // sucursal del usuario, igual que las fichas). null = todavia no cargaron.
@@ -8064,8 +8087,33 @@ function PiezasTab() {
   const inp = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, padding: '8px 10px', color: 'var(--text)', fontSize: 12, width: '100%' }
   const mono = { fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums' }
 
+  const subTabs = (
+    <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+      {[['piezas', '🍖 Piezas en stock'], ['rinde', '📉 Rinde']].map(([id, label]) => (
+        <button key={id} onClick={() => setSub(id)}
+          style={{ padding: '7px 16px', borderRadius: 8, cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
+            fontFamily: "'DM Sans',sans-serif",
+            border: `1px solid ${sub === id ? 'var(--gold)' : 'var(--border)'}`,
+            background: sub === id ? 'var(--gold)' : 'transparent',
+            color: sub === id ? '#000' : 'var(--muted)' }}>{label}</button>
+      ))}
+    </div>
+  )
+
+  // La segunda merma de la cadena: la primera fue despostar la media.
+  if (sub === 'rinde') return (
+    <div>
+      {subTabs}
+      <HistorialRinde
+        tipos={['pieza_kilo']}
+        titulo="📉 Rinde · pieza → CORTES"
+        queEntra="Pieza" queSale="Cortes" />
+    </div>
+  )
+
   return (
     <div>
+      {subTabs}
       {/* Stats top */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 20 }}>
         <div style={card}>
@@ -8088,13 +8136,6 @@ function PiezasTab() {
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{stats.kgVend.toFixed(1)} kg · ${Math.round(stats.valorVend).toLocaleString('es-AR')}</div>
         </div>
       </div>
-
-      {/* El rinde de convertir una pieza a cortes: la segunda merma de la
-          cadena (la primera fue despostar la media). */}
-      <HistorialRinde
-        tipos={['pieza_kilo']}
-        titulo="📉 Rinde · pieza → CORTES"
-        queEntra="Pieza" queSale="Cortes" />
 
       {/* Control contador vs fichas */}
       {!loading && contadores != null && (
