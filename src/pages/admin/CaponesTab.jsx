@@ -29,6 +29,25 @@ const n = v => Number(v) || 0
 // El peso con el que se despostó es el real si se pesó al entrar; si no, el
 // declarado. Mismo criterio que usa el desposte (caponSeleccionado en Deposito).
 const kgDeCapon = c => n(c.kg_real) || n(c.kg)
+// Lo que se pago por el animal entero. Si la entrada no trae importe se calcula
+// con el precio por kilo (algunas viejas quedaron con importe 0).
+const pagadoPorCapon = c => n(c.importe) || (kgDeCapon(c) * n(c.precio_kg))
+// -- EL COSTO REAL DEL KILO -------------------------------------------
+// No se paga por kilo de carne, se paga por kilo de ANIMAL: los kilos que no
+// se venden (hueso, cuero, lo que no se pesa) hay que pagarlos igual, asi que
+// su costo se reparte entre los que si se venden.
+//     costo real = lo que pagaste / kilos vendibles
+// `kg_neto` del desposte de capon YA es el vendible: excluye hueso, grasa,
+// tocino y cuero (ver esMermaDeCerdo en lib/mermas.js).
+// Es el numero CONSERVADOR: no descuenta lo que se recupera vendiendo el
+// tocino (Fabricio, 15/09/2026: el tocino se recupera a ~$2.000/kg y el cuero
+// y el hueso se tiran o se regalan).
+function costoRealCapon(c, desposte) {
+  const pagado = pagadoPorCapon(c)
+  const vendible = n(desposte?.kg_neto)
+  if (!(pagado > 0) || !(vendible > 0)) return null
+  return pagado / vendible
+}
 
 const ESTADO = {
   camara:     { label: 'EN CÁMARA',  color: 'var(--green)', bg: 'rgba(60,180,75,0.12)' },
@@ -105,6 +124,11 @@ export default function CaponesTab() {
   const kgEntradosR = ultimosDesp.reduce((s, c) => s + kgDeCapon(c), 0)
   const kgSalidosR = ultimosDesp.reduce((s, c) => s + n(despPorEntrada[c.id]?.kg_neto), 0)
   const rinde = kgEntradosR > 0 ? (kgSalidosR / kgEntradosR) * 100 : null
+  // Costo del kilo de esos mismos despostes: plata total / kilos vendibles
+  // totales. Ponderado, no promedio de costos.
+  const pagadoR = ultimosDesp.reduce((s, c) => s + pagadoPorCapon(c), 0)
+  const costoR = (kgSalidosR > 0 && pagadoR > 0) ? pagadoR / kgSalidosR : null
+  const precioR = (kgEntradosR > 0 && pagadoR > 0) ? pagadoR / kgEntradosR : null
 
   const filtrados = capones.filter(c => {
     if (filtro !== 'todos' && estadoDe(c) !== filtro) return false
@@ -158,7 +182,16 @@ export default function CaponesTab() {
           </div>
           <div style={{ ...mono, fontSize: 25, color: 'var(--gold)' }}>{rinde == null ? '—' : rinde.toFixed(1) + '%'}</div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
-            {rinde == null ? 'sin despostes' : `${fmtKg(kgSalidosR, { decimales: 1 })} de piezas · merma ${(100 - rinde).toFixed(1)}%`}
+            {rinde == null ? 'sin despostes' : `${fmtKg(kgSalidosR, { decimales: 1 })} vendibles · merma ${(100 - rinde).toFixed(1)}%`}
+          </div>
+        </div>
+
+        <div style={{ ...card, borderColor: costoR ? 'var(--amber)' : 'var(--border)' }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Te queda a (el kilo)</div>
+          <div style={{ ...mono, fontSize: 25, color: 'var(--amber)' }}>{costoR == null ? '—' : fmtPrecio(costoR)}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+            {costoR == null ? 'sin datos de compra'
+              : <>lo pagás {fmtPrecio(precioR)} · <strong style={{ color: 'var(--amber)' }}>+{((costoR / precioR - 1) * 100).toFixed(1)}%</strong></>}
           </div>
         </div>
       </div>
@@ -188,6 +221,12 @@ export default function CaponesTab() {
       {/* ── CADA CAPÓN Y QUÉ SE HIZO CON ÉL ── */}
       <div className="card">
         <div className="card-title">🐖 {filtrados.length} {filtrados.length === 1 ? 'capón' : 'capones'}</div>
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10, lineHeight: 1.6 }}>
+          <strong>Te queda a</strong> = lo que pagaste dividido los kilos vendibles. El hueso, el
+          cuero y lo que no se pesa se pagan igual, asi que su costo se reparte entre los kilos que
+          si vendes. Es el numero conservador: <strong>no</strong> descuenta lo que recuperas
+          vendiendo el tocino.
+        </div>
         {filtrados.length === 0 ? <div className="empty">Sin capones con este filtro</div> : (
           <>
             <div style={{ overflowX: 'auto' }}>
@@ -198,7 +237,8 @@ export default function CaponesTab() {
                     <th style={th}>Entró</th>
                     <th style={th}>Peso</th>
                     <th style={th}>Proveedor</th>
-                    <th style={th}>Costo</th>
+                    <th style={th}>Lo pagaste</th>
+                    <th style={th}>Te queda a</th>
                     <th style={th}>Estado</th>
                     <th style={th}>Qué se hizo</th>
                   </tr>
@@ -220,8 +260,20 @@ export default function CaponesTab() {
                         <td style={{ ...td, ...mono, whiteSpace: 'nowrap' }}>{fmtKg(kg, { decimales: 1 })}</td>
                         <td style={{ ...td, fontSize: 12 }}>{c.proveedor_nombre || '—'}</td>
                         <td style={{ ...td, ...mono, fontSize: 12, whiteSpace: 'nowrap' }}>
-                          {n(c.importe) > 0 ? fmtPrecio(c.importe) : '—'}
+                          {pagadoPorCapon(c) > 0 ? fmtPrecio(pagadoPorCapon(c)) : '—'}
                           {n(c.precio_kg) > 0 && <div style={{ color: 'var(--muted)', fontSize: 11 }}>{fmtPrecio(c.precio_kg)}/kg</div>}
+                        </td>
+                        <td style={{ ...td, ...mono, fontSize: 13, whiteSpace: 'nowrap', fontWeight: 700,
+                          color: costoRealCapon(c, d) ? 'var(--amber)' : 'var(--muted)' }}>
+                          {(() => {
+                            const cr = costoRealCapon(c, d)
+                            if (cr == null) return '—'
+                            const pk = n(c.precio_kg)
+                            return (<>
+                              {fmtPrecio(cr)}
+                              {pk > 0 && <div style={{ color: 'var(--muted)', fontSize: 11, fontWeight: 400 }}>+{((cr / pk - 1) * 100).toFixed(0)}%</div>}
+                            </>)
+                          })()}
                         </td>
                         <td style={td}>
                           <span style={{ background: info.bg, color: info.color, borderRadius: 4, padding: '2px 8px', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>

@@ -25,6 +25,7 @@ import MermasHistorial from './MermasHistorial'
 import { esMermaDeCerdo } from '../../lib/mermas'
 import PlanillasRinde from '../../components/PlanillasRinde'
 import CostoConMerma from '../../components/CostoConMerma'
+import HistorialRinde from '../../components/HistorialRinde'
 import Recetas from '../../components/Recetas'
 import { cargarCategoriasPrecios, labelsDeCategorias } from '../../lib/categoriasPrecios'
 import { estadoBloqueoCliente } from '../../lib/moraClientes'
@@ -913,6 +914,22 @@ setElaboraciones(elaboracionesData || [])
       // Stock por pieza: cada pieza suma a SU bucket propio (pieza_pierna, pieza_cortito…),
       // ya no al genérico bovino_pieza. Así cada pieza tiene su stock individual.
       for (const pieza of piezas) { await actualizarStock(pieza.tipo_stock || bucketDePiezaBovina(pieza.nombre), pieza.kg_editado) }
+      // ── COSTO REAL DE LA PIEZA (15/09/2026, pedido de Fabricio) ──────
+      // La plata de la media se reparte entre los kilos que REALMENTE
+      // salieron, no entre los que entraron. Los kilos que quedan en la mesa
+      // al despiezar (3,5% a 5,6% segun el historial) se pagaron igual, y
+      // antes no se le cargaban a nadie: la pieza heredaba el precio de la
+      // media pelado y ese costo se perdia.
+      //
+      //   costo de la pieza = (kg de la media x precio/kg) / kg que salieron
+      //
+      // Ej MR-525: 114 kg x $9.400 = $1.071.600 / 109,3 kg = $9.804,21/kg
+      // (antes quedaba en $9.400). Es el mismo criterio que ya usa la
+      // conversion pieza -> cortes, un escalon antes.
+      const precioMediaKg = Number(seleccionada.precio_kg) || 0
+      const costoPiezaKg = (kgTotalPiezas > 0 && precioMediaKg > 0)
+        ? parseFloat(((kgBase * precioMediaKg) / kgTotalPiezas).toFixed(2))
+        : precioMediaKg
       // Stock individual: una fila por pieza para trazabilidad completa
       const filasPiezas = piezas
         .filter(p => (p.kg_editado || 0) > 0)
@@ -922,7 +939,10 @@ setElaboraciones(elaboracionesData || [])
           tipo_pieza: p.nombre,
           tipo_stock: p.tipo_stock || 'bovino_pieza',
           kg: p.kg_editado,
-          precio_costo_kg: p.precio_costo_kg || seleccionada.precio_kg || null,
+          // El costo ya viene ajustado por la merma del despiece (arriba).
+          // `p.precio_costo_kg` no se usa mas aca: era el precio de la media
+          // sin ajustar y daba el costo de la pieza mas barato de lo real.
+          precio_costo_kg: costoPiezaKg || null,
           fecha_ingreso: fecha,
           proveedor_origen: seleccionada.proveedor_nombre || null,
           descripcion_origen: (seleccionada.descripcion || 'Media Res') + ' (' + (Number(seleccionada.kg_real) || Number(seleccionada.kg) || 0).toFixed(1) + ' kg)',
@@ -2873,6 +2893,20 @@ function MediasResesTab() {
           </div>
         </div>
       </div>
+
+      {/* ── RINDE: los dos caminos de una media res, POR SEPARADO ──
+          Pedido de Fabricio (15/09/2026). Son ciclos distintos y mezclarlos no
+          diria nada: despostar a piezas deja casi todo (merma ~4%, la pieza
+          sigue con hueso) y despostar para venta por kilo se lleva un cuarto
+          del animal. */}
+      <HistorialRinde
+        tipos={['kilo', 'bovino']}
+        titulo="📉 Rinde · media res → venta por KILO"
+        queEntra="Media" queSale="Cortes" />
+      <HistorialRinde
+        tipos={['piezas']}
+        titulo="📉 Rinde · media res → PIEZAS"
+        queEntra="Media" queSale="Piezas" />
 
       {msg && (
         <div className={`alert alert-${msg.tipo === 'error' ? 'error' : 'success'}`} style={{ marginBottom: 12 }}>{msg.txt}</div>
@@ -8054,6 +8088,13 @@ function PiezasTab() {
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{stats.kgVend.toFixed(1)} kg · ${Math.round(stats.valorVend).toLocaleString('es-AR')}</div>
         </div>
       </div>
+
+      {/* El rinde de convertir una pieza a cortes: la segunda merma de la
+          cadena (la primera fue despostar la media). */}
+      <HistorialRinde
+        tipos={['pieza_kilo']}
+        titulo="📉 Rinde · pieza → CORTES"
+        queEntra="Pieza" queSale="Cortes" />
 
       {/* Control contador vs fichas */}
       {!loading && contadores != null && (
