@@ -16,6 +16,8 @@ import { fmtKg } from '../../lib/formatos'
 import { fechaHoyARG } from '../../lib/fechas'
 import { FAMILIAS, cargarStockFamilia, cargarMovimientos, resumirPorBucket } from '../../lib/stockPiezas'
 import Paginador, { usePaginacion } from '../../components/Paginador'
+import { useAuth } from '../../context/AuthContext'
+import CaponesTab from './CaponesTab'
 
 const CLASES = {
   ingreso:     { label: 'Compra',      color: '#7dff7d', icono: '📥' },
@@ -35,6 +37,7 @@ function hace(dias) {
 }
 
 export default function StockPiezasTab() {
+  const { isSucursal } = useAuth()
   const [familia, setFamilia] = useState('cerdo')
   const [stock, setStock] = useState({})
   const [movs, setMovs] = useState([])
@@ -44,6 +47,9 @@ export default function StockPiezasTab() {
 
   useEffect(() => {
     let vivo = true
+    // Capones es una vista propia (fichas individuales, no kilos por bucket):
+    // no tiene stock de familia ni movimientos que cargar.
+    if (familia === 'capones') { setCargando(false); return }
     setCargando(true)
     setBucketSel('todos')
     ;(async () => {
@@ -58,7 +64,7 @@ export default function StockPiezasTab() {
   }, [familia, dias])
 
   const cfg = FAMILIAS[familia]
-  const resumen = resumirPorBucket(familia, movs)
+  const resumen = familia === 'capones' ? {} : resumirPorBucket(familia, movs)
   const movsFiltrados = bucketSel === 'todos' ? movs : movs.filter(m => m.bucket === bucketSel)
   const totalKg = Object.values(stock).reduce((s, k) => s + k, 0)
   // Antes se cortaba en los 300 más recientes y el resto no se podía ver:
@@ -69,20 +75,32 @@ export default function StockPiezasTab() {
   const th = { textAlign: 'left', padding: '8px 10px', fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, borderBottom: '1px solid var(--border)' }
   const td = { padding: '8px 10px', fontSize: 13, borderBottom: '1px solid var(--border)' }
 
+  // El selector de familia es el mismo para las dos vistas (la de kilos por
+  // bucket y la de capones), asi que se arma una sola vez.
+  const selectorFamilia = (
+    <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+      {[['cerdo', '🐷 Cerdo'], ['embutido', '🌭 Embutidos'],
+        // La sucursal no recibe capones enteros (le llegan las piezas ya
+        // despostadas), asi que la solapa le quedaria siempre vacia.
+        ...(isSucursal ? [] : [['capones', '🐖 Capones']])].map(([id, label]) => (
+        <button key={id} onClick={() => setFamilia(id)}
+          style={{ padding: '8px 18px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: "'DM Sans',sans-serif", fontWeight: 700,
+            border: `1px solid ${familia === id ? 'var(--gold)' : 'var(--border)'}`,
+            background: familia === id ? 'var(--gold)' : 'transparent',
+            color: familia === id ? '#000' : 'var(--muted)' }}>
+          {label}
+        </button>
+      ))}
+    </div>
+  )
+
+  // Capones tiene su propia pantalla: fichas individuales en vez de kilos por
+  // bucket. Va DESPUES de todos los hooks para no romper su orden.
+  if (familia === 'capones') return <div>{selectorFamilia}<CaponesTab /></div>
+
   return (
     <div>
-      {/* Qué familia se está mirando */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-        {[['cerdo', '🐷 Cerdo'], ['embutido', '🌭 Embutidos']].map(([id, label]) => (
-          <button key={id} onClick={() => setFamilia(id)}
-            style={{ padding: '8px 18px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: "'DM Sans',sans-serif", fontWeight: 700,
-              border: `1px solid ${familia === id ? 'var(--gold)' : 'var(--border)'}`,
-              background: familia === id ? 'var(--gold)' : 'transparent',
-              color: familia === id ? '#000' : 'var(--muted)' }}>
-            {label}
-          </button>
-        ))}
-      </div>
+      {selectorFamilia}
 
       {/* ── KILOS POR PIEZA ── */}
       <div className="card" style={{ marginBottom: 16 }}>
