@@ -2873,7 +2873,7 @@ function MediasResesTab() {
 
   const subTabs = (
     <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-      {[['medias', '🐄 Medias en stock'], ['rinde', '📉 Rinde']].map(([id, label]) => (
+      {[['medias', '🐄 Stock / Historial'], ['rinde', '📉 Rinde']].map(([id, label]) => (
         <button key={id} onClick={() => setSub(id)}
           style={{ padding: '7px 16px', borderRadius: 8, cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
             fontFamily: "'DM Sans',sans-serif",
@@ -8089,7 +8089,7 @@ function PiezasTab() {
 
   const subTabs = (
     <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-      {[['piezas', '🍖 Piezas en stock'], ['rinde', '📉 Rinde']].map(([id, label]) => (
+      {[['piezas', '🍖 Stock / Historial'], ['rinde', '📉 Rinde']].map(([id, label]) => (
         <button key={id} onClick={() => setSub(id)}
           style={{ padding: '7px 16px', borderRadius: 8, cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
             fontFamily: "'DM Sans',sans-serif",
