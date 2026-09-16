@@ -215,6 +215,18 @@ const filaNueva = c => (typeof c === 'string'
 // usuario Desposte tiene permiso de escritura sobre esa clave y solo sobre esa
 // (policy config_merma_desposte). En una clave nueva no podria guardar. Los
 // updates de esta config copian el objeto entero, asi que la lista sobrevive.
+// ⚠️ NUNCA escribir `merma_conversion` partiendo del `config` que tiene el
+// front: se carga al abrir la pantalla y queda viejo. Como el update manda el
+// objeto ENTERO, todo lo que haya cambiado en el medio se pisa en silencio.
+// Paso el 16/09/2026: guardar la lista de cortes revirtio la merma de Pierna
+// de 27,15% a 19,94% — la pantalla llevaba horas abierta.
+// Siempre releer de la base y mergear sobre ESO.
+async function configFresca(fallback) {
+  const { data } = await supabase.from('config_sistema')
+    .select('valor').eq('clave', 'merma_conversion').maybeSingle()
+  return JSON.parse(JSON.stringify(data?.valor || fallback || {}))
+}
+
 const CLAVE_CORTES = 'cortes_por_planilla'
 const cortesGuardadosDe = (config, tipo) => {
   const g = config?.[CLAVE_CORTES]?.[tipo]
@@ -359,7 +371,8 @@ export default function PlanillasRinde({ config, onConfigChange }) {
     if (lista.length === 0) { mostrar('La planilla no tiene ningun corte', 'error'); return }
     setGuardandoCortes(true)
     try {
-      const nuevo = JSON.parse(JSON.stringify(config || {}))
+      // Sobre la config FRESCA, no sobre la del front (ver configFresca).
+      const nuevo = await configFresca(config)
       nuevo[CLAVE_CORTES] = { ...(nuevo[CLAVE_CORTES] || {}), [tipo]: lista }
       const { data: ok, error } = await supabase.from('config_sistema')
         .update({ valor: nuevo }).eq('clave', 'merma_conversion').select('clave')
@@ -468,7 +481,10 @@ export default function PlanillasRinde({ config, onConfigChange }) {
       }
 
       // La ÚLTIMA planilla es la que manda: se pisa el % en Mermas por producto.
-      const nuevo = JSON.parse(JSON.stringify(config || {}))
+      // Sobre la config FRESCA: si se parte de la del front, guardar una
+      // planilla revierte cualquier otro % que se haya cambiado mientras esta
+      // pantalla estaba abierta (ver configFresca).
+      const nuevo = await configFresca(config)
       if (plan.destino === 'media_res') {
         nuevo.media_res = (nuevo.media_res || []).map(m => (m.id === destinoId ? { ...m, merma: pct } : m))
       } else {
