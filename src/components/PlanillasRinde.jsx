@@ -219,6 +219,12 @@ export default function PlanillasRinde({ config, onConfigChange }) {
   const [notas, setNotas] = useState('')
   const [nuevoCorte, setNuevoCorte] = useState('')
   const [historial, setHistorial] = useState([])
+  // Las ultimas planillas de CUALQUIER tipo. El historial de abajo solo
+  // muestra el tipo+destino elegido arriba y la pantalla abre en Media res:
+  // el 16/09/2026 Fabricio busco desde el usuario Desposte el rinde que le
+  // habian hecho a una pierna y no lo encontraba — el dato estaba, la pantalla
+  // no lo mostraba hasta cambiar dos selectores.
+  const [ultimas, setUltimas] = useState([])
   const [guardando, setGuardando] = useState(false)
   const [msg, setMsg] = useState(null)
   const [verHistorial, setVerHistorial] = useState(false)
@@ -227,6 +233,15 @@ export default function PlanillasRinde({ config, onConfigChange }) {
   const [detalleId, setDetalleId] = useState(null)
 
   const plan = PLANILLAS[tipo]
+
+  // Abrir una planilla del panel de arriba = pararse en su tipo y su destino.
+  function irA(pl) {
+    if (!PLANILLAS[pl.tipo]) return
+    setTipo(pl.tipo)
+    if (PLANILLAS[pl.tipo].destino && pl.destino_id && pl.destino_id !== 'capon') setDestinoId(pl.destino_id)
+    setVerHistorial(true)
+    setDetalleId(pl.id)
+  }
 
   // ── A qué fila de "Mermas por producto" puede escribir esta planilla ──
   const destinos = useMemo(() => {
@@ -249,6 +264,21 @@ export default function PlanillasRinde({ config, onConfigChange }) {
   }, [destinos])
 
   useEffect(() => { cargarHistorial() }, [tipo, destinoId])
+
+  // Se recarga cuando cambia el historial (o sea, tambien despues de guardar).
+  useEffect(() => {
+    let vivo = true
+    supabase.from('planillas_rinde')
+      .select('id, fecha, tipo, destino_id, destino_label, kg_bruto, kg_neto, merma_pct, creado_por')
+      .order('fecha', { ascending: false }).order('created_at', { ascending: false })
+      .limit(8)
+      .then(({ data, error }) => {
+        if (!vivo) return
+        if (error) { console.warn('No se pudieron cargar las ultimas planillas:', error.message); return }
+        setUltimas(data || [])
+      })
+    return () => { vivo = false }
+  }, [historial])
 
   async function cargarHistorial() {
     // El capón no tiene destino: su historial se lista sólo por tipo.
@@ -425,6 +455,51 @@ export default function PlanillasRinde({ config, onConfigChange }) {
           se venden.
         </div>
       </div>
+
+      {/* ── LO ULTIMO QUE SE CARGO, de cualquier tipo ──
+          El historial de mas abajo esta filtrado por el tipo y el destino
+          elegidos arriba, asi que una planilla de pierna no se ve si la
+          pantalla esta parada en media res. Este panel muestra lo ultimo sin
+          filtrar, y al tocarlo lleva a esa planilla. */}
+      {ultimas.length > 0 && (
+        <div style={{ marginBottom: 16, padding: '10px 12px', background: 'var(--surface2)',
+          border: '1px solid var(--border)', borderRadius: 8 }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
+            Últimas planillas cargadas
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {ultimas.map(pl => (
+              <button key={pl.id} onClick={() => irA(pl)}
+                title="Abrir esta planilla"
+                style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+                  background: 'none', border: 'none', borderBottom: '1px solid var(--border)',
+                  padding: '6px 2px', cursor: 'pointer', textAlign: 'left', width: '100%',
+                  fontFamily: "'DM Sans',sans-serif", color: 'var(--text)' }}>
+                <span style={{ fontSize: 11, color: 'var(--muted)', minWidth: 42 }}>
+                  {String(pl.fecha || '').slice(8, 10)}/{String(pl.fecha || '').slice(5, 7)}
+                </span>
+                <span style={{ fontSize: 12.5, fontWeight: 700, flex: 1, minWidth: 110 }}>
+                  {pl.destino_label || PLANILLAS[pl.tipo]?.label || pl.tipo}
+                </span>
+                <span style={{ fontSize: 11.5, color: 'var(--muted)', fontFamily: "'IBM Plex Mono',monospace" }}>
+                  {kg3(pl.kg_bruto)} → {kg3(pl.kg_neto)} kg
+                </span>
+                <span style={{ fontSize: 12.5, fontWeight: 800, fontFamily: "'IBM Plex Mono',monospace",
+                  color: Number(pl.merma_pct) > 35 ? '#ff8b8b' : 'var(--gold)', minWidth: 62, textAlign: 'right' }}>
+                  {Number(pl.merma_pct).toFixed(2).replace('.', ',')}%
+                </span>
+                <span style={{ fontSize: 10.5, color: 'var(--muted)', minWidth: 90 }}>
+                  {pl.creado_por || ''}
+                </span>
+              </button>
+            ))}
+          </div>
+          <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 8 }}>
+            El % es la MERMA. Tocá una para abrirla — el historial de abajo muestra sólo el producto
+            que tengas elegido arriba.
+          </div>
+        </div>
+      )}
 
       {msg && (
         <div style={{
