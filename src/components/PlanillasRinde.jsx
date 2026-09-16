@@ -204,6 +204,30 @@ const filaNueva = c => (typeof c === 'string'
   ? { nombre: c, kg: '', es_merma: false }
   : { nombre: c.n, kg: '', es_merma: !!c.m })
 
+// ── LA LISTA DE CORTES DE CADA PLANILLA (16/09/2026) ────────────────
+// Fabricio fue agregando los cortes de cada pieza y se le borraron. Antes los
+// cortes SOLO se recordaban de la ultima planilla GUARDADA: agregar "BOCADO"
+// al CORTITO y salir sin cargar kilos no dejaba nada.
+// Ahora la lista se guarda a proposito, por tipo de planilla, y manda sobre
+// todo lo demas.
+//
+// Vive DENTRO de `merma_conversion` y no en una clave nueva a proposito: el
+// usuario Desposte tiene permiso de escritura sobre esa clave y solo sobre esa
+// (policy config_merma_desposte). En una clave nueva no podria guardar. Los
+// updates de esta config copian el objeto entero, asi que la lista sobrevive.
+const CLAVE_CORTES = 'cortes_por_planilla'
+const cortesGuardadosDe = (config, tipo) => {
+  const g = config?.[CLAVE_CORTES]?.[tipo]
+  return Array.isArray(g) && g.length ? g : null
+}
+// Las filas con las que arranca una planilla: la lista guardada si hay, y si
+// no los cortes que trae el sistema.
+const filasDePlanilla = (tipo, config) => {
+  const g = cortesGuardadosDe(config, tipo)
+  if (g) return g.map(c => ({ nombre: c.nombre, kg: '', es_merma: !!c.es_merma }))
+  return (PLANILLAS[tipo]?.cortes || []).map(filaNueva)
+}
+
 const inp = {
   background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)',
   borderRadius: 6, padding: '6px 9px', fontSize: 13, width: '100%', boxSizing: 'border-box',
@@ -216,6 +240,7 @@ export default function PlanillasRinde({ config, onConfigChange }) {
   const [fecha, setFecha] = useState(fechaHoyARG())
   const [bruto, setBruto] = useState('')
   const [filas, setFilas] = useState(() => PLANILLAS.media_res.cortes.map(filaNueva))
+  const [guardandoCortes, setGuardandoCortes] = useState(false)
   const [notas, setNotas] = useState('')
   const [nuevoCorte, setNuevoCorte] = useState('')
   const [historial, setHistorial] = useState([])
@@ -263,6 +288,14 @@ export default function PlanillasRinde({ config, onConfigChange }) {
     if (!destinos.some(d => d.id === destinoId)) setDestinoId(destinos[0].id)
   }, [destinos])
 
+  // La config llega despues del primer render (en el portal Desposte se pide
+  // aparte), asi que cuando llega hay que aplicar la lista guardada. Nunca
+  // arriba de una planilla a medio cargar: solo si no se tipeo ningun kilo.
+  useEffect(() => {
+    if (!cortesGuardadosDe(config, tipo)) return
+    setFilas(fs => (fs.every(f => !String(f.kg).trim()) ? filasDePlanilla(tipo, config) : fs))
+  }, [config, tipo])
+
   useEffect(() => { cargarHistorial() }, [tipo, destinoId])
 
   // Se recarga cuando cambia el historial (o sea, tambien despues de guardar).
@@ -297,7 +330,9 @@ export default function PlanillasRinde({ config, onConfigChange }) {
     // Sólo se pisa el formulario si todavía no se tipeó ningún kilo — jamás
     // arriba de una planilla a medio cargar. Y con setFilas funcional, porque
     // este fetch es async y `filas` acá estaría vieja.
-    const ultima = (data || [])[0]
+    // Si hay una lista guardada a proposito para este tipo, manda ella: no se
+    // pisa con los cortes de la ultima planilla cargada.
+    const ultima = cortesGuardadosDe(config, tipo) ? null : (data || [])[0]
     if (Array.isArray(ultima?.cortes) && ultima.cortes.length) {
       setFilas(fs => fs.every(f => !String(f.kg).trim())
         ? ultima.cortes.map(c => ({ nombre: c.nombre, kg: '', es_merma: !!c.es_merma }))
@@ -310,8 +345,39 @@ export default function PlanillasRinde({ config, onConfigChange }) {
   // Cambiar de planilla arranca de cero con los renglones de ESA planilla.
   function cambiarTipo(t) {
     setTipo(t)
-    setFilas(PLANILLAS[t].cortes.map(filaNueva))
+    setFilas(filasDePlanilla(t, config))
     setBruto(''); setNotas(''); setNuevoCorte('')
+  }
+
+  // Guardar la lista de cortes de ESTA planilla para las proximas. Es un boton
+  // aparte y no automatico a proposito: sacar un corte que hoy no salio no
+  // tiene que borrarlo de la plantilla para siempre.
+  async function guardarCortes() {
+    const lista = filas
+      .filter(f => f.nombre.trim())
+      .map(f => ({ nombre: f.nombre.trim(), es_merma: !!f.es_merma }))
+    if (lista.length === 0) { mostrar('La planilla no tiene ningun corte', 'error'); return }
+    setGuardandoCortes(true)
+    try {
+      const nuevo = JSON.parse(JSON.stringify(config || {}))
+      nuevo[CLAVE_CORTES] = { ...(nuevo[CLAVE_CORTES] || {}), [tipo]: lista }
+      const { data: ok, error } = await supabase.from('config_sistema')
+        .update({ valor: nuevo }).eq('clave', 'merma_conversion').select('clave')
+      // Con la RLS bloqueando, `.update()` devuelve error null y CERO filas:
+      // hay que mirar las filas, no el error, o se festeja un guardado que no
+      // paso (misma trampa que abajo, en guardar()).
+      if (error) throw error
+      if (!ok || ok.length === 0) {
+        mostrar('No se pudo guardar la lista: no tenes permiso para cambiar la configuracion.', 'error')
+      } else {
+        const m = lista.filter(c => c.es_merma).length
+        mostrar(`✅ Lista guardada: ${lista.length} cortes${m ? ` (${m} marcados como merma)` : ''}. Van a salir asi en las proximas planillas de ${plan.label.replace(/^\S+\s/, '')}.`)
+        onConfigChange?.(nuevo)
+      }
+    } catch (err) {
+      mostrar('No se pudo guardar la lista: ' + err.message, 'error')
+    }
+    setGuardandoCortes(false)
   }
 
   function setFila(i, cambios) { setFilas(fs => fs.map((f, j) => (j === i ? { ...f, ...cambios } : f))) }
@@ -376,7 +442,7 @@ export default function PlanillasRinde({ config, onConfigChange }) {
       if (!plan.destino) {
         mostrar(`✅ Rinde guardado en el historial: ${pct}% de merma. (Esta planilla no ajusta ningún %.)`)
         setBruto(''); setNotas('')
-        setFilas(PLANILLAS[tipo].cortes.map(filaNueva))
+        setFilas(filasDePlanilla(tipo, config))
         await cargarHistorial()
         return
       }
@@ -396,7 +462,7 @@ export default function PlanillasRinde({ config, onConfigChange }) {
           media_res: (config.media_res || []).map(m => (m.id === destinoId ? { ...m, merma: pct } : m)),
         })
         setBruto(''); setNotas('')
-        setFilas(PLANILLAS[tipo].cortes.map(filaNueva))
+        setFilas(filasDePlanilla(tipo, config))
         await cargarHistorial()
         return
       }
@@ -420,7 +486,7 @@ export default function PlanillasRinde({ config, onConfigChange }) {
         onConfigChange?.(nuevo)
       }
       setBruto(''); setNotas('')
-      setFilas(PLANILLAS[tipo].cortes.map(filaNueva))
+      setFilas(filasDePlanilla(tipo, config))
       await cargarHistorial()
     } catch (err) {
       mostrar('❌ No se pudo guardar: ' + (err?.message || err), 'error')
@@ -606,6 +672,20 @@ export default function PlanillasRinde({ config, onConfigChange }) {
           style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text2)', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
           + Agregar corte
         </button>
+        {/* Los cortes agregados se pierden si no se fijan: antes solo quedaban
+            al guardar una planilla entera, con kilos. */}
+        <button onClick={guardarCortes} disabled={guardandoCortes}
+          title="Deja esta lista de cortes fija para las proximas planillas de este producto"
+          style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid var(--gold)',
+            background: 'rgba(201,168,76,0.10)', color: 'var(--gold)',
+            cursor: guardandoCortes ? 'default' : 'pointer', fontSize: 12, fontWeight: 700 }}>
+          {guardandoCortes ? '⏳ Guardando…' : '📌 Dejar fija esta lista'}
+        </button>
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6, lineHeight: 1.5 }}>
+        Los cortes que agregues valen sólo para esta planilla hasta que toques{' '}
+        <strong style={{ color: 'var(--gold)' }}>Dejar fija esta lista</strong>: ahí quedan
+        guardados y aparecen solos cada vez que abras {plan.label.replace(/^\S+\s/, '')}.
       </div>
 
       {/* El resultado */}
