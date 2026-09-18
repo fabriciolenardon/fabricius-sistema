@@ -6490,31 +6490,85 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
     // 'disponible' y el stock se devuelve o se descuenta según corresponda.
     const { quitados, agregados } = diffItemsRemito(editando.items || [], itemsLimpios)
 
-    if (quitados.length > 0) {
-      // Medias res → vuelven a 'disponible'. Se libera despostada Y reservada:
-      // la lista de medias para despachar/despostar filtra por las dos.
-      const mediasQuitadas = quitados.map(it => it.media_res_id).filter(Boolean)
-      if (mediasQuitadas.length > 0) {
-        await supabase.from('entradas_deposito').update({ despostada: false, reservada: false }).in('id', mediasQuitadas)
-        await supabase.from('medias_stock').update({
-          estado: 'disponible',
-          cliente_nombre: null, cliente_id: null, fecha_salida: null, destino: null,
-        }).in('entrada_id', mediasQuitadas)
-      }
-      // Piezas enteras → vuelven a 'disponible' limpiando los datos de venta
-      for (const it of quitados.filter(i => i.tipo === 'pieza_entera' && i.pieza_id)) {
-        const { error } = await supabase.from('piezas_stock').update({
-          estado: 'disponible',
-          destino: null, cliente_id: null, cliente_nombre: null,
-          precio_venta_kg: null, total_venta: null, fecha_salida: null, notas_salida: null,
-        }).eq('id', it.pieza_id)
-        if (error) console.warn('No se pudo revertir pieza vendida al editar:', error.message)
-      }
-      // Cajas individuales → revertirVentaCaja ya reajusta stock_actual
-      for (const it of quitados.filter(i => i.caja_id)) {
-        const { error } = await revertirVentaCaja(it.caja_id)
-        if (error) console.warn('No se pudo revertir caja vendida al editar:', error)
-      }
+    // ── LAS UNIDADES FÍSICAS SE DECIDEN POR SU ID, NO POR EL DIFF ──────────
+    // El diff compara descripción+kg+PRECIO: si solo se cambia el precio de una
+    // media res, la ve como "se sacó una y se agregó otra". Antes eso devolvía
+    // la media a 'disponible' (por la "sacada") y no la volvía a marcar (la
+    // "agregada" no se procesaba), mientras el stock quedaba igual (+kg −kg).
+    // Bug real del 18/09/2026: remitos 2420 (Alvear) y 2421 (Monte Cristo)
+    // editados para pasar 3 medias de $10.500 a $10.400 → MR-551/552/553
+    // quedaron 'disponible' y la cámara mostró 356,30 kg de más.
+    // El diff sigue sirviendo para la cuenta de kilos (más abajo); qué unidad
+    // física entró o salió se decide acá, comparando ids.
+    const idsDe = (lista, campo, filtro = () => true) =>
+      new Set((lista || []).filter(filtro).map(it => it[campo]).filter(Boolean))
+    const soloEn = (a, b) => [...a].filter(id => !b.has(id))
+    const esPiezaEntera = it => it.tipo === 'pieza_entera'
+    const mAntes = idsDe(editando.items, 'media_res_id'), mDespues = idsDe(itemsLimpios, 'media_res_id')
+    const pAntes = idsDe(editando.items, 'pieza_id', esPiezaEntera), pDespues = idsDe(itemsLimpios, 'pieza_id', esPiezaEntera)
+    const cAntes = idsDe(editando.items, 'caja_id'), cDespues = idsDe(itemsLimpios, 'caja_id')
+    const mediasQuitadas = soloEn(mAntes, mDespues)
+    const mediasAgregadas = soloEn(mDespues, mAntes)
+    const piezasQuitadas = soloEn(pAntes, pDespues)
+    const piezasAgregadas = soloEn(pDespues, pAntes)
+    const cajasQuitadas = soloEn(cAntes, cDespues)
+
+    // Medias res que se SACARON → vuelven a 'disponible'. Se libera despostada
+    // Y reservada: la lista de medias para despachar/despostar filtra por las dos.
+    if (mediasQuitadas.length > 0) {
+      await supabase.from('entradas_deposito').update({ despostada: false, reservada: false }).in('id', mediasQuitadas)
+      await supabase.from('medias_stock').update({
+        estado: 'disponible',
+        cliente_nombre: null, cliente_id: null, fecha_salida: null, destino: null,
+      }).in('entrada_id', mediasQuitadas)
+    }
+    // Medias res que se AGREGARON en la edición → 'vendida', igual que al crear
+    // el remito. Antes no se hacía: el stock se descontaba y la ficha quedaba
+    // disponible. El remito no guarda el destino, así que ese queda vacío.
+    if (mediasAgregadas.length > 0) {
+      await supabase.from('entradas_deposito').update({ despostada: true }).in('id', mediasAgregadas)
+      await supabase.from('medias_stock').update({
+        estado: 'vendida',
+        cliente_nombre: editando.cliente_nombre || null,
+        cliente_id: editando.cliente_id || null,
+        fecha_salida: fechaEdit,
+      }).in('entrada_id', mediasAgregadas)
+    }
+
+    // Piezas enteras que se SACARON → vuelven a 'disponible'
+    for (const id of piezasQuitadas) {
+      const { error } = await supabase.from('piezas_stock').update({
+        estado: 'disponible',
+        destino: null, cliente_id: null, cliente_nombre: null,
+        precio_venta_kg: null, total_venta: null, fecha_salida: null, notas_salida: null,
+      }).eq('id', id)
+      if (error) console.warn('No se pudo revertir pieza vendida al editar:', error.message)
+    }
+    // Piezas enteras que se AGREGARON o que siguen en el remito → 'vendida' con
+    // el precio de ESTA versión (si solo cambió el precio, se actualiza el precio
+    // de venta de la ficha y nada más).
+    for (const it of itemsLimpios.filter(i => esPiezaEntera(i) && i.pieza_id)) {
+      const nueva = piezasAgregadas.includes(it.pieza_id)
+      const { error } = await supabase.from('piezas_stock').update({
+        ...(nueva ? {
+          estado: 'vendida',
+          cliente_id: editando.cliente_id || null,
+          cliente_nombre: editando.cliente_nombre || null,
+          fecha_salida: fechaEdit,
+          notas_salida: 'Vendida entera en remito N° ' + String(editando.numero || editando.id || '').padStart(5, '0'),
+        } : {}),
+        precio_venta_kg: it.precio,
+        total_venta: it.importe,
+      }).eq('id', it.pieza_id)
+      if (error) console.warn('No se pudo actualizar pieza vendida al editar:', error.message)
+    }
+
+    // Cajas que se SACARON → revertirVentaCaja ya reajusta stock_actual.
+    // Por id: una caja a la que solo se le cambió el precio ya no se revierte
+    // (antes quedaba disponible Y con el stock devuelto).
+    for (const id of cajasQuitadas) {
+      const { error } = await revertirVentaCaja(id)
+      if (error) console.warn('No se pudo revertir caja vendida al editar:', error)
     }
 
     // Stock por bucket: + lo que se quitó, − lo que se agregó. Los skips son
