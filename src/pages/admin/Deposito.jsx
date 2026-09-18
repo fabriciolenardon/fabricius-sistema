@@ -4061,7 +4061,22 @@ async function ejecutarAnulacion(entrada) {
     })
   }
 
+  // ── CANDADO CONTRA DOBLE CLIC ──────────────────────────────────────
+  // El 18/09/2026 el remito 2421 se guardo DOS veces seguidas (mismas
+  // escrituras repetidas a los 4 segundos). El candado se cierra ANTES de
+  // cualquier await: si se chequeara un estado de React, el segundo clic
+  // llega antes del re-render y pasa igual (paso en la creacion de remitos,
+  // ver project_remitos_doble_emision). El estado es solo para apagar el boton.
+  const edicionRef = useRef(false)
+  const [guardandoEdicion, setGuardandoEdicion] = useState(false)
   async function guardarEdicion(entrada) {
+    if (edicionRef.current) return
+    edicionRef.current = true
+    setGuardandoEdicion(true)
+    try { await guardarEdicionInterno(entrada) }
+    finally { edicionRef.current = false; setGuardandoEdicion(false) }
+  }
+  async function guardarEdicionInterno(entrada) {
     if (esFechaFutura(formEdit.fecha)) { showAlert({ type: 'error', msg: `⛔ La fecha no puede ser futura (hoy es ${fechaHoyARG()})` }); return }
     const kgAnterior = entrada.kg_real || entrada.kg || 0
     const kgNuevo = parseNumero(formEdit.kg)
@@ -4673,7 +4688,7 @@ async function ejecutarAnulacion(entrada) {
                   </td>
                   <td>
                     <div style={{ display: 'flex', gap: 4 }}>
-                      <button onClick={() => guardarEdicion(e)} style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>💾</button>
+                      <button onClick={() => guardarEdicion(e)} disabled={guardandoEdicion} style={{ background: 'var(--gold)', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: guardandoEdicion ? 'default' : 'pointer', fontSize: 12, fontWeight: 700, opacity: guardandoEdicion ? 0.5 : 1 }}>{guardandoEdicion ? '⏳' : '💾'}</button>
                       <button onClick={() => setEditando(null)} style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 12 }}>✕</button>
                     </div>
                   </td>
@@ -6464,7 +6479,22 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
     setNuevoKg(''); setNuevoPrecio(''); setNuevoProductoId(''); setNuevaCategoria('')
   }
 
+  // ── CANDADO CONTRA DOBLE CLIC ──────────────────────────────────────
+  // El 18/09/2026 el remito 2421 se guardo DOS veces seguidas (mismas
+  // escrituras repetidas a los 4 segundos). El candado se cierra ANTES de
+  // cualquier await: si se chequeara un estado de React, el segundo clic
+  // llega antes del re-render y pasa igual (paso en la creacion de remitos,
+  // ver project_remitos_doble_emision). El estado es solo para apagar el boton.
+  const edicionRef = useRef(false)
+  const [guardandoEdicion, setGuardandoEdicion] = useState(false)
   async function guardarEdicion() {
+    if (edicionRef.current) return
+    edicionRef.current = true
+    setGuardandoEdicion(true)
+    try { await guardarEdicionInterno() }
+    finally { edicionRef.current = false; setGuardandoEdicion(false) }
+  }
+  async function guardarEdicionInterno() {
     if (itemsEdit.length === 0) { showAlert('Debe tener al menos un producto', 'error'); return }
     if (!fechaEdit) { showAlert('La fecha de emisión no puede estar vacía', 'error'); return }
     if (esFechaFutura(fechaEdit)) { showAlert(`⛔ La fecha no puede ser futura (hoy es ${fechaHoyARG()})`, 'error'); return }
@@ -6787,7 +6817,7 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
           </div>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 12 }}>
             <button className="btn btn-ghost" onClick={() => setEditando(null)}>Cancelar</button>
-            <button className="btn btn-gold" onClick={guardarEdicion}>💾 Guardar cambios</button>
+            <button className="btn btn-gold" onClick={guardarEdicion} disabled={guardandoEdicion}>{guardandoEdicion ? '⏳ Guardando…' : '💾 Guardar cambios'}</button>
           </div>
         </div>
       </div>
