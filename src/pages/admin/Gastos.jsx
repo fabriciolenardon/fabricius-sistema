@@ -44,7 +44,9 @@ const TIPOS = [
   { id: 'variable', label: '💸 Variable', color: 'var(--red-light)' },
   { id: 'fijo', label: '📌 Fijo', color: 'var(--blue)' },
   { id: 'socio', label: '👤 Socio', color: 'var(--gold)' },
-  { id: 'ingreso', label: '💰 Ingreso', color: 'var(--green)' },
+  // El tipo 'ingreso' (plata extra) se sacó el 19/09/2026: no se usó nunca
+  // (cero registros) y Fabricio pidió eliminarlo. Los filtros `tipo !==
+  // 'ingreso'` de otras pantallas quedan: no molestan y cubren datos viejos.
 ]
 
 // Alícuotas de IVA disponibles
@@ -423,9 +425,7 @@ export default function Gastos() {
   const totVar = gastosQueSuman.filter(g => g.tipo === 'variable').reduce((s, g) => s + (g.monto || 0), 0)
   const totFijo = gastosQueSuman.filter(g => g.tipo === 'fijo').reduce((s, g) => s + (g.monto || 0), 0)
   const totSocio = gastosQueSuman.filter(g => g.tipo === 'socio').reduce((s, g) => s + (g.monto || 0), 0)
-  const totIngreso = gastosQueSuman.filter(g => g.tipo === 'ingreso').reduce((s, g) => s + (g.monto || 0), 0)
   const totalEgresos = totVar + totFijo + totSocio
-  const balance = totIngreso - totalEgresos
 
   // Totales del MES en curso (del día 01 hasta hoy), sin importar el filtro de
   // período de la lista. Socio separado por Fabri / Ariel. Panel bajo el formulario.
@@ -486,7 +486,7 @@ export default function Gastos() {
   return (
     <div>
       <div className="page-title">GASTOS</div>
-      <div className="page-sub">Variables, fijos, socios e ingresos extra</div>
+      <div className="page-sub">Variables, fijos y socios</div>
 
       {alert && (
         <div style={{ background: alert.type === 'error' ? '#3a1a1a' : '#1a2a1a', border: `1px solid ${alert.type === 'error' ? '#5a2a2a' : '#2d5a2d'}`, borderRadius: 8, padding: '10px 16px', marginBottom: 16, color: alert.type === 'error' ? '#ff6b6b' : '#7dff7d', fontWeight: 600 }}>
@@ -568,7 +568,7 @@ export default function Gastos() {
           { label: 'Variables', val: totVar, color: 'var(--red-light)', icon: '💸' },
           { label: 'Fijos', val: totFijo, color: 'var(--blue)', icon: '📌' },
           { label: 'Socios', val: totSocio, color: 'var(--gold)', icon: '👤' },
-          { label: 'Ingresos extra', val: totIngreso, color: 'var(--green)', icon: '💰' },
+          { label: 'Total egresos', val: totalEgresos, color: 'var(--red-light)', icon: '🧾' },
         ].map(s => (
           <div key={s.label} className="stat">
             <div style={{ fontSize: 18, marginBottom: 4 }}>{s.icon}</div>
@@ -576,20 +576,6 @@ export default function Gastos() {
             <div className="stat-value" style={{ color: s.color }}>{fmt(s.val)}</div>
           </div>
         ))}
-      </div>
-
-      {/* BALANCE */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
-        <div className="stat" style={{ flex: 1 }}>
-          <div className="stat-label">Total egresos del período</div>
-          <div className="stat-value" style={{ color: 'var(--red-light)' }}>{fmt(totalEgresos)}</div>
-        </div>
-        <div className="stat" style={{ flex: 1, borderColor: balance >= 0 ? 'var(--green)' : 'var(--red-light)' }}>
-          <div className="stat-label">Balance (ingresos − egresos)</div>
-          <div className="stat-value" style={{ color: balance >= 0 ? 'var(--green)' : 'var(--red-light)' }}>
-            {balance >= 0 ? '+' : ''}{fmt(balance)}
-          </div>
-        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: esMovil ? '1fr' : '1fr 1.5fr', gap: 16 }}>
