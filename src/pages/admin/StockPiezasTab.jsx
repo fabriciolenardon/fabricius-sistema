@@ -18,6 +18,7 @@ import { FAMILIAS, cargarStockFamilia, cargarMovimientos, resumirPorBucket } fro
 import Paginador, { usePaginacion } from '../../components/Paginador'
 import { useAuth } from '../../context/AuthContext'
 import CaponesTab from './CaponesTab'
+import { Pestanas } from '../../components/NavModulo'
 
 const CLASES = {
   ingreso:     { label: 'Compra',      color: '#7dff7d', icono: '📥' },
@@ -78,20 +79,11 @@ export default function StockPiezasTab() {
   // El selector de familia es el mismo para las dos vistas (la de kilos por
   // bucket y la de capones), asi que se arma una sola vez.
   const selectorFamilia = (
-    <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-      {[['cerdo', '🐷 Piezas'], ['embutido', '🌭 Embutidos'],
+    <Pestanas value={familia} onChange={setFamilia}
+      items={[{ id: 'cerdo', icono: '🐷', label: 'Piezas' }, { id: 'embutido', icono: '🌭', label: 'Embutidos' },
         // La sucursal no recibe capones enteros (le llegan las piezas ya
         // despostadas), asi que la solapa le quedaria siempre vacia.
-        ...(isSucursal ? [] : [['capones', '🐖 Capones']])].map(([id, label]) => (
-        <button key={id} onClick={() => setFamilia(id)}
-          style={{ padding: '8px 18px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: "'DM Sans',sans-serif", fontWeight: 700,
-            border: `1px solid ${familia === id ? 'var(--gold)' : 'var(--border)'}`,
-            background: familia === id ? 'var(--gold)' : 'transparent',
-            color: familia === id ? '#000' : 'var(--muted)' }}>
-          {label}
-        </button>
-      ))}
-    </div>
+        ...(isSucursal ? [] : [{ id: 'capones', icono: '🐖', label: 'Capones' }])]} />
   )
 
   // Capones tiene su propia pantalla: fichas individuales en vez de kilos por

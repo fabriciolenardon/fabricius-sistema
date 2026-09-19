@@ -27,6 +27,7 @@ import PlanillasRinde from '../../components/PlanillasRinde'
 import CostoConMerma from '../../components/CostoConMerma'
 import HistorialRinde from '../../components/HistorialRinde'
 import Recetas from '../../components/Recetas'
+import { ModuloConNav, Pestanas, Pastillas, useMiga } from '../../components/NavModulo'
 import { cargarCategoriasPrecios, labelsDeCategorias } from '../../lib/categoriasPrecios'
 import { estadoBloqueoCliente } from '../../lib/moraClientes'
 import { logAuditoria } from '../../lib/auditoria'
@@ -484,7 +485,12 @@ export function Deposito() {
   // su peso propio, igual que en Río Primero.
   const { isCEO, isSucursal, profile, user } = useAuth()
   const puedeAjustar = puedeAjustarStock(profile, user)
-  const [tab, setTab] = useState('entradas')
+  const [tab, setTabRaw] = useState('entradas')
+  // Destino dentro de la sección (lo usan los atajos del buscador para abrir
+  // directo, por ejemplo, Desposte › Mermas › Planillas). `vuelta` fuerza a
+  // remontar la sección: tocar la que ya está abierta la lleva a su inicio.
+  const [inicio, setInicio] = useState({})
+  const [vuelta, setVuelta] = useState(0)
   const [alert, setAlert] = useState(null)
   const [remitoActual, setRemitoActual] = useState(null)
   const [proveedores, setProveedores] = useState([])
@@ -496,65 +502,86 @@ export function Deposito() {
 
   function showAlert(msg) { setAlert(msg); setTimeout(() => setAlert(null), 4000) }
 
+  function setTab(id, destino = {}) {
+    setTabRaw(id)
+    setInicio(destino)
+    setVuelta(v => v + 1)
+  }
+
+  // ── LA BARRA LATERAL, AGRUPADA (19/09/2026) ──
+  // Antes era una fila de 12 botones iguales y cada sub-nivel sumaba otra
+  // fila abajo ("la escalera"). Mismas secciones y mismas condiciones por
+  // boca que antes; solo cambia cómo se muestran.
+  const grupos = [
+    // Primero: Ingresos es lo que más se usa, entra mercadería todos los días
+    // (pedido de Fabricio, 19/09/2026).
+    { titulo: 'Movimientos', items: [
+      { id: 'entradas', icono: '📥', label: 'Ingresos' },
+      { id: 'remitos', icono: '🧾', label: 'Remitos' },
+      ...(isSucursal ? [] : [{ id: 'flujo', icono: '🔁', label: 'Flujo depósito' }]),
+    ] },
+    { titulo: 'Stock', items: [
+      { id: 'medias', icono: '🐄', label: 'Media reses' },
+      { id: 'piezas', icono: '🥩', label: 'Piezas' },
+      // Los kilos de cada pieza de cerdo con su historial. A la central le
+      // sirve igual, pero para una sucursal es la única forma de saber
+      // cuánto le queda: no recibe capones para despostar, recibe las
+      // piezas ya hechas.
+      { id: 'cerdo', icono: '🐷', label: 'Cerdo y embutidos' },
+      { id: 'cajas', icono: '📦', label: 'Cajas bovinas' },
+      { id: 'pollo_cajones', icono: '🍗', label: 'Pollo cajones' },
+      // Lechón, cabrito y cordero: se compran y se venden ENTEROS y cada
+      // animal pesa distinto, así que van uno por uno con su código
+      // (LE-001) y no como un bucket de kilos (mig 137).
+      { id: 'animalitos', icono: '🐑', label: 'Animalitos' },
+    ] },
+    { titulo: 'Producción', items: [
+      { id: 'desposte', icono: '🔪', label: 'Desposte' },
+      // Para una sucursal la elaboración sale de adentro del Desposte y
+      // sube acá: casi no desposta (recibe las piezas ya hechas), así que
+      // elaborar es una tarea propia y no un paso del desposte. En la
+      // central queda donde estaba, que es su flujo real.
+      ...(isSucursal ? [{ id: 'elaborar', icono: '🍔', label: MILANESAS_ELABORACION_ACTIVA ? 'Hamburguesas y milanesas' : 'Hamburguesas' }] : []),
+      // Material de consulta, no un paso del trabajo diario. Las ven las
+      // dos bocas; las edita sólo la central (la mig 104 lo aplica en la base).
+      { id: 'recetas', icono: '📖', label: 'Recetas' },
+    ] },
+    ...(puedeAjustar ? [{ titulo: 'Control', items: [
+      { id: 'ajuste', icono: '🔧', label: 'Ajuste stock' },
+    ] }] : []),
+  ]
+
+  // Atajos del buscador a lo que está más adentro
+  const atajos = [
+    ...SUBTABS_DESPOSTE(isSucursal).map(t => ({ icono: t.icono, label: t.label, ruta: 'Desposte', destino: { tab: 'desposte', sub: t.id } })),
+    ...SUBTABS_MERMAS(isSucursal).map(t => ({ icono: t.icono, label: t.label, ruta: 'Desposte › Mermas', destino: { tab: 'desposte', sub: 'mermas', sub2: t.id } })),
+    { icono: '📉', label: 'Rinde de media res', ruta: 'Media reses', destino: { tab: 'medias', sub: 'rinde' } },
+    { icono: '📉', label: 'Rinde de piezas', ruta: 'Piezas', destino: { tab: 'piezas', sub: 'rinde' } },
+  ]
+
+  const k = tab + '-' + vuelta
+
   return (
-    <div>
-      <div className="page-title">DEPÓSITO</div>
-      <div className="page-sub">Stock, entradas, desposte y piezas</div>
+    <ModuloConNav titulo="DEPÓSITO" subtitulo="Stock, entradas, desposte y piezas"
+      grupos={grupos} activo={tab} onCambiar={id => setTab(id)}
+      atajos={atajos} onAtajo={d => setTab(d.tab, d)}>
       {alert && <div className={`alert alert-${alert?.type || 'success'}`}>{alert?.msg || alert}</div>}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap' }}>
-        {[
-          { id: 'entradas', label: '📥 Ingresos' },
-          { id: 'desposte', label: '🔪 Desposte' },
-          // Al lado del Desposte porque es su insumo: qué medias hay en la
-          // cámara ahora y qué se hizo con cada una de las que pasaron.
-          { id: 'medias', label: '🐄 Media Reses' },
-          // Para una sucursal la elaboración sale de adentro del Desposte y
-          // sube acá: casi no desposta (recibe las piezas ya hechas), así que
-          // elaborar es una tarea propia y no un paso del desposte. En la
-          // central queda donde estaba, que es su flujo real.
-          ...(isSucursal ? [{ id: 'elaborar', label: MILANESAS_ELABORACION_ACTIVA ? '🍔 Elab. Hamburguesas y Milanesas' : '🍔 Elab. Hamburguesas' }] : []),
-          { id: 'piezas', label: '🥩 Piezas' },
-          // Los kilos de cada pieza de cerdo con su historial. A la central le
-          // sirve igual, pero para una sucursal es la única forma de saber
-          // cuánto le queda: no recibe capones para despostar, recibe las
-          // piezas ya hechas.
-          { id: 'cerdo', label: '🐷 Cerdo y Embutidos' },
-          { id: 'cajas', label: '📦 Cajas Bovinas' },
-          { id: 'pollo_cajones', label: '🍗 Pollo Cajones' },
-          // Lechón, cabrito y cordero: se compran y se venden ENTEROS y cada
-          // animal pesa distinto, así que van uno por uno con su código
-          // (LE-001) y no como un bucket de kilos (mig 137).
-          { id: 'animalitos', label: '🐑 Animalitos' },
-          ...(isSucursal ? [] : [{ id: 'flujo', label: '📥 Flujo Depósito' }]),
-          { id: 'remitos', label: '🧾 Remitos' },
-          ...(puedeAjustar ? [{ id: 'ajuste', label: '🔧 Ajuste Stock' }] : []),
-          // Última de la fila: es material de consulta, no un paso del
-          // trabajo diario. Las ven las dos bocas; las edita sólo la
-          // central (la mig 104 lo aplica en la base).
-          { id: 'recetas', label: '📖 Recetas' },
-        ].map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
-            style={{ padding: '8px 16px', borderRadius: 8, border: `1px solid ${tab === t.id ? 'var(--amber)' : 'var(--border)'}`, background: tab === t.id ? 'var(--amber)' : 'transparent', color: tab === t.id ? '#fff' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-      {tab === 'entradas' && <EntradaForm onSaved={() => {}} showAlert={showAlert} proveedores={proveedores} />}
-        {tab === 'desposte' && <DesposteTab key={tab} onSaved={() => {}} />}
-        {tab === 'medias' && <MediasResesTab key={tab} />}
-{/* Misma pantalla, pero abierta directo en Elaborar y sin la fila de
-    sub-solapas del desposte. */}
-{tab === 'elaborar' && <DesposteTab key={tab} onSaved={() => {}} soloElaborar />}
-{tab === 'piezas' && <PiezasTab key={tab} />}
-{tab === 'cerdo' && <StockPiezasTab key={tab} />}
-{tab === 'recetas' && <Recetas key={tab} puedeEditar={!isSucursal} />}
-{tab === 'cajas' && <CajasTab key={tab} />}
-{tab === 'pollo_cajones' && <PolloCajonesTab key={tab} />}
-{tab === 'animalitos' && <AnimalitosTab key={tab} onIrAIngresos={() => setTab('entradas')} />}
-{tab === 'remitos' && <RemitosTab remitoActual={remitoActual} />}
-      {tab === 'flujo' && !isSucursal && <FlujoDeposito />}
-      {tab === 'ajuste' && puedeAjustar && <AjusteStock />}
-    </div>
+      {tab === 'entradas' && <EntradaForm key={k} onSaved={() => {}} showAlert={showAlert} proveedores={proveedores} />}
+      {tab === 'desposte' && <DesposteTab key={k} onSaved={() => {}} subInicial={inicio.sub} mermaInicial={inicio.sub2} />}
+      {tab === 'medias' && <MediasResesTab key={k} subInicial={inicio.sub} />}
+      {/* Misma pantalla, pero abierta directo en Elaborar y sin la fila de
+          sub-solapas del desposte. */}
+      {tab === 'elaborar' && <DesposteTab key={k} onSaved={() => {}} soloElaborar />}
+      {tab === 'piezas' && <PiezasTab key={k} subInicial={inicio.sub} />}
+      {tab === 'cerdo' && <StockPiezasTab key={k} />}
+      {tab === 'recetas' && <Recetas key={k} puedeEditar={!isSucursal} />}
+      {tab === 'cajas' && <CajasTab key={k} />}
+      {tab === 'pollo_cajones' && <PolloCajonesTab key={k} />}
+      {tab === 'animalitos' && <AnimalitosTab key={k} onIrAIngresos={() => setTab('entradas')} />}
+      {tab === 'remitos' && <RemitosTab key={k} remitoActual={remitoActual} />}
+      {tab === 'flujo' && !isSucursal && <FlujoDeposito key={k} />}
+      {tab === 'ajuste' && puedeAjustar && <AjusteStock key={k} />}
+    </ModuloConNav>
   )
 }
 
@@ -565,15 +592,52 @@ export default Deposito
 // `soloElaborar`: la pantalla se abre directo en Elaborar y sin la fila de
 // sub-solapas. La usa la sucursal, que tiene Elaborar como solapa propia
 // arriba en vez de escondida adentro del Desposte.
-function DesposteTab({ onSaved, soloElaborar = false }) {
+// Sub-solapas del Desposte (nivel 2). Una sucursal no desposta cerdo: recibe
+// las piezas ya despostadas de la central, nunca capones enteros. Y de
+// elaboración solo hace hamburguesas: en la sucursal Elaborar ya es una
+// sección propia en la barra, si además estuviera acá el mismo tablero
+// estaría en dos lugares.
+const SUBTABS_DESPOSTE = esSucursal => [
+  { id: 'piezas', icono: '🍖', label: 'Desposte en piezas' },
+  { id: 'kilo', icono: '⚖️', label: 'Desposte para venta por kilo' },
+  { id: 'pieza_kilo', icono: '🔄', label: 'Convertir pieza a cortes' },
+  ...(esSucursal ? [] : [{ id: 'cerdo', icono: '🐷', label: 'Desposte cerdo' }]),
+  ...(esSucursal ? [] : [{ id: 'embutidos', icono: '🌭', label: 'Elaborados' }]),
+  { id: 'historial', icono: '📋', label: 'Historial desposte' },
+  // Los % los define la CENTRAL, pero la sucursal SÍ tiene que entrar acá: ve
+  // los tipos heredados de sólo lectura, carga los suyos y —sobre todo— saca el
+  // costo del kilo con merma de lo que le compra a la central. Estuvo oculta
+  // hasta el 06/09/2026 y por eso "no aparecía nada" del lado de Monte Cristo.
+  { id: 'mermas', icono: '⚙️', label: esSucursal ? 'Mermas y costo' : 'Mermas' },
+]
+
+// Sub-solapas de Mermas (nivel 3)
+const SUBTABS_MERMAS = esSucursal => [
+  { id: 'config', icono: '⚙️', label: 'Mermas por producto' },
+  // A la franquicia le sirve más que ninguna: le compra las piezas a la
+  // central y necesita saber a cuánto le queda el kilo después de la
+  // merma para poner sus precios.
+  { id: 'costo', icono: '💲', label: 'Costo con merma' },
+  // Las planillas de rinde son de la central: la RLS sólo deja escribirlas
+  // a es_central(), así que a una sucursal no le sirve.
+  ...(esSucursal ? [] : [{ id: 'planillas', icono: '📋', label: 'Planillas de rinde' }]),
+  { id: 'historial', icono: '📊', label: 'Historial semanal' },
+]
+
+function DesposteTab({ onSaved, soloElaborar = false, subInicial, mermaInicial }) {
   const { isSucursal: esSucursal } = useAuth()
-  const [subtab, setSubtab] = useState(soloElaborar ? 'embutidos' : 'piezas')
+  const [subtab, setSubtab] = useState(soloElaborar ? 'embutidos' : (subInicial || 'piezas'))
   // Dentro de Mermas hay dos cosas distintas y la pantalla quedaba larguísima
   // con las dos apiladas: los % configurados, y las planillas de rinde de
   // donde salen esos %.
   // La sucursal no edita los %, los usa: le abre directo en el costo por kilo,
   // que es a lo que entra.
-  const [tabMerma, setTabMerma] = useState(esSucursal ? 'costo' : 'config')
+  const [tabMerma, setTabMerma] = useState(mermaInicial || (esSucursal ? 'costo' : 'config'))
+  // La ruta de arriba (Depósito › Desposte › …)
+  const subtabsDesposte = SUBTABS_DESPOSTE(esSucursal)
+  const subtabsMermas = SUBTABS_MERMAS(esSucursal)
+  useMiga(2, soloElaborar ? null : subtabsDesposte.find(t => t.id === subtab)?.label)
+  useMiga(3, !soloElaborar && subtab === 'mermas' ? subtabsMermas.find(t => t.id === tabMerma)?.label : null)
   const [mediasRes, setMediasRes] = useState([])
   const [piezasStock, setPiezasStock] = useState({})
   const [despostes, setDespostes] = useState([])
@@ -1663,28 +1727,8 @@ async function confirmarDesposteCerdo() {
       {/* Abierta como "Elaborar" desde el menú de arriba, esta fila no va: ya
           se eligió qué hacer. */}
       {!soloElaborar && (
-      <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
-        {/* Una sucursal no desposta cerdo: recibe las piezas ya despostadas de
-            la central, nunca capones enteros. Y de elaboración solo hace
-            hamburguesas — los embutidos frescos y los salames los elabora la
-            central y se los distribuye. La solapa se llama distinto por eso. */}
-        {[{ id: 'piezas', label: '🍖 Desposte en Piezas' }, { id: 'kilo', label: '⚖️ Desposte para venta por Kilo' }, { id: 'pieza_kilo', label: '🔄 Convertir Pieza a Cortes' },
-...(esSucursal ? [] : [{ id: 'cerdo', label: '🐷 Desposte Cerdo' }]),
-// En la sucursal, Elaborar ya es una solapa propia arriba: si además la
-// dejáramos acá, el mismo tablero estaría en dos lugares.
-...(esSucursal ? [] : [{ id: 'embutidos', label: '🌭 Elaborados' }]),
-{ id: 'historial', label: '📋 Historial Desposte' },
-// Los % los define la CENTRAL, pero la sucursal SÍ tiene que entrar acá: ve
-// los tipos heredados de sólo lectura, carga los suyos y —sobre todo— saca el
-// costo del kilo con merma de lo que le compra a la central. Estuvo oculta
-// hasta el 06/09/2026 y por eso "no aparecía nada" del lado de Monte Cristo.
-{ id: 'mermas', label: esSucursal ? '⚙️ Mermas y costo' : '⚙️ Mermas' }].map(t => (
-          <button key={t.id} onClick={() => { setSubtab(t.id); setSeleccionada(null); setPiezas([]); cargarDatos() }}
-            style={{ padding: '8px 16px', borderRadius: 8, border: `1px solid ${subtab === t.id ? 'var(--gold)' : 'var(--border)'}`, background: subtab === t.id ? 'var(--gold)' : 'transparent', color: subtab === t.id ? '#000' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <Pestanas value={subtab} items={subtabsDesposte}
+        onChange={id => { setSubtab(id); setSeleccionada(null); setPiezas([]); cargarDatos() }} />
       )}
 
       {subtab === 'piezas' && (
@@ -2633,28 +2677,7 @@ async function confirmarDesposteCerdo() {
   <div>
     {/* Sub-pestañas: los % configurados por un lado, las planillas de donde
         salen esos % por el otro. Apiladas la pantalla quedaba interminable. */}
-    <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-      {[
-        { id: 'config', label: '⚙️ Mermas por producto' },
-        // A la franquicia le sirve más que ninguna: le compra las piezas a la
-        // central y necesita saber a cuánto le queda el kilo después de la
-        // merma para poner sus precios. Por eso va primero para ella.
-        { id: 'costo', label: '💲 Costo con merma' },
-        // Las planillas de rinde son de la central: la RLS sólo deja
-        // escribirlas a es_central(), así que a una sucursal la solapa le
-        // serviría para ver las de la central y para nada más.
-        ...(esSucursal ? [] : [{ id: 'planillas', label: '📋 Planillas de rinde' }]),
-        { id: 'historial', label: '📊 Historial semanal' },
-      ].map(t => (
-        <button key={t.id} onClick={() => setTabMerma(t.id)}
-          style={{
-            padding: '9px 18px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 700,
-            border: `1px solid ${tabMerma === t.id ? 'var(--gold)' : 'var(--border)'}`,
-            background: tabMerma === t.id ? 'var(--gold)' : 'transparent',
-            color: tabMerma === t.id ? '#000' : 'var(--muted)',
-          }}>{t.label}</button>
-      ))}
-    </div>
+    <Pastillas value={tabMerma} onChange={setTabMerma} items={subtabsMermas} />
 
     {tabMerma === 'config' && (<>
     <div className="card" style={{ marginBottom: 16 }}>
@@ -2802,11 +2825,11 @@ async function confirmarDesposteCerdo() {
 // disponibles. Cuando se desacoplan, alguna media se descontó del stock sin
 // marcarse (o al revés) y el depósito empieza a mentir.
 // ═══════════════════════════════════════════════════════════
-function MediasResesTab() {
+function MediasResesTab({ subInicial }) {
   // El rinde vive en su propia sub-pestana: ocupaba toda la pantalla y tapaba
   // lo que hay que ver de entrada, que son las medias en camara (Fabricio,
   // 15/09/2026).
-  const [sub, setSub] = useState('medias')
+  const [sub, setSub] = useState(subInicial || 'medias')
   const [medias, setMedias] = useState([])
   const [stockMR, setStockMR] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -2872,16 +2895,8 @@ function MediasResesTab() {
   const card = { background: 'var(--surface2)', borderRadius: 10, padding: '12px 16px', border: '1px solid var(--border)' }
 
   const subTabs = (
-    <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-      {[['medias', '🐄 Stock / Historial'], ['rinde', '📉 Rinde']].map(([id, label]) => (
-        <button key={id} onClick={() => setSub(id)}
-          style={{ padding: '7px 16px', borderRadius: 8, cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
-            fontFamily: "'DM Sans',sans-serif",
-            border: `1px solid ${sub === id ? 'var(--gold)' : 'var(--border)'}`,
-            background: sub === id ? 'var(--gold)' : 'transparent',
-            color: sub === id ? '#000' : 'var(--muted)' }}>{label}</button>
-      ))}
-    </div>
+    <Pestanas value={sub} onChange={setSub}
+      items={[{ id: 'medias', icono: '🐄', label: 'Stock / Historial' }, { id: 'rinde', icono: '📉', label: 'Rinde' }]} />
   )
 
   // Los dos caminos de una media res, POR SEPARADO: son ciclos distintos y
@@ -8063,9 +8078,9 @@ function fechaDiaARG(iso) {
 // =============================================
 // PESTAÑA HISTORIAL/STOCK DE PIEZAS INDIVIDUALES
 // =============================================
-function PiezasTab() {
+function PiezasTab({ subInicial }) {
   // Mismo criterio que en Media Reses: el rinde en su propia sub-pestana.
-  const [sub, setSub] = useState('piezas')
+  const [sub, setSub] = useState(subInicial || 'piezas')
   const [piezas, setPiezas] = useState([])
   // Contadores de stock_actual para los buckets pieza_* (la RLS los limita a la
   // sucursal del usuario, igual que las fichas). null = todavia no cargaron.
@@ -8172,16 +8187,8 @@ function PiezasTab() {
   const mono = { fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums' }
 
   const subTabs = (
-    <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-      {[['piezas', '🍖 Stock / Historial'], ['rinde', '📉 Rinde']].map(([id, label]) => (
-        <button key={id} onClick={() => setSub(id)}
-          style={{ padding: '7px 16px', borderRadius: 8, cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
-            fontFamily: "'DM Sans',sans-serif",
-            border: `1px solid ${sub === id ? 'var(--gold)' : 'var(--border)'}`,
-            background: sub === id ? 'var(--gold)' : 'transparent',
-            color: sub === id ? '#000' : 'var(--muted)' }}>{label}</button>
-      ))}
-    </div>
+    <Pestanas value={sub} onChange={setSub}
+      items={[{ id: 'piezas', icono: '🍖', label: 'Stock / Historial' }, { id: 'rinde', icono: '📉', label: 'Rinde' }]} />
   )
 
   // La segunda merma de la cadena: la primera fue despostar la media.
