@@ -513,6 +513,13 @@ export function Deposito() {
   // fila abajo ("la escalera"). Mismas secciones y mismas condiciones por
   // boca que antes; solo cambia cómo se muestran.
   const grupos = [
+    // Primero: Ingresos es lo que más se usa, entra mercadería todos los días
+    // (pedido de Fabricio, 19/09/2026).
+    { titulo: 'Movimientos', items: [
+      { id: 'entradas', icono: '📥', label: 'Ingresos' },
+      { id: 'remitos', icono: '🧾', label: 'Remitos' },
+      ...(isSucursal ? [] : [{ id: 'flujo', icono: '🔁', label: 'Flujo depósito' }]),
+    ] },
     { titulo: 'Stock', items: [
       { id: 'medias', icono: '🐄', label: 'Media reses' },
       { id: 'piezas', icono: '🥩', label: 'Piezas' },
@@ -538,11 +545,6 @@ export function Deposito() {
       // Material de consulta, no un paso del trabajo diario. Las ven las
       // dos bocas; las edita sólo la central (la mig 104 lo aplica en la base).
       { id: 'recetas', icono: '📖', label: 'Recetas' },
-    ] },
-    { titulo: 'Movimientos', items: [
-      { id: 'entradas', icono: '📥', label: 'Ingresos' },
-      { id: 'remitos', icono: '🧾', label: 'Remitos' },
-      ...(isSucursal ? [] : [{ id: 'flujo', icono: '🔁', label: 'Flujo depósito' }]),
     ] },
     ...(puedeAjustar ? [{ titulo: 'Control', items: [
       { id: 'ajuste', icono: '🔧', label: 'Ajuste stock' },
