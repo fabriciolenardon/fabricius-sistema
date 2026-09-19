@@ -79,7 +79,7 @@ export default function StockPiezasTab() {
   // bucket y la de capones), asi que se arma una sola vez.
   const selectorFamilia = (
     <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-      {[['cerdo', '🐷 Cerdo'], ['embutido', '🌭 Embutidos'],
+      {[['cerdo', '🐷 Piezas'], ['embutido', '🌭 Embutidos'],
         // La sucursal no recibe capones enteros (le llegan las piezas ya
         // despostadas), asi que la solapa le quedaria siempre vacia.
         ...(isSucursal ? [] : [['capones', '🐖 Capones']])].map(([id, label]) => (
