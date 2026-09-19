@@ -107,6 +107,8 @@ export default function Gastos() {
   // o monto. Con búsqueda activa se ignora el filtro de período (busca en TODO
   // el historial — si buscás "ferretería" la querés encontrar aunque sea vieja).
   const [busqueda, setBusqueda] = useState('')
+  // Ver solo un tipo de gasto (variable / fijo / socio) dentro del período
+  const [filtroTipo, setFiltroTipo] = useState('todos')
   const [guardando, setGuardando] = useState(false)
   const [exportando, setExportando] = useState('')
   const guardandoRef = useRef(false)
@@ -396,8 +398,10 @@ export default function Gastos() {
     }
   }
 
-  // Filtrar por período (vista "Todos") — salvo que haya una búsqueda activa,
-  // que busca sobre TODO el historial sin importar el período elegido.
+  // Filtrado en tres pasos: período → búsqueda → tipo.
+  // Hasta el 19/09/2026 la búsqueda ignoraba el período y buscaba en todo el
+  // historial; Fabricio pidió que busque en el mes elegido. Para buscar en
+  // todo, se elige el período "Todos".
   const hoy = new Date()
   const q = norm(busqueda.trim())
   const matchGasto = g =>
@@ -409,7 +413,7 @@ export default function Gastos() {
     || norm(CATEGORIAS.find(c => c.value === g.categoria)?.label).includes(q)
     || String(g.fecha || '').includes(q)
     || String(Math.round(Number(g.monto) || 0)).includes(q)
-  const gastosFiltrados = q ? gastos.filter(matchGasto) : gastos.filter(g => {
+  const gastosDelPeriodo = gastos.filter(g => {
     if (filtroPeriodo === 'mes') return g.fecha?.startsWith(filtroMes)
     if (filtroPeriodo === 'semana') {
       const d = new Date(g.fecha + 'T12:00')
@@ -418,10 +422,14 @@ export default function Gastos() {
     }
     return true // todos
   })
+  // Período + búsqueda: de acá salen las tarjetas de totales, así cada tarjeta
+  // muestra lo suyo aunque se esté viendo un solo tipo en la lista.
+  const gastosBuscados = q ? gastosDelPeriodo.filter(matchGasto) : gastosDelPeriodo
+  const gastosFiltrados = filtroTipo === 'todos' ? gastosBuscados : gastosBuscados.filter(g => g.tipo === filtroTipo)
 
   // Totales del período filtrado. Los "solo balance" (facturas a nombre de la
   // SAS que paga un tercero) NO suman: son solo documentación para el balance.
-  const gastosQueSuman = gastosFiltrados.filter(g => !g.solo_balance)
+  const gastosQueSuman = gastosBuscados.filter(g => !g.solo_balance)
   const totVar = gastosQueSuman.filter(g => g.tipo === 'variable').reduce((s, g) => s + (g.monto || 0), 0)
   const totFijo = gastosQueSuman.filter(g => g.tipo === 'fijo').reduce((s, g) => s + (g.monto || 0), 0)
   const totSocio = gastosQueSuman.filter(g => g.tipo === 'socio').reduce((s, g) => s + (g.monto || 0), 0)
@@ -465,6 +473,8 @@ export default function Gastos() {
 
   // Paginación del listado filtrado
   const pag = usePaginacion(gastosFiltrados, 25)
+  // Al cambiar cualquier filtro, volver a la primera página del listado
+  useEffect(() => { pag.controles.setPagina(1) }, [filtroTipo, q, filtroPeriodo, filtroMes]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const inp = { background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, width: '100%', boxSizing: 'border-box' }
 
@@ -514,13 +524,13 @@ export default function Gastos() {
             onExport={exportarMes} exportando={exportando} />
         : (
         <>
-      {/* 🔍 BUSCADOR — busca en TODO el historial, ignora el filtro de período */}
+      {/* 🔍 BUSCADOR — busca dentro del período elegido abajo */}
       <div style={{ marginBottom: 14 }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <input
             value={busqueda}
             onChange={e => setBusqueda(e.target.value)}
-            placeholder="🔍 Buscar gasto por descripción, categoría, forma de pago, socio, fecha o monto..."
+            placeholder={`🔍 Buscar en ${filtroPeriodo === 'mes' ? nombreMes(filtroMes) : filtroPeriodo === 'semana' ? 'esta semana' : 'todos los gastos'}: descripción, categoría, forma de pago, socio, fecha o monto...`}
             style={{ flex: 1, background: 'var(--surface)', border: `1px solid ${q ? 'var(--gold)' : 'var(--border)'}`, color: 'var(--text)', borderRadius: 8, padding: '10px 14px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, boxSizing: 'border-box' }}
           />
           {q && (
@@ -532,27 +542,27 @@ export default function Gastos() {
         </div>
         {q && (
           <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
-            🔎 <b style={{ color: 'var(--text)' }}>{gastosFiltrados.length}</b> resultado{gastosFiltrados.length !== 1 ? 's' : ''} en todo el historial
-            {gastosFiltrados.length > 0 && <> · egresos <b style={{ color: 'var(--red-light)' }}>{fmt(gastosFiltrados.filter(g => !g.solo_balance && g.tipo !== 'ingreso').reduce((s, g) => s + (Number(g.monto) || 0), 0))}</b></>}
-            {' '}<span style={{ color: 'var(--amber)' }}>(la búsqueda ignora el filtro de período)</span>
+            🔎 <b style={{ color: 'var(--text)' }}>{gastosFiltrados.length}</b> resultado{gastosFiltrados.length !== 1 ? 's' : ''} en {filtroPeriodo === 'mes' ? nombreMes(filtroMes) : filtroPeriodo === 'semana' ? 'esta semana' : 'todo el historial'}
+            {gastosFiltrados.length > 0 && <> · <b style={{ color: 'var(--red-light)' }}>{fmt(gastosFiltrados.filter(g => !g.solo_balance).reduce((s, g) => s + (Number(g.monto) || 0), 0))}</b></>}
+            {filtroPeriodo !== 'todos' && <>{' '}<span style={{ color: 'var(--muted)' }}>· para buscar en todo, elegí "📋 Todos"</span></>}
           </div>
         )}
       </div>
 
       {/* FILTROS */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center', opacity: q ? 0.45 : 1 }}>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
         {[
           { id: 'semana', label: '📅 Esta semana' },
           { id: 'mes', label: '📆 Este mes' },
           { id: 'todos', label: '📋 Todos' },
         ].map(p => (
-          <button key={p.id} onClick={() => { setBusqueda(''); setFiltroPeriodo(p.id) }}
+          <button key={p.id} onClick={() => setFiltroPeriodo(p.id)}
             style={{ padding: '7px 14px', borderRadius: 8, border: `1px solid ${filtroPeriodo === p.id ? 'var(--gold)' : 'var(--border)'}`, background: filtroPeriodo === p.id ? 'var(--gold)' : 'transparent', color: filtroPeriodo === p.id ? '#000' : 'var(--muted)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: 600, fontSize: 12 }}>
             {p.label}
           </button>
         ))}
         {filtroPeriodo === 'mes' && (
-          <select value={filtroMes} onChange={e => { setBusqueda(''); setFiltroMes(e.target.value) }}
+          <select value={filtroMes} onChange={e => setFiltroMes(e.target.value)}
             style={{ ...inp, width: 'auto', fontSize: 13 }}>
             {mesesDisp.map(m => (
               <option key={m} value={m}>{nombreMes(m)}</option>
@@ -562,15 +572,32 @@ export default function Gastos() {
         <span style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 'auto' }}>{gastosFiltrados.length} registros</span>
       </div>
 
+      {/* SELECTOR DE TIPO — también se elige tocando las tarjetas de abajo */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={{ fontSize: 12, color: 'var(--muted)', marginRight: 4 }}>Ver:</span>
+        {[{ id: 'todos', label: 'Todos' }, ...TIPOS.map(t => ({ id: t.id, label: t.label }))].map(t => (
+          <button key={t.id} onClick={() => setFiltroTipo(t.id)}
+            style={{ padding: '5px 14px', borderRadius: 999, cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontSize: 12,
+              fontWeight: filtroTipo === t.id ? 700 : 500,
+              border: `1px solid ${filtroTipo === t.id ? 'var(--gold)' : 'var(--border2)'}`,
+              background: filtroTipo === t.id ? 'var(--gold)' : 'transparent',
+              color: filtroTipo === t.id ? '#000' : 'var(--text2)' }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
       {/* STATS */}
       <div className="grid4" style={{ marginBottom: 20 }}>
         {[
-          { label: 'Variables', val: totVar, color: 'var(--red-light)', icon: '💸' },
-          { label: 'Fijos', val: totFijo, color: 'var(--blue)', icon: '📌' },
-          { label: 'Socios', val: totSocio, color: 'var(--gold)', icon: '👤' },
-          { label: 'Total egresos', val: totalEgresos, color: 'var(--red-light)', icon: '🧾' },
+          { id: 'variable', label: 'Variables', val: totVar, color: 'var(--red-light)', icon: '💸' },
+          { id: 'fijo', label: 'Fijos', val: totFijo, color: 'var(--blue)', icon: '📌' },
+          { id: 'socio', label: 'Socios', val: totSocio, color: 'var(--gold)', icon: '👤' },
+          { id: 'todos', label: 'Total egresos', val: totalEgresos, color: 'var(--red-light)', icon: '🧾' },
         ].map(s => (
-          <div key={s.label} className="stat">
+          <div key={s.label} className="stat" onClick={() => setFiltroTipo(s.id)} title="Ver solo estos gastos"
+            style={{ cursor: 'pointer', borderColor: filtroTipo === s.id ? 'var(--gold)' : undefined,
+              boxShadow: filtroTipo === s.id ? '0 0 0 1px var(--gold)' : undefined }}>
             <div style={{ fontSize: 18, marginBottom: 4 }}>{s.icon}</div>
             <div className="stat-label">{s.label}</div>
             <div className="stat-value" style={{ color: s.color }}>{fmt(s.val)}</div>
@@ -818,10 +845,11 @@ export default function Gastos() {
           <div className="card-title">
             {q ? `🔍 Resultados de "${busqueda.trim()}" (${gastosFiltrados.length})`
               : filtroPeriodo === 'semana' ? 'Gastos de la semana' : filtroPeriodo === 'mes' ? `Gastos de ${nombreMes(filtroMes)}` : 'Todos los gastos'}
+            {filtroTipo !== 'todos' && <span style={{ color: 'var(--gold)' }}> · {TIPOS.find(t => t.id === filtroTipo)?.label}</span>}
           </div>
 
           {gastosFiltrados.length === 0
-            ? <div className="empty">{q ? `Ningún gasto matchea "${busqueda.trim()}"` : 'Sin registros para este período'}</div>
+            ? <div className="empty">{q ? `Ningún gasto coincide con "${busqueda.trim()}" en este período` : filtroTipo !== 'todos' ? 'No hay gastos de este tipo en el período' : 'Sin registros para este período'}</div>
             : pag.items.map(g => {
                 const t = TIPOS.find(x => x.id === g.tipo) || TIPOS[0]
                 return (
