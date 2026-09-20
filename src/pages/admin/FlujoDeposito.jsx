@@ -30,6 +30,21 @@ const fmtFechaHora = ts => ts ? new Date(ts).toLocaleString('es-AR', {
   timeZone: 'America/Argentina/Buenos_Aires',
 }) : ''
 
+// Panel de confirmación dentro de la tarjeta (reemplaza al confirm/prompt)
+const cajaConfirmar = {
+  padding: 10, borderRadius: 9, border: '1px solid var(--border2)', background: 'var(--surface2)',
+}
+const btnSi = {
+  flex: 1, padding: '8px 10px', border: 'none', borderRadius: 7, cursor: 'pointer',
+  background: 'var(--green)', color: '#000', fontWeight: 700, fontSize: 12.5,
+  fontFamily: "'DM Sans',sans-serif",
+}
+const btnNo = {
+  padding: '8px 12px', borderRadius: 7, cursor: 'pointer', background: 'transparent',
+  border: '1px solid var(--border2)', color: 'var(--text2)', fontWeight: 600, fontSize: 12.5,
+  fontFamily: "'DM Sans',sans-serif",
+}
+
 const LABEL_TIPO = {
   media_res_piezas:     { label: 'En piezas', icono: '🥩', color: 'var(--gold)' },
   media_res_kilo:       { label: 'Venta por kilo', icono: '⚖️', color: '#7a9dff' },
@@ -45,6 +60,15 @@ export default function FlujoDeposito() {
   const [msg, setMsg] = useState(null)
   const [confirmando, setConfirmando] = useState(null) // flujo siendo confirmado en modal
   const [procesando, setProcesando]   = useState(false)
+  // Aprobar/rechazar se confirman DENTRO de la tarjeta: en el iPhone y en la
+  // PWA el confirm()/prompt() del navegador se suprime sin error y la acción
+  // se perdía en silencio (misma regla que el arqueo, PR #220).
+  const [accion, setAccion] = useState(null)   // { id, tipo: 'aprobar' | 'rechazar' }
+  const [motivo, setMotivo] = useState('')
+  const [guardando, setGuardando] = useState(false)
+
+  function pedirAccion(f, tipo) { setMotivo(''); setAccion({ id: f.id, tipo }) }
+  function cerrarAccion() { if (!guardando) { setAccion(null); setMotivo('') } }
 
   useEffect(() => {
     cargar()
@@ -84,23 +108,27 @@ export default function FlujoDeposito() {
   const pag = usePaginacion(filtrados, 20)
   const pendientes = flujos.filter(f => f.estado === 'pendiente').length
 
+  // El motivo lo escribe en el campo de la tarjeta (`motivo`), no en un prompt.
   async function rechazar(f) {
-    const motivo = prompt('Motivo del rechazo (opcional):', '')
-    if (motivo === null) return
+    if (guardando) return
+    setGuardando(true)
     const cambios = {
       estado: 'rechazado',
-      notas_admin: motivo || 'Rechazado sin motivo',
+      notas_admin: motivo.trim() || 'Rechazado sin motivo',
       aprobado_por: user?.id,
       aprobado_por_nombre: profile?.nombre || null,
       aprobado_at: new Date().toISOString(),
     }
     const { error } = await supabase.from('flujo_deposito').update(cambios).eq('id', f.id)
-    if (error) { aviso('❌ ' + error.message, 'error'); return }
+    if (error) { setGuardando(false); aviso('❌ ' + error.message, 'error'); return }
     marcarLocal(f.id, cambios)
     // Liberar la media res reservada: vuelve a estar disponible para el desposte
     if (f.entrada_id) {
       await supabase.from('entradas_deposito').update({ reservada: false }).eq('id', f.entrada_id)
     }
+    setGuardando(false)
+    setAccion(null)
+    setMotivo('')
     aviso('Rechazado — la media res vuelve a estar disponible')
   }
 
@@ -109,13 +137,10 @@ export default function FlujoDeposito() {
   // desde Depósito (ahí recién se descuenta el stock y se marca despostada).
   // La media queda como "Aprobada" (reservada) en el sector desposte hasta
   // que el admin cargue el despacho a mano.
+  // Lo confirma el panel de la tarjeta, no un confirm() del navegador.
   async function aprobar(f) {
-    if (!confirm(
-      '¿Confirmar recepción de esta info?\n\n' +
-      'Esto marca el flujo como APROBADO (recibido). ' +
-      'El stock NO se toca acá — el despacho/desposte de esta media res ' +
-      'lo cargás vos a mano desde Depósito.'
-    )) return
+    if (guardando) return
+    setGuardando(true)
     const cambios = {
       estado: 'aprobado',
       notas_admin: 'Recepción confirmada. El despacho/desposte se carga manualmente desde Depósito.',
@@ -124,8 +149,11 @@ export default function FlujoDeposito() {
       aprobado_at: new Date().toISOString(),
     }
     const { error } = await supabase.from('flujo_deposito').update(cambios).eq('id', f.id)
-    if (error) aviso('❌ ' + error.message, 'error')
-    else { marcarLocal(f.id, cambios); aviso('✅ Recepción confirmada') }
+    setGuardando(false)
+    if (error) { aviso('❌ ' + error.message, 'error'); return }
+    marcarLocal(f.id, cambios)
+    setAccion(null)
+    aviso('✅ Recepción confirmada')
   }
 
   // Ejecuta la aprobación (llamada desde el modal de confirmación)
@@ -340,18 +368,59 @@ export default function FlujoDeposito() {
                       )}
                     </div>
                     {f.estado === 'pendiente' && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 220 }}>
-                        <button onClick={() => aprobar(f)}
-                          style={{ padding: '10px 14px', background: 'var(--green)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
-                          ✅ Aprobar (confirmar recepción)
-                        </button>
-                        <button onClick={() => rechazar(f)}
-                          style={{ padding: '8px 14px', background: 'transparent', border: '1px solid #5a2a2a', color: '#ff8b8b', borderRadius: 8, cursor: 'pointer', fontWeight: 600, fontSize: 12 }}>
-                          ❌ Rechazar
-                        </button>
-                        <div style={{ fontSize: 10, color: 'var(--muted)', textAlign: 'center', marginTop: 2 }}>
-                          El despacho/desposte se carga a mano desde Depósito
-                        </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 220, maxWidth: 260 }}>
+                        {/* La confirmación pasa acá adentro: el confirm() del
+                            navegador no existe en el iPhone ni en la PWA. */}
+                        {accion?.id === f.id && accion.tipo === 'aprobar' ? (
+                          <div style={cajaConfirmar}>
+                            <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.45 }}>
+                              ¿Confirmar la recepción? Queda <b style={{ color: '#7dff7d' }}>APROBADO</b>.
+                              El stock NO se toca acá — el despacho/desposte lo cargás a mano desde Depósito.
+                            </div>
+                            <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+                              <button onClick={() => aprobar(f)} disabled={guardando} style={btnSi}>
+                                {guardando ? 'Guardando…' : '✅ Sí, confirmar'}
+                              </button>
+                              <button onClick={cerrarAccion} disabled={guardando} style={btnNo}>Cancelar</button>
+                            </div>
+                          </div>
+                        ) : accion?.id === f.id && accion.tipo === 'rechazar' ? (
+                          <div style={cajaConfirmar}>
+                            <div style={{ fontSize: 12, color: 'var(--text2)', fontWeight: 700, marginBottom: 6 }}>
+                              Motivo del rechazo <span style={{ fontWeight: 500, color: 'var(--muted)' }}>(opcional)</span>
+                            </div>
+                            <input value={motivo} onChange={e => setMotivo(e.target.value)} autoFocus
+                              onKeyDown={e => { if (e.key === 'Enter') rechazar(f); if (e.key === 'Escape') cerrarAccion() }}
+                              placeholder="Ej: los kg no cierran"
+                              style={{ width: '100%', boxSizing: 'border-box', padding: '7px 9px', fontSize: 12.5,
+                                borderRadius: 7, border: '1px solid var(--border2)', background: 'var(--surface)',
+                                color: 'var(--text)', fontFamily: "'DM Sans',sans-serif" }} />
+                            <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 6 }}>
+                              La media res vuelve a estar disponible para el desposte.
+                            </div>
+                            <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+                              <button onClick={() => rechazar(f)} disabled={guardando}
+                                style={{ ...btnSi, background: '#8b2a2a', color: '#fff' }}>
+                                {guardando ? 'Guardando…' : '❌ Rechazar'}
+                              </button>
+                              <button onClick={cerrarAccion} disabled={guardando} style={btnNo}>Cancelar</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <button onClick={() => pedirAccion(f, 'aprobar')}
+                              style={{ padding: '10px 14px', background: 'var(--green)', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+                              ✅ Aprobar (confirmar recepción)
+                            </button>
+                            <button onClick={() => pedirAccion(f, 'rechazar')}
+                              style={{ padding: '8px 14px', background: 'transparent', border: '1px solid #5a2a2a', color: '#ff8b8b', borderRadius: 8, cursor: 'pointer', fontWeight: 600, fontSize: 12 }}>
+                              ❌ Rechazar
+                            </button>
+                            <div style={{ fontSize: 10, color: 'var(--muted)', textAlign: 'center', marginTop: 2 }}>
+                              El despacho/desposte se carga a mano desde Depósito
+                            </div>
+                          </>
+                        )}
                       </div>
                     )}
                   </div>
