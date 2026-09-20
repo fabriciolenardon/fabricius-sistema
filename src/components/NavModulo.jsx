@@ -29,10 +29,21 @@ export function useMiga(nivel, label) {
 }
 
 const CLAVE_COLAPSADA = 'nav_modulo_colapsada'
+// El mismo redondel rojo que usa el menú de arriba (AdminLayout)
+const pastillaBadge = {
+  marginLeft: 'auto', background: '#ef4444', color: '#fff', borderRadius: 999,
+  minWidth: 18, height: 18, padding: '0 5px', fontSize: 10, fontWeight: 700,
+  display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+}
 const sinAcentos = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
 
 /**
- * grupos:  [{ titulo, items: [{ id, icono, label }] }]
+ * grupos:  [{ titulo, items: [{ id, icono, label, badge }] }]
+ *   badge: número de pendientes de esa sección (0/undefined = no se muestra).
+ *   Es el mismo contador rojo del menú de arriba: si el módulo tiene avisos,
+ *   acá se ve en qué sección están (ej. Depósito › Flujo depósito).
+ *   Con la barra achicada queda como puntito sobre el ícono, y en el celular
+ *   —con el menú cerrado— la suma va en el botón ☰.
  * activo:  id del item elegido
  * onCambiar(id): elegir un item (también se llama al tocar el item ya activo
  *   o su nombre en la ruta, para volver al inicio de esa sección)
@@ -80,6 +91,7 @@ export function ModuloConNav({ titulo, subtitulo, grupos, activo, onCambiar, ata
   }
 
   const angosta = colapsada && !esMovil
+  const totalBadges = grupos.reduce((t, g) => t + g.items.reduce((s2, i) => s2 + (Number(i.badge) || 0), 0), 0)
 
   const buscador = (
     <div style={{ position: 'relative', marginBottom: 6 }}>
@@ -122,6 +134,7 @@ export function ModuloConNav({ titulo, subtitulo, grupos, activo, onCambiar, ata
                 fontWeight: 700, margin: '10px 10px 4px' }}>{g.titulo}</div>}
           {g.items.map(i => {
             const on = i.id === activo
+            const n = Number(i.badge) || 0
             return (
               <button key={i.id} onClick={() => { onCambiar(i.id); setMenuAbierto(false) }}
                 title={angosta ? i.label : undefined}
@@ -135,8 +148,16 @@ export function ModuloConNav({ titulo, subtitulo, grupos, activo, onCambiar, ata
                   transition: 'background .15s, color .15s' }}
                 onMouseEnter={e => { if (!on) e.currentTarget.style.background = 'var(--surface2)' }}
                 onMouseLeave={e => { if (!on) e.currentTarget.style.background = 'transparent' }}>
-                <span style={{ fontSize: 15, width: 20, textAlign: 'center' }}>{i.icono}</span>
+                <span style={{ position: 'relative', fontSize: 15, width: 20, textAlign: 'center' }}>
+                  {i.icono}
+                  {/* Con la barra achicada no hay lugar para el número: puntito */}
+                  {angosta && n > 0 && (
+                    <span style={{ position: 'absolute', top: -3, right: -3, width: 8, height: 8,
+                      borderRadius: '50%', background: '#ef4444' }} />
+                  )}
+                </span>
                 {!angosta && <span>{i.label}</span>}
+                {!angosta && n > 0 && <span style={pastillaBadge}>{n}</span>}
               </button>
             )
           })}
@@ -177,6 +198,8 @@ export function ModuloConNav({ titulo, subtitulo, grupos, activo, onCambiar, ata
                 color: 'var(--text)', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontSize: 14, fontWeight: 700 }}>
               <span style={{ fontSize: 18 }}>☰</span>
               <span style={{ flex: 1, textAlign: 'left' }}>{itemActivo ? `${itemActivo.icono} ${itemActivo.label}` : 'Secciones'}</span>
+              {/* Con el menú cerrado no se ven las secciones: el total avisa que hay algo adentro */}
+              {!menuAbierto && totalBadges > 0 && <span style={pastillaBadge}>{totalBadges}</span>}
               <span style={{ color: 'var(--muted)' }}>{menuAbierto ? '▲' : '▼'}</span>
             </button>
             {menuAbierto && (

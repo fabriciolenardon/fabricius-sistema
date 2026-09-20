@@ -7,6 +7,7 @@ import { bucketDePiezaBovina, MERMA_PIEZA_DEFAULT, MERMA_PIEZA_GENERICA, MERMA_M
 import { cargarCajasDisponibles, crearCajasIngreso, venderCaja, revertirVentaCaja, CATEGORIA_A_TIPO_CAJA } from '../../lib/cajasStock'
 import { fmtPrecio, fmtKg, parseNumero } from '../../lib/formatos'
 import { imprimirHTML } from '../../lib/imprimir'
+import { useBadgesNav } from '../../lib/badgesNav'
 import BadgeCobranzaTerceros, { FILA_COBRANZA_TERCEROS } from '../../components/BadgeCobranzaTerceros'
 import { recomputarSaldoCliente } from '../../lib/ctaCorriente'
 import { getCampoPrecio, LISTAS, listasDeVenta } from '../../lib/listasPrecios'
@@ -485,6 +486,8 @@ export function Deposito() {
   // su peso propio, igual que en Río Primero.
   const { isCEO, isSucursal, profile, user } = useAuth()
   const puedeAjustar = puedeAjustarStock(profile, user)
+  // Lo cuenta AdminLayout (un solo canal de Realtime); acá sólo se lee.
+  const { deposito: flujosPendientes } = useBadgesNav()
   const [tab, setTabRaw] = useState('entradas')
   // Destino dentro de la sección (lo usan los atajos del buscador para abrir
   // directo, por ejemplo, Desposte › Mermas › Planillas). `vuelta` fuerza a
@@ -518,7 +521,10 @@ export function Deposito() {
     { titulo: 'Movimientos', items: [
       { id: 'entradas', icono: '📥', label: 'Ingresos' },
       { id: 'remitos', icono: '🧾', label: 'Remitos' },
-      ...(isSucursal ? [] : [{ id: 'flujo', icono: '🔁', label: 'Flujo depósito' }]),
+      // El badge del menú de arriba (Operación › Depósito) son SIEMPRE los
+      // despostes pendientes de aprobar: acá se repite en la sección que los
+      // tiene, así se ve de dónde vienen sin entrar a buscarlos.
+      ...(isSucursal ? [] : [{ id: 'flujo', icono: '🔁', label: 'Flujo depósito', badge: flujosPendientes }]),
     ] },
     { titulo: 'Stock', items: [
       { id: 'medias', icono: '🐄', label: 'Media reses' },
