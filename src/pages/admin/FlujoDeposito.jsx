@@ -18,6 +18,7 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import { MODELOS_DESPOSTE } from '../../lib/modelosDesposte'
 import { redondearStock } from '../../lib/stockHelpers'
+import { avisarCambioFlujo } from '../../lib/useFlujoNotificaciones'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
 import { fmtPrecio, fmtKg } from '../../lib/formatos'
@@ -71,6 +72,8 @@ export default function FlujoDeposito() {
   // de estado apenas se aprueba/rechaza y sale sola del filtro "Pendiente".
   function marcarLocal(id, cambios) {
     setFlujos(fs => fs.map(x => x.id === id ? { ...x, ...cambios } : x))
+    // Y el badge del menú recuenta al toque, sin esperar el realtime.
+    avisarCambioFlujo()
   }
 
   const filtrados = useMemo(() => {

@@ -1,8 +1,9 @@
 // ============================================================
 // useFlujoNotificaciones — Hook para alertas push del Flujo Depósito
 // ============================================================
-// Suscribe Supabase Realtime a la tabla flujo_deposito y cuando
-// entra un nuevo registro con estado="pendiente" dispara:
+// Suscribe Supabase Realtime a la tabla flujo_deposito (está en la
+// publicación desde la mig 152) y cuando aparece un registro nuevo con
+// estado="pendiente" dispara:
 //   1) Notificación nativa del browser (con permiso del usuario)
 //   2) Beep sonoro generado con Web Audio (sin assets externos)
 //   3) Contador de pendientes que se puede mostrar en UI
@@ -10,10 +11,19 @@
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from './supabase'
 
+// Avisa a los badges que un flujo cambió de estado (aprobado/rechazado) para
+// que recuenten YA, sin esperar al realtime. Es la misma idea que marcarLocal
+// en la pantalla: el número tiene que bajar apenas apretás el botón.
+export function avisarCambioFlujo() {
+  try { window.dispatchEvent(new Event('flujo-deposito-cambio')) } catch (e) {}
+}
+
 export function useFlujoNotificaciones({ enabled = true } = {}) {
   const [pendientes, setPendientes] = useState(0)
   const [ultimo, setUltimo] = useState(null)
   const audioCtxRef = useRef(null)
+  const notificadosRef = useRef(new Set())
+  const primeraCarga = useRef(true)
   const permisoPedido = useRef(false)
 
   // Pedir permiso para notificaciones del browser (una sola vez)
@@ -27,52 +37,56 @@ export function useFlujoNotificaciones({ enabled = true } = {}) {
     }
   }, [enabled])
 
-  // Cargar contador inicial de pendientes
+  // Se RECUENTA con un SELECT en cada cambio, igual que usePedidosListosNotif.
+  // Antes se sumaba y restaba de a uno mirando payload.old, y la REPLICA
+  // IDENTITY de la tabla es la default: el "antes" sólo trae el id, así que el
+  // estado anterior venía vacío y el contador nunca bajaba al aprobar (quedaba
+  // clavado en 3 con la base ya en cero). El set de ids ya avisados evita
+  // repetir el beep y que suene al abrir la app con pendientes viejos.
   useEffect(() => {
     if (!enabled) return
     let cancelado = false
-    async function cargar() {
-      const { count } = await supabase
+    async function recargar() {
+      const { data } = await supabase
         .from('flujo_deposito')
-        .select('id', { count: 'exact', head: true })
+        .select('id, tipo, modelo, kg_media_res, empleado_nombre')
         .eq('estado', 'pendiente')
-      if (!cancelado) setPendientes(count || 0)
+      if (cancelado) return
+      const filas = data || []
+      setPendientes(filas.length)
+      const idsActuales = new Set(filas.map(f => f.id))
+      if (primeraCarga.current) {
+        // Al abrir la app no avisamos de los que ya estaban esperando.
+        filas.forEach(f => notificadosRef.current.add(f.id))
+        primeraCarga.current = false
+      } else {
+        for (const f of filas) {
+          if (!notificadosRef.current.has(f.id)) {
+            notificadosRef.current.add(f.id)
+            setUltimo(f)
+            dispararBeep(audioCtxRef)
+            dispararNotificacionBrowser(f)
+          }
+        }
+      }
+      // El que dejó de estar pendiente sale del set: si alguna vez vuelve a
+      // pendiente, avisa de nuevo.
+      for (const id of [...notificadosRef.current]) {
+        if (!idsActuales.has(id)) notificadosRef.current.delete(id)
+      }
     }
-    cargar()
-    return () => { cancelado = true }
-  }, [enabled])
-
-  // Suscribirse a Realtime: INSERT y UPDATE
-  useEffect(() => {
-    if (!enabled) return
+    recargar()
     const canal = supabase.channel('flujo-deposito-push')
-      .on('postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'flujo_deposito' },
-        payload => {
-          const nuevo = payload.new
-          if (!nuevo) return
-          if (nuevo.estado !== 'pendiente') return
-          setPendientes(p => p + 1)
-          setUltimo(nuevo)
-          dispararBeep(audioCtxRef)
-          dispararNotificacionBrowser(nuevo)
-        })
-      .on('postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'flujo_deposito' },
-        payload => {
-          const antes = payload.old
-          const despues = payload.new
-          if (!despues) return
-          // Si cambió de pendiente a aprobado/rechazado, decrementar
-          if (antes?.estado === 'pendiente' && despues.estado !== 'pendiente') {
-            setPendientes(p => Math.max(0, p - 1))
-          }
-          if (antes?.estado !== 'pendiente' && despues.estado === 'pendiente') {
-            setPendientes(p => p + 1)
-          }
-        })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'flujo_deposito' }, () => recargar())
       .subscribe()
-    return () => supabase.removeChannel(canal)
+    // Red de seguridad: el propio admin que aprueba no depende del realtime.
+    const alCambiar = () => recargar()
+    window.addEventListener('flujo-deposito-cambio', alCambiar)
+    return () => {
+      cancelado = true
+      window.removeEventListener('flujo-deposito-cambio', alCambiar)
+      supabase.removeChannel(canal)
+    }
   }, [enabled])
 
   return { pendientes, ultimo }
