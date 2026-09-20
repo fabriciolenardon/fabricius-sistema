@@ -1,29 +1,26 @@
 // ============================================================
 // FLUJO DEPÓSITO (Admin)
 // ============================================================
-// Recibe las cargas de medias reses que envían los empleados
-// del sector desposte. Admin las corrobora y al aprobar
-// procesa según el tipo:
+// Recibe las cargas de medias reses que envían los empleados del sector
+// desposte (media_res_piezas / _kilo / _mayorista / _minorista). El admin las
+// corrobora y aprueba o rechaza: es SOLO el acuse de recibo.
 //
-//   - media_res_piezas:    abre form de desposte con modelo
-//   - media_res_kilo:      registra como desposte "KILO"
-//   - media_res_mayorista: registra como reservada mayorista
-//   - media_res_minorista: registra como reservada minorista
+// Aprobar NO toca el stock ni crea un desposte — el despacho/desposte se
+// carga a mano desde Depósito. La versión que lo hacía sola (ejecutarAprobacion
+// + ModalConfirmarDesposte) quedó desconectada hace tiempo y se borró el
+// 20/09/2026; sus controles de kg sobrevivieron en controlarKg(), que ahora
+// sí se ven, en el panel de aprobación.
 //
-// O simplemente marca como "aprobado" si ya cargó el desposte
-// manualmente desde el módulo Depósito.
+// Aprobar y rechazar se confirman DENTRO de la tarjeta: el confirm()/prompt()
+// del navegador no existe en el iPhone ni en la PWA.
 // ============================================================
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
-import { MODELOS_DESPOSTE } from '../../lib/modelosDesposte'
-import { redondearStock } from '../../lib/stockHelpers'
 import { avisarCambioFlujo } from '../../lib/useFlujoNotificaciones'
 import Paginador, { usePaginacion } from '../../components/Paginador'
 
-import { fmtPrecio, fmtKg } from '../../lib/formatos'
-// fmt sin signo $ — formato AR para mostrar números genéricos con 2 decimales
-const fmt = n => (Number(n) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+import { fmtKg } from '../../lib/formatos'
 // Fecha+hora de la aprobación en horario ARG (regla de oro: nunca la TZ del navegador)
 const fmtFechaHora = ts => ts ? new Date(ts).toLocaleString('es-AR', {
   day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit',
@@ -52,14 +49,38 @@ const LABEL_TIPO = {
   media_res_minorista:  { label: 'Minorista (entera)', icono: '🏪', color: '#7dff7d' },
 }
 
+// ────────────────────────────────────────────────────────────
+// Controles de kg antes de aprobar
+// ────────────────────────────────────────────────────────────
+// Estaban escondidos detrás de window.confirm dentro de una función que quedó
+// sin uso, así que hacía rato no protegían de nada. Ahora se ven en el panel
+// de aprobación: el bloqueo no deja seguir y los avisos piden un click extra.
+// Rango real de una media res en Fabricius: 70-140 kg.
+function controlarKg(f) {
+  const piezas = Array.isArray(f.payload?.piezas) ? f.payload.piezas : []
+  const kgPiezas = piezas.reduce((s, p) => s + (Number(p.kg) || 0), 0)
+  const kgMR = Number(f.kg_media_res) || 0
+  const avisos = []
+  // Bloqueo: ninguna pieza puede pesar más que la media res entera. Es un
+  // typo seguro (39.4 tipeado como 394), no algo para "aprobar igual".
+  const inflada = kgMR > 0 ? piezas.find(p => (Number(p.kg) || 0) > kgMR) : null
+  const bloqueo = inflada
+    ? `La pieza "${inflada.nombre}" pesa ${fmtKg(inflada.kg)} y la media res entera ${fmtKg(kgMR)}. Rechazá el flujo y pedile al operario que revise.`
+    : null
+  if (kgMR > 150) avisos.push(`La media res declara ${fmtKg(kgMR)} — el rango real es 70-140 kg.`)
+  if (kgMR > 0 && kgMR < 50) avisos.push(`La media res declara sólo ${fmtKg(kgMR)} — el rango real es 70-140 kg.`)
+  if (kgMR > 0 && kgPiezas > kgMR * 1.1) {
+    avisos.push(`La suma de las piezas (${fmtKg(kgPiezas)}) supera a la media res (${fmtKg(kgMR)}) por más del 10% — probablemente hay un kg con un dígito de más.`)
+  }
+  return { bloqueo, avisos }
+}
+
 export default function FlujoDeposito() {
   const { user, profile } = useAuth()
   const [flujos, setFlujos] = useState([])
   const [loading, setLoading] = useState(true)
   const [filtroEstado, setFiltroEstado] = useState('pendiente')
   const [msg, setMsg] = useState(null)
-  const [confirmando, setConfirmando] = useState(null) // flujo siendo confirmado en modal
-  const [procesando, setProcesando]   = useState(false)
   // Aprobar/rechazar se confirman DENTRO de la tarjeta: en el iPhone y en la
   // PWA el confirm()/prompt() del navegador se suprime sin error y la acción
   // se perdía en silencio (misma regla que el arqueo, PR #220).
@@ -67,7 +88,7 @@ export default function FlujoDeposito() {
   const [motivo, setMotivo] = useState('')
   const [guardando, setGuardando] = useState(false)
 
-  function pedirAccion(f, tipo) { setMotivo(''); setAccion({ id: f.id, tipo }) }
+  function pedirAccion(f, tipo, motivoPrevio = '') { setMotivo(motivoPrevio); setAccion({ id: f.id, tipo }) }
   function cerrarAccion() { if (!guardando) { setAccion(null); setMotivo('') } }
 
   useEffect(() => {
@@ -156,109 +177,6 @@ export default function FlujoDeposito() {
     aviso('✅ Recepción confirmada')
   }
 
-  // Ejecuta la aprobación (llamada desde el modal de confirmación)
-  async function ejecutarAprobacion(f) {
-    let modelo = f.modelo || 'KILO'
-    if (f.tipo === 'media_res_kilo') modelo = 'KILO'
-    if (f.tipo === 'media_res_mayorista') modelo = 'MAYORISTA'
-    if (f.tipo === 'media_res_minorista') modelo = 'MINORISTA'
-
-    const piezasFlujo = Array.isArray(f.payload?.piezas) ? f.payload.piezas : []
-    const kgPiezasTotal = piezasFlujo.reduce((s, p) => s + (Number(p.kg) || 0), 0)
-    const mermaCalc = f.kg_media_res > 0 && kgPiezasTotal > 0
-      ? ((f.kg_media_res - kgPiezasTotal) / f.kg_media_res) * 100 : 0
-
-    // Guardia 1: ninguna pieza individual puede pesar más que la media res.
-    // Detecta typos en un solo valor (ej. operario tipeó 394 en vez de 39.4).
-    if (f.kg_media_res > 0) {
-      const piezaInflada = piezasFlujo.find(p => (Number(p.kg) || 0) > f.kg_media_res)
-      if (piezaInflada) {
-        aviso(`⚠️ Pieza "${piezaInflada.nombre}" tiene ${piezaInflada.kg} kg pero la media res es de ${f.kg_media_res} kg. Rechazá el flujo y pedile al operario que revise.`, 'error')
-        return
-      }
-    }
-    // Guardia 2: sanity check de la media res en sí.
-    // Rango real Fabricius: 70-140 kg. > 150 kg casi seguro typo.
-    if (f.kg_media_res > 150) {
-      const ok = window.confirm(
-        `⚠️ La media res declara ${f.kg_media_res} kg.\nRango real Fabricius: 70-140 kg.\n¿Estás seguro?`
-      )
-      if (!ok) { aviso('Aprobación cancelada.', 'error'); return }
-    }
-    if (f.kg_media_res > 0 && f.kg_media_res < 50) {
-      const ok = window.confirm(
-        `⚠️ La media res declara solo ${f.kg_media_res} kg.\nRango real Fabricius: 70-140 kg.\n¿Estás seguro?`
-      )
-      if (!ok) { aviso('Aprobación cancelada.', 'error'); return }
-    }
-    // Guardia 3: si la suma de piezas supera al peso de la media res por más
-    // del 10%, casi seguro hay un typo. Pedir confirmación explícita.
-    if (f.kg_media_res > 0 && kgPiezasTotal > f.kg_media_res * 1.1) {
-      const ok = window.confirm(
-        `⚠️ ATENCIÓN — Valores sospechosos\n\n` +
-        `Media res: ${f.kg_media_res} kg\n` +
-        `Suma de piezas: ${fmtKg(kgPiezasTotal, { decimales: 2 })}\n\n` +
-        `La suma de piezas supera al peso de la media res por mucho.\n` +
-        `Probablemente el operario tipeó un kg con un dígito de más.\n\n` +
-        `¿Aprobar igual? (No recomendado)`
-      )
-      if (!ok) { aviso('Aprobación cancelada. Pedile al operario que revise los kg.', 'error'); return }
-    }
-
-    setProcesando(true)
-
-    // Insertar desposte
-    const { data: desp, error: e1 } = await supabase.from('despostes').insert({
-      fecha: f.fecha,
-      entrada_id: f.entrada_id,
-      modelo,
-      tipo_desposte: 'bovino',
-      tipo_animal: 'bovino',
-      kg_media_res: f.kg_media_res,
-      merma_pct: mermaCalc,
-      kg_neto: kgPiezasTotal || f.kg_media_res,
-      piezas: piezasFlujo,
-      notas: `Procesado desde flujo depósito #${f.id} (${f.empleado_nombre || 'empleado'})`,
-    }).select().single()
-    if (e1) { setProcesando(false); aviso('❌ Error creando desposte: ' + e1.message, 'error'); return }
-
-    // Sumar al stock cada pieza (solo si vos confirmaste en el modal)
-    for (const p of piezasFlujo) {
-      if (!p.tipo_stock || !p.kg) continue
-      const { data: stockRow } = await supabase.from('stock_actual').select('*').eq('tipo', p.tipo_stock).maybeSingle()
-      if (stockRow) {
-        await supabase.from('stock_actual').update({
-          kg_disponible: redondearStock((Number(stockRow.kg_disponible) || 0) + Number(p.kg))
-        }).eq('tipo', p.tipo_stock)
-      } else {
-        await supabase.from('stock_actual').insert({ tipo: p.tipo_stock, kg_disponible: redondearStock(p.kg) })
-      }
-    }
-
-    // Marcar entrada como despostada
-    if (f.entrada_id) {
-      await supabase.from('entradas_deposito')
-        .update({ despostada: true, desposte_id: desp.id })
-        .eq('id', f.entrada_id)
-    }
-
-    // Marcar flujo como aprobado
-    const cambios = {
-      estado: 'aprobado',
-      desposte_id: desp.id,
-      notas_admin: 'Procesado automáticamente con confirmación',
-      aprobado_por: user?.id,
-      aprobado_por_nombre: profile?.nombre || null,
-      aprobado_at: new Date().toISOString(),
-    }
-    const { error: e2 } = await supabase.from('flujo_deposito').update(cambios).eq('id', f.id)
-    setProcesando(false)
-    setConfirmando(null)
-    if (e2) { aviso('Desposte creado pero falló enlazar flujo: ' + e2.message, 'error'); return }
-    marcarLocal(f.id, cambios)
-    aviso('✅ Flujo aprobado y desposte creado en el sistema')
-  }
-
   if (loading) return <p style={{ color: 'var(--muted)' }}>Cargando flujo...</p>
 
   return (
@@ -313,6 +231,7 @@ export default function FlujoDeposito() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {pag.items.map(f => {
               const info = LABEL_TIPO[f.tipo] || { label: f.tipo, icono: '📋', color: 'var(--muted)' }
+              const ctrl = controlarKg(f)
               return (
                 <div key={f.id} className="card" style={{ padding: 14, borderColor: f.estado === 'pendiente' ? '#ffd17a' : 'var(--border)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
@@ -373,14 +292,37 @@ export default function FlujoDeposito() {
                             navegador no existe en el iPhone ni en la PWA. */}
                         {accion?.id === f.id && accion.tipo === 'aprobar' ? (
                           <div style={cajaConfirmar}>
-                            <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.45 }}>
-                              ¿Confirmar la recepción? Queda <b style={{ color: '#7dff7d' }}>APROBADO</b>.
-                              El stock NO se toca acá — el despacho/desposte lo cargás a mano desde Depósito.
-                            </div>
+                            {/* Controles de kg: el bloqueo no deja aprobar; los
+                                avisos piden confirmar a sabiendas. */}
+                            {ctrl.bloqueo ? (
+                              <div style={{ fontSize: 12, color: '#ff8b8b', lineHeight: 1.45 }}>
+                                <b>🚫 No se puede aprobar.</b><br />{ctrl.bloqueo}
+                              </div>
+                            ) : (
+                              <>
+                                {ctrl.avisos.map((a, n) => (
+                                  <div key={n} style={{ fontSize: 11.5, color: '#ffd17a', lineHeight: 1.45, marginBottom: 8 }}>
+                                    ⚠️ {a}
+                                  </div>
+                                ))}
+                                <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.45 }}>
+                                  ¿Confirmar la recepción? Queda <b style={{ color: '#7dff7d' }}>APROBADO</b>.
+                                  El stock NO se toca acá — el despacho/desposte lo cargás a mano desde Depósito.
+                                </div>
+                              </>
+                            )}
                             <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
-                              <button onClick={() => aprobar(f)} disabled={guardando} style={btnSi}>
-                                {guardando ? 'Guardando…' : '✅ Sí, confirmar'}
-                              </button>
+                              {ctrl.bloqueo ? (
+                                <button onClick={() => pedirAccion(f, 'rechazar', ctrl.bloqueo)} disabled={guardando}
+                                  style={{ ...btnSi, background: '#8b2a2a', color: '#fff' }}>
+                                  ❌ Rechazar
+                                </button>
+                              ) : (
+                                <button onClick={() => aprobar(f)} disabled={guardando}
+                                  style={ctrl.avisos.length ? { ...btnSi, background: '#ffd17a' } : btnSi}>
+                                  {guardando ? 'Guardando…' : (ctrl.avisos.length ? '⚠️ Aprobar igual' : '✅ Sí, confirmar')}
+                                </button>
+                              )}
                               <button onClick={cerrarAccion} disabled={guardando} style={btnNo}>Cancelar</button>
                             </div>
                           </div>
@@ -432,146 +374,6 @@ export default function FlujoDeposito() {
         </>
       )}
 
-    </div>
-  )
-}
-
-// ============================================================
-// Modal de confirmación detallada antes de sumar al stock
-// ============================================================
-function ModalConfirmarDesposte({ flujo, procesando, onConfirmar, onCancelar }) {
-  const piezas = Array.isArray(flujo.payload?.piezas) ? flujo.payload.piezas : []
-  const kgPiezas = piezas.reduce((s, p) => s + (Number(p.kg) || 0), 0)
-  const kgMR = Number(flujo.kg_media_res) || 0
-  const merma = kgMR - kgPiezas
-  const mermaPct = kgMR > 0 ? (merma / kgMR) * 100 : 0
-  const sinPiezas = piezas.length === 0
-
-  const labelStock = {
-    bovino_pieza:  '🍖 Bovino Piezas',
-    bovino_corte:  '🥩 Bovino Cortes',
-    bovino_mr:     '🐄 Media Reses',
-    bovino_brosa:  '🫀 Brosa',
-  }
-
-  return (
-    <div onClick={procesando ? null : onCancelar}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, overflow: 'auto' }}>
-      <div onClick={e => e.stopPropagation()}
-        style={{ background: 'var(--surface)', border: '2px solid var(--gold)', borderRadius: 14, padding: 24, maxWidth: 640, width: '100%', maxHeight: '90vh', overflow: 'auto' }}>
-        <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 28, color: 'var(--gold)', marginBottom: 6, letterSpacing: 2 }}>
-          ⚠️ CONFIRMAR APROBACIÓN
-        </div>
-        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
-          Esto va a <strong style={{ color: '#ff8b8b' }}>SUMAR al stock</strong> los kilos de cada pieza y crear el registro de desposte. Revisá bien antes de confirmar.
-        </div>
-
-        {/* Datos generales del flujo */}
-        <div style={{ padding: 14, background: 'var(--surface2)', borderRadius: 10, marginBottom: 14 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-            <span style={{ color: 'var(--muted)' }}>Empleado:</span>
-            <strong>{flujo.empleado_nombre || '—'}</strong>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-            <span style={{ color: 'var(--muted)' }}>Fecha / hora:</span>
-            <strong>{flujo.fecha} {flujo.hora?.slice(0, 5)}</strong>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-            <span style={{ color: 'var(--muted)' }}>Media res:</span>
-            <strong style={{ color: 'var(--gold)', fontFamily: "'Bebas Neue', cursive", fontSize: 22 }}>{fmtKg(flujo.kg_media_res, { decimales: 2 })}</strong>
-          </div>
-          {flujo.modelo && (
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--muted)' }}>Modelo:</span>
-              <strong>Modelo {flujo.modelo} — {flujo.payload?.modelo_nombre}</strong>
-            </div>
-          )}
-          {flujo.notas && (
-            <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>
-              📝 {flujo.notas}
-            </div>
-          )}
-        </div>
-
-        {/* Tabla de piezas a sumar al stock */}
-        {!sinPiezas ? (
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 12, color: '#ff8b8b', letterSpacing: 1, marginBottom: 8, fontWeight: 700 }}>
-              ⚠️ KILOS QUE SE SUMARÁN AL STOCK
-            </div>
-            <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ color: 'var(--muted)', fontSize: 11, textTransform: 'uppercase' }}>
-                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Pieza</th>
-                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Va al stock</th>
-                  <th style={{ textAlign: 'right', padding: '6px 8px' }}>Kg</th>
-                </tr>
-              </thead>
-              <tbody>
-                {piezas.map((p, i) => (
-                  <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
-                    <td style={{ padding: '8px 8px', fontWeight: 600 }}>{p.nombre}</td>
-                    <td style={{ padding: '8px 8px', color: 'var(--muted)', fontSize: 12 }}>
-                      {labelStock[p.tipo_stock] || p.tipo_stock || '—'}
-                    </td>
-                    <td style={{ textAlign: 'right', padding: '8px 8px', color: 'var(--gold)', fontWeight: 700 }}>
-                      +{fmtKg(p.kg, { decimales: 2 })}
-                    </td>
-                  </tr>
-                ))}
-                <tr style={{ borderTop: '2px solid var(--gold)' }}>
-                  <td colSpan={2} style={{ padding: '8px 8px', fontWeight: 700, color: '#7dff7d' }}>TOTAL al stock</td>
-                  <td style={{ textAlign: 'right', padding: '8px 8px', color: '#7dff7d', fontWeight: 800, fontFamily: "'Bebas Neue', cursive", fontSize: 20 }}>
-                    +{fmtKg(kgPiezas, { decimales: 2 })}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-
-            {/* Cuadro de merma */}
-            <div style={{
-              marginTop: 12, padding: 10, borderRadius: 8,
-              background: merma < 0 ? '#3a1a1a' : mermaPct > 10 ? '#3a2a14' : '#1a2a1a',
-              border: `1px solid ${merma < 0 ? '#ff6b6b' : mermaPct > 10 ? '#ffd17a' : '#7dff7d'}`,
-              fontSize: 13,
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>Merma del desposte:</span>
-                <strong style={{ color: merma < 0 ? '#ff8b8b' : mermaPct > 10 ? '#ffd17a' : '#7dff7d' }}>
-                  {fmtKg(Math.abs(merma), { decimales: 2 })} ({Math.abs(mermaPct).toFixed(1)}%)
-                </strong>
-              </div>
-              {merma < 0 && (
-                <div style={{ fontSize: 11, color: '#ff8b8b', marginTop: 4 }}>
-                  ⚠️ Las piezas suman MÁS que la media res. Posible error de carga.
-                </div>
-              )}
-              {mermaPct > 10 && merma > 0 && (
-                <div style={{ fontSize: 11, color: '#ffd17a', marginTop: 4 }}>
-                  ⚠️ Merma alta — verificá que el empleado haya cargado todas las piezas.
-                </div>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div style={{ padding: 14, background: 'var(--surface2)', borderRadius: 8, fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
-            ℹ️ Este flujo no tiene piezas con kilos (probablemente Mayorista/Minorista/Kilo).
-            Solo se va a crear el registro de desposte sin tocar el stock.
-          </div>
-        )}
-
-        {/* Botones */}
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button onClick={onCancelar} disabled={procesando}
-            style={{ flex: 1, padding: 14, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--muted)', borderRadius: 10, cursor: procesando ? 'not-allowed' : 'pointer', fontWeight: 600, fontSize: 14 }}>
-            ✕ Cancelar
-          </button>
-          <button onClick={onConfirmar} disabled={procesando}
-            style={{ flex: 2, padding: 14, background: 'var(--green)', color: '#000', border: 'none', borderRadius: 10, cursor: procesando ? 'wait' : 'pointer', fontWeight: 800, fontFamily: "'Bebas Neue', cursive", fontSize: 18, letterSpacing: 2 }}>
-            {procesando ? '⏳ PROCESANDO...' : (sinPiezas ? '✅ APROBAR (sin tocar stock)' : `✅ CONFIRMAR Y SUMAR ${fmtKg(kgPiezas, { decimales: 2 })} AL STOCK`)}
-          </button>
-        </div>
-      </div>
     </div>
   )
 }
