@@ -1,8 +1,9 @@
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useFlujoNotificaciones, usePedidosListosNotif } from '../../lib/useFlujoNotificaciones'
+import { BadgesNavCtx } from '../../lib/badgesNav'
 import { fechaHoyARG, horaHoyARG, diaSemanaARG } from '../../lib/fechas'
 import { lunesDeLaSemana, domingoDeLaSemana } from '../../lib/cierreAuto'
 import { fmtPrecio, fmtKg } from '../../lib/formatos'
@@ -544,6 +545,13 @@ export default function AdminLayout() {
   // filtrar las opciones CEO-only (Ejecutivo, Reportes). Antes esto estaba
   // referenciado pero nunca seteado → en mobile esos links nunca aparecían.
   useEffect(() => { window.__ceoEmail = user?.email || null }, [user?.email])
+  // Los mismos contadores del menú de arriba, para las barras laterales de
+  // adentro de cada módulo (ej. Depósito › Flujo depósito).
+  const badgesNav = useMemo(() => ({
+    pedidos: pedidosPendientes + pedidosListos,
+    whatsapp: pedidosWaNuevos + waNoLeidos,
+    deposito: flujosPendientes,
+  }), [pedidosPendientes, pedidosListos, pedidosWaNuevos, waNoLeidos, flujosPendientes])
   const [menuAbierto, setMenuAbierto] = useState(false)
   const [isMobile, setIsMobile] = useState(window.innerWidth < 900)
 
@@ -629,7 +637,7 @@ export default function AdminLayout() {
             <NavDesktop
               userEmail={user?.email}
               esSucursal={isSucursal}
-              badges={{ pedidos: pedidosPendientes + pedidosListos, whatsapp: pedidosWaNuevos + waNoLeidos, deposito: flujosPendientes }}
+              badges={badgesNav}
             />
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>
               <RelojHeader />
@@ -682,7 +690,7 @@ export default function AdminLayout() {
       {/* CONTENIDO */}
       <main style={{ paddingTop: 56, minHeight: '100vh', marginRight: panelAbierto && !isMobile ? `${panelAncho}vw` : 0 }}>
         <div style={{ padding: isMobile ? '16px 12px' : '24px 28px' }} className="fade-in">
-          <Outlet />
+          <BadgesNavCtx.Provider value={badgesNav}><Outlet /></BadgesNavCtx.Provider>
       <BuscadorGlobal />
         </div>
       </main>
