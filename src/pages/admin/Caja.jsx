@@ -62,9 +62,9 @@ export default function Caja() {
   // ARQUEO CIEGO: al cajero no se le muestra la plata facturada del día.
   // Si la ve, a la noche cuenta contra ese número en vez de contar la caja
   // de verdad. Ver el comentario largo en ArqueoCaja.jsx.
-  // `esCajero` = no puede ver lo recaudado del día (cajera de la central y
-  // bocas — ver AuthContext.cajaCiega). `esSoloCajero` sigue siendo el ROL,
-  // para lo que no es cuestión de plata a la vista.
+  // `esCajero` = no ve el TOTAL que se va acumulando en el día (cajera de la
+  // central y bocas — ver AuthContext.cajaCiega). `esSoloCajero` es el ROL:
+  // todo lo demás que el rol cajero no ve y una boca sí (PRs #399/#402).
   const { sucursalId, isSucursal: esSucursal, cajaCiega: esCajero, isCajero: esSoloCajero } = useAuth()
   // La caja se usa tambien desde el celular (la franquicia opera asi). Con
   // estilos inline no hay media queries, asi que el layout de dos columnas
@@ -1021,8 +1021,7 @@ export default function Caja() {
           // Planilla del convenio: registro contable para pasarle a Blangino
           // su 5% — es de administración, el cajero no la necesita.
           { id: 'planilla_blangino', label: '🔵 Planilla Blangino' },
-        ].filter(t => !(esCajero && t.id === 'historial'))
-         .filter(t => !(esSoloCajero && t.id === 'planilla_blangino')).map(t => (
+        ].filter(t => !(esSoloCajero && (t.id === 'historial' || t.id === 'planilla_blangino'))).map(t => (
           <button key={t.id} onClick={() => setVistaCaja(t.id)}
             style={{
               padding: '9px 20px', borderRadius: 8, border: 'none',
@@ -1035,11 +1034,11 @@ export default function Caja() {
         ))}
       </div>
 
-      {/* El `&& !esCajero` no es redundante con sacarle el botón: sin esto,
+      {/* El `&& !esSoloCajero` no es redundante con sacarle el botón: sin esto,
           alcanza con que `vistaCaja` quede en 'historial' por cualquier vía
           para que el componente se monte igual. La pestaña que no existe no
           se puede apretar, pero la vista sí se puede pedir. */}
-      {vistaCaja === 'historial' && !esCajero && <HistorialCaja />}
+      {vistaCaja === 'historial' && !esSoloCajero && <HistorialCaja />}
       {vistaCaja === 'arqueo' && <ArqueoCaja />}
       {vistaCaja === 'ticket_manual' && <TicketManualCaja onGuardado={cargarTodo} />}
       {vistaCaja === 'planilla_blangino' && !esSoloCajero && <PlanillaBlangino />}
@@ -1341,7 +1340,7 @@ export default function Caja() {
                           son 15 números que sumados dan casi el total del
                           día, o sea el esperado del arqueo por la ventana. */}
                       <div style={{ fontSize: 10, color: 'var(--muted)' }}>
-                        {p.ops} {p.ops === 1 ? 'venta' : 'ventas'}{esCajero ? '' : ` · ${fmt(p.importe)}`}
+                        {p.ops} {p.ops === 1 ? 'venta' : 'ventas'}{esSoloCajero ? '' : ` · ${fmt(p.importe)}`}
                       </div>
                     </div>
                     <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 18, color: 'var(--green)', marginLeft: 8 }}>{fmtKg(p.kg, { decimales: 2 })}</div>
