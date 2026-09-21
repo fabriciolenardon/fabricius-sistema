@@ -76,6 +76,13 @@ export function AuthProvider({ children }) {
   const isFranquicia = profile?.rol === 'franquicia'
   const isClienteMayorista = profile?.rol === 'cliente_mayorista'
   const isCajero = profile?.rol === 'cajero'
+  // CAJA A CIEGAS: el que está del lado del mostrador no ve lo recaudado del
+  // día — ni en la Caja ni mientras arquea. Son la cajera de la central y las
+  // bocas (Monte Cristo, pedido de Fabricio 21/09/2026): el arqueo es el
+  // control sobre cada mostrador, y con el esperado a la vista deja de ser un
+  // control. Los admin de la central siguen viendo todo: controlan, no son
+  // controlados. Ver la cabecera de ArqueoCaja.jsx.
+  const cajaCiega = isCajero || isSucursal
   // Dueño de la empresa: los tres admin de la central no son equivalentes —
   // hay acciones reservadas a Fabricio. Ver lib/permisos.js.
   const isCEO = isAdmin && esCEO(profile, user)
@@ -83,7 +90,7 @@ export function AuthProvider({ children }) {
   const sucursalId = profile?.sucursal_id ?? null
 
   return (
-    <AuthContext.Provider value={{ user, profile, profileMissing, loading, isAdmin, isCEO, isSucursal, sucursalId, isFranquicia, isClienteMayorista, isCajero, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, profile, profileMissing, loading, isAdmin, isCEO, isSucursal, sucursalId, isFranquicia, isClienteMayorista, isCajero, cajaCiega, signIn, signOut }}>
       {children}
     </AuthContext.Provider>
   )

@@ -62,7 +62,10 @@ export default function Caja() {
   // ARQUEO CIEGO: al cajero no se le muestra la plata facturada del día.
   // Si la ve, a la noche cuenta contra ese número en vez de contar la caja
   // de verdad. Ver el comentario largo en ArqueoCaja.jsx.
-  const { sucursalId, isSucursal: esSucursal, isCajero: esCajero } = useAuth()
+  // `esCajero` = no puede ver lo recaudado del día (cajera de la central y
+  // bocas — ver AuthContext.cajaCiega). `esSoloCajero` sigue siendo el ROL,
+  // para lo que no es cuestión de plata a la vista.
+  const { sucursalId, isSucursal: esSucursal, cajaCiega: esCajero, isCajero: esSoloCajero } = useAuth()
   // La caja se usa tambien desde el celular (la franquicia opera asi). Con
   // estilos inline no hay media queries, asi que el layout de dos columnas
   // se apila con este flag: en un telefono la columna del carrito quedaba de
@@ -1018,7 +1021,8 @@ export default function Caja() {
           // Planilla del convenio: registro contable para pasarle a Blangino
           // su 5% — es de administración, el cajero no la necesita.
           { id: 'planilla_blangino', label: '🔵 Planilla Blangino' },
-        ].filter(t => !(esCajero && (t.id === 'historial' || t.id === 'planilla_blangino'))).map(t => (
+        ].filter(t => !(esCajero && t.id === 'historial'))
+         .filter(t => !(esSoloCajero && t.id === 'planilla_blangino')).map(t => (
           <button key={t.id} onClick={() => setVistaCaja(t.id)}
             style={{
               padding: '9px 20px', borderRadius: 8, border: 'none',
@@ -1038,7 +1042,7 @@ export default function Caja() {
       {vistaCaja === 'historial' && !esCajero && <HistorialCaja />}
       {vistaCaja === 'arqueo' && <ArqueoCaja />}
       {vistaCaja === 'ticket_manual' && <TicketManualCaja onGuardado={cargarTodo} />}
-      {vistaCaja === 'planilla_blangino' && !esCajero && <PlanillaBlangino />}
+      {vistaCaja === 'planilla_blangino' && !esSoloCajero && <PlanillaBlangino />}
       {/* Vista vender: se oculta con display:none para no desmontar el estado/foco */}
       <div style={{ display: vistaCaja === 'vender' ? 'block' : 'none' }}>
 
@@ -1279,8 +1283,8 @@ export default function Caja() {
                 <div style={{ fontFamily: "'Bebas Neue',cursive", fontSize: 22, color: 'var(--green)' }}>{fmtKg(kgTotalHoy)}</div>
               </div>
               {/* Los kilos quedan: sirven para operar y no alcanzan para
-                  deducir la plata esperada en el cajón. La facturación sí,
-                  y por eso el cajero no la ve. */}
+                  deducir la plata esperada en el cajón. La facturación sí, y
+                  por eso no la ve el mostrador (cajera de la central y bocas). */}
               {!esCajero && (
                 <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: 10, textAlign: 'center' }}>
                   <div style={{ fontSize: 9, color: 'var(--muted)' }}>Facturado</div>
