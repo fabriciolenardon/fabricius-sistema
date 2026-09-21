@@ -76,12 +76,12 @@ export function AuthProvider({ children }) {
   const isFranquicia = profile?.rol === 'franquicia'
   const isClienteMayorista = profile?.rol === 'cliente_mayorista'
   const isCajero = profile?.rol === 'cajero'
-  // CAJA A CIEGAS: el que está del lado del mostrador no ve lo recaudado del
-  // día — ni en la Caja ni mientras arquea. Son la cajera de la central y las
-  // bocas (Monte Cristo, pedido de Fabricio 21/09/2026): el arqueo es el
-  // control sobre cada mostrador, y con el esperado a la vista deja de ser un
-  // control. Los admin de la central siguen viendo todo: controlan, no son
-  // controlados. Ver la cabecera de ArqueoCaja.jsx.
+  // El mostrador no ve el TOTAL que se va acumulando mientras vende: ni el
+  // "Facturado" del turno ni el "Total:" de las ventas del día. Son la cajera
+  // de la central y las bocas (Monte Cristo, pedido de Fabricio 21/09/2026).
+  // Es SÓLO ese número: el arqueo, la pestaña Historial y el resto de la Caja
+  // siguen como estaban para la boca — lo que el rol cajero además no ve va
+  // por `isCajero` (PRs #399/#402), no por acá.
   const cajaCiega = isCajero || isSucursal
   // Dueño de la empresa: los tres admin de la central no son equivalentes —
   // hay acciones reservadas a Fabricio. Ver lib/permisos.js.
