@@ -43,11 +43,11 @@ function mediosPagoResumen(v) {
 }
 
 export default function HistorialDiaCaja({ ventas = [], onChange }) {
-  // ARQUEO CIEGO: el cajero no ve el total del día sumado. Las ventas una
+  // ARQUEO CIEGO: el mostrador no ve el total del día sumado. Las ventas una
   // por una sí las ve (las necesita para encontrar y anular), pero el total
   // servido en bandeja es justo el número contra el que después "acomoda"
   // el conteo. Ver ArqueoCaja.jsx.
-  const { isAdmin, isCajero: esCajero } = useAuth()
+  const { isAdmin, cajaCiega: esCajero } = useAuth()
   const [abierta, setAbierta] = useState(null) // id de la venta expandida
   const [anulando, setAnulando] = useState(null) // id en proceso de anulación
   const [aEliminar, setAEliminar] = useState(null) // venta esperando el código

@@ -22,8 +22,10 @@
 // Es el mismo criterio de la planilla CIEGA del conteo de stock: se cuenta
 // sin la cantidad del sistema al lado.
 //
-// Los admin (Fabricio, Ariel, Giuliana) y el personal de sucursal ven todo
-// siempre: son los que controlan, no los controlados.
+// Quiénes arquean a ciegas lo decide `cajaCiega` (AuthContext): la cajera de
+// la central y el personal de las bocas — Monte Cristo entró el 21/09/2026,
+// antes veía todo. Los admin de la central (Fabricio, Ariel, Giuliana) ven
+// todo siempre: son los que controlan, no los controlados.
 //
 // TRAMPA al tocar esta pantalla: el esperado no se filtra sólo por los
 // carteles grandes. También se escapa por los avisos previos a confirmar
@@ -94,7 +96,7 @@ export default function ArqueoCaja() {
   // Permiso de dueño centralizado en lib/permisos.js (antes se comparaba
   // el email a mano acá).
   // `ciego` = arqueo a ciegas para el rol cajero (ver cabecera del archivo).
-  const { isCEO: esCEO, isCajero: ciego, profile } = useAuth()
+  const { isCEO: esCEO, cajaCiega: ciego, profile } = useAuth()
   // Resultado del arqueo recién guardado, para revelárselo al cajero DESPUÉS
   // de cerrarlo. Es una foto: se congela con los valores del guardado, así
   // el formulario se puede limpiar sin que la revelación se borre.
