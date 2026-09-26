@@ -708,7 +708,6 @@ const [tipoMilanesa, setTipoMilanesa] = useState('milanesa_carne')
 const [piezaMilaCerdo, setPiezaMilaCerdo] = useState('cerdo_pierna')
 const [kgOrigenMila, setKgOrigenMila] = useState('')
 const [kgFinalMila, setKgFinalMila] = useState('')
-const [tipoEmbutido, setTipoEmbutido] = useState('chorizo_parrillero')
 // Hamburguesas: tipo elegido, kg de materia prima (carne/pollo — el cerdo usa
 // la grilla de piezas) y kg FINALES de hamburguesas producidas (puede haber
 // merma o incremento por agregados: pan, condimentos, etc.).
@@ -731,7 +730,6 @@ const [piezasEmbutido, setPiezasEmbutido] = useState({
 const [kgCarneBovinaEmbutido, setKgCarneBovinaEmbutido] = useState('')
 const [kgQuesoEmbutido, setKgQuesoEmbutido] = useState('') // Queso Holanda (kg) del salame
 const [kgQuesoRockefordEmbutido, setKgQuesoRockefordEmbutido] = useState('')
-const [pctAumentoEmbutido, setPctAumentoEmbutido] = useState(10)
 // Peso real embutido por variedad (parrilleros). Si se carga, la merma sale sola.
 // Peso real por PRODUCTO terminado: una misma elaboración puede producir
 // chorizos comunes, saborizados Y salchichas (cada uno va a su stock).
@@ -1119,21 +1117,22 @@ setElaboraciones(elaboracionesData || [])
 async function confirmarElaboracionEmbutido() {
   const kgCerdo = Object.values(piezasEmbutido).reduce((s, v) => s + parseNumero(v), 0)
   if (kgCerdo === 0) { showAlert('Ingresá al menos una pieza de cerdo', 'error'); return }
+  // De una misma pasta salen VARIOS productos (x kg de chorizo, x de salchicha),
+  // así que lo cargado en "peso real" ES la elaboración: define qué entra a cada
+  // stock. Sin eso no hay a qué acreditar, por eso se exige — mismo criterio que
+  // el portal de Desposte (lib/elaborar.js).
+  const productosFinales = Object.entries(pesoRealEmb)
+    .map(([tipo, v]) => ({ tipo, kg: parseNumero(v) }))
+    .filter(p => p.kg > 0)
+  if (productosFinales.length === 0) {
+    showAlert('Cargá el peso real de al menos un producto terminado', 'error'); return
+  }
   setLoading(true)
   try {
     const kgTotal = kgCerdo + (parseNumero(kgCarneBovinaEmbutido))
-    // Peso real por producto terminado (chorizo común / saborizado / salchicha).
-    // Si se cargó al menos uno, ese total es el kg final y la merma sale de ahí;
-    // si no, se usa el % manual y todo el lote va al tipo elegido en el select.
-    const productosFinales = Object.entries(pesoRealEmb)
-      .map(([tipo, v]) => ({ tipo, kg: parseNumero(v) }))
-      .filter(p => p.kg > 0)
-    const totalElab = productosFinales.reduce((s, p) => s + p.kg, 0)
-    const usaReal = totalElab > 0
-    const kgFinal = parseFloat((usaReal ? totalElab : kgTotal * (1 + pctAumentoEmbutido / 100)).toFixed(2))
-    const pctFinal = kgTotal > 0 ? parseFloat(((kgFinal / kgTotal - 1) * 100).toFixed(2)) : pctAumentoEmbutido
-    // A qué bucket de stock va cada kg elaborado
-    const destinosStock = usaReal ? productosFinales : [{ tipo: tipoEmbutido, kg: kgFinal }]
+    // El peso real cargado ES el kg final, y de ahí sale la merma.
+    const kgFinal = parseFloat(productosFinales.reduce((s, p) => s + p.kg, 0).toFixed(2))
+    const pctFinal = kgTotal > 0 ? parseFloat(((kgFinal / kgTotal - 1) * 100).toFixed(2)) : 0
     const piezasUsadas = Object.entries(piezasEmbutido)
       .filter(([, v]) => parseNumero(v) > 0)
       .map(([tipo, v]) => ({ tipo, kg: parseNumero(v) }))
@@ -1144,15 +1143,15 @@ async function confirmarElaboracionEmbutido() {
       return
     }
     await supabase.from('elaboraciones_embutidos').insert({
-      fecha, tipo: 'embutido', tipo_embutido: tipoEmbutido,
+      fecha, tipo: 'embutido', tipo_embutido: productosFinales[0].tipo,
       piezas_usadas: piezasUsadas,
       kg_carne_cerdo: kgCerdo,
       kg_carne_bovina: parseNumero(kgCarneBovinaEmbutido),
       kg_elaborado: kgTotal, pct_aumento: pctFinal,
       // legacy: comunes/saborizados se siguen llenando para los reportes viejos
-      kg_comunes: usaReal ? parseNumero(pesoRealEmb.chorizo_parrillero) : null,
-      kg_saborizados: usaReal ? parseNumero(pesoRealEmb.chorizo_saborizado) : null,
-      productos_finales: destinosStock,
+      kg_comunes: parseNumero(pesoRealEmb.chorizo_parrillero) || null,
+      kg_saborizados: parseNumero(pesoRealEmb.chorizo_saborizado) || null,
+      productos_finales: productosFinales,
       kg_final: kgFinal, maduracion_completa: true, notas
     })
     for (const [tipo, v] of Object.entries(piezasEmbutido)) {
@@ -1169,7 +1168,7 @@ async function confirmarElaboracionEmbutido() {
     // Suma al stock PROPIO de cada producto terminado (mig 60) — paso
     // crítico que antes fallaba en silencio; sumarStockVerificado re-lee
     // y verifica cada bucket.
-    for (const p of destinosStock) {
+    for (const p of productosFinales) {
       await sumarStockVerificado(BUCKET_EMBUTIDO[p.tipo] || 'embutido', p.kg)
     }
     // Registrar la elaboración como entrada informativa, así aparece junto a
@@ -1181,7 +1180,7 @@ async function confirmarElaboracionEmbutido() {
       fecha,
       tipo: 'embutido',
       proveedor_nombre: 'Elaboración propia',
-      descripcion: `${destinosStock.map(p => `${NOMBRE_EMBUTIDO[p.tipo] || p.tipo} ${p.kg.toFixed(1)} kg`).join(' + ')} elaborado (${kgCerdo.toFixed(1)} kg cerdo${kgBovinaEmb > 0 ? ` + ${kgBovinaEmb.toFixed(1)} kg retazos` : ''})`,
+      descripcion: `${productosFinales.map(p => `${NOMBRE_EMBUTIDO[p.tipo] || p.tipo} ${p.kg.toFixed(1)} kg`).join(' + ')} elaborado (${kgCerdo.toFixed(1)} kg cerdo${kgBovinaEmb > 0 ? ` + ${kgBovinaEmb.toFixed(1)} kg retazos` : ''})`,
       kg: kgFinal,
       kg_real: kgFinal,
       merma_pct: 0,
@@ -1191,7 +1190,7 @@ async function confirmarElaboracionEmbutido() {
       cantidad: 1,
     })
     if (errEntrada) console.warn('No se pudo registrar la entrada de la elaboración:', errEntrada.message)
-    showAlert(`✅ ${kgFinal.toFixed(1)} kg elaborados — ${destinosStock.map(p => `${NOMBRE_EMBUTIDO[p.tipo] || p.tipo}: ${p.kg.toFixed(1)} kg`).join(' · ')} (cada uno a su stock)`)
+    showAlert(`✅ ${kgFinal.toFixed(1)} kg elaborados — ${productosFinales.map(p => `${NOMBRE_EMBUTIDO[p.tipo] || p.tipo}: ${p.kg.toFixed(1)} kg`).join(' · ')} (cada uno a su stock)`)
     setPiezasEmbutido({ cerdo_pierna: '', cerdo_paleta: '', cerdo_parrillero: '', cerdo_pechito: '', cerdo_matambre: '', cerdo_carre: '', cerdo_bondiola: '', cerdo_tocino: '' })
     setKgCarneBovinaEmbutido(''); setKgQuesoEmbutido(''); setNotas('')
     setPesoRealEmb({ chorizo_parrillero: '', chorizo_saborizado: '', chorizo_colorado: '', salchicha_parrillera: '', morcilla: '' })
@@ -2218,21 +2217,8 @@ async function confirmarDesposteCerdo() {
           ))}
         </div>
         {tipoElaboracion === 'embutido' && (
-          <div>
-            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>Tipo de embutido</label>
-            <select value={tipoEmbutido} onChange={e => setTipoEmbutido(e.target.value)} style={{ ...inp, marginBottom: 10 }}>
-              <option value="chorizo_parrillero">🌭 Chorizo Parrillero</option>
-              <option value="chorizo_saborizado">🌭 Chorizo Saborizado</option>
-              <option value="chorizo_colorado">🌶️ Chorizo Colorado</option>
-              <option value="salchicha_parrillera">🌭 Salchicha Parrillera</option>
-              <option value="morcilla">🖤 Morcilla</option>
-            </select>
-            <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>% de merma (−) o aumento (+)</label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-              <input type="text" inputMode="decimal" value={pctAumentoEmbutido} onChange={e => setPctAumentoEmbutido(parseFloat(e.target.value) || 0)}
-                style={{ ...inp, width: 90, borderColor: 'var(--gold)', textAlign: 'center', fontSize: 18, fontWeight: 700 }} />
-              <span style={{ fontSize: 12, color: 'var(--muted)' }}>% — <strong style={{ color: '#ff8b8b' }}>negativo = merma</strong> · positivo = agregados (vino, tripas, especias)</span>
-            </div>
+          <div style={{ background: 'rgba(125,181,255,0.08)', border: '1px solid rgba(125,181,255,0.3)', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#7db5ff', marginBottom: 10 }}>
+            ℹ️ No hay que elegir qué se hace: de una misma pasta pueden salir varios productos. Cargá abajo, en <strong>Peso real embutido</strong>, los kg de cada uno — eso define qué entra a cada stock y de ahí sale la merma real.
           </div>
         )}
         {tipoElaboracion === 'hamburguesa' && (
@@ -2670,16 +2656,14 @@ async function confirmarDesposteCerdo() {
               </div>
             )
           }
-          // EMBUTIDO: si se cargó el peso real (comunes + saborizados), ese es el
-          // final y la merma sale de ahí; si no, se usa el % manual.
-          const totalElabBox = Object.values(pesoRealEmb).reduce((s, v) => s + parseNumero(v), 0)
-          const usaReal = totalElabBox > 0
-          const kgFinal = usaReal ? totalElabBox : kgTotal * (1 + pctAumentoEmbutido / 100)
-          const pctMostrar = kgTotal > 0 ? ((kgFinal / kgTotal - 1) * 100) : 0
+          // EMBUTIDO: el peso real cargado por producto ES el kg final, y de ahí
+          // sale la merma. No se estima.
+          const kgFinal = Object.values(pesoRealEmb).reduce((s, v) => s + parseNumero(v), 0)
+          const pctMostrar = kgTotal > 0 && kgFinal > 0 ? ((kgFinal / kgTotal - 1) * 100) : 0
           return (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
               <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg carne total</div><div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16 }}>{kgTotal.toFixed(1)} kg</div></div>
-              <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>{`${pctMostrar >= 0 ? '+' : ''}${pctMostrar.toFixed(1)}% ${usaReal ? '(real)' : pctMostrar >= 0 ? 'agregados' : 'merma'}`}</div><div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, color: (kgFinal - kgTotal) >= 0 ? 'var(--green)' : 'var(--red-light)' }}>{(kgFinal - kgTotal) >= 0 ? '+' : ''}{(kgFinal - kgTotal).toFixed(1)} kg</div></div>
+              <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>{kgFinal > 0 ? `${pctMostrar >= 0 ? '+' : ''}${pctMostrar.toFixed(1)}% (real)` : 'falta el peso real'}</div><div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, color: (kgFinal - kgTotal) >= 0 ? 'var(--green)' : 'var(--red-light)' }}>{(kgFinal - kgTotal) >= 0 ? '+' : ''}{(kgFinal - kgTotal).toFixed(1)} kg</div></div>
               <div><div style={{ fontSize: 10, color: 'var(--muted)' }}>Kg finales</div><div style={{ fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 16, color: 'var(--gold)' }}>{kgFinal.toFixed(1)} kg</div></div>
             </div>
           )
