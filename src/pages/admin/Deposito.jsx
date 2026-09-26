@@ -48,6 +48,11 @@ const NOMBRE_EMBUTIDO = {
   salchicha_parrillera: 'Salchicha Parrillera',
   morcilla: 'Morcilla',
   salame_comun: 'Salame Común',
+  // De una misma tanda salen los dos: parte se envasa y parte queda con reipa
+  // para vender suelta. Este tipo NO se elige al cargar la elaboración —
+  // aparece recién al pesar seco, para repartir los kilos entre los dos
+  // buckets (pedido de Fabricio, 26/09/2026).
+  salame_comun_sin_envasar: 'Salame Común sin envasar',
   salame_rockeford: 'Salame Rockeford',
   salame_holanda: 'Salame Holanda',
   bondiola_fiambre: 'Bondiola Fiambre',
@@ -130,7 +135,11 @@ const BUCKET_EMBUTIDO = {
   chorizo_colorado: 'emb_chorizo_colorado',
   salchicha_parrillera: 'emb_salchicha_parrillera',
   morcilla: 'emb_morcilla',
-  salame_comun: 'emb_salame_comun',
+  // Lo que se elabora se envasa casi todo (es el producto que se vende): el
+  // peso final envasado va al bucket del envasado y lo que quede suelto al
+  // del sin envasar (mig 154).
+  salame_comun: 'emb_salame_envasado',
+  salame_comun_sin_envasar: 'emb_salame_comun',
   salame_rockeford: 'emb_salame_rockeford',
   salame_holanda: 'emb_salame_holanda',
   // Fiambres madurados (mig 151): la pieza de cerdo elegida se sala, madura
@@ -1446,11 +1455,16 @@ async function confirmarElaboracionSalame() {
     const vars = Array.isArray(elab.productos_finales) && elab.productos_finales.length
       ? elab.productos_finales
       : [{ tipo: elab.tipo_embutido || 'salame_comun', kg_neto: Number(elab.kg_elaborado) || 0 }]
-    const finalizados = vars.map(v => ({
-      tipo: v.tipo,
-      kg_neto: Number(v.kg_neto) || 0,
-      kg_final: parseNumero(finales?.[v.tipo]),
-    }))
+    // El salame común se pesa en DOS: lo que se envasó y lo que quedó con
+    // reipa para vender suelto. Cada parte va a su bucket. Los kg netos son de
+    // la tanda entera, así que quedan en la primera fila para no duplicarlos
+    // en la cuenta de la merma.
+    const finalizados = vars.flatMap(v => v.tipo === 'salame_comun'
+      ? [
+          { tipo: 'salame_comun', kg_neto: Number(v.kg_neto) || 0, kg_final: parseNumero(finales?.salame_comun) },
+          { tipo: 'salame_comun_sin_envasar', kg_neto: 0, kg_final: parseNumero(finales?.salame_comun_sin_envasar) },
+        ]
+      : [{ tipo: v.tipo, kg_neto: Number(v.kg_neto) || 0, kg_final: parseNumero(finales?.[v.tipo]) }])
     const totalFinal = finalizados.reduce((s, v) => s + (v.kg_final || 0), 0)
     if (!(totalFinal > 0)) { showAlert('Ingresá los kg finales (pesados secos) de al menos una variedad', 'error'); return }
     setLoading(true)
@@ -1458,7 +1472,7 @@ async function confirmarElaboracionSalame() {
       // Sumar cada variedad a SU bucket (mig 60e) con verificación.
       for (const v of finalizados) {
         if (v.kg_final > 0) {
-          await sumarStockVerificado(BUCKET_EMBUTIDO[v.tipo] || 'emb_salame_comun', v.kg_final)
+          await sumarStockVerificado(BUCKET_EMBUTIDO[v.tipo] || 'emb_salame_envasado', v.kg_final)
         }
       }
       // pct_aumento = merma real (negativa) sobre el total de la tanda.
@@ -3342,12 +3356,21 @@ function HistorialElaboraciones({ elaboraciones, onFinalizarSalame, onEditarProd
                 const vars = Array.isArray(e.productos_finales) && e.productos_finales.length
                   ? e.productos_finales
                   : [{ tipo: e.tipo_embutido || 'salame_comun' }]
+                // Del salame común se pesan DOS cosas: lo que se envasó y lo
+                // que quedó con reipa para vender suelto. Cada una tiene su
+                // stock, así que se cargan por separado.
+                const filas = vars.flatMap(v => v.tipo === 'salame_comun'
+                  ? [
+                      { tipo: 'salame_comun', label: '📦 Salame común ENVASADO', kg_neto: v.kg_neto },
+                      { tipo: 'salame_comun_sin_envasar', label: '🥖 Salame común SIN ENVASAR (con reipa)' },
+                    ]
+                  : [{ tipo: v.tipo, label: NOMBRE_EMBUTIDO[v.tipo] || v.tipo, kg_neto: v.kg_neto }])
                 return (
                   <div style={{ marginTop: 8, padding: 10, background: 'var(--surface2)', borderRadius: 8 }}>
                     <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>{e.tipo === 'fiambre' ? '🔓 Peso final, ya secado — va al stock de venta:' : '🔓 Peso final pesado seco de cada variedad — cada uno va a su stock:'}</div>
-                    {vars.map(v => (
+                    {filas.map(v => (
                       <div key={v.tipo} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                        <span style={{ fontSize: 13 }}>{NOMBRE_EMBUTIDO[v.tipo] || v.tipo}{Number(v.kg_neto) > 0 ? ` · ${Number(v.kg_neto).toFixed(1)} kg netos` : ''}</span>
+                        <span style={{ fontSize: 13 }}>{v.label}{Number(v.kg_neto) > 0 ? ` · ${Number(v.kg_neto).toFixed(1)} kg netos` : ''}</span>
                         <input
                           type="text" inputMode="decimal"
                           value={kgFinales[v.tipo] || ''}
