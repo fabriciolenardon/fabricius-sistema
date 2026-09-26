@@ -119,9 +119,11 @@ const ORIGEN_HAMBURGUESA = {
 // Bucket de stock PROPIO de cada embutido elaborado (mig 60, modelo "cerdo
 // piezas"): la elaboración suma acá y la venta descuenta de acá (vía
 // precios.stock_origen — la caja y las salidas lo priorizan sobre la
-// categoría). Los embutidos no elaborados (jamón crudo, arrollado, etc.)
-// no trackean stock. Cada tipo de salame tiene su propio bucket (mig 60e):
-// Salame Casero Env./sin Env. → común; Holanda y Rockeford → el suyo.
+// categoría). Desde la mig 153 los comprados
+// (jamón crudo, queso de cerdo, arrollado y chorizo Cuné) también tienen su
+// bucket y entran por Ingresos. Cada tipo de salame tiene el suyo (mig 60e).
+// Lo que se ELABORA es siempre el salame común: envasarlo es un paso
+// posterior, así que emb_salame_envasado (mig 153) no se acredita acá.
 const BUCKET_EMBUTIDO = {
   chorizo_parrillero: 'emb_chorizo_parrillero',
   chorizo_saborizado: 'emb_chorizo_saborizado',
