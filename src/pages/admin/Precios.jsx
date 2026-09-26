@@ -563,6 +563,10 @@ export default function Precios() {
   }, [ofertasVigentesTodas])
   const ofertasVencidas = ofertas.filter(o => !o.activa || o.fecha_fin < hoy)
   const productosFiltrados = precios.filter(p => p.categoria === filtro)
+  // La columna "Sale de" sólo tiene sentido donde el bucket se define por
+  // producto (cerdo, embutido, brosa y las categorías personalizadas): en los
+  // cortes de bovino sale de la categoría y del nombre, no de la ficha.
+  const muestraBucket = permiteStockOrigen(filtro)
   const productosBusqueda = precios.filter(p => p.nombre.toLowerCase().includes(busquedaOferta.toLowerCase()))
 
   // Precios vigentes aplicando ofertas (selectivamente según las listas marcadas).
@@ -962,6 +966,12 @@ export default function Precios() {
               <thead><tr>
                 <th>Producto</th>
                 <th style={{ width: 70 }}>⚖️ PLU</th>
+                {/* De qué bucket descuenta cada producto, para verlo de un
+                    vistazo sin entrar a editarlo uno por uno. Sólo en las
+                    categorías donde el campo manda (cerdo, embutido, brosa y
+                    las personalizadas): en los cortes de bovino el bucket sale
+                    de la categoría y del nombre, no de acá. */}
+                {muestraBucket && <th style={{ color: '#7dff7d' }}>📦 Sale de</th>}
                 {/* Carnicería es el precio con el que la central le vende a las
                     carnicerías: para una sucursal es su precio de COMPRA, no
                     de venta. Era la única tabla que todavía lo mostraba. */}
@@ -975,6 +985,15 @@ export default function Precios() {
                   <tr key={p.id}>
                     <td style={{ fontWeight: 500 }}>{p.nombre}</td>
                     <td>{p.codigo_balanza ? <span style={{ background: 'var(--gold)', color: '#000', padding: '2px 8px', borderRadius: 4, fontFamily: 'monospace', fontSize: 12, fontWeight: 700 }}>{p.codigo_balanza}</span> : <span style={{ color: 'var(--muted)', fontSize: 11 }}>—</span>}</td>
+                    {muestraBucket && (
+                      <td style={{ fontSize: 11.5 }}>
+                        {p.stock_origen
+                          ? <span style={{ color: '#7dff7d' }}>{prettyBucket(p.stock_origen)}</span>
+                          : p.stock_no_aplica
+                            ? <span style={{ color: 'var(--muted)' }}>🚫 No descuenta</span>
+                            : <span style={{ color: 'var(--amber)', fontWeight: 700 }}>⚠️ Sin asignar</span>}
+                      </td>
+                    )}
                     {!esSucursal && <td style={{ color: 'var(--red-light)', fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 14 }}>{fmt(p.precio_carniceria)}</td>}
                     <td style={{ color: 'var(--amber)', fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 14 }}>{fmt(p.precio_mayorista)}</td>
                     <td style={{ color: 'var(--green)', fontFamily: "'IBM Plex Mono',monospace", fontVariantNumeric: 'tabular-nums', fontSize: 14 }}>{fmt(p.precio_minorista)}</td>
