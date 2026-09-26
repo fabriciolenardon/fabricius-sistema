@@ -427,6 +427,21 @@ export function diffItemsRemito(itemsAntes, itemsDespues) {
   return { quitados, agregados }
 }
 
+// Categorías que se venden por UNIDAD (no por kg). Para estas el form
+// muestra "Cantidad" en vez de "Kg", el step es entero, y el carrito
+// muestra "X u" en vez de "X kg". Las cajas CB/PT además validan stock.
+// A nivel de módulo (como CATEGORIA_A_STOCK) porque también la necesita
+// RemitosTab, al agregar un producto editando un remito.
+const CATEGORIAS_POR_UNIDAD = new Set([
+  'pollo_cajon',     // 🍗 Pollo Cajón
+  'rebozado_cajon',  // 🧊 Rebozado Cajón
+  'almacen',         // 🛒 Almacén
+  'bebidas',         // 🥤 Bebidas
+  'bovino_caja_cb',  // 📦 Caja CB
+  'bovino_caja_pt',  // 📦 Caja PT
+  'insumos',         // 🧰 Insumos (se venden por unidad, NO descuentan stock)
+])
+
 const CATEGORIA_A_STOCK = {
   bovino_mr: 'bovino_mr',
   bovino_corte: 'bovino_corte',
@@ -4983,18 +4998,6 @@ export function SalidaForm({ onSaved, showAlert, onRemito, setTab }) {
     if (typeof showAlert === 'function') showAlert('🧾 Remito precargado desde el pedido. Revisá kilos/productos y emitilo.')
   }, [todosPrecios])
 
-  // Categorías que se venden por UNIDAD (no por kg). Para estas el form
-  // muestra "Cantidad" en vez de "Kg", el step es entero, y el carrito
-  // muestra "X u" en vez de "X kg". Las cajas CB/PT además validan stock.
-  const CATEGORIAS_POR_UNIDAD = new Set([
-    'pollo_cajon',     // 🍗 Pollo Cajón
-    'rebozado_cajon',  // 🧊 Rebozado Cajón
-    'almacen',         // 🛒 Almacén
-    'bebidas',         // 🥤 Bebidas
-    'bovino_caja_cb',  // 📦 Caja CB
-    'bovino_caja_pt',  // 📦 Caja PT
-    'insumos',         // 🧰 Insumos (se venden por unidad, NO descuentan stock)
-  ])
   const esUnidad = CATEGORIAS_POR_UNIDAD.has(form.categoria)
   const esCaja = form.categoria === 'bovino_caja_cb' || form.categoria === 'bovino_caja_pt'
   const esCombos = form.categoria === 'combos'
@@ -6486,6 +6489,15 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
 
   function quitarItemEdit(idx) { setItemsEdit(prev => prev.filter((_, i) => i !== idx)) }
 
+  // El ítem tiene que salir IGUAL que uno agregado al crear el remito (ver el
+  // `const item` de la carga normal): `stock_origen` es lo que decide de qué
+  // bucket se descuenta, y sin él las categorías que dependen de ese campo
+  // —cerdo, embutidos, brosa— están mapeadas a null y NO DESCUENTAN NADA.
+  // Bug real del 26/09/2026: al corregir el remito 2551 de Gabriel Castillo
+  // (COSTILLA DE TERNERA → COSTILLA DE CERDO), la ternera volvió bien a
+  // bovino_corte pero los 20,2 kg de cerdo nunca salieron de cerdo_pechito.
+  // `kg_por_unidad` es lo mismo para los cajones: sin él, un cajón de pollo
+  // descuenta 1 kg en vez de 20.
   function agregarItemEdit() {
     if (!nuevoKg || !nuevoPrecio || !nuevoProductoId) return
     const prod = todosPrecios.find(p => p.id === nuevoProductoId)
@@ -6494,7 +6506,10 @@ function showAlert(msg, type = 'success') { setAlert({ msg, type }); setTimeout(
       kg: parseNumero(nuevoKg),
       precio: parseNumero(nuevoPrecio),
       importe: parseNumero(nuevoKg) * parseNumero(nuevoPrecio),
-      tipo: nuevaCategoria
+      tipo: nuevaCategoria,
+      unidad: CATEGORIAS_POR_UNIDAD.has(nuevaCategoria) ? 'u' : 'kg',
+      stock_origen: prod?.stock_origen || null,
+      kg_por_unidad: prod?.kg_por_unidad || null,
     }
     setItemsEdit(prev => [...prev, item])
     setNuevoKg(''); setNuevoPrecio(''); setNuevoProductoId(''); setNuevaCategoria('')
