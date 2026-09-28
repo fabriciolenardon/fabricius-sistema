@@ -41,6 +41,9 @@ export default function Cheques() {
   // 🔍 Buscador: por número de serie, cliente, beneficiario/endosado, banco o nota.
   // Filtra las DOS pestañas a la vez — abajo del input se ve cuántos matchean en cada una.
   const [busqueda, setBusqueda] = useState('')
+  // Rechazo de un cheque recibido: confirmación inline con motivo. Nada de
+  // window.confirm, que en iOS/PWA se suprime sin error.
+  const [rech, setRech] = useState(null) // { id, motivo } | null
 
   const recibidosTodos = cheques.filter(ch => ch.origen !== 'emitido')
   const emitidosTodos = cheques.filter(ch => ch.origen === 'emitido')
@@ -131,6 +134,29 @@ export default function Cheques() {
     fetchCheques()
   }
 
+  // El banco lo rechazó: el cheque NO se borra (es el comprobante de que el
+  // cliente lo entregó) pero deja de ser plata por cobrar y sale de los avisos
+  // de vencimiento. La cuenta corriente NO se toca acá: si el pago ya estaba
+  // cargado hay que anularlo desde Clientes, que es donde queda el rastro.
+  async function marcarRechazado(ch, motivo) {
+    const { error } = await supabase.from('cheques')
+      .update({ estado: 'rechazado', fecha_rechazo: fechaHoyARG(), motivo_rechazo: motivo || null })
+      .eq('id', ch.id)
+    if (error) { showAlert(error.message, 'error'); return false }
+    showAlert(`⚠️ Cheque #${ch.numero} marcado como RECHAZADO — revisá si el pago sigue cargado en la cta cte de ${ch.cliente_nombre || 'el cliente'}`)
+    fetchCheques()
+    return true
+  }
+
+  async function deshacerRechazo(ch) {
+    const { error } = await supabase.from('cheques')
+      .update({ estado: 'pendiente', fecha_rechazo: null, motivo_rechazo: null })
+      .eq('id', ch.id)
+    if (error) { showAlert(error.message, 'error'); return }
+    showAlert(`↩️ Cheque #${ch.numero} vuelve a pendiente`)
+    fetchCheques()
+  }
+
   // Emitidos pendientes cuya fecha ya llegó (hoy o vencidos) → hay que cubrirlos.
   // Sobre el listado COMPLETO (no el filtrado): buscar algo no puede esconder
   // el aviso de un cheque propio que hay que levantar.
@@ -196,7 +222,7 @@ export default function Cheques() {
           <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>
             <span>
               📥 <b style={{ color: 'var(--text)' }}>{recibidos.length}</b> recibido{recibidos.length !== 1 ? 's' : ''}
-              {recibidos.length > 0 && <> por <b style={{ color: 'var(--green)' }}>{fmt(recibidos.reduce((s, ch) => s + (Number(ch.monto) || 0), 0))}</b></>}
+              {recibidos.length > 0 && <> por <b style={{ color: 'var(--green)' }}>{fmt(recibidos.filter(ch => ch.estado !== 'rechazado').reduce((s, ch) => s + (Number(ch.monto) || 0), 0))}</b></>}
             </span>
             <span>
               📤 <b style={{ color: 'var(--text)' }}>{emitidos.length}</b> emitido{emitidos.length !== 1 ? 's' : ''}
@@ -284,23 +310,69 @@ export default function Cheques() {
 
         <div className="card">
           <div className="card-title">Cheques recibidos ({recibidos.length})</div>
-          {pag.items.map(ch => (
-            <div key={ch.id} style={{ background: 'var(--surface2)', borderRadius: 10, padding: 14, marginBottom: 10 }}>
+          {pag.items.map(ch => {
+            const rechazado = ch.estado === 'rechazado'
+            return (
+            <div key={ch.id} style={{ background: 'var(--surface2)', borderRadius: 10, padding: 14, marginBottom: 10, opacity: rechazado ? 0.75 : 1, border: rechazado ? '1px solid #5a2a2a' : 'none' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
-                  <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 18, color: 'var(--gold)' }}>{ch.tipo === 'echeq' ? '📱' : '📄'} #{ch.numero}</div>
+                  <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 18, color: rechazado ? 'var(--muted)' : 'var(--gold)', textDecoration: rechazado ? 'line-through' : 'none' }}>{ch.tipo === 'echeq' ? '📱' : '📄'} #{ch.numero}</div>
                   <div style={{ fontSize: 11, color: 'var(--muted)' }}>{ch.cliente_nombre}{ch.banco ? ' · ' + ch.banco : ''}</div>
                   <div style={{ fontSize: 11, color: 'var(--muted)' }}>{ch.fecha_recepcion}{ch.fecha_pago ? ' → ' + ch.fecha_pago : ''}</div>
+                  {rechazado && ch.motivo_rechazo && (
+                    <div style={{ fontSize: 11, color: '#ff8b8b', marginTop: 4 }}>Motivo: {ch.motivo_rechazo}</div>
+                  )}
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 22, color: 'var(--green)' }}>{fmt(ch.monto)}</div>
-                  <span className={`badge ${ch.destino === 'endoso' ? 'badge-amber' : 'badge-teal'}`}>
-                    {ch.destino === 'endoso' ? '→ ' + ch.proveedor_nombre : 'En cartera'}
-                  </span>
+                  <div style={{ fontFamily: "'Bebas Neue', cursive", fontSize: 22, color: rechazado ? 'var(--muted)' : 'var(--green)', textDecoration: rechazado ? 'line-through' : 'none' }}>{fmt(ch.monto)}</div>
+                  {rechazado ? (
+                    <span className="badge badge-red">⚠️ Rechazado{ch.fecha_rechazo ? ' ' + fmtFecha(ch.fecha_rechazo) : ''}</span>
+                  ) : (
+                    <span className={`badge ${ch.destino === 'endoso' ? 'badge-amber' : 'badge-teal'}`}>
+                      {ch.destino === 'endoso' ? '→ ' + ch.proveedor_nombre : 'En cartera'}
+                    </span>
+                  )}
+                  <div style={{ marginTop: 8 }}>
+                    {rechazado ? (
+                      <button onClick={() => deshacerRechazo(ch)}
+                        style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 11, color: 'var(--muted)' }}>
+                        ↩️ Deshacer
+                      </button>
+                    ) : (
+                      <button onClick={() => setRech(rech?.id === ch.id ? null : { id: ch.id, motivo: '' })}
+                        title="El banco rechazó este cheque"
+                        style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: 'var(--red-light)' }}>
+                        ⚠️ Rechazado
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
+              {rech?.id === ch.id && (
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #5a2a2a' }}>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+                    Sale de los vencimientos y deja de contar como plata por cobrar. El cheque queda registrado.
+                    {' '}<strong style={{ color: '#ff8b8b' }}>Si el pago ya está cargado en la cuenta corriente, anulalo desde Clientes.</strong>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <input autoFocus value={rech.motivo} onChange={e => setRech(x => ({ ...x, motivo: e.target.value }))}
+                      placeholder="Motivo (ej. sin fondos)"
+                      style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '6px 10px', fontSize: 12, fontFamily: "'DM Sans',sans-serif", width: 220, maxWidth: '100%' }} />
+                    <button onClick={async () => { if (await marcarRechazado(ch, rech.motivo.trim())) setRech(null) }}
+                      disabled={!rech.motivo.trim()}
+                      style={{ background: rech.motivo.trim() ? 'var(--red-light)' : 'var(--surface2)', border: 'none', borderRadius: 6, padding: '6px 14px', cursor: rech.motivo.trim() ? 'pointer' : 'not-allowed', fontSize: 12, fontWeight: 700, color: rech.motivo.trim() ? '#000' : 'var(--muted)' }}>
+                      ⚠️ Sí, rechazado
+                    </button>
+                    <button onClick={() => setRech(null)}
+                      style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 14px', cursor: 'pointer', fontSize: 12, color: 'var(--muted)' }}>
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
-          ))}
+            )
+          })}
           {recibidos.length === 0 && <div className="empty">{q ? `Ningún cheque recibido matchea "${busqueda.trim()}"` : 'Sin cheques registrados'}</div>}
           <Paginador {...pag.controles} label="cheques" />
         </div>

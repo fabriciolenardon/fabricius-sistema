@@ -130,7 +130,7 @@ function useNotificaciones() {
       const haceUnAno = new Date(hoy.getFullYear() - 1, hoy.getMonth(), hoy.getDate())
 
       const [{ data: cheques }, { data: chequesEmitidos }, { data: clientes }, { data: cierres }, { data: stockData }, { data: cuentasFiscales }, { data: facturasRecientes }, { data: impuestosRecientes }, { data: productosStock }] = await Promise.all([
-        supabase.from('cheques').select('*').neq('origen', 'emitido').gte('fecha_pago', hoyStr).lte('fecha_pago', en15Str),
+        supabase.from('cheques').select('*').neq('origen', 'emitido').neq('estado', 'rechazado').gte('fecha_pago', hoyStr).lte('fecha_pago', en15Str),
         // Cheques propios pendientes de imputar que se debitan en ≤7 días (o ya vencieron)
         supabase.from('cheques').select('*').eq('origen', 'emitido').neq('estado', 'imputado').lte('fecha_pago', fechaHoyARG(new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + 7))),
         supabase.from('clientes').select('*').gt('saldo', 0).order('saldo', { ascending: false }),
