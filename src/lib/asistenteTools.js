@@ -1005,7 +1005,8 @@ export async function ejecutarFuncion(nombre, args) {
       }
 
       case 'consultar_cheques': {
-        const { data, error } = await supabase.from('cheques').select('*').neq('estado', 'imputado').order('fecha_pago')
+        // Los rechazados no son cartera: no se van a cobrar.
+        const { data, error } = await supabase.from('cheques').select('*').neq('estado', 'imputado').neq('estado', 'rechazado').order('fecha_pago')
         if (error) throw error
         if (!data || data.length === 0) return { resultado: 'No hay cheques pendientes en cartera.' }
         const hoyD = new Date(fechaHoyARG() + 'T12:00')

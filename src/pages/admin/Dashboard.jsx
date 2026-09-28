@@ -67,7 +67,7 @@ export default function Dashboard() {
       supabase.from('remitos').select('*').order('created_at', { ascending: false }).limit(5),
       // Sin "solo balance" (facturas que paga un tercero, no son gasto nuestro)
       supabase.from('gastos').select('*').eq('solo_balance', false).order('fecha', { ascending: false }).limit(5),
-      supabase.from('cheques').select('*').neq('origen', 'emitido').order('fecha_pago', { ascending: true }).limit(20),
+      supabase.from('cheques').select('*').neq('origen', 'emitido').neq('estado', 'rechazado').order('fecha_pago', { ascending: true }).limit(20),
       // Cheques propios (emitidos) pendientes de imputar
       supabase.from('cheques').select('*').eq('origen', 'emitido').neq('estado', 'imputado').order('fecha_pago', { ascending: true }),
       supabase.from('precios').select('categoria'),

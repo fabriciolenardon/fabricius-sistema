@@ -23,7 +23,7 @@ export async function armarBriefing() {
       supabase.from('ventas_minoristas').select('total').eq('origen', 'caja').eq('fecha', antier),
       // Cheques POR COBRAR (no emitidos) que vencen entre hoy y 3 días
       supabase.from('cheques').select('numero, cliente_nombre, monto, fecha_pago')
-        .neq('estado', 'imputado').neq('origen', 'emitido')
+        .neq('estado', 'imputado').neq('estado', 'rechazado').neq('origen', 'emitido')
         .gte('fecha_pago', hoy).lte('fecha_pago', en3dias).order('fecha_pago'),
       supabase.from('stock_actual').select('tipo, kg_disponible'),
     ])

@@ -250,7 +250,7 @@ function useDashboardData(refreshMs = 120000) {
       supabase.from('cuentas_fiscales').select('*').eq('activa', true).then(r => r).catch(() => ({ data: null })),
       supabase.from('facturas').select('cuenta_id, monto_total, fecha').eq('tipo', 'emitida').gte('fecha', fechaHaceDias(365)).then(r => r).catch(() => ({ data: null })),
       supabase.from('stock_actual').select('*'),
-      supabase.from('cheques').select('*').gte('fecha_pago', hoy).lte('fecha_pago', fechaHaceDias(-15)),
+      supabase.from('cheques').select('*').neq('estado', 'rechazado').gte('fecha_pago', hoy).lte('fecha_pago', fechaHaceDias(-15)),
       supabase.from('clientes').select('nombre, saldo').gt('saldo', 0).order('saldo', { ascending: false }).limit(15),
       // solo_balance: facturas a nombre de la SAS que paga un tercero — no son gasto nuestro
       supabase.from('gastos').select('tipo, monto, fecha, solo_balance').gte('fecha', mesIni).lte('fecha', hoy),
