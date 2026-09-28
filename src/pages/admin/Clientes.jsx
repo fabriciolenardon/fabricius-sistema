@@ -3,10 +3,11 @@
 // =============================================
 import { useEffect, useState, useMemo, Fragment } from 'react'
 import { supabase, fetchAllRows } from '../../lib/supabase'
-import { fechaHoyARG } from '../../lib/fechas'
+import { fechaHoyARG, fmtFechaHoraARG } from '../../lib/fechas'
 import { parseNumero, fmtPrecio } from '../../lib/formatos'
 import { imprimirHTML } from '../../lib/imprimir'
 import { recomputarSaldoCliente, conSaldoCorriente } from '../../lib/ctaCorriente'
+import { auditoria, movimientosCtacteEliminados } from '../../lib/auditoria'
 import { lunesDeLaSemana } from '../../lib/cierreAuto'
 import { getEtiquetaLista, listasDeVenta, listaPorDefecto } from '../../lib/listasPrecios'
 import { useAuth } from '../../context/AuthContext'
@@ -32,6 +33,9 @@ export function Clientes() {
   const [clientes, setClientes] = useState([])
   const [seleccionado, setSeleccionado] = useState(null)
   const [movimientos, setMovimientos] = useState([])
+  // Movimientos que se borraron: no viven en el ledger (sumarían), se leen
+  // del log de auditoría para poder mostrar QUÉ se borró, quién y por qué.
+  const [eliminados, setEliminados] = useState([])
   const [remitos, setRemitos] = useState([])
   const [showForm, setShowForm] = useState(false)
   const [showPago, setShowPago] = useState(false)
@@ -172,6 +176,7 @@ async function seleccionar(cliente) {
     setMovimientos(conSaldoCorriente(movs))
     const { data: rems } = await fetchAllRows(() => supabase.from('remitos').select('*').eq('cliente_id', cliente.id).order('created_at', { ascending: false }))
     setRemitos(rems || [])
+    setEliminados(await movimientosCtacteEliminados(cliente.id))
   }
   // Reporte de cobranzas por período: suma, por cliente, los remitos (compras) y
   // los pagos de un rango de fechas — aislado del saldo acumulado. Sirve para ver
@@ -230,15 +235,23 @@ async function seleccionar(cliente) {
     eliminado_por: eliminadoPor,
     eliminado_en: new Date().toISOString()
   }).eq('id', remito.id)
+  // El remito queda marcado como eliminado, pero sus movimientos de cta cte se
+  // borran de verdad (en el ledger seguirían sumando). Se loguean antes para
+  // que el historial pueda mostrar qué se fue y por qué.
+  const { data: movsDelRemito } = await supabase.from('movimientos_ctacte').select('*').eq('remito_id', remito.id)
+  for (const m of movsDelRemito || []) {
+    await auditoria.eliminarMovimientoCtacte(m, seleccionado.nombre, `Anulación del remito N° ${remito.numero}`)
+  }
   await supabase.from('movimientos_ctacte').delete().eq('remito_id', remito.id)
   const nuevoSaldo = await recomputarSaldoCliente(seleccionado.id)
   setSeleccionado(prev => ({ ...prev, saldo: nuevoSaldo }))
   setClientes(prev => prev.map(c => c.id === seleccionado.id ? { ...c, saldo: nuevoSaldo } : c))
   const { data: rems } = await supabase.from('remitos').select('*').eq('cliente_id', seleccionado.id).order('created_at', { ascending: false })
   setRemitos(rems || [])
+  setEliminados(await movimientosCtacteEliminados(seleccionado.id))
 }
-async function eliminarMovimiento(mov) {
-  if (!confirm(`¿Eliminar este movimiento de ${fmt(mov.debe || mov.haber)}?`)) return
+async function eliminarMovimiento(mov, motivo) {
+  await auditoria.eliminarMovimientoCtacte(mov, seleccionado.nombre, motivo)
   await supabase.from('movimientos_ctacte').delete().eq('id', mov.id)
   // Recalcular el saldo desde el ledger (antes se ajustaba a mano; el caso del
   // pago hacía `saldo + mov.haber`, que con numeric=string CONCATENA en vez de sumar).
@@ -247,6 +260,7 @@ async function eliminarMovimiento(mov) {
   setMovimientos(conSaldoCorriente(movs))
   setSeleccionado(prev => ({ ...prev, saldo: nuevoSaldo }))
   setClientes(prev => prev.map(c => c.id === seleccionado.id ? { ...c, saldo: nuevoSaldo } : c))
+  setEliminados(await movimientosCtacteEliminados(seleccionado.id))
 }
   // ============================================================
   // PORTAL DE CLIENTES
@@ -413,15 +427,19 @@ async function eliminarMovimiento(mov) {
   // Anula un pago específico — invierte el efecto en saldo y elimina el movimiento.
   // Bajado desde eliminarMovimiento pero usable directamente desde la nueva
   // tabla de pagos.
-  async function anularPago(mov) {
-    if (mov.tipo !== 'pago' && mov.tipo !== 'cheque') return
-    const msg = `¿Anular este pago de ${fmt(mov.haber)} (${mov.descripcion})?\n\n` +
-                `El saldo del cliente subirá en ${fmt(mov.haber)}.`
-    if (!confirm(msg)) return
-    await supabase.from('movimientos_ctacte').delete().eq('id', mov.id)
+  // La confirmación la pide PagosCliente inline: window.confirm se suprime sin
+  // error en iOS/PWA y la anulación se perdía. El motivo que se escribe ahí es
+  // lo que después explica el movimiento en "Movimientos eliminados".
+  async function anularPago(mov, motivo) {
+    if (mov.tipo !== 'pago' && mov.tipo !== 'cheque') return false
+    // Se loguea ANTES de borrar: el log queda como único registro del pago.
+    await auditoria.eliminarMovimientoCtacte(mov, seleccionado.nombre, motivo)
+    const { error } = await supabase.from('movimientos_ctacte').delete().eq('id', mov.id)
+    if (error) { alert('❌ No se pudo anular el pago: ' + error.message); return false }
     const nuevoSaldo = await recomputarSaldoCliente(seleccionado.id)
     await fetchClientes()
     await seleccionar({ ...seleccionado, saldo: nuevoSaldo })
+    return true
   }
 
   function imprimirRemito(remito) {
@@ -1011,6 +1029,8 @@ async function eliminarMovimiento(mov) {
             <MovimientosCliente movimientos={movimientos} fmt={fmt} remitos={remitos} imprimirRemito={imprimirRemito} />
             <RemitosCliente remitos={remitos} imprimirRemito={imprimirRemito} />
             <PagosCliente movimientos={movimientos} onAnular={anularPago} onEditar={editarPago} fmt={fmt} />
+
+            <EliminadosCliente eliminados={eliminados} fmt={fmt} />
 {false && (
             <div className="card" style={{ marginBottom: 16 }}>
   <div className="card-title">🧾 Remitos</div>
@@ -1587,6 +1607,17 @@ function PagosCliente({ movimientos, onAnular, onEditar, fmt }) {
   // tipo 'cheque' los maneja el módulo de cheques). Importes NO se editan.
   const [edit, setEdit] = useState(null) // { id, forma, notas } | null
   const [guardando, setGuardando] = useState(false)
+  // Anulación: confirmación inline con motivo. Nada de window.confirm — en
+  // iOS/PWA se suprime sin error y la anulación se pierde en silencio.
+  const [anul, setAnul] = useState(null) // { id, motivo } | null
+  const [anulando, setAnulando] = useState(false)
+
+  async function confirmarAnular(p) {
+    setAnulando(true)
+    const ok = await onAnular(p, anul.motivo.trim())
+    setAnulando(false)
+    if (ok !== false) setAnul(null)
+  }
 
   async function guardarEdit(p) {
     setGuardando(true)
@@ -1609,7 +1640,8 @@ function PagosCliente({ movimientos, onAnular, onEditar, fmt }) {
         </tr></thead>
         <tbody>
           {pag.items.map(p => (
-            <tr key={p.id}>
+            <Fragment key={p.id}>
+            <tr>
               <td>{p.fecha}</td>
               <td>
                 {p.descripcion || '—'}
@@ -1637,18 +1669,96 @@ function PagosCliente({ movimientos, onAnular, onEditar, fmt }) {
                     ✏️ Editar
                   </button>
                 )}
-                <button onClick={() => onAnular(p)}
+                <button onClick={() => { setEdit(null); setAnul(anul?.id === p.id ? null : { id: p.id, motivo: '' }) }}
                   title="Anular este pago (revierte el saldo)"
                   style={{ background: '#3a1a1a', border: '1px solid #5a2a2a', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--red-light)' }}>
                   🗑️ Anular
                 </button>
               </td>
             </tr>
+            {anul?.id === p.id && (
+            <tr>
+              <td colSpan={4} style={{ background: '#2a1414', borderTop: '1px solid #5a2a2a' }}>
+                <div style={{ padding: '10px 4px' }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--red-light)', marginBottom: 4 }}>
+                    ¿Anular el pago de {fmt(p.haber)} del {p.fecha}?
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+                    La deuda del cliente sube {fmt(p.haber)}. Queda registrado en «Movimientos eliminados» con tu nombre.
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <input autoFocus value={anul.motivo} onChange={e => setAnul(x => ({ ...x, motivo: e.target.value }))}
+                      placeholder="Motivo (ej. echeq rechazado)"
+                      style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '6px 10px', fontSize: 12, fontFamily: "'DM Sans',sans-serif", width: 260, maxWidth: '100%' }} />
+                    <button onClick={() => confirmarAnular(p)} disabled={anulando || !anul.motivo.trim()}
+                      style={{ background: anul.motivo.trim() ? 'var(--red-light)' : 'var(--surface2)', border: 'none', borderRadius: 6, padding: '6px 14px', cursor: anul.motivo.trim() ? 'pointer' : 'not-allowed', fontSize: 12, fontWeight: 700, color: anul.motivo.trim() ? '#000' : 'var(--muted)' }}>
+                      {anulando ? 'Anulando…' : '🗑️ Sí, anular'}
+                    </button>
+                    <button onClick={() => setAnul(null)}
+                      style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 14px', cursor: 'pointer', fontSize: 12, color: 'var(--muted)' }}>
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              </td>
+            </tr>
+            )}
+            </Fragment>
           ))}
           {pagos.length === 0 && <tr><td colSpan={4} className="empty">Sin pagos registrados</td></tr>}
         </tbody>
       </table>
       <Paginador {...pag.controles} label="pagos" />
+    </div>
+  )
+}
+
+// ============================================================
+// MOVIMIENTOS ELIMINADOS — el rastro de lo que se borró
+// ============================================================
+// Un movimiento borrado NO puede quedar en movimientos_ctacte: ahí seguiría
+// sumando al saldo (y hay ~15 consultas que lo leen, cualquiera sin filtrar
+// declararía mal la deuda). Así que la fila se borra de verdad y lo que queda
+// es el registro en auditoria_log, que es lo que se lista acá: qué era, de
+// cuánto, quién lo borró, cuándo y por qué.
+function EliminadosCliente({ eliminados, fmt }) {
+  const pag = usePaginacion(eliminados || [], 10)
+  if (!eliminados || eliminados.length === 0) return null
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card-title">🗑️ Movimientos eliminados ({eliminados.length})</div>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
+        No cuentan para el saldo — es el historial de lo que se dio de baja.
+      </div>
+      <table>
+        <thead><tr>
+          <th>Fecha</th>
+          <th>Descripción</th>
+          <th style={{ textAlign: 'right' }}>Importe</th>
+          <th>Eliminado por</th>
+          <th>Motivo</th>
+        </tr></thead>
+        <tbody>
+          {pag.items.map(e => (
+            <tr key={e.log_id} style={{ opacity: 0.75 }}>
+              <td style={{ textDecoration: 'line-through' }}>{e.mov.fecha || '—'}</td>
+              <td style={{ textDecoration: 'line-through' }}>
+                <span className={`badge ${e.mov.tipo === 'compra' ? 'badge-red' : 'badge-green'}`}>{e.mov.tipo || '—'}</span>
+                {' '}{e.mov.descripcion || '—'}
+              </td>
+              <td style={{ textAlign: 'right', fontWeight: 700, textDecoration: 'line-through' }}>
+                {fmt(Number(e.mov.debe) > 0 ? e.mov.debe : e.mov.haber)}
+              </td>
+              <td style={{ fontSize: 12 }}>
+                {e.eliminado_por}
+                <div style={{ fontSize: 10, color: 'var(--muted)' }}>{fmtFechaHoraARG(e.eliminado_en)}</div>
+              </td>
+              <td style={{ fontSize: 12, color: 'var(--muted)' }}>{e.motivo || '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <Paginador {...pag.controles} label="eliminados" />
     </div>
   )
 }

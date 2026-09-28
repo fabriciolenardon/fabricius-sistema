@@ -11,7 +11,7 @@ import Paginador, { usePaginacion } from '../../components/Paginador'
 
 const fmtFechaHora = d => d ? new Date(d).toLocaleString('es-AR') : '—'
 
-const MODULOS = ['todos', 'caja', 'precios', 'ofertas', 'facturacion', 'deposito', 'arqueo', 'desposte', 'otros']
+const MODULOS = ['todos', 'caja', 'clientes', 'precios', 'ofertas', 'facturacion', 'deposito', 'arqueo', 'desposte', 'otros']
 const ACCIONES = ['todas', 'insert', 'update', 'delete', 'login', 'custom']
 
 const COLOR_ACCION = {
