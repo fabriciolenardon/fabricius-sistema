@@ -84,3 +84,17 @@ export function fmtFechaARG(valor, vacio = '—') {
     day: '2-digit', month: '2-digit', year: 'numeric',
   }).format(t)
 }
+
+// Igual que fmtFechaARG pero con la hora — para sellos de auditoría ("lo
+// eliminó Fabricio el 28/09 14:32"), donde la hora es parte del dato.
+// Siempre en reloj de Argentina, nunca en la TZ del navegador.
+export function fmtFechaHoraARG(valor, vacio = '—') {
+  if (!valor) return vacio
+  const t = new Date(String(valor))
+  if (isNaN(t.getTime())) return fmtFechaARG(valor, vacio)
+  return new Intl.DateTimeFormat('es-AR', {
+    timeZone: TZ_ARG,
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(t).replace(', ', ' ')
+}
