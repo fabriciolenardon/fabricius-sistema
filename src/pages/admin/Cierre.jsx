@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase, fetchAllRows } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import { fechaHoyARG, fechaRelativaARG } from '../../lib/fechas'
@@ -526,6 +526,9 @@ export default function Cierre() {
     showAlert({ type: 'info', msg: '↩️ Valores automáticos restaurados' })
   }
 
+  // Identifica cada cálculo para poder descartar los que llegan fuera de orden.
+  const corridaRef = useRef(0)
+
   useEffect(() => { fetchCierres() }, [])
   // Dueños del negocio: sin filtro por sucursal, lo pone el RLS.
   useEffect(() => { cargarSocios().then(setSociosNegocio) }, [])
@@ -534,9 +537,12 @@ export default function Cierre() {
     supabase.from('meses_operativos').select('*').order('fecha_inicio', { ascending: false })
       .then(({ data }) => setMesesOp(data || []))
   }, [])
-  // Recalcular cuando cambia el período
+  // Recalcular cuando cambia el período. Con un respiro: escribir una fecha a
+  // mano dispara un onChange por tecla y cada uno lanzaría un cálculo entero.
   useEffect(() => {
-    if (desde && hasta && desde <= hasta) recalcular()
+    if (!(desde && hasta && desde <= hasta)) return
+    const t = setTimeout(recalcular, 400)
+    return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [desde, hasta])
 
@@ -563,19 +569,30 @@ export default function Cierre() {
   }
 
   async function recalcular() {
+    // Token de corrida: descarta el resultado de un cálculo viejo que llega
+    // tarde. Sin esto, cambiar las fechas mientras corre otro deja la pantalla
+    // con los números del período anterior y nadie se entera.
+    const miCorrida = ++corridaRef.current
     setCalculando(true)
     try {
       const [result, ctrl] = await Promise.all([
         calcularCierreAuto(desde, hasta),
         calcularControlSemanal(desde, hasta),
       ])
+      if (miCorrida !== corridaRef.current) return   // llegó tarde: la pisa otra
       setCierreAuto(result)
       setCierreEdit(JSON.parse(JSON.stringify(result)))  // copia editable fresca
       setControl(ctrl)
     } catch (e) {
+      if (miCorrida !== corridaRef.current) return
+      // El cálculo viejo queda en pantalla, así que hay que decirlo fuerte: si
+      // no, se leen los números del período anterior como si fueran estos.
+      setCierreAuto(null)
+      setCierreEdit(null)
+      setControl(null)
       showAlert({ type: 'error', msg: 'Error calculando: ' + e.message })
     } finally {
-      setCalculando(false)
+      if (miCorrida === corridaRef.current) setCalculando(false)
     }
   }
 
@@ -803,6 +820,24 @@ export default function Cierre() {
                   ? `📊 Período: ${fmtFecha(cierreAuto.periodo.desde)} → ${fmtFecha(cierreAuto.periodo.hasta)}`
                   : 'Seleccioná un período válido'}
             </div>
+            {/* Los números de abajo son de OTRAS fechas que las de arriba. No
+                puede quedar en una línea gris: se leen como si fueran del
+                período elegido. */}
+            {!calculando && cierreAuto &&
+             (cierreAuto.periodo.desde !== desde || cierreAuto.periodo.hasta !== hasta) && (
+              <div style={{
+                marginTop: 10, padding: '10px 12px', borderRadius: 8,
+                background: 'rgba(255,170,60,0.12)', border: '1px solid var(--amber)',
+                fontSize: 12, color: 'var(--amber)', display: 'flex',
+                alignItems: 'center', gap: 10, flexWrap: 'wrap'
+              }}>
+                <span style={{ flex: 1, minWidth: 240 }}>
+                  ⚠️ Los números de abajo son del <strong>{fmtFecha(cierreAuto.periodo.desde)} → {fmtFecha(cierreAuto.periodo.hasta)}</strong>,
+                  no del período que elegiste arriba.
+                </span>
+                <button className="btn btn-sm" onClick={recalcular} disabled={calculando}>🔄 Recalcular</button>
+              </div>
+            )}
             {/* Este período pisa un cierre ya guardado con OTRAS fechas: si se
                 guarda, el mes cuenta dos veces los días repetidos. */}
             {cierresQueSePisan(desde, hasta).map(c => (
