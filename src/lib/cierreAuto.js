@@ -79,7 +79,7 @@ const sum = (arr, k) => (arr || []).reduce((s, r) => s + (Number(r?.[k]) || 0), 
  * Devuelve un objeto con la siguiente estructura:
  * {
  *   periodo: { desde, hasta, dias },
- *   ventas: { caja, mayorista, pedidos, total },
+ *   ventas: { caja, cajaTicketeado, cajaDiasSinArqueo, mayorista, pedidos, total },
  *   cobrado: { efectivo, debito, transferencia, cobranzasCta, total },
  *   porCobrar: { totalSaldoClientes },
  *   compras: { entradas, total },
@@ -123,6 +123,7 @@ export async function calcularCierreAuto(desde, hasta) {
     saldoProvR,
     conceptosR,
     mesesOpR,
+    arqueosR,
   ] = await Promise.all([
     // Todas las consultas con ventana de fechas van paginadas (fetchAllRows): un
     // cierre puede correrse sobre un MES entero (botón "mes" de Cierre.jsx) y un
@@ -241,6 +242,13 @@ export async function calcularCierreAuto(desde, hasta) {
     supabase
       .from('meses_operativos')
       .select('mes, fecha_cierre'),
+
+    // Arqueos del período: son la fuente de la venta minorista (ver "VENTAS").
+    fetchAllRows(() => supabase
+      .from('arqueos_caja')
+      .select('fecha, total_contado, debito_real, transferencia_real')
+      .gte('fecha', desde)
+      .lte('fecha', hasta)),
   ])
 
   const ventasCaja = ventasCajaR.data || []
@@ -276,17 +284,59 @@ export async function calcularCierreAuto(desde, hasta) {
   const sueldos = sueldosR.data || []
   const clientes = clientesR.data || []
 
+  // ====== CAJA MINORISTA: manda el ARQUEO, no los tickets ==============
+  // Lo que entró en el mostrador es lo que se contó a la noche. Parte de la
+  // venta al público no queda ticketeada, así que sumar ventas_minoristas
+  // subdeclara. Y no es teoría: el "esperado" del arqueo se calcula JUSTO
+  // con ventas_minoristas del día (ArqueoCaja.cargar), o sea que la
+  // diferencia entre el arqueo y los tickets ES la venta sin ticketear.
+  // En la semana 15→21/09 de Monte Cristo eran $238.801 que no se veían.
+  //
+  // El arqueo es venta minorista limpia: las cobranzas mayoristas no pasan
+  // por el mostrador, van por transferencia al banco. Por eso no se pisa
+  // con "despachos cobrados al entregar" ni con las cobranzas de cta cte.
+  //
+  // Día SIN arqueo cargado (el de hoy hasta que cierran a la noche) → se cae
+  // a los tickets de ese día. Si no, el día desaparecería del cierre.
+  const arqueosPorFecha = new Map()
+  for (const a of (arqueosR.data || [])) {
+    const prev = arqueosPorFecha.get(a.fecha) || { efectivo: 0, debito: 0, transferencia: 0 }
+    // Puede haber más de un arqueo en el mismo día: se suman.
+    arqueosPorFecha.set(a.fecha, {
+      efectivo: prev.efectivo + (Number(a.total_contado) || 0),
+      debito: prev.debito + (Number(a.debito_real) || 0),
+      transferencia: prev.transferencia + (Number(a.transferencia_real) || 0),
+    })
+  }
+  const ticketsPorFecha = new Map()
+  for (const v of ventasCaja) {
+    const prev = ticketsPorFecha.get(v.fecha) || { efectivo: 0, debito: 0, transferencia: 0 }
+    ticketsPorFecha.set(v.fecha, {
+      efectivo: prev.efectivo + (Number(v.efectivo) || 0),
+      debito: prev.debito + (Number(v.debito) || 0),
+      transferencia: prev.transferencia + (Number(v.transferencia) || 0),
+    })
+  }
+  // Un día cuenta una sola vez: si tiene arqueo manda el arqueo, si no los tickets.
+  const fechasCaja = new Set([...arqueosPorFecha.keys(), ...ticketsPorFecha.keys()])
+  let cobradoEfectivo = 0, cobradoDebito = 0, cobradoTransferencia = 0
+  const diasSinArqueo = []
+  for (const f of fechasCaja) {
+    const dia = arqueosPorFecha.get(f) || ticketsPorFecha.get(f)
+    if (!arqueosPorFecha.has(f)) diasSinArqueo.push(f)
+    cobradoEfectivo += dia.efectivo
+    cobradoDebito += dia.debito
+    cobradoTransferencia += dia.transferencia
+  }
+  diasSinArqueo.sort()
+
   // ====== VENTAS (facturado en el período) ======
   // Total = caja minorista + suma de remitos mayoristas. (Sin pedidos: lo que
   // se entregó ya está como remito; contar pedidos además duplicaría.)
-  const ventasCajaTotal = sum(ventasCaja, 'total')
+  const ventasCajaTotal = cobradoEfectivo + cobradoDebito + cobradoTransferencia
+  const ventasTicketeado = sum(ventasCaja, 'total')
   const ventasMayoristaTotal = sum(remitos, 'total')
   const ventasTotal = ventasCajaTotal + ventasMayoristaTotal
-
-  // ====== COBRADO (caja real en el período) ======
-  const cobradoEfectivo = sum(ventasCaja, 'efectivo')
-  const cobradoDebito = sum(ventasCaja, 'debito')
-  const cobradoTransferencia = sum(ventasCaja, 'transferencia')
   // Cobranzas de cta cte: SOLO pagos reales (efectivo/transferencia). Los cheques
   // NO son cobro nuestro — se endosan a proveedores, no se cobran (no van al flujo).
   // Las COMPENSACIONES (mig 135) se descuentan de lo que la franquicia nos
@@ -488,6 +538,10 @@ export async function calcularCierreAuto(desde, hasta) {
     periodo: { desde, hasta },
     ventas: {
       caja: ventasCajaTotal,
+      // Lo que quedó ticketeado, para poder mostrar cuánto de la caja no
+      // salió por un ticket. No entra en ningún total.
+      cajaTicketeado: ventasTicketeado,
+      cajaDiasSinArqueo: diasSinArqueo,
       mayorista: ventasMayoristaTotal,
       cantRemitos: remitos.length,
       total: ventasTotal,
