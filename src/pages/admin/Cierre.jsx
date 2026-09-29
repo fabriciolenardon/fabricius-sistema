@@ -963,6 +963,19 @@ export default function Cierre() {
                 <div className="card">
                   <div className="card-title">💵 Ventas — desglose</div>
                   <FilaDesglose label="Caja minorista" value={view.ventas.caja} color="var(--green)" editable={editableNow} onCommit={v => commitLeaf('ventas.caja', v)} />
+                  {/* De dónde sale el número: es el arqueo, no los tickets.
+                      Sin esto la caja no cuadra contra Ventas y parece un error. */}
+                  {view.ventas.cajaTicketeado != null && (
+                    <div style={{ fontSize: 11, color: 'var(--muted)', margin: '-4px 0 8px 2px', lineHeight: 1.6 }}>
+                      Sale de los arqueos. Ticketeado {fmt(view.ventas.cajaTicketeado)}
+                      {view.ventas.caja - view.ventas.cajaTicketeado > 0 &&
+                        <> · sin ticketear <b style={{ color: 'var(--amber)' }}>{fmt(view.ventas.caja - view.ventas.cajaTicketeado)}</b></>}
+                      {view.ventas.cajaDiasSinArqueo?.length > 0 &&
+                        <div style={{ color: 'var(--amber)' }}>
+                          ⚠️ Sin arqueo cargado ({view.ventas.cajaDiasSinArqueo.length}): {view.ventas.cajaDiasSinArqueo.map(fmtFecha).join(' · ')} — esos días van por ticket.
+                        </div>}
+                    </div>
+                  )}
                   <FilaDesglose label="Remitos mayoristas" value={view.ventas.mayorista} color="var(--green)" editable={editableNow} onCommit={v => commitLeaf('ventas.mayorista', v)} />
                   <FilaDesglose label="TOTAL FACTURADO" value={view.ventas.total} color="var(--gold)" />
                 </div>
