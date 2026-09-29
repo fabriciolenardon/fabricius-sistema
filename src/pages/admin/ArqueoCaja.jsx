@@ -249,6 +249,36 @@ export default function ArqueoCaja() {
   const diferencia = totalContado - efectivoEsperado
   const debitoRealNum = parseNumero(debitoReal)
   const transferenciaRealNum = parseNumero(transferenciaReal)
+
+  // ── AVISO DE IMPORTE FUERA DE ESCALA ──────────────────────────────
+  // Un dígito de más entraba sin que nadie chistara: el arqueo del 17/09 de
+  // Monte Cristo quedó con $7.566.745 de débito en vez de $756.466, y el del
+  // 08/09 con $11.111 en vez de $1.111.110.
+  //
+  // La cuenta se hace contra el esperado, pero el texto del aviso NO lo
+  // nombra ni lo deja deducir: el arqueo es ciego y el cajero cuenta sin
+  // saber cuánto tiene que dar. Solo se le dice que el número está fuera de
+  // lo habitual y para qué lado. No bloquea: avisa y él decide.
+  const DESVIO_AVISO = 0.30
+  // Con esperados chicos un 30% son monedas y el aviso sería ruido.
+  const PISO_AVISO = 50000
+
+  const sospechas = useMemo(() => {
+    const revisar = (label, esperado, real) => {
+      const esp = Number(esperado) || 0
+      if (esp < PISO_AVISO) return null
+      const desvio = (Number(real) || 0) / esp - 1
+      if (Math.abs(desvio) < DESVIO_AVISO) return null
+      return { label, alto: desvio > 0 }
+    }
+    return [
+      revisar('El efectivo contado', efectivoEsperado, totalContado),
+      revisar('El débito / QR', debitoEsperado, debitoRealNum),
+      revisar('Las transferencias', transferenciaEsperada, transferenciaRealNum),
+    ].filter(Boolean)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [efectivoEsperado, totalContado, debitoEsperado, debitoRealNum,
+      transferenciaEsperada, transferenciaRealNum])
   const debitoDif = debitoRealNum - debitoEsperado
   const transferenciaDif = transferenciaRealNum - transferenciaEsperada
 
@@ -831,6 +861,22 @@ export default function ArqueoCaja() {
             {confirmandoGuardar && (
               <div style={{ marginTop: 12, padding: 14, background: 'rgba(255,209,122,0.06)', border: '1px solid var(--gold)', borderRadius: 8 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--gold)', marginBottom: 8 }}>📋 CONFIRMAR ARQUEO DEL {fechaArqueo}</div>
+                {sospechas.length > 0 && (
+                  <div style={{ marginBottom: 10, padding: '10px 12px', borderRadius: 8, background: 'rgba(255,90,90,0.10)', border: '1px solid var(--red-light)' }}>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--red-light)', marginBottom: 4 }}>
+                      ⚠️ REVISÁ ANTES DE GUARDAR
+                    </div>
+                    {sospechas.map(x => (
+                      <div key={x.label} style={{ fontSize: 12, color: '#ffb3b3', lineHeight: 1.6 }}>
+                        • {x.label} quedó <b>muy {x.alto ? 'por encima' : 'por debajo'}</b> de lo habitual para un día así.
+                        {x.alto ? ' ¿Se coló un dígito de más?' : ' ¿Falta un dígito o quedó a medio cargar?'}
+                      </div>
+                    ))}
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
+                      Si el número es correcto, guardá igual.
+                    </div>
+                  </div>
+                )}
                 {/* En modo ciego el resumen repite SOLO lo que cargó el
                     cajero. Nada de esperados ni diferencias: si estuvieran
                     acá, taparlos arriba no habría servido de nada. */}
