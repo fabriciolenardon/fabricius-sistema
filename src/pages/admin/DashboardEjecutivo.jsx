@@ -58,33 +58,6 @@ const DESTINOS_INTERNOS = new Set(['desposte', 'elaboracion'])
 const hoyISO = () => fechaHoyARG()
 const fechaHaceDias = (n) => fechaRelativaARG(-n)
 const inicioMes = () => fechaHoyARG().slice(0, 8) + '01'
-const inicioMesAnterior = () => {
-  const hoy = fechaHoyARG()
-  const y = Number(hoy.slice(0, 4))
-  const m = Number(hoy.slice(5, 7))
-  const yPrev = m === 1 ? y - 1 : y
-  const mPrev = m === 1 ? 12 : m - 1
-  return `${yPrev}-${String(mPrev).padStart(2, '0')}-01`
-}
-const finMesAnterior = () => {
-  const inicio = new Date(inicioMes() + 'T12:00:00')
-  inicio.setDate(inicio.getDate() - 1)
-  return fechaHoyARG(inicio)
-}
-// Mismo día del mes anterior (para comparar período contra período).
-// Regla de Fabricio: NO comparar el mes en curso contra el mes anterior
-// COMPLETO — eso no es parámetro. Se compara 01→hoy vs 01→mismo día del
-// mes pasado. Si el mes anterior es más corto (ej. 31 vs 30), se recorta.
-const mismoDiaMesAnterior = () => {
-  const hoy = fechaHoyARG()
-  const y = Number(hoy.slice(0, 4))
-  const m = Number(hoy.slice(5, 7))
-  const d = Number(hoy.slice(8, 10))
-  const yPrev = m === 1 ? y - 1 : y
-  const mPrev = m === 1 ? 12 : m - 1
-  const ultimoDiaPrev = new Date(yPrev, mPrev, 0).getDate()
-  return `${yPrev}-${String(mPrev).padStart(2, '0')}-${String(Math.min(d, ultimoDiaPrev)).padStart(2, '0')}`
-}
 // Lunes de la semana en curso (ARG) — las compras a proveedores van por semana
 const inicioSemanaARG = () => {
   const d = new Date(fechaHoyARG() + 'T12:00')
@@ -215,8 +188,39 @@ function useDashboardData(refreshMs = 120000) {
     const mesOpActual = (mesesOpData || []).find(m => hoy >= m.fecha_inicio && hoy <= m.fecha_cierre) || null
     const mesIni = mesOpActual ? mesOpActual.fecha_inicio : inicioMes()
     const mesOpLabel = mesOpActual ? mesOpActual.etiqueta : null
-    const mesAntIni = inicioMesAnterior()
-    const mesAntMismoDia = mismoDiaMesAnterior() // período comparable: 01→mismo día
+    // ── PERÍODO COMPARABLE DEL MES ANTERIOR ───────────────────────────
+    // El período actual arranca en el mes OPERATIVO (el de septiembre empezó
+    // el 31/08), pero esto comparaba contra el 01 del mes CALENDARIO anterior
+    // hasta el mismo día. El 01/10 esa ventana era UN SOLO DÍA (01/09) y el
+    // panel mostraba +4173%: $25.864.665 de 32 días contra $605.241 de uno.
+    // Se compara contra el mes OPERATIVO anterior, misma cantidad de días.
+    const mesOpAnterior = (mesesOpData || [])
+      .filter(m => m.fecha_inicio && m.fecha_cierre && m.fecha_cierre < mesIni)
+      .sort((a, b) => b.fecha_inicio.localeCompare(a.fecha_inicio))[0] || null
+    const diasEntre = (a, b) =>
+      Math.round((new Date(b + 'T12:00') - new Date(a + 'T12:00')) / 86400000) + 1
+    const sumarDias = (f, n) => {
+      const d = new Date(f + 'T12:00')
+      d.setDate(d.getDate() + n)
+      return fechaHoyARG(d)
+    }
+    const diasActual = diasEntre(mesIni, hoy)
+    let mesAntIni, mesAntMismoDia
+    if (mesOpAnterior) {
+      mesAntIni = mesOpAnterior.fecha_inicio
+      // No pasarse del cierre del mes anterior: si el actual ya lleva más días
+      // que los que duró aquel, la ventana se corta ahí.
+      const tope = sumarDias(mesAntIni, diasActual - 1)
+      mesAntMismoDia = tope > mesOpAnterior.fecha_cierre ? mesOpAnterior.fecha_cierre : tope
+    } else {
+      // Sin mes operativo anterior cargado (le pasa a Monte Cristo, que
+      // arrancó en septiembre): el tramo de la misma cantidad de días que
+      // termina justo antes de que empiece el actual. Caer al mes calendario
+      // acá reproducía el bug: con mesIni el 01, la ventana daba un solo día.
+      mesAntMismoDia = sumarDias(mesIni, -1)
+      mesAntIni = sumarDias(mesAntMismoDia, -(diasActual - 1))
+    }
+    const diasAnt = diasEntre(mesAntIni, mesAntMismoDia)
     // Semana en curso y semana pasada (lun→dom) — las 3 capas FIFO de la mora
     // de clientes (igual criterio que Clientes.jsx: lo de esta semana y lo de
     // la semana pasada NO es mora; mora = lo anterior).
@@ -315,7 +319,18 @@ function useDashboardData(refreshMs = 120000) {
     const totalCajaMes = (ventasMes.data || []).reduce((s, v) => s + (Number(v.total) || 0), 0)
     const totalMesAnt  = (ventasMesAnt.data || []).reduce((s, v) => s + (Number(v.total) || 0), 0)
     const totalAnioPasado = (ventasAnioPasado.data || []).reduce((s, v) => s + (Number(v.total) || 0), 0)
-    const variacion   = totalMesAnt > 0 ? ((totalCajaMes - totalMesAnt) / totalMesAnt) * 100 : 0
+    // Si los dos tramos no tienen la misma cantidad de días (pasa cuando el
+    // mes operativo anterior fue más corto), comparar los TOTALES miente: más
+    // días venden más. Ahí se compara el promedio POR DÍA, que sí es
+    // comparable, y la pantalla lo aclara.
+    const variacionPorDia = diasAnt !== diasActual
+    const promActual = diasActual > 0 ? totalCajaMes / diasActual : 0
+    const promAnt = diasAnt > 0 ? totalMesAnt / diasAnt : 0
+    const variacion = totalMesAnt > 0
+      ? (variacionPorDia
+          ? (promAnt > 0 ? ((promActual - promAnt) / promAnt) * 100 : 0)
+          : ((totalCajaMes - totalMesAnt) / totalMesAnt) * 100)
+      : 0
     const variacionAnioPasado = totalAnioPasado > 0
       ? ((totalCajaMes - totalAnioPasado) / totalAnioPasado) * 100 : null
     const ticketProm  = cantHoy > 0 ? totalHoy / cantHoy : 0
@@ -660,6 +675,8 @@ function useDashboardData(refreshMs = 120000) {
       totalMes: totalCajaMes,
       mayoristaMes: totalSalidasMes,
       totalMesAnt, variacion,
+      // Para que el subtítulo pueda decir contra qué se está comparando.
+      variacionPorDia, diasActual, diasAnt, mesAntIni, mesAntFin: mesAntMismoDia,
       topProductosHoy, cuentasConPct, stockCritico,
       ultimaVentaHora,
       mensualVivo,
@@ -1225,7 +1242,7 @@ function ResumenEjecutivo() {
           sub={`Promedio ${fmtArs(data.totalSemana / 7)}/día`} />
         <CardKPI label="ESTE MES · CAJA (mostrador)" valor={fmtArs(data.totalMes)} color={colorVar(data.variacion)}
           sub={data.totalMesAnt > 0
-            ? `Solo mostrador · ${flecha(data.variacion)} ${signo(data.variacion)}${data.variacion.toFixed(1)}% vs mismo período mes ant.`
+            ? `Solo mostrador · ${flecha(data.variacion)} ${signo(data.variacion)}${data.variacion.toFixed(1)}% ${data.variacionPorDia ? `por día vs mes ant. (${data.diasActual}d vs ${data.diasAnt}d)` : 'vs mismo período mes ant.'}`
             : 'Solo mostrador (ventas por caja)'} />
         <CardKPI label="ESTE MES · MAYORISTA" valor={fmtArs(data.mayoristaMes)} color={NEON.cian}
           sub="Remitos a clientes y franquicias" />
@@ -2054,7 +2071,7 @@ function ModoTV({ onSalir }) {
                     Sin eso no cerraba con lo que contesta Iris, que cuenta por
                     mes calendario cuando se le pide "del 1 al 10". */}
                 <TvKPI label="MINORISTA · MES OPERATIVO" valor={fmtArs(data.totalMes)}
-                  sub={`desde ${fechaCortaDM(data.mesIni)}${data.totalMesAnt > 0 ? ` · ${flecha(data.variacion)} ${signo(data.variacion)}${data.variacion.toFixed(0)}% vs mismo período mes ant.` : ''}`}
+                  sub={`desde ${fechaCortaDM(data.mesIni)}${data.totalMesAnt > 0 ? ` · ${flecha(data.variacion)} ${signo(data.variacion)}${data.variacion.toFixed(0)}% ${data.variacionPorDia ? `por día vs mes ant.` : 'vs mismo período mes ant.'}` : ''}`}
                   color={colorVar(data.variacion)} />
                 <TvWhatsapp />
               </div>
