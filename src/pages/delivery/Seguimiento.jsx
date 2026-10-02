@@ -11,6 +11,7 @@ import { supabase } from '../../lib/supabase'
 import { pesos, fmtCantidad, TZ, nombreLindo, nombreRenglon } from '../../lib/delivery'
 import { limpiarNumero } from '../../lib/whatsapp'
 import { C, F, btnPrimario, btnSecundario, useModoDelivery } from './estilo'
+import InfoImportante from './InfoImportante'
 
 const hora = v => v ? new Date(v).toLocaleTimeString('es-AR', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) : ''
 
@@ -165,6 +166,7 @@ export default function Seguimiento() {
           {esTransf ? 'Pagás por transferencia.' : `Pagás ${pesos(totalMostrar)}${pesado ? '' : ' aprox.'} en efectivo cuando te llega.`}
           {' '}Esta pantalla se actualiza sola.
         </div>
+        {['en_camino', 'entregado'].includes(p.estado) && <InfoImportante />}
         <button onClick={() => navigate('/pedir')} style={btnSecundario}>Hacer otro pedido</button>
       </div>
     </Marco>

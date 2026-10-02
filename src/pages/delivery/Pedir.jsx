@@ -25,6 +25,7 @@ import {
   cierraA, proximaApertura, textoHorarios, mensajeError, mensajeIngreso, textoCupon, nombreLindo,
 } from '../../lib/delivery'
 import { C, F, input, btnPrimario, btnSecundario, useModoDelivery, leerLS, guardarLS } from './estilo'
+import InfoImportante from './InfoImportante'
 
 const LS_CARRITO = 'fabricius_delivery_carrito'
 const LS_SESION = 'fabricius_delivery_sesion'
@@ -189,9 +190,10 @@ function Pantalla({ children }) {
 
 function Cabecera({ chico }) {
   return (
-    <div style={{ background: C.ink, color: '#FFFFFF', padding: chico ? '20px 20px 18px' : '44px 24px 28px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{ fontFamily: F.display, fontWeight: 800, fontSize: chico ? 24 : 34, letterSpacing: '0.04em', color: C.gold }}>FABRICIUS</div>
-      <div style={{ fontSize: 15, color: '#E9E2D8' }}>Carnicería · Delivery a tu casa</div>
+    <div style={{ background: C.ink, color: '#FFFFFF', padding: chico ? '20px 20px 18px' : '44px 24px 28px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: 4 }}>
+      <div style={{ fontFamily: F.display, fontWeight: 800, fontSize: chico ? 26 : 38, letterSpacing: '0.06em', color: C.gold }}>FABRICIUS</div>
+      <div style={{ fontFamily: F.display, fontWeight: 700, fontSize: chico ? 15 : 18, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#FFFFFF' }}>Carnes Premium</div>
+      <div style={{ fontSize: 14, color: '#E9E2D8', marginTop: 4 }}>Delivery a tu casa</div>
     </div>
   )
 }
@@ -253,6 +255,7 @@ function Inicio({ config, abierto, cuenta, onVer, onIngresar, onCuenta, onSeguir
         <div style={{ fontSize: 14, lineHeight: 1.5, color: '#3D3632' }}>
           Pagás en <b>efectivo</b> cuando te llega, o por <b>transferencia</b> antes del envío.
         </div>
+        <InfoImportante />
 
         {enCurso && (
           <button onClick={() => onSeguir(enCurso.token)} style={{ ...btnSecundario }}>
