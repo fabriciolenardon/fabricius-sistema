@@ -190,8 +190,10 @@ function Pantalla({ children }) {
 
 function Cabecera({ chico }) {
   return (
-    <div style={{ background: C.ink, color: '#FFFFFF', padding: chico ? '20px 20px 18px' : '44px 24px 28px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: 4 }}>
-      <div style={{ fontFamily: F.display, fontWeight: 800, fontSize: chico ? 26 : 38, letterSpacing: '0.06em', color: C.gold }}>FABRICIUS</div>
+    <div style={{ background: C.ink, color: '#FFFFFF', padding: chico ? '18px 20px 16px' : '28px 24px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: 4 }}>
+      {/* El logo es blanco y rojo sobre transparente: va sobre el fondo oscuro. */}
+      <img src="/logo-delivery.png" alt="Fabricius Carnicerías — Premium Quality" width={chico ? 120 : 190} height={chico ? 106 : 167}
+        style={{ display: 'block', width: chico ? 120 : 190, height: 'auto', marginBottom: 8 }} />
       <div style={{ fontFamily: F.display, fontWeight: 700, fontSize: chico ? 15 : 18, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#FFFFFF' }}>Carnes Premium</div>
       <div style={{ fontSize: 14, color: '#E9E2D8', marginTop: 4 }}>Delivery a tu casa</div>
     </div>
