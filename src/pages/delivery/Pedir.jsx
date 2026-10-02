@@ -25,7 +25,7 @@ import {
   cierraA, proximaApertura, textoHorarios, mensajeError, mensajeIngreso, textoCupon, nombreLindo,
 } from '../../lib/delivery'
 import { C, F, input, btnPrimario, btnSecundario, useModoDelivery, leerLS, guardarLS } from './estilo'
-import InfoImportante from './InfoImportante'
+import InfoImportante, { ResenaGoogle } from './InfoImportante'
 
 const LS_CARRITO = 'fabricius_delivery_carrito'
 const LS_SESION = 'fabricius_delivery_sesion'
@@ -256,6 +256,7 @@ function Inicio({ config, abierto, cuenta, onVer, onIngresar, onCuenta, onSeguir
           Pagás en <b>efectivo</b> cuando te llega, o por <b>transferencia</b> antes del envío.
         </div>
         <InfoImportante />
+        <ResenaGoogle />
 
         {enCurso && (
           <button onClick={() => onSeguir(enCurso.token)} style={{ ...btnSecundario }}>
