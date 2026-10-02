@@ -194,7 +194,11 @@ export function mensajeEnCamino(p) {
   return `Hola ${p.cliente_nombre}! Tu pedido N° ${p.id} de Fabricius ya salió para ${p.direccion} 🛵`
 }
 
+// La dirección PÚBLICA de la app (dominio propio, sin "vercel" en el link).
+// Los links que se le mandan al cliente salen siempre de acá, aunque quien
+// los arme esté en el panel del sistema (otro dominio).
+export const URL_DELIVERY = 'https://delivery.fabriciuscarnes.com.ar'
+
 export function linkSeguimiento(token) {
-  const base = typeof window !== 'undefined' ? window.location.origin : ''
-  return `${base}/pedir/seguimiento/${token}`
+  return `${URL_DELIVERY}/pedir/seguimiento/${token}`
 }

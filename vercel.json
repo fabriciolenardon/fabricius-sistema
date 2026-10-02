@@ -7,6 +7,14 @@
   "crons": [
     { "path": "/api/recordatorio-compras", "schedule": "0 21 * * *" }
   ],
+  "redirects": [
+    {
+      "source": "/",
+      "has": [{ "type": "host", "value": "delivery.fabriciuscarnes.com.ar" }],
+      "destination": "/pedir",
+      "permanent": false
+    }
+  ],
   "rewrites": [
     { "source": "/pedir", "destination": "/pedir.html" },
     { "source": "/pedir/:path*", "destination": "/pedir.html" },
