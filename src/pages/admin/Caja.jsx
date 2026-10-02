@@ -9,6 +9,7 @@
 //  5. Selecciona forma de pago y cierra
 // ============================================================
 import { useState, useEffect, useRef, useMemo } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { decodificarEANBalanza, esCodigoBalanza } from '../../lib/balanzaEAN'
 import { resolverFormatoEAN } from '../../lib/balanzaFormato'
@@ -56,6 +57,7 @@ const CATEGORIAS = {
   animalitos: '🐑 Animalitos',
   pollo: '🍗 Pollo',
   embutido: '🌭 Embutidos',
+  envio_delivery: '🛵 Envío delivery',
 }
 
 export default function Caja() {
@@ -119,6 +121,12 @@ export default function Caja() {
   // carrito repartiendo el precio fijo del combo. Se administran en
   // Precios → Combos (tabla combos_venta). Ver agregarCombo().
   const [combos, setCombos] = useState([])
+  // Pedido de delivery que se está cobrando (lo manda Delivery → "Cobrar en
+  // Caja" con el carrito armado). Al cerrar la venta se le graba venta_id.
+  const location = useLocation()
+  const navigate = useNavigate()
+  const [deliveryEnCaja, setDeliveryEnCaja] = useState(null)   // { id, total, forma } | null
+  const deliveryPedidoRef = useRef(null)
 
   const codigoRef = useRef(null)
   const busquedaRef = useRef(null)
@@ -205,6 +213,83 @@ export default function Caja() {
     setCombos(cbs || [])
     setAnimalitosDisp(anims || [])
   }
+
+  // ---- Pedido de delivery → carrito ----
+  // Llega desde Delivery con { deliveryId } en el state de la navegación.
+  // Se espera a tener el catálogo cargado (agregarItem resuelve categoría,
+  // stock_origen y oferta desde `precios`). Los kilos son los PESADOS y el
+  // precio, el del pedido (precioOverride): el cliente ya recibió ese total
+  // por WhatsApp, y si en el medio cambió un precio se le cobra lo avisado.
+  useEffect(() => {
+    const id = location.state?.deliveryId
+    if (!id || !precios.length) return
+    navigate(location.pathname, { replace: true, state: null })   // que un F5 no lo vuelva a cargar
+    cargarPedidoDelivery(id)
+  }, [location.state, precios.length])
+
+  async function cargarPedidoDelivery(id) {
+    if (carrito.length > 0) {
+      showMsg('❌ Para cobrar el pedido de delivery, primero cobrá o vaciá el carrito actual.', 'error', 6000)
+      return
+    }
+    const { data: ped, error } = await supabase.from('pedidos_delivery').select('*').eq('id', id).maybeSingle()
+    if (error || !ped) { showMsg('❌ No se encontró el pedido de delivery', 'error', 5000); return }
+    if (ped.venta_id) { showMsg(`⚠️ El pedido N° ${ped.id} ya se cobró en la Caja`, 'error', 5000); return }
+    if (ped.total_final == null) { showMsg(`❌ El pedido N° ${ped.id} todavía no está pesado`, 'error', 5000); return }
+    const items = Array.isArray(ped.items) ? ped.items : []
+    const faltan = items.filter(it => !it.sin_stock && !precios.find(p => p.id === it.producto_id))
+    if (faltan.length) {
+      showMsg(`❌ Productos del pedido que no están en el catálogo: ${faltan.map(f => f.nombre).join(', ')}`, 'error', 6000)
+      return
+    }
+    // Cupón del delivery (mig 157): va como precio con descuento en cada
+    // renglón de carne (no una línea negativa, que ARCA no factura). El
+    // envío no tiene descuento.
+    const pctCupon = ped.cupon ? Number(ped.descuento_pct) || 0 : 0
+    let totalCarrito = 0
+    for (const it of items) {
+      if (it.sin_stock) continue   // no había: no se cobra ni descuenta
+      const prod = precios.find(p => p.id === it.producto_id)
+      const cant = it.pesable ? Number(it.kg_real) : Number(it.cantidad)
+      if (!(cant > 0)) continue
+      const precio = Number(it.precio) * (1 - pctCupon / 100)
+      totalCarrito += cant * precio
+      agregarItem(prod, cant, precio, true)
+    }
+    const envio = Number(ped.envio) || 0
+    if (envio > 0) {
+      // Línea sin producto: no descuenta stock (mapearStock la saltea) y va
+      // con kg 0 para no sumar kilos en los reportes. es_envio la deja fija.
+      setCarrito(c => [...c, {
+        id: Date.now() + Math.random(),
+        producto_id: null,
+        descripcion: `ENVÍO DELIVERY — Pedido N° ${ped.id}`,
+        categoria: 'envio_delivery',
+        stock_origen: null, kg_por_unidad: null,
+        kg: 0, unidad: 'u',
+        precio: envio, precio_base: envio, tiene_oferta: false, oferta_pct: null,
+        lista: 'minorista', importe: envio, es_envio: true,
+      }])
+    }
+    // El cobro se prellena con lo que suma ESTE carrito (kg × precio, sin
+    // redondear), no con total_final redondeado: si el redondeo quedaba
+    // abajo, la Caja frenaba con "Falta cobrar $0,40".
+    const total = Math.ceil((totalCarrito + envio) * 100) / 100
+    setPago(ped.forma_pago === 'transferencia'
+      ? { efectivo: '', debito: '', transferencia: String(total) }
+      : { efectivo: String(total), debito: '', transferencia: '' })
+    deliveryPedidoRef.current = ped.id
+    setDeliveryEnCaja({ id: ped.id, total, forma: ped.forma_pago, cupon: pctCupon })
+    showMsg(`🛵 Pedido delivery N° ${ped.id} cargado — ${fmt(total)}`, 'success', 4000)
+  }
+
+  // Si vacían el carrito a mano, el pedido deja de estar "en cobro".
+  useEffect(() => {
+    if (carrito.length === 0 && deliveryPedidoRef.current) {
+      deliveryPedidoRef.current = null
+      setDeliveryEnCaja(null)
+    }
+  }, [carrito.length])
 
   // ---- Resuelve el precio final de un producto según lista activa + ofertas ----
   // Devuelve { precio, precioBase, oferta }. Si hay oferta vigente que aplica a la
@@ -566,7 +651,7 @@ export default function Caja() {
   // la venta se arman campo por campo en cerrarVenta.
   function editarKg(id, nuevoKg) {
     setCarrito(c => c.map(item => {
-      if (item.id !== id) return item
+      if (item.id !== id || item.es_envio) return item
       // parseNumero acepta "2,5" o "2.5" sin distinción
       const kg = parseNumero(nuevoKg)
       return { ...item, kg_texto: nuevoKg, kg, importe: kg * item.precio }
@@ -909,6 +994,16 @@ export default function Caja() {
       if (errPieza) console.warn('No se pudo marcar pieza vendida:', errPieza.message)
     }
 
+    // Pedido de delivery: queda linkeado a esta venta (el panel lo da por cobrado).
+    if (deliveryPedidoRef.current) {
+      const { error: errDel } = await supabase.from('pedidos_delivery')
+        .update({ venta_id: data.id, updated_at: new Date().toISOString() })
+        .eq('id', deliveryPedidoRef.current)
+      if (errDel) console.warn('No se pudo linkear el pedido de delivery:', errDel.message)
+      deliveryPedidoRef.current = null
+      setDeliveryEnCaja(null)
+    }
+
     setUltimaVenta({ ...venta, vuelto: cobrado - totalACobrar, id: data.id })
     setCarrito([])
     setPago({ efectivo: '', debito: '', transferencia: '' })
@@ -1163,6 +1258,13 @@ export default function Caja() {
             </div>
           </div>
 
+          {deliveryEnCaja && (
+            <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 8, background: 'rgba(201,168,76,.12)', border: '1px solid var(--gold)', fontSize: 13, color: 'var(--text)' }}>
+              🛵 <b>Cobrando el pedido de delivery N° {deliveryEnCaja.id}</b> · {fmt(deliveryEnCaja.total)} · {deliveryEnCaja.forma === 'transferencia' ? 'pagado por transferencia' : 'efectivo (lo trae el repartidor)'}{deliveryEnCaja.cupon ? ` · con cupón ${deliveryEnCaja.cupon}% ya aplicado en los precios` : ''}.
+              {' '}Al confirmar la venta queda registrado en el pedido.
+            </div>
+          )}
+
           {/* Carrito */}
           <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10 }}>
             {carrito.length === 0 ? (
@@ -1204,13 +1306,13 @@ export default function Caja() {
                           <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'flex-end' }}>
                             {/* Enter = "listo con el peso": devuelve el foco al lector
                                 para seguir escaneando sin tener que clickear. */}
-                            <input
+                            {item.es_envio ? <span style={{ fontSize: 12, color: 'var(--muted)' }}>—</span> : <input
                               type="text" inputMode="decimal" value={item.kg_texto ?? item.kg}
                               onChange={e => editarKg(item.id, e.target.value)}
                               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); codigoRef.current?.focus() } }}
                               style={{ width: 70, textAlign: 'right', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 6, padding: '4px 6px', fontSize: 13 }}
-                            />
-                            <span style={{ fontSize: 10, color: 'var(--muted)', minWidth: 18 }}>{item.unidad || 'kg'}</span>
+                            />}
+                            {!item.es_envio && <span style={{ fontSize: 10, color: 'var(--muted)', minWidth: 18 }}>{item.unidad || 'kg'}</span>}
                           </div>
                         </td>
                         <td style={{ textAlign: 'right', padding: '8px 4px', fontSize: 13 }}>

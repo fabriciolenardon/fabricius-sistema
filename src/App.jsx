@@ -53,6 +53,12 @@ const Instagram = lazy(() => import('./pages/admin/Instagram'))
 const Proveedores = lazy(() => import('./pages/admin/Proveedores'))
 const Presupuestos = lazy(() => import('./pages/admin/Presupuestos'))
 const Productividad = lazy(() => import('./pages/admin/Productividad'))
+const Delivery = lazy(() => import('./pages/admin/Delivery'))
+
+// Lazy: app PÚBLICA de delivery (sin usuario). Va en su propio chunk: el
+// cliente que pide carne no se baja el sistema.
+const Pedir = lazy(() => import('./pages/delivery/Pedir'))
+const SeguimientoDelivery = lazy(() => import('./pages/delivery/Seguimiento'))
 
 // Lazy: portal franquicia (solo lo usa el rol franquicia)
 const FranquiciaLayout = lazy(() => import('./pages/franquicia/FranquiciaLayout'))
@@ -167,6 +173,9 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/perfil-pendiente" element={<PerfilPendienteRoute />} />
+        {/* Delivery minorista: público, sin login (mig 156). */}
+        <Route path="/pedir" element={<Pedir />} />
+        <Route path="/pedir/seguimiento/:token" element={<SeguimientoDelivery />} />
         <Route path="/" element={<RootRedirect />} />
         <Route path="/admin" element={<ProtectedRoute requiredRole="admin"><SinModulosDeCentral><AdminLayout /></SinModulosDeCentral></ProtectedRoute>}>
           <Route path="dashboard" element={<SinRestriccion ruta="/admin/dashboard"><Dashboard /></SinRestriccion>} />
@@ -175,6 +184,7 @@ export default function App() {
           <Route path="presupuestos" element={<Presupuestos />} />
           <Route path="clientes" element={<Clientes />} />
           <Route path="pedidos" element={<Pedidos />} />
+          <Route path="delivery" element={<Delivery />} />
           <Route path="whatsapp" element={<Whatsapp />} />
           <Route path="instagram" element={<Instagram />} />
           <Route path="pedidos-whatsapp" element={<Navigate to="/admin/whatsapp?tab=pedidos" replace />} />

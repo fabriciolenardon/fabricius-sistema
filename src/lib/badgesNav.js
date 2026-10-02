@@ -11,7 +11,7 @@
 // ============================================================
 import { createContext, useContext } from 'react'
 
-export const BadgesNavCtx = createContext({ deposito: 0, pedidos: 0, whatsapp: 0 })
+export const BadgesNavCtx = createContext({ deposito: 0, pedidos: 0, whatsapp: 0, delivery: 0 })
 
 export function useBadgesNav() {
   return useContext(BadgesNavCtx)

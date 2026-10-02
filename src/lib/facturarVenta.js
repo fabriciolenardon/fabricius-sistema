@@ -19,7 +19,8 @@ import { supabase, fetchAllRows } from './supabase'
 
 // La carne va al 10,5%. El almacén y las bebidas, al 21%. Es el error
 // clásico del sistema genérico: mandar todo al 21% porque es el default.
-const CATEGORIAS_21 = new Set(['almacen', 'bebidas', 'insumo', 'insumos'])
+// El envío del delivery es un servicio: 21%, no el 10,5% de la carne.
+const CATEGORIAS_21 = new Set(['almacen', 'bebidas', 'insumo', 'insumos', 'envio_delivery'])
 export const IVA_CARNE = 4   // 10,5%
 export const IVA_GENERAL = 5 // 21%
 

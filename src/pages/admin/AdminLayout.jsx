@@ -57,6 +57,7 @@ const navItems = [
   { to: '/admin/etiquetas',   icon: '🏷️', label: 'Etiquetas' },
   { to: '/admin/clientes',    icon: '👥', label: 'Clientes' },
   { to: '/admin/pedidos',     icon: '📥', label: 'Pedidos Mayoristas' },
+  { to: '/admin/delivery',    icon: '🛵', label: 'Delivery' },
   { to: '/admin/whatsapp', icon: '💬', label: 'WhatsApp' },
   { to: '/admin/instagram', icon: '📸', label: 'Instagram' },
   { to: '/admin/proveedores', icon: '🏭', label: 'Proveedores' },
@@ -77,6 +78,7 @@ const NAV_GRUPOS = [
     { to: '/admin/ventas',    icon: '📋', label: 'Ventas Cta/Cte' },
     { to: '/admin/deposito',  icon: '🏭', label: 'Depósito' },
     { to: '/admin/pedidos',   icon: '📥', label: 'Pedidos Mayoristas' },
+    { to: '/admin/delivery',  icon: '🛵', label: 'Delivery' },
   ] },
   { label: 'Comercial', icon: '🏷️', items: [
     { to: '/admin/precios',      icon: '💲', label: 'Precios' },
@@ -271,6 +273,26 @@ function usePedidosPendientes() {
   return count
 }
 
+// Pedidos de delivery (app pública /pedir) que llegaron y nadie pesó todavía.
+// Recuenta con SELECT en cada cambio: payload.old sólo trae la PK.
+function useDeliveryNuevos() {
+  const { isSucursal } = useAuth()
+  const [count, setCount] = useState(0)
+  useEffect(() => {
+    if (isSucursal) return
+    async function cargar() {
+      const { count: c } = await supabase.from('pedidos_delivery').select('id', { count: 'exact', head: true }).eq('estado', 'nuevo')
+      setCount(c || 0)
+    }
+    cargar()
+    const canal = supabase.channel('delivery-count-admin')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos_delivery' }, () => cargar())
+      .subscribe()
+    return () => { supabase.removeChannel(canal) }
+  }, [isSucursal])
+  return count
+}
+
 // Pedidos entrantes de WhatsApp (que tomó Iris) todavía sin ver.
 function usePedidosWaNuevos() {
   const [count, setCount] = useState(0)
@@ -416,6 +438,9 @@ function MenuMobile({ onClose }) {
                 {item.to === '/admin/pedidos' && (((window.__pedidosPendientes || 0) + (window.__pedidosListos || 0)) > 0) && (
                   <span style={{ background: '#ef4444', color: '#fff', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{(window.__pedidosPendientes || 0) + (window.__pedidosListos || 0)}</span>
                 )}
+                {item.to === '/admin/delivery' && (window.__deliveryNuevos || 0) > 0 && (
+                  <span style={{ background: '#ef4444', color: '#fff', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{window.__deliveryNuevos}</span>
+                )}
                 {item.to === '/admin/whatsapp' && (((window.__pedidosWaNuevos || 0) + (window.__waNoLeidos || 0)) > 0) && (
                   <span style={{ background: 'var(--green)', color: '#000', borderRadius: '50%', minWidth: 18, height: 18, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{(window.__pedidosWaNuevos || 0) + (window.__waNoLeidos || 0)}</span>
                 )}
@@ -458,6 +483,7 @@ function NavDesktop({ userEmail, esSucursal, badges }) {
 
   const badgeFor = (to) => {
     if (to === '/admin/pedidos')  return badges.pedidos
+    if (to === '/admin/delivery') return badges.delivery
     if (to === '/admin/whatsapp') return badges.whatsapp
     if (to === '/admin/deposito') return badges.deposito
     return 0
@@ -531,6 +557,7 @@ export default function AdminLayout() {
   const notifs = useNotificaciones()
   const pedidosPendientes = usePedidosPendientes()
   const pedidosWaNuevos = usePedidosWaNuevos()
+  const deliveryNuevos = useDeliveryNuevos()
   const waNoLeidos = useWaNoLeidos()
   const { pendientes: flujosPendientes } = useFlujoNotificaciones()
   const { listos: pedidosListos } = usePedidosListosNotif()
@@ -540,6 +567,7 @@ export default function AdminLayout() {
   useEffect(() => { window.__pedidosPendientes = pedidosPendientes }, [pedidosPendientes])
   useEffect(() => { window.__pedidosListos = pedidosListos }, [pedidosListos])
   useEffect(() => { window.__pedidosWaNuevos = pedidosWaNuevos }, [pedidosWaNuevos])
+  useEffect(() => { window.__deliveryNuevos = deliveryNuevos }, [deliveryNuevos])
   useEffect(() => { window.__waNoLeidos = waNoLeidos }, [waNoLeidos])
   // Exponer el email del usuario actual para que el menú mobile pueda
   // filtrar las opciones CEO-only (Ejecutivo, Reportes). Antes esto estaba
@@ -551,7 +579,8 @@ export default function AdminLayout() {
     pedidos: pedidosPendientes + pedidosListos,
     whatsapp: pedidosWaNuevos + waNoLeidos,
     deposito: flujosPendientes,
-  }), [pedidosPendientes, pedidosListos, pedidosWaNuevos, waNoLeidos, flujosPendientes])
+    delivery: deliveryNuevos,
+  }), [pedidosPendientes, pedidosListos, pedidosWaNuevos, waNoLeidos, flujosPendientes, deliveryNuevos])
   const [menuAbierto, setMenuAbierto] = useState(false)
   const [isMobile, setIsMobile] = useState(window.innerWidth < 900)
 
