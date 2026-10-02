@@ -127,6 +127,7 @@ export function mensajeError(error, config) {
   if (m.includes('NOMBRE')) return 'Escribí tu nombre.'
   if (m.includes('TELEFONO')) return 'Revisá el número de WhatsApp: tiene que tener la característica (ej. 3574 …).'
   if (m.includes('DIRECCION')) return 'Escribí la dirección de entrega.'
+  if (m.includes('SIN_STOCK')) return 'Uno de los productos se quedó sin stock recién. Sacalo del pedido y elegí otro.'
   if (m.includes('PRODUCTO')) return 'Uno de los productos ya no está disponible. Sacalo del pedido y probá de nuevo.'
   if (m.includes('CANTIDAD')) return 'Hay una cantidad que no podemos tomar (máximo 20 kg por producto).'
   if (m.includes('DEMASIADOS')) return 'Ya tenés pedidos en curso con este número. Esperá a que lleguen o llamanos.'

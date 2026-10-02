@@ -114,7 +114,7 @@ export default function Pedir() {
   // "Repetir" un pedido anterior: lo que sigue publicado, con las cantidades pedidas.
   function repetir(pedido) {
     const nuevos = (pedido.items || [])
-      .filter(i => !i.sin_stock && porId.has(i.producto_id))
+      .filter(i => !i.sin_stock && porId.has(i.producto_id) && !porId.get(i.producto_id).sin_stock)
       .map(i => ({ producto_id: i.producto_id, cantidad: Number(i.cantidad), nota: i.nota || '' }))
     setCarrito(nuevos)
     setVista('pedido')
@@ -284,9 +284,10 @@ function Catalogo({ productos, config, abierto, lineas, subtotal, onVolver, onAb
 
   const lista = useMemo(() => {
     const t = q.trim().toLowerCase()
-    if (t) return productos.filter(p => p.nombre.toLowerCase().includes(t))
-    if (catSel === 'ofertas') return productos.filter(p => p.oferta)
-    return productos.filter(p => p.categoria === catSel)
+    const xs = t ? productos.filter(p => p.nombre.toLowerCase().includes(t))
+      : catSel === 'ofertas' ? productos.filter(p => p.oferta && !p.sin_stock)
+      : productos.filter(p => p.categoria === catSel)
+    return [...xs].sort((a, b) => Number(!!a.sin_stock) - Number(!!b.sin_stock))   // los sin stock, al final
   }, [productos, catSel, q])
 
   const falta = Math.max(0, Number(config.minimo || 0) - subtotal)
@@ -321,7 +322,15 @@ function Catalogo({ productos, config, abierto, lineas, subtotal, onVolver, onAb
 
       <div style={{ display: 'flex', flexDirection: 'column', padding: '4px 16px 120px' }}>
         {lista.length === 0 && <div style={{ padding: '28px 0', color: C.muted, fontSize: 15 }}>No encontramos productos{q ? ` con "${q}"` : ''}.</div>}
-        {lista.map(p => (
+        {lista.map(p => p.sin_stock ? (
+          <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '13px 0', borderBottom: '1px solid #EFEAE2', color: C.muted }}>
+            <span style={{ display: 'flex', flexDirection: 'column', gap: 3, flexGrow: 1, minWidth: 0 }}>
+              <span style={{ fontWeight: 700, fontSize: 15 }}>{nombreLindo(p.nombre)}</span>
+              <span style={{ fontSize: 13 }}>Hoy no tenemos · elegí otro corte</span>
+            </span>
+            <span style={{ fontSize: 12, fontWeight: 800, color: C.rojo, border: `1px solid ${C.rojo}`, borderRadius: 8, padding: '4px 8px', whiteSpace: 'nowrap' }}>SIN STOCK</span>
+          </div>
+        ) : (
           <button key={p.id} onClick={() => onAbrir(p)}
             style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '13px 0', border: 0, borderBottom: '1px solid #EFEAE2', background: 'transparent', color: C.ink, textAlign: 'left', cursor: 'pointer', fontFamily: F.body, width: '100%' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flexGrow: 1, minWidth: 0 }}>
@@ -385,7 +394,7 @@ function HojaCantidad({ producto, enCarrito, onCerrar, onGuardar }) {
   const [nota, setNota] = useState(enCarrito?.nota || '')
 
   const cantidad = pesable && usaOtra ? parseNumero(otra) : cant
-  const valida = pesable ? cantidad >= 0.1 && cantidad <= 20 : cantidad >= 1 && cantidad <= 50
+  const valida = !producto.sin_stock && (pesable ? cantidad >= 0.1 && cantidad <= 20 : cantidad >= 1 && cantidad <= 50)
   const importe = Math.round((valida ? cantidad : 0) * Number(producto.precio))
 
   return (
@@ -448,7 +457,8 @@ function HojaCantidad({ producto, enCarrito, onCerrar, onGuardar }) {
 
         <button disabled={!valida} onClick={() => onGuardar(Math.round(cantidad * 1000) / 1000, nota.trim())}
           style={{ ...btnPrimario, opacity: valida ? 1 : 0.5 }}>
-          {valida
+          {producto.sin_stock ? 'Sin stock: sacalo y elegí otro'
+            : valida
             ? `${enCarrito ? 'Actualizar' : 'Agregar'} · ≈ ${pesos(importe)}`
             : pesable ? 'Elegí entre 0,1 y 20 kg' : 'Elegí la cantidad'}
         </button>
@@ -505,7 +515,9 @@ function TuPedido({ config, abierto, lineas, subtotal, cuenta, token, onVolver, 
     onCreado(data)
   }
 
+  const sinStock = lineas.filter(l => l.producto.sin_stock)
   const motivo = !lineas.length ? 'Tu pedido está vacío'
+    : sinStock.length ? 'Sacá los productos sin stock'
     : falta > 0 ? `Te faltan ${pesos(falta)} para la compra mínima`
     : !abierto ? `Ahora no tomamos pedidos${proximaApertura(config) ? ` · volvemos ${proximaApertura(config)}` : ''}`
     : direccion.trim().length < 4 ? 'Escribí la dirección'
@@ -523,9 +535,11 @@ function TuPedido({ config, abierto, lineas, subtotal, cuenta, token, onVolver, 
             <button key={l.producto_id} onClick={() => onEditar(l)}
               style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '11px 0', border: 0, borderBottom: '1px solid #EFEAE2', background: 'transparent', color: C.ink, fontFamily: F.body, fontSize: 15, textAlign: 'left', cursor: 'pointer', width: '100%' }}>
               <span style={{ minWidth: 0 }}>
-                <b>{nombreLindo(l.producto.nombre)}</b> <span style={{ color: C.muted }}>· {fmtCantidad(l.cantidad, l.producto.pesable)}</span>
+                <b style={{ textDecoration: l.producto.sin_stock ? 'line-through' : 'none' }}>{nombreLindo(l.producto.nombre)}</b> <span style={{ color: C.muted }}>· {fmtCantidad(l.cantidad, l.producto.pesable)}</span>
                 {l.nota && <span style={{ display: 'block', fontSize: 13, color: C.muted, marginTop: 2 }}>«{l.nota}»</span>}
-                <span style={{ display: 'block', fontSize: 12, color: C.goldText, marginTop: 2, fontWeight: 600 }}>Tocá para cambiar</span>
+                {l.producto.sin_stock
+                  ? <span style={{ display: 'block', fontSize: 12, color: C.rojo, marginTop: 2, fontWeight: 700 }}>Se quedó sin stock · tocá para sacarlo</span>
+                  : <span style={{ display: 'block', fontSize: 12, color: C.goldText, marginTop: 2, fontWeight: 600 }}>Tocá para cambiar</span>}
               </span>
               <span style={{ whiteSpace: 'nowrap' }}>≈ {pesos(l.importe)}</span>
             </button>
@@ -701,7 +715,7 @@ function MiCuenta({ cuenta, token, porId, onVolver, onSalir, onRepetir, onActual
           <h2 style={{ margin: 0, fontFamily: F.display, fontSize: 19 }}>Mis pedidos</h2>
           {cuenta.pedidos.length === 0 && <span style={{ color: C.muted, fontSize: 14 }}>Todavía no hiciste ningún pedido.</span>}
           {cuenta.pedidos.map(p => {
-            const vivos = (p.items || []).filter(i => !i.sin_stock && porId.has(i.producto_id)).length
+            const vivos = (p.items || []).filter(i => !i.sin_stock && porId.has(i.producto_id) && !porId.get(i.producto_id).sin_stock).length
             return (
               <div key={p.numero} style={{ border: `1px solid ${C.line}`, borderRadius: 14, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline' }}>

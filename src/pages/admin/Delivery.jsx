@@ -231,6 +231,12 @@ function Detalle({ pedido: p, config, onVolver }) {
       setCatalogo(data || [])
     }
   }
+  // Que el resto de los clientes ya no lo pueda pedir (mig 158).
+  async function marcarSinStockApp(it) {
+    const { error } = await supabase.from('precios').update({ delivery_sin_stock: true }).eq('id', it.producto_id)
+    setMsg(error ? { tipo: 'error', texto: `No se pudo: ${error.message}` }
+      : { tipo: 'ok', texto: `${nombreLindo(it.nombre)} quedó SIN STOCK en la app. Se vuelve a habilitar en Productos publicados.` })
+  }
   function alternarSinStock(idx) {
     setItems(xs => xs.map((x, j) => j === idx ? { ...x, sin_stock: !x.sin_stock } : x))
     setMsg(null)
@@ -361,6 +367,9 @@ function Detalle({ pedido: p, config, onVolver }) {
               {it.sin_stock ? '↩ Sí hay' : '✕ No hay'}
             </button>
             <button onClick={() => abrirCambio(idx)} className="btn btn-ghost btn-sm">⇄ Cambiar por otro</button>
+            {it.sin_stock && it.producto_id && (
+              <button onClick={() => marcarSinStockApp(it)} className="btn btn-ghost btn-sm" title="Que los próximos clientes no lo puedan pedir">🚫 Sin stock en la app</button>
+            )}
             <a href={waLink(p.telefono, mensajeSinStock(p, it))} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm" style={{ textDecoration: 'none', color: 'var(--green)' }}>
               💬 Preguntarle
             </a>
@@ -621,7 +630,7 @@ function Productos({ config }) {
 
   async function cargar() {
     const { data } = await supabase.from('precios')
-      .select('id, nombre, categoria, precio_minorista, pesable, vende_por_pieza, delivery_oculto')
+      .select('id, nombre, categoria, precio_minorista, pesable, vende_por_pieza, delivery_oculto, delivery_sin_stock')
       .is('sucursal_id', null).in('categoria', cats).gt('precio_minorista', 0).order('nombre')
     setProductos((data || []).filter(p => !p.vende_por_pieza))
   }
@@ -633,15 +642,31 @@ function Productos({ config }) {
     setProductos(ps => ps.map(x => x.id === p.id ? { ...x, delivery_oculto: !x.delivery_oculto } : x))
   }
 
+  async function alternarStock(p) {
+    const { error } = await supabase.from('precios').update({ delivery_sin_stock: !p.delivery_sin_stock }).eq('id', p.id)
+    if (error) { setMsg(`No se pudo cambiar: ${error.message}`); return }
+    setProductos(ps => ps.map(x => x.id === p.id ? { ...x, delivery_sin_stock: !x.delivery_sin_stock } : x))
+  }
+
   const t = q.trim().toLowerCase()
   const visibles = productos.filter(p => !t || p.nombre.toLowerCase().includes(t))
   const publicados = productos.filter(p => !p.delivery_oculto).length
+  const agotados = productos.filter(p => !p.delivery_oculto && p.delivery_sin_stock)
   return (
     <div className="card" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.5 }}>
         Se publican con el <b>precio minorista</b> de la lista y las ofertas vigentes de la central. Apagá los que no querés que aparezcan en el delivery.
         <br /><b style={{ color: 'var(--text)' }}>{publicados}</b> de {productos.length} publicados.
+        {' '}<b style={{ color: 'var(--text)' }}>Sin stock</b> = el cliente lo ve en gris y no lo puede pedir, hasta que lo vuelvas a habilitar.
       </div>
+      {agotados.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', fontSize: 12 }}>
+          <b style={{ color: 'var(--red-light)' }}>Sin stock ahora ({agotados.length}):</b>
+          {agotados.map(p => (
+            <button key={p.id} onClick={() => alternarStock(p)} className="btn btn-ghost btn-sm" title="Volver a habilitar">{nombreLindo(p.nombre)} ✓ hay</button>
+          ))}
+        </div>
+      )}
       <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar producto" style={{ maxWidth: 360 }} />
       {msg && <div style={{ color: 'var(--red-light)', fontSize: 13 }}>{msg}</div>}
       {CATEGORIAS_DELIVERY.filter(c => cats.includes(c.key)).map(c => {
@@ -655,6 +680,13 @@ function Productos({ config }) {
                 <input type="checkbox" checked={!p.delivery_oculto} onChange={() => alternar(p)} />
                 <span style={{ flex: 1, opacity: p.delivery_oculto ? 0.5 : 1 }}>{nombreLindo(p.nombre)}</span>
                 <span style={{ color: 'var(--text2)' }}>{pesos(p.precio_minorista)}{p.pesable === false ? ' c/u' : ' /kg'}</span>
+                {!p.delivery_oculto && (
+                  <button onClick={e => { e.preventDefault(); alternarStock(p) }} className="btn btn-sm" style={{
+                    minWidth: 92, fontWeight: 700,
+                    background: p.delivery_sin_stock ? 'var(--red)' : 'transparent', color: p.delivery_sin_stock ? '#fff' : 'var(--text2)',
+                    border: `1px solid ${p.delivery_sin_stock ? 'var(--red)' : 'var(--border2)'}`,
+                  }}>{p.delivery_sin_stock ? 'SIN STOCK' : 'Hay'}</button>
+                )}
               </label>
             ))}
           </div>
