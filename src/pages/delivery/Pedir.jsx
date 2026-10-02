@@ -1,29 +1,33 @@
 // ============================================================
-// /pedir — App de delivery para el público (sin usuario)
+// /pedir — App de delivery para el público
 // ============================================================
 // Inicio → catálogo → elegir cantidad → tu pedido → seguimiento.
 // Todo en una sola pantalla con `vista`, para que el carrito no se
 // pierda entre pasos; además queda guardado en el celular (localStorage)
 // por si cierra la pestaña.
 //
+// Mirar precios es libre; para PEDIR hay que tener cuenta (nombre,
+// teléfono, dirección y una clave de 4 números — mig 157). La sesión es
+// un token que queda en el celular: la próxima vez entra directo.
+//
 // El precio que se muestra es APROXIMADO: la carne se pesa al preparar
 // el pedido y el local avisa el total exacto por WhatsApp. El servidor
-// (delivery_crear_pedido) recalcula todo y vuelve a validar horario y
-// mínimo: lo que valida esta pantalla es sólo para avisar antes.
+// (delivery_crear_pedido) recalcula todo y vuelve a validar horario,
+// mínimo y cupón: lo que valida esta pantalla es sólo para avisar antes.
 // ============================================================
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { parseNumero } from '../../lib/formatos'
+import { limpiarNumero } from '../../lib/whatsapp'
 import {
-  CATEGORIAS_DELIVERY, OPCIONES_KG, labelKg, pesos, fmtCantidad,
-  cierraA, proximaApertura, textoHorarios, mensajeError, nombreLindo,
+  CATEGORIAS_DELIVERY, OPCIONES_KG, labelKg, pesos, fmtCantidad, ESTADOS, TZ,
+  cierraA, proximaApertura, textoHorarios, mensajeError, mensajeIngreso, textoCupon, nombreLindo,
 } from '../../lib/delivery'
 import { C, F, input, btnPrimario, btnSecundario, useModoDelivery, leerLS, guardarLS } from './estilo'
 
 const LS_CARRITO = 'fabricius_delivery_carrito'
-const LS_DATOS = 'fabricius_delivery_datos'
-export const LS_PEDIDOS = 'fabricius_delivery_pedidos'
+const LS_SESION = 'fabricius_delivery_sesion'
 
 const Icono = {
   pin: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-12a7 7 0 0 1 14 0c0 5.8-7 12-7 12z" /><circle cx="12" cy="9" r="2.5" /></svg>,
@@ -31,7 +35,7 @@ const Icono = {
   mas: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>,
   menos: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M5 12h14" /></svg>,
   lupa: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M20 20l-4-4" /></svg>,
-  reloj: <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>,
+  persona: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7" /></svg>,
   info: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={C.goldText} strokeWidth="2" strokeLinecap="round" aria-hidden="true" style={{ flexShrink: 0, marginTop: 1 }}><circle cx="12" cy="12" r="9" /><path d="M12 8v5M12 16.5v.5" /></svg>,
 }
 
@@ -40,10 +44,12 @@ export default function Pedir() {
   const navigate = useNavigate()
   const [cat, setCat] = useState(null)          // { config, abierto, productos }
   const [errorCarga, setErrorCarga] = useState(false)
-  const [vista, setVista] = useState('inicio')  // inicio | catalogo | pedido
+  const [vista, setVista] = useState('inicio')  // inicio | catalogo | pedido | ingreso | cuenta
+  const [despuesIngreso, setDespuesIngreso] = useState('inicio')
   const [carrito, setCarrito] = useState(() => leerLS(LS_CARRITO, []))
   const [hoja, setHoja] = useState(null)        // producto abierto en la hoja de cantidad
-  const [pedidosPrevios] = useState(() => leerLS(LS_PEDIDOS, []))
+  const [token, setToken] = useState(() => leerLS(LS_SESION, null))
+  const [cuenta, setCuenta] = useState(null)    // datos + cupón + pedidos
 
   async function cargar() {
     const { data, error } = await supabase.rpc('delivery_catalogo')
@@ -57,6 +63,35 @@ export default function Pedir() {
     const t = setInterval(cargar, 60000)
     return () => clearInterval(t)
   }, [])
+
+  async function cargarCuenta(tk = token) {
+    if (!tk) { setCuenta(null); return }
+    const { data, error } = await supabase.rpc('delivery_mi_cuenta', { p_token: tk })
+    if (error) {
+      // Sesión vencida o reseteada por el local: a ingresar de nuevo.
+      if (String(error.message).includes('SESION')) { guardarLS(LS_SESION, null); setToken(null); setCuenta(null) }
+      return
+    }
+    setCuenta(data)
+  }
+  useEffect(() => { cargarCuenta() }, [token])
+
+  function entrar(r) {
+    guardarLS(LS_SESION, r.token)
+    setToken(r.token)
+    setVista(despuesIngreso)
+  }
+  async function salir() {
+    if (token) await supabase.rpc('delivery_salir', { p_token: token })
+    guardarLS(LS_SESION, null)
+    setToken(null)
+    setCuenta(null)
+    setVista('inicio')
+  }
+  function irAIngresar(despues) {
+    setDespuesIngreso(despues)
+    setVista('ingreso')
+  }
 
   useEffect(() => { guardarLS(LS_CARRITO, carrito) }, [carrito])
   useEffect(() => { window.scrollTo(0, 0) }, [vista])
@@ -76,6 +111,14 @@ export default function Pedir() {
       return cantidad > 0 ? [...sin, { producto_id, cantidad, nota: nota || '' }] : sin
     })
   }
+  // "Repetir" un pedido anterior: lo que sigue publicado, con las cantidades pedidas.
+  function repetir(pedido) {
+    const nuevos = (pedido.items || [])
+      .filter(i => !i.sin_stock && porId.has(i.producto_id))
+      .map(i => ({ producto_id: i.producto_id, cantidad: Number(i.cantidad), nota: i.nota || '' }))
+    setCarrito(nuevos)
+    setVista('pedido')
+  }
 
   if (!cat) {
     return (
@@ -94,8 +137,10 @@ export default function Pedir() {
   return (
     <Pantalla>
       {vista === 'inicio' && (
-        <Inicio config={config} abierto={abierto} pedidosPrevios={pedidosPrevios}
+        <Inicio config={config} abierto={abierto} cuenta={cuenta}
           onVer={() => setVista('catalogo')}
+          onIngresar={() => irAIngresar('inicio')}
+          onCuenta={() => setVista('cuenta')}
           onSeguir={t => navigate(`/pedir/seguimiento/${t}`)} />
       )}
       {vista === 'catalogo' && (
@@ -104,13 +149,24 @@ export default function Pedir() {
           onVolver={() => setVista('inicio')} onAbrir={setHoja} onPedido={() => setVista('pedido')} />
       )}
       {vista === 'pedido' && (
-        <TuPedido config={config} abierto={abierto} lineas={lineas} subtotal={subtotal}
+        <TuPedido config={config} abierto={abierto} lineas={lineas} subtotal={subtotal} cuenta={cuenta} token={token}
           onVolver={() => setVista('catalogo')} onEditar={l => setHoja(l.producto)}
+          onIngresar={() => irAIngresar('pedido')}
+          onSesionVencida={() => { guardarLS(LS_SESION, null); setToken(null); setCuenta(null) }}
           onCreado={(r) => {
             setCarrito([])
-            guardarLS(LS_PEDIDOS, [{ token: r.token, numero: r.numero, fecha: new Date().toISOString() }, ...leerLS(LS_PEDIDOS, [])].slice(0, 10))
+            cargarCuenta()
             navigate(`/pedir/seguimiento/${r.token}`)
           }} />
+      )}
+      {vista === 'ingreso' && (
+        <Ingreso config={config} onVolver={() => setVista(despuesIngreso === 'pedido' ? 'pedido' : 'inicio')} onEntrar={entrar} />
+      )}
+      {vista === 'cuenta' && cuenta && (
+        <MiCuenta cuenta={cuenta} token={token} porId={porId}
+          onVolver={() => setVista('inicio')} onSalir={salir} onRepetir={repetir}
+          onActualizada={setCuenta}
+          onSeguir={t => navigate(`/pedir/seguimiento/${t}`)} />
       )}
       {hoja && (
         <HojaCantidad producto={hoja} enCarrito={carrito.find(l => l.producto_id === hoja.id)}
@@ -140,15 +196,28 @@ function Cabecera({ chico }) {
   )
 }
 
-function Inicio({ config, abierto, pedidosPrevios, onVer, onSeguir }) {
+function Inicio({ config, abierto, cuenta, onVer, onIngresar, onCuenta, onSeguir }) {
   const hasta = cierraA(config)
   const proxima = proximaApertura(config)
   const horarios = textoHorarios(config)
-  const ultimo = pedidosPrevios[0]
+  const enCurso = (cuenta?.pedidos || []).find(p => ['nuevo', 'pesado', 'pagado', 'en_camino'].includes(p.estado))
+  const cupon = textoCupon(cuenta?.cupon)
   return (
     <>
       <Cabecera />
       <div style={{ padding: '24px 24px 28px', display: 'flex', flexDirection: 'column', gap: 18, flexGrow: 1 }}>
+        {cuenta ? (
+          <button onClick={onCuenta} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 14, border: `1px solid ${C.line}`, background: '#FFFFFF', color: C.ink, fontFamily: F.body, textAlign: 'left', cursor: 'pointer', width: '100%' }}>
+            {Icono.persona}
+            <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flexGrow: 1, minWidth: 0 }}>
+              <b style={{ fontSize: 15 }}>Hola, {cuenta.nombre.split(' ')[0]}</b>
+              <span style={{ fontSize: 13, color: cuenta.cupon?.disponible ? C.verde : C.muted, fontWeight: cuenta.cupon?.disponible ? 700 : 400 }}>{cupon || 'Mis pedidos y mis datos'}</span>
+            </span>
+            <span style={{ fontSize: 13, color: C.goldText, fontWeight: 700 }}>Mi cuenta</span>
+          </button>
+        ) : (
+          <button onClick={onIngresar} style={{ ...btnSecundario, minHeight: 46 }}>Ingresar o crear mi cuenta</button>
+        )}
         <h1 style={{ margin: 0, fontFamily: F.display, fontWeight: 700, fontSize: 25, lineHeight: 1.2, textWrap: 'balance' }}>
           Te lo llevamos a tu casa en {config.localidad || 'Río Primero'}
         </h1>
@@ -185,9 +254,9 @@ function Inicio({ config, abierto, pedidosPrevios, onVer, onSeguir }) {
           Pagás en <b>efectivo</b> cuando te llega, o por <b>transferencia</b> antes del envío.
         </div>
 
-        {ultimo && (
-          <button onClick={() => onSeguir(ultimo.token)} style={{ ...btnSecundario }}>
-            Ver mi pedido N° {ultimo.numero}
+        {enCurso && (
+          <button onClick={() => onSeguir(enCurso.token)} style={{ ...btnSecundario }}>
+            Ver mi pedido N° {enCurso.numero} · {ESTADOS[enCurso.estado]?.label}
           </button>
         )}
         <div style={{ flexGrow: 1 }} />
@@ -400,35 +469,35 @@ function Opcion({ activa, onClick, children }) {
   )
 }
 
-function TuPedido({ config, abierto, lineas, subtotal, onVolver, onEditar, onCreado }) {
-  const [datos, setDatos] = useState(() => leerLS(LS_DATOS, { nombre: '', telefono: '', direccion: '', referencias: '' }))
+function TuPedido({ config, abierto, lineas, subtotal, cuenta, token, onVolver, onEditar, onIngresar, onSesionVencida, onCreado }) {
+  const [direccion, setDireccion] = useState(cuenta?.direccion || '')
+  const [referencias, setReferencias] = useState(cuenta?.referencias || '')
   const [pago, setPago] = useState('efectivo')
   const [enviando, setEnviando] = useState(false)
   const [error, setError] = useState(null)
-  const set = (k, v) => setDatos(d => ({ ...d, [k]: v }))
+  // Si la cuenta llega después de abrir esta pantalla, completar la dirección.
+  useEffect(() => {
+    if (cuenta && !direccion) { setDireccion(cuenta.direccion || ''); setReferencias(cuenta.referencias || '') }
+  }, [cuenta])
 
   const envio = Number(config.envio || 0)
   const minimo = Number(config.minimo || 0)
   const falta = Math.max(0, minimo - subtotal)
-  const tel = datos.telefono.replace(/\D/g, '')
-  const faltaDato = !datos.nombre.trim() ? 'Escribí tu nombre'
-    : tel.length < 8 ? 'Escribí tu WhatsApp'
-    : datos.direccion.trim().length < 4 ? 'Escribí la dirección'
-    : null
+  const cupon = cuenta?.cupon?.disponible ? cuenta.cupon : null
+  const descuento = cupon ? Math.round(subtotal * Number(cupon.pct) / 100) : 0
 
   async function confirmar() {
-    if (enviando || !lineas.length || falta > 0 || faltaDato || !abierto) return
+    if (enviando || !lineas.length || falta > 0 || !abierto || !cuenta) return
     setEnviando(true)
     setError(null)
-    guardarLS(LS_DATOS, datos)
     const { data, error: err } = await supabase.rpc('delivery_crear_pedido', {
       p: {
-        nombre: datos.nombre, telefono: datos.telefono, direccion: datos.direccion, referencias: datos.referencias,
-        forma_pago: pago,
+        token, direccion, referencias, forma_pago: pago,
         items: lineas.map(l => ({ producto_id: l.producto_id, cantidad: l.cantidad, nota: l.nota })),
       },
     })
     if (err || !data?.token) {
+      if (String(err?.message).includes('SESION')) onSesionVencida()
       setError(mensajeError(err, config))
       setEnviando(false)
       return
@@ -439,7 +508,8 @@ function TuPedido({ config, abierto, lineas, subtotal, onVolver, onEditar, onCre
   const motivo = !lineas.length ? 'Tu pedido está vacío'
     : falta > 0 ? `Te faltan ${pesos(falta)} para la compra mínima`
     : !abierto ? `Ahora no tomamos pedidos${proximaApertura(config) ? ` · volvemos ${proximaApertura(config)}` : ''}`
-    : faltaDato
+    : direccion.trim().length < 4 ? 'Escribí la dirección'
+    : null
 
   return (
     <>
@@ -460,45 +530,227 @@ function TuPedido({ config, abierto, lineas, subtotal, onVolver, onEditar, onCre
               <span style={{ whiteSpace: 'nowrap' }}>≈ {pesos(l.importe)}</span>
             </button>
           ))}
+          {descuento > 0 && <Fila label={`🎁 Tu descuento (${cupon.pct}%)`} valor={`-${pesos(descuento)}`} verde />}
           <Fila label="Envío a domicilio" valor={pesos(envio)} gris />
-          <Fila label="Total aproximado" valor={`≈ ${pesos(subtotal + envio)}`} fuerte />
+          <Fila label="Total aproximado" valor={`≈ ${pesos(subtotal - descuento + envio)}`} fuerte />
           <div style={{ paddingTop: 6, fontSize: 13, color: falta > 0 ? C.rojo : C.verde, fontWeight: 600 }}>
             {falta > 0 ? `Te faltan ${pesos(falta)} para la compra mínima de ${pesos(minimo)}` : `Supera la compra mínima de ${pesos(minimo)}`}
           </div>
         </div>
 
-        <Campo label="Tu nombre">
-          <input value={datos.nombre} onChange={e => set('nombre', e.target.value)} autoComplete="name" maxLength={80} style={input} />
-        </Campo>
-        <Campo label="WhatsApp" ayuda="Por acá te avisamos el total y cuando sale el pedido">
-          <input type="tel" inputMode="tel" value={datos.telefono} onChange={e => set('telefono', e.target.value)} autoComplete="tel" placeholder="3574 …" maxLength={20} style={input} />
-        </Campo>
-        <Campo label={`Dirección en ${config.localidad}`}>
-          <input value={datos.direccion} onChange={e => set('direccion', e.target.value)} autoComplete="street-address" placeholder="Calle y número" maxLength={200} style={input} />
-        </Campo>
-        <Campo label="Referencias" ayuda="Opcional: piso, color de la casa, entre qué calles">
-          <input value={datos.referencias} onChange={e => set('referencias', e.target.value)} maxLength={200} style={input} />
-        </Campo>
+        {!cuenta ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 16, borderRadius: 14, background: C.soft }}>
+            <b style={{ fontSize: 16 }}>Para pedir, ingresá con tu cuenta</b>
+            <span style={{ fontSize: 14, color: C.muted, lineHeight: 1.5 }}>Es con tu teléfono y una clave de 4 números. La primera vez tarda un minuto y después entrás directo.</span>
+            <button onClick={onIngresar} style={btnPrimario}>Ingresar o crear mi cuenta</button>
+          </div>
+        ) : (
+          <>
+            <div style={{ fontSize: 14, color: C.muted }}>A nombre de <b style={{ color: C.ink }}>{cuenta.nombre}</b> · {cuenta.telefono}</div>
+            <Campo label={`Dirección en ${config.localidad}`}>
+              <input value={direccion} onChange={e => setDireccion(e.target.value)} autoComplete="street-address" placeholder="Calle y número" maxLength={200} style={input} />
+            </Campo>
+            <Campo label="Referencias" ayuda="Opcional: piso, color de la casa, entre qué calles">
+              <input value={referencias} onChange={e => setReferencias(e.target.value)} maxLength={200} style={input} />
+            </Campo>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <span style={{ fontWeight: 700, fontSize: 14 }}>¿Cómo pagás?</span>
+              <OpcionPago activa={pago === 'efectivo'} onClick={() => setPago('efectivo')} titulo="Efectivo al recibir" detalle="Le pagás al repartidor" />
+              <OpcionPago activa={pago === 'transferencia'} onClick={() => setPago('transferencia')} titulo="Transferencia" detalle="Te pasamos el total pesado y transferís antes del envío" />
+            </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <span style={{ fontWeight: 700, fontSize: 14 }}>¿Cómo pagás?</span>
-          <OpcionPago activa={pago === 'efectivo'} onClick={() => setPago('efectivo')} titulo="Efectivo al recibir" detalle="Le pagás al repartidor" />
-          <OpcionPago activa={pago === 'transferencia'} onClick={() => setPago('transferencia')} titulo="Transferencia" detalle="Te pasamos el total pesado y transferís antes del envío" />
-        </div>
+            {error && <div role="alert" style={{ padding: '12px 14px', borderRadius: 12, background: '#FDECEA', color: C.rojo, fontSize: 14, fontWeight: 600 }}>{error}</div>}
 
-        {error && <div role="alert" style={{ padding: '12px 14px', borderRadius: 12, background: '#FDECEA', color: C.rojo, fontSize: 14, fontWeight: 600 }}>{error}</div>}
-
-        <button onClick={confirmar} disabled={!!motivo || enviando} style={{ ...btnPrimario, opacity: motivo || enviando ? 0.5 : 1 }}>
-          {enviando ? 'Mandando…' : motivo || 'Confirmar pedido'}
-        </button>
+            <button onClick={confirmar} disabled={!!motivo || enviando} style={{ ...btnPrimario, opacity: motivo || enviando ? 0.5 : 1 }}>
+              {enviando ? 'Mandando…' : motivo || 'Confirmar pedido'}
+            </button>
+          </>
+        )}
       </div>
     </>
   )
 }
 
-function Fila({ label, valor, gris, fuerte }) {
+// ── Ingresar / crear cuenta ──
+function Ingreso({ config, onVolver, onEntrar }) {
+  const [modo, setModo] = useState('ingresar')   // ingresar | crear
+  const [f, setF] = useState({ nombre: '', telefono: '', direccion: '', referencias: '', pin: '', pin2: '' })
+  const [error, setError] = useState(null)
+  const [enviando, setEnviando] = useState(false)
+  const set = (k, v) => { setF(x => ({ ...x, [k]: v })); setError(null) }
+  const soloDigitos = v => v.replace(/\D/g, '').slice(0, 4)
+
+  async function enviar() {
+    if (enviando) return
+    const tel = f.telefono.replace(/\D/g, '')
+    if (tel.length < 8) { setError('Escribí tu número de WhatsApp con la característica (ej. 3574 …).'); return }
+    if (!/^\d{4}$/.test(f.pin)) { setError('La clave tiene que ser de 4 números.'); return }
+    if (modo === 'crear') {
+      if (f.nombre.trim().length < 3) { setError('Escribí tu nombre y apellido.'); return }
+      if (f.direccion.trim().length < 4) { setError('Escribí tu dirección.'); return }
+      if (f.pin !== f.pin2) { setError('Las dos claves no coinciden.'); return }
+    }
+    setEnviando(true)
+    const r = modo === 'crear'
+      ? await supabase.rpc('delivery_registrar', { p: { nombre: f.nombre, telefono: f.telefono, direccion: f.direccion, referencias: f.referencias, pin: f.pin } })
+      : await supabase.rpc('delivery_ingresar', { p_telefono: f.telefono, p_pin: f.pin })
+    setEnviando(false)
+    if (r.error) { setError(mensajeError(r.error, config)); return }
+    if (r.data?.error) {
+      setError(mensajeIngreso(r.data.error))
+      if (r.data.error === 'NO_EXISTE') setModo('crear')
+      return
+    }
+    onEntrar(r.data)
+  }
+
+  const wa = limpiarNumero(config.whatsapp)
+  const olvide = encodeURIComponent(`Hola! Me olvidé la clave del delivery de Fabricius. Mi teléfono es ${f.telefono || '…'}`)
+
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', padding: fuerte ? '6px 0 0' : '10px 0 2px', fontSize: fuerte ? 18 : 15, fontWeight: fuerte ? 800 : 400, color: gris ? C.muted : C.ink }}>
+    <>
+      <div style={{ padding: '14px 16px 12px', display: 'flex', alignItems: 'center', gap: 8, borderBottom: `1px solid ${C.line}` }}>
+        <button onClick={onVolver} aria-label="Volver" style={btnIcono}>{Icono.volver}</button>
+        <h1 style={{ margin: 0, fontFamily: F.display, fontWeight: 700, fontSize: 22 }}>{modo === 'crear' ? 'Crear mi cuenta' : 'Ingresar'}</h1>
+      </div>
+      <div style={{ padding: '18px 20px 28px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+          <Opcion activa={modo === 'ingresar'} onClick={() => { setModo('ingresar'); setError(null) }}>Ya tengo cuenta</Opcion>
+          <Opcion activa={modo === 'crear'} onClick={() => { setModo('crear'); setError(null) }}>Soy nuevo</Opcion>
+        </div>
+        {modo === 'crear' && (
+          <Campo label="Nombre y apellido">
+            <input value={f.nombre} onChange={e => set('nombre', e.target.value)} autoComplete="name" maxLength={80} style={input} />
+          </Campo>
+        )}
+        <Campo label="Tu WhatsApp" ayuda={modo === 'crear' ? 'Por acá te avisamos el total y cuando sale el pedido' : null}>
+          <input type="tel" inputMode="tel" value={f.telefono} onChange={e => set('telefono', e.target.value)} autoComplete="tel" placeholder="3574 …" maxLength={20} style={input} />
+        </Campo>
+        {modo === 'crear' && (
+          <>
+            <Campo label={`Dirección en ${config.localidad}`}>
+              <input value={f.direccion} onChange={e => set('direccion', e.target.value)} autoComplete="street-address" placeholder="Calle y número" maxLength={200} style={input} />
+            </Campo>
+            <Campo label="Referencias" ayuda="Opcional: piso, color de la casa, entre qué calles">
+              <input value={f.referencias} onChange={e => set('referencias', e.target.value)} maxLength={200} style={input} />
+            </Campo>
+          </>
+        )}
+        <Campo label={modo === 'crear' ? 'Elegí una clave de 4 números' : 'Tu clave'}>
+          <input type="password" inputMode="numeric" autoComplete={modo === 'crear' ? 'new-password' : 'current-password'} value={f.pin}
+            onChange={e => set('pin', soloDigitos(e.target.value))} placeholder="••••" style={{ ...input, letterSpacing: 8, fontSize: 20 }} />
+        </Campo>
+        {modo === 'crear' && (
+          <Campo label="Repetí la clave">
+            <input type="password" inputMode="numeric" autoComplete="new-password" value={f.pin2}
+              onChange={e => set('pin2', soloDigitos(e.target.value))} placeholder="••••" style={{ ...input, letterSpacing: 8, fontSize: 20 }} />
+          </Campo>
+        )}
+
+        {error && <div role="alert" style={{ padding: '12px 14px', borderRadius: 12, background: '#FDECEA', color: C.rojo, fontSize: 14, fontWeight: 600, lineHeight: 1.45 }}>{error}</div>}
+
+        <button onClick={enviar} disabled={enviando} style={{ ...btnPrimario, opacity: enviando ? 0.5 : 1 }}>
+          {enviando ? 'Un momento…' : modo === 'crear' ? 'Crear mi cuenta' : 'Ingresar'}
+        </button>
+        {modo === 'ingresar' && wa && (
+          <a href={`https://wa.me/${wa}?text=${olvide}`} target="_blank" rel="noreferrer" style={{ textAlign: 'center', fontSize: 14, fontWeight: 700, color: C.goldText }}>
+            Me olvidé la clave
+          </a>
+        )}
+      </div>
+    </>
+  )
+}
+
+// ── Mi cuenta: cupón, pedidos anteriores y mis datos ──
+function MiCuenta({ cuenta, token, porId, onVolver, onSalir, onRepetir, onActualizada, onSeguir }) {
+  const [editando, setEditando] = useState(false)
+  const [f, setF] = useState({ nombre: cuenta.nombre, direccion: cuenta.direccion, referencias: cuenta.referencias || '' })
+  const [msg, setMsg] = useState(null)
+  const cupon = textoCupon(cuenta.cupon)
+  const fecha = v => new Date(v).toLocaleDateString('es-AR', { timeZone: TZ, day: '2-digit', month: '2-digit', year: '2-digit' })
+
+  async function guardar() {
+    const { data, error } = await supabase.rpc('delivery_actualizar_datos', { p_token: token, p: f })
+    if (error) { setMsg({ error: true, t: mensajeError(error) }); return }
+    onActualizada({ ...cuenta, ...data })
+    setEditando(false)
+    setMsg({ t: 'Datos guardados.' })
+  }
+
+  return (
+    <>
+      <div style={{ padding: '14px 16px 12px', display: 'flex', alignItems: 'center', gap: 8, borderBottom: `1px solid ${C.line}` }}>
+        <button onClick={onVolver} aria-label="Volver" style={btnIcono}>{Icono.volver}</button>
+        <h1 style={{ margin: 0, fontFamily: F.display, fontWeight: 700, fontSize: 22, flexGrow: 1 }}>Mi cuenta</h1>
+        <button onClick={onSalir} style={{ border: 0, background: 'transparent', color: C.muted, fontFamily: F.body, fontSize: 14, fontWeight: 600, cursor: 'pointer', padding: 10 }}>Salir</button>
+      </div>
+      <div style={{ padding: '16px 20px 28px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+        {cupon && (
+          <div style={{ padding: '14px 16px', borderRadius: 14, background: cuenta.cupon.disponible ? '#E8F5EC' : C.aviso, color: cuenta.cupon.disponible ? C.verde : C.avisoInk, fontWeight: 700, fontSize: 15, lineHeight: 1.45 }}>
+            {cupon}
+            {!cuenta.cupon.disponible && (
+              <div style={{ marginTop: 10, height: 8, borderRadius: 4, background: '#FFFFFF', overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${Math.round(((cuenta.cupon.cada - cuenta.cupon.faltan) / cuenta.cupon.cada) * 100)}%`, background: C.gold }} />
+              </div>
+            )}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <h2 style={{ margin: 0, fontFamily: F.display, fontSize: 19 }}>Mis pedidos</h2>
+          {cuenta.pedidos.length === 0 && <span style={{ color: C.muted, fontSize: 14 }}>Todavía no hiciste ningún pedido.</span>}
+          {cuenta.pedidos.map(p => {
+            const vivos = (p.items || []).filter(i => !i.sin_stock && porId.has(i.producto_id)).length
+            return (
+              <div key={p.numero} style={{ border: `1px solid ${C.line}`, borderRadius: 14, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline' }}>
+                  <b style={{ fontSize: 15 }}>N° {p.numero} · {fecha(p.created_at)}</b>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: ESTADOS[p.estado]?.color || C.muted }}>{ESTADOS[p.estado]?.label}</span>
+                </div>
+                <span style={{ fontSize: 13, color: C.muted, lineHeight: 1.45 }}>
+                  {(p.items || []).filter(i => !i.sin_stock).map(i => nombreLindo(i.nombre)).join(', ')}
+                </span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                  <b>{p.final ? '' : '≈ '}{pesos(p.total)}{p.cupon ? ' 🎁' : ''}</b>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={() => onSeguir(p.token)} style={{ ...btnSecundario, width: 'auto', minHeight: 38, padding: '0 12px', fontSize: 13 }}>Ver</button>
+                    {vivos > 0 && <button onClick={() => onRepetir(p)} style={{ ...btnPrimario, width: 'auto', minHeight: 38, padding: '0 12px', fontSize: 13 }}>Repetir</button>}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <h2 style={{ margin: 0, fontFamily: F.display, fontSize: 19 }}>Mis datos</h2>
+          {editando ? (
+            <>
+              <Campo label="Nombre y apellido"><input value={f.nombre} onChange={e => setF({ ...f, nombre: e.target.value })} maxLength={80} style={input} /></Campo>
+              <Campo label="Dirección"><input value={f.direccion} onChange={e => setF({ ...f, direccion: e.target.value })} maxLength={200} style={input} /></Campo>
+              <Campo label="Referencias"><input value={f.referencias} onChange={e => setF({ ...f, referencias: e.target.value })} maxLength={200} style={input} /></Campo>
+              <button onClick={guardar} style={btnPrimario}>Guardar</button>
+            </>
+          ) : (
+            <div style={{ fontSize: 15, lineHeight: 1.6 }}>
+              <b>{cuenta.nombre}</b><br />
+              <span style={{ color: C.muted }}>{cuenta.telefono}</span><br />
+              {cuenta.direccion}{cuenta.referencias ? ` — ${cuenta.referencias}` : ''}
+              <div><button onClick={() => setEditando(true)} style={{ border: 0, background: 'transparent', color: C.goldText, fontWeight: 700, fontFamily: F.body, fontSize: 14, padding: '8px 0', cursor: 'pointer' }}>Cambiar mis datos</button></div>
+            </div>
+          )}
+          {msg && <span style={{ fontSize: 13, fontWeight: 600, color: msg.error ? C.rojo : C.verde }}>{msg.t}</span>}
+          <span style={{ fontSize: 12, color: C.muted }}>El teléfono no se puede cambiar: es tu usuario. Para cambiarlo, escribinos.</span>
+        </div>
+      </div>
+    </>
+  )
+}
+
+function Fila({ label, valor, gris, fuerte, verde }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', padding: fuerte ? '6px 0 0' : '10px 0 2px', fontSize: fuerte ? 18 : 15, fontWeight: fuerte || verde ? 800 : 400, color: verde ? C.verde : gris ? C.muted : C.ink }}>
       <span>{label}</span><span>{valor}</span>
     </div>
   )

@@ -242,12 +242,19 @@ export default function Caja() {
       showMsg(`❌ Productos del pedido que no están en el catálogo: ${faltan.map(f => f.nombre).join(', ')}`, 'error', 6000)
       return
     }
+    // Cupón del delivery (mig 157): va como precio con descuento en cada
+    // renglón de carne (no una línea negativa, que ARCA no factura). El
+    // envío no tiene descuento.
+    const pctCupon = ped.cupon ? Number(ped.descuento_pct) || 0 : 0
+    let totalCarrito = 0
     for (const it of items) {
       if (it.sin_stock) continue   // no había: no se cobra ni descuenta
       const prod = precios.find(p => p.id === it.producto_id)
       const cant = it.pesable ? Number(it.kg_real) : Number(it.cantidad)
       if (!(cant > 0)) continue
-      agregarItem(prod, cant, Number(it.precio), true)
+      const precio = Number(it.precio) * (1 - pctCupon / 100)
+      totalCarrito += cant * precio
+      agregarItem(prod, cant, precio, true)
     }
     const envio = Number(ped.envio) || 0
     if (envio > 0) {
@@ -264,12 +271,15 @@ export default function Caja() {
         lista: 'minorista', importe: envio, es_envio: true,
       }])
     }
-    const total = Number(ped.total_final) || 0
+    // El cobro se prellena con lo que suma ESTE carrito (kg × precio, sin
+    // redondear), no con total_final redondeado: si el redondeo quedaba
+    // abajo, la Caja frenaba con "Falta cobrar $0,40".
+    const total = Math.ceil((totalCarrito + envio) * 100) / 100
     setPago(ped.forma_pago === 'transferencia'
       ? { efectivo: '', debito: '', transferencia: String(total) }
       : { efectivo: String(total), debito: '', transferencia: '' })
     deliveryPedidoRef.current = ped.id
-    setDeliveryEnCaja({ id: ped.id, total, forma: ped.forma_pago })
+    setDeliveryEnCaja({ id: ped.id, total, forma: ped.forma_pago, cupon: pctCupon })
     showMsg(`🛵 Pedido delivery N° ${ped.id} cargado — ${fmt(total)}`, 'success', 4000)
   }
 
@@ -1250,7 +1260,7 @@ export default function Caja() {
 
           {deliveryEnCaja && (
             <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 8, background: 'rgba(201,168,76,.12)', border: '1px solid var(--gold)', fontSize: 13, color: 'var(--text)' }}>
-              🛵 <b>Cobrando el pedido de delivery N° {deliveryEnCaja.id}</b> · {fmt(deliveryEnCaja.total)} · {deliveryEnCaja.forma === 'transferencia' ? 'pagado por transferencia' : 'efectivo (lo trae el repartidor)'}.
+              🛵 <b>Cobrando el pedido de delivery N° {deliveryEnCaja.id}</b> · {fmt(deliveryEnCaja.total)} · {deliveryEnCaja.forma === 'transferencia' ? 'pagado por transferencia' : 'efectivo (lo trae el repartidor)'}{deliveryEnCaja.cupon ? ` · con cupón ${deliveryEnCaja.cupon}% ya aplicado en los precios` : ''}.
               {' '}Al confirmar la venta queda registrado en el pedido.
             </div>
           )}

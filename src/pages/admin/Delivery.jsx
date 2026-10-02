@@ -14,7 +14,7 @@
 // ============================================================
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { supabase } from '../../lib/supabase'
+import { supabase, fetchAllRows } from '../../lib/supabase'
 import { parseNumero } from '../../lib/formatos'
 import { useEsMovil } from '../../lib/useEsMovil'
 import {
@@ -61,11 +61,12 @@ export default function Delivery() {
     <div style={{ padding: '16px 16px 40px', maxWidth: 1400, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
       <Encabezado config={config} onPausar={() => guardarConfig({ activo: !config?.activo })} />
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        {[['pedidos', '🛵 Pedidos'], ['productos', '🥩 Productos publicados'], ['config', '⚙️ Configuración']].map(([k, l]) => (
+        {[['pedidos', '🛵 Pedidos'], ['clientes', '👥 Clientes'], ['productos', '🥩 Productos publicados'], ['config', '⚙️ Configuración']].map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)} className={tab === k ? 'btn btn-gold' : 'btn btn-ghost'} style={{ fontSize: 13 }}>{l}</button>
         ))}
       </div>
       {tab === 'pedidos' && <Pedidos config={config} />}
+      {tab === 'clientes' && <Clientes config={config} />}
       {tab === 'productos' && <Productos config={config} />}
       {tab === 'config' && config && <Configuracion config={config} onGuardar={guardarConfig} />}
     </div>
@@ -263,7 +264,11 @@ function Detalle({ pedido: p, config, onVolver }) {
   const todoSinStock = calc.length > 0 && calc.every(i => i.sin_stock)
   const subtotalFinal = calc.reduce((s, i) => s + i.importe_real, 0)
   const envio = Number(p.envio) || 0
-  const totalFinal = subtotalFinal + envio
+  // Cupón (mig 157): el % se fijó al crear el pedido; el monto se recalcula
+  // sobre la carne PESADA. El envío no tiene descuento.
+  const pctCupon = p.cupon ? Number(p.descuento_pct) || 0 : 0
+  const descuentoFinal = Math.round(subtotalFinal * pctCupon / 100)
+  const totalFinal = subtotalFinal - descuentoFinal + envio
   const esTransf = p.forma_pago === 'transferencia'
   const terminado = ['entregado', 'cancelado'].includes(p.estado)
 
@@ -287,6 +292,7 @@ function Detalle({ pedido: p, config, onVolver }) {
     }
     const ok = await actualizar({
       items: calc, subtotal_final: subtotalFinal, total_final: totalFinal,
+      descuento_monto: p.cupon ? descuentoFinal : null,
       estado: p.estado === 'nuevo' ? 'pesado' : p.estado,
       pesado_at: p.pesado_at || new Date().toISOString(),
     }, 'Pesos guardados. Ahora mandale el total al cliente por WhatsApp 👇')
@@ -312,7 +318,7 @@ function Detalle({ pedido: p, config, onVolver }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
           <span style={{ fontSize: 12, color: 'var(--text2)' }}>Pedido N° {p.id} · {fechaHora(p.created_at)} · {esTransf ? 'Transferencia' : 'Efectivo al recibir'}</span>
-          <b style={{ fontSize: 18 }}>{p.cliente_nombre}</b>
+          <b style={{ fontSize: 18 }}>{p.cliente_nombre}{p.cupon && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: '#000', background: 'var(--gold)', borderRadius: 8, padding: '2px 7px', verticalAlign: 'middle' }}>🎁 CUPÓN {Number(p.descuento_pct)}%</span>}</b>
           <span style={{ fontSize: 14 }}>📍 {p.direccion}{p.referencias ? ` — ${p.referencias}` : ''}</span>
           <a href={`https://wa.me/${limpiarNumero(p.telefono)}`} target="_blank" rel="noreferrer" style={{ fontSize: 13, color: 'var(--green)', textDecoration: 'none', fontWeight: 600 }}>💬 {p.telefono}</a>
         </div>
@@ -386,6 +392,7 @@ function Detalle({ pedido: p, config, onVolver }) {
         {!faltanPesos && subtotalFinal < Number(config?.minimo || 0) && (
           <span style={{ fontSize: 11, color: 'var(--amber)' }}>Quedó abajo de la compra mínima ({pesos(config.minimo)}) por lo que no había. Igual se puede enviar.</span>
         )}
+        {pctCupon > 0 && <Linea l={`🎁 Cupón ${pctCupon}% (carne)`} v={`-${pesos(faltanPesos ? p.descuento_monto : descuentoFinal)}`} />}
         <Linea l="Envío" v={pesos(envio)} />
         <Linea l={faltanPesos ? 'Total aproximado' : 'Total final'} v={faltanPesos ? `≈ ${pesos(p.total_aprox)}` : pesos(totalFinal)} fuerte />
       </div>
@@ -460,6 +467,151 @@ function Linea({ l, v, fuerte }) {
   return <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: fuerte ? 800 : 400, fontSize: fuerte ? 15 : 13 }}><span>{l}</span><span>{v}</span></div>
 }
 
+// ───────────────────────── CLIENTES ─────────────────────────
+// Cuentas del delivery (mig 157) con lo que compró cada una. "Comprado"
+// cuenta sólo pedidos ENTREGADOS, con su total final (lo que pagó).
+function Clientes({ config }) {
+  const [clientes, setClientes] = useState([])
+  const [pedidos, setPedidos] = useState([])
+  const [q, setQ] = useState('')
+  const [abierto, setAbierto] = useState(null)
+  const [cargando, setCargando] = useState(true)
+
+  async function cargar() {
+    const [{ data: cs }, { data: ps }] = await Promise.all([
+      // Columnas explícitas: el hash de la clave no es legible ni para el panel.
+      supabase.from('clientes_delivery').select('id, telefono, nombre, direccion, referencias, notas, created_at, ultimo_ingreso, bloqueado_hasta').order('nombre'),
+      fetchAllRows(() => supabase.from('pedidos_delivery').select('id, cliente_id, estado, total_final, total_aprox, created_at, cupon, descuento_monto').not('cliente_id', 'is', null)),
+    ])
+    setClientes(cs || [])
+    setPedidos(ps || [])
+    setCargando(false)
+  }
+  useEffect(() => { cargar() }, [])
+
+  const cada = Number(config?.cupon_cada) || 0
+  const pct = Number(config?.cupon_pct) || 0
+  const filas = clientes.map(c => {
+    const suyos = pedidos.filter(p => p.cliente_id === c.id).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+    const entregados = suyos.filter(p => p.estado === 'entregado')
+    const comprado = entregados.reduce((s, p) => s + (Number(p.total_final) || 0), 0)
+    const usados = suyos.filter(p => p.cupon && p.estado !== 'cancelado').length
+    const cuponDisponible = cada > 0 && pct > 0 && Math.floor(entregados.length / cada) > usados
+    return {
+      ...c, suyos, entregados: entregados.length, comprado,
+      promedio: entregados.length ? comprado / entregados.length : 0,
+      ultimo: suyos[0]?.created_at || null,
+      cupones: usados, cuponDisponible,
+      faltan: cada > 0 ? cada - (entregados.length % cada) : null,
+    }
+  }).sort((a, b) => b.comprado - a.comprado)
+
+  const t = q.trim().toLowerCase()
+  const visibles = filas.filter(c => !t || c.nombre.toLowerCase().includes(t) || c.telefono.includes(t.replace(/\D/g, '') || '@'))
+  const totalComprado = filas.reduce((s, c) => s + c.comprado, 0)
+  const totalEntregados = filas.reduce((s, c) => s + c.entregados, 0)
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
+        <Resumen titulo="Clientes con cuenta" valor={filas.length} />
+        <Resumen titulo="Pedidos entregados" valor={totalEntregados} />
+        <Resumen titulo="Total comprado" valor={pesos(totalComprado)} />
+        <Resumen titulo="Ticket promedio" valor={totalEntregados ? pesos(totalComprado / totalEntregados) : '—'} />
+      </div>
+      <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar por nombre o teléfono" style={{ maxWidth: 360 }} />
+      <div className="card" style={{ marginBottom: 0, padding: 0, overflowX: 'auto' }}>
+        {cargando && <div style={{ padding: 16, color: 'var(--muted)' }}>Cargando…</div>}
+        {!cargando && visibles.length === 0 && <div style={{ padding: 16, color: 'var(--muted)', fontSize: 14 }}>Todavía no hay clientes con cuenta. Aparecen acá apenas se registran en la app.</div>}
+        {visibles.map(c => (
+          <div key={c.id} style={{ borderBottom: '1px solid var(--border)' }}>
+            <button onClick={() => setAbierto(abierto === c.id ? null : c.id)} style={{
+              display: 'grid', gridTemplateColumns: 'minmax(160px, 1.4fr) 90px 120px 110px 110px minmax(130px, 1fr)', gap: 10, alignItems: 'center', minWidth: 760,
+              width: '100%', padding: '11px 14px', border: 0, background: abierto === c.id ? 'var(--surface3)' : 'transparent', color: 'var(--text)', textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13,
+            }}>
+              <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                <b>{c.nombre}</b><span style={{ color: 'var(--text2)', fontSize: 12 }}>{c.telefono}</span>
+              </span>
+              <span><b>{c.entregados}</b> <span style={{ color: 'var(--muted)', fontSize: 11 }}>pedidos</span></span>
+              <span>{pesos(c.comprado)}</span>
+              <span style={{ color: 'var(--text2)' }}>{c.entregados ? `prom. ${pesos(c.promedio)}` : '—'}</span>
+              <span style={{ color: 'var(--text2)' }}>{c.ultimo ? fechaHora(c.ultimo).split(',')[0] : '—'}</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: c.cuponDisponible ? 'var(--gold)' : 'var(--muted)' }}>
+                {c.cuponDisponible ? `🎁 Tiene cupón ${pct}%` : c.faltan != null && pct > 0 ? `Le faltan ${c.faltan} para el cupón` : ''}
+              </span>
+            </button>
+            {abierto === c.id && <FichaCliente cliente={c} onCambio={cargar} />}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function Resumen({ titulo, valor }) {
+  return (
+    <div className="card" style={{ marginBottom: 0, padding: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <span style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600 }}>{titulo}</span>
+      <b style={{ fontSize: 20, fontFamily: "'IBM Plex Mono', monospace", fontVariantNumeric: 'tabular-nums' }}>{valor}</b>
+    </div>
+  )
+}
+
+function FichaCliente({ cliente: c, onCambio }) {
+  const [pin, setPin] = useState('')
+  const [notas, setNotas] = useState(c.notas || '')
+  const [msg, setMsg] = useState(null)
+
+  async function resetear() {
+    if (!/^\d{4}$/.test(pin)) { setMsg({ error: true, t: 'La clave nueva tiene que ser de 4 números.' }); return }
+    const { error } = await supabase.rpc('delivery_resetear_pin', { p_cliente: c.id, p_pin: pin })
+    if (error) { setMsg({ error: true, t: `No se pudo: ${error.message}` }); return }
+    setPin('')
+    setMsg({ t: `Listo. Pasale la clave nueva a ${c.nombre.split(' ')[0]} por WhatsApp; puede cambiarla escribiéndonos.` })
+    onCambio()
+  }
+  async function guardarNotas() {
+    const { error } = await supabase.from('clientes_delivery').update({ notas: notas.trim() || null }).eq('id', c.id)
+    setMsg(error ? { error: true, t: `No se pudo: ${error.message}` } : { t: 'Notas guardadas.' })
+  }
+
+  return (
+    <div style={{ padding: '4px 14px 14px', display: 'flex', flexDirection: 'column', gap: 12, fontSize: 13 }}>
+      <div style={{ color: 'var(--text2)' }}>
+        📍 {c.direccion}{c.referencias ? ` — ${c.referencias}` : ''} · cliente desde {fechaHora(c.created_at).split(',')[0]}
+        {' · '}<a href={`https://wa.me/${limpiarNumero(c.telefono)}`} target="_blank" rel="noreferrer" style={{ color: 'var(--green)', fontWeight: 600 }}>💬 WhatsApp</a>
+        {c.bloqueado_hasta && new Date(c.bloqueado_hasta) > new Date() && <span style={{ color: 'var(--red-light)', fontWeight: 700 }}> · 🔒 bloqueado por claves mal puestas</span>}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <b style={{ fontSize: 12, color: 'var(--text2)' }}>Historial</b>
+        {c.suyos.length === 0 && <span style={{ color: 'var(--muted)' }}>Sin pedidos todavía.</span>}
+        {c.suyos.map(p => (
+          <div key={p.id} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <span style={{ width: 60 }}>N° {p.id}</span>
+            <span style={{ width: 110, color: 'var(--text2)' }}>{fechaHora(p.created_at)}</span>
+            <Chip estado={p.estado} />
+            <span>{p.total_final != null ? pesos(p.total_final) : `≈ ${pesos(p.total_aprox)}`}</span>
+            {p.cupon && <span style={{ color: 'var(--gold)', fontSize: 11, fontWeight: 700 }}>🎁 cupón</span>}
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, fontWeight: 700, color: 'var(--text2)' }}>
+          Se olvidó la clave → clave nueva
+          <input type="text" inputMode="numeric" value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="4 números" style={{ width: 140 }} />
+        </label>
+        <button onClick={resetear} className="btn btn-ghost">🔑 Resetear clave</button>
+      </div>
+      <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, fontWeight: 700, color: 'var(--text2)' }}>
+        Notas internas (no las ve el cliente)
+        <textarea value={notas} onChange={e => setNotas(e.target.value)} rows={2} maxLength={500} placeholder="Ej: el timbre no anda, llamar al llegar" />
+      </label>
+      <button onClick={guardarNotas} className="btn btn-ghost" style={{ alignSelf: 'flex-start' }}>Guardar notas</button>
+      {msg && <span style={{ fontWeight: 600, color: msg.error ? 'var(--red-light)' : 'var(--green)' }}>{msg.t}</span>}
+    </div>
+  )
+}
+
 // ───────────────────────── PRODUCTOS ─────────────────────────
 function Productos({ config }) {
   const [productos, setProductos] = useState([])
@@ -519,6 +671,7 @@ function Configuracion({ config, onGuardar }) {
   const [f, setF] = useState(() => ({
     envio: String(config.envio ?? ''), minimo: String(config.minimo ?? ''),
     alias: config.alias || '', whatsapp: config.whatsapp || '',
+    cupon_cada: String(config.cupon_cada ?? 5), cupon_pct: String(config.cupon_pct ?? 10),
     horarios: (config.horarios || []).map(h => ({ ...h })),
   }))
   const [msg, setMsg] = useState(null)
@@ -534,7 +687,10 @@ function Configuracion({ config, onGuardar }) {
     if (f.horarios.some(h => !h.desde || !h.hasta || h.desde >= h.hasta || !h.dias.length)) {
       setMsg({ error: true, t: 'Cada turno necesita días y un horario de inicio anterior al de cierre.' }); return
     }
-    const err = await onGuardar({ envio, minimo, alias: f.alias.trim(), whatsapp: f.whatsapp.replace(/[^\d+ ]/g, '').trim(), horarios: f.horarios })
+    const cupon_cada = Math.round(parseNumero(f.cupon_cada))
+    const cupon_pct = parseNumero(f.cupon_pct)
+    if (cupon_cada < 0 || cupon_pct < 0 || cupon_pct > 50) { setMsg({ error: true, t: 'Revisá el cupón: el descuento va de 0 a 50%.' }); return }
+    const err = await onGuardar({ envio, minimo, alias: f.alias.trim(), whatsapp: f.whatsapp.replace(/[^\d+ ]/g, '').trim(), horarios: f.horarios, cupon_cada, cupon_pct })
     setMsg(err ? { error: true, t: `No se pudo guardar: ${err}` } : { t: 'Guardado. La app de los clientes ya usa estos datos.' })
   }
 
@@ -550,6 +706,11 @@ function Configuracion({ config, onGuardar }) {
           <span style={{ fontWeight: 400, fontSize: 11, color: 'var(--muted)' }}>Vacío = el cliente no ve el botón para mandar el comprobante.</span>
         </label>
       </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+        <label style={campo}>🎁 Cupón cada… (pedidos entregados)<input type="text" inputMode="numeric" value={f.cupon_cada} onChange={e => set('cupon_cada', e.target.value)} /></label>
+        <label style={campo}>…de este % en la carne<input type="text" inputMode="decimal" value={f.cupon_pct} onChange={e => set('cupon_pct', e.target.value)} /></label>
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: -8 }}>Con 0 en cualquiera de los dos no se dan cupones. El envío nunca tiene descuento.</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text2)' }}>Horarios de toma de pedidos (hora de Argentina)</div>
         {f.horarios.map((h, i) => (

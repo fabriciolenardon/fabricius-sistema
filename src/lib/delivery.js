@@ -119,6 +119,9 @@ export function textoHorarios(config) {
 // Los códigos que tira delivery_crear_pedido → lo que se le dice al cliente.
 export function mensajeError(error, config) {
   const m = String(error?.message || error || '')
+  if (m.includes('SESION')) return 'Tu sesión se cerró. Ingresá de nuevo con tu teléfono y tu clave.'
+  if (m.includes('YA_EXISTE')) return 'Ese teléfono ya tiene una cuenta. Ingresá con tu clave.'
+  if (m.includes('PIN')) return 'La clave tiene que ser de 4 números.'
   if (m.includes('CERRADO')) return 'Justo cerramos la toma de pedidos. Probá de nuevo en el próximo horario.'
   if (m.includes('MINIMO')) return `La compra mínima es de ${pesos(config?.minimo)}.`
   if (m.includes('NOMBRE')) return 'Escribí tu nombre.'
@@ -129,6 +132,22 @@ export function mensajeError(error, config) {
   if (m.includes('DEMASIADOS')) return 'Ya tenés pedidos en curso con este número. Esperá a que lleguen o llamanos.'
   if (m.includes('SATURADO')) return 'Estamos con muchos pedidos. Probá en unos minutos.'
   return 'No pudimos mandar el pedido. Revisá tu conexión y probá de nuevo.'
+}
+
+// Lo que vuelve delivery_ingresar en { error }.
+export function mensajeIngreso(codigo) {
+  if (codigo === 'NO_EXISTE') return 'No hay una cuenta con ese teléfono. Creá una, es un minuto.'
+  if (codigo === 'CLAVE') return 'La clave no es correcta. Ojo: a los 5 intentos la cuenta se bloquea 15 minutos.'
+  if (codigo === 'BLOQUEADO') return 'Por seguridad la cuenta quedó bloqueada 15 minutos. Si te olvidaste la clave, escribinos y te la reseteamos.'
+  return 'No pudimos ingresar. Revisá tu conexión y probá de nuevo.'
+}
+
+// "Te faltan 2 pedidos para tu 10%" / "Tenés 10% de descuento en este pedido"
+export function textoCupon(cupon) {
+  if (!cupon || !(cupon.cada > 0) || !(cupon.pct > 0)) return null
+  if (cupon.disponible) return `🎁 Tenés ${cupon.pct}% de descuento en la carne de tu próximo pedido`
+  const f = cupon.faltan
+  return `Te ${f === 1 ? 'falta 1 pedido' : `faltan ${f} pedidos`} para tu ${cupon.pct}% de descuento`
 }
 
 // ── Mensajes de WhatsApp que manda el local (wa.me, desde su celular) ──
@@ -151,6 +170,7 @@ export function mensajeTotalFinal(p, config) {
     `Hola ${p.cliente_nombre}! Ya pesamos tu pedido N° ${p.id} de Fabricius 🥩`,
     '',
     ...lineas,
+    ...(Number(p.descuento_monto) > 0 ? [`• Descuento cupón ${Number(p.descuento_pct)}%: -${pesos(p.descuento_monto)}`] : []),
     `• Envío: ${pesos(p.envio)}`,
     `*Total: ${pesos(p.total_final)}*`,
     '',

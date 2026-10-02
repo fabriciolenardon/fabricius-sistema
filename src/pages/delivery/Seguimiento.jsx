@@ -125,6 +125,9 @@ export default function Seguimiento() {
                           </div>
                         )
                       ))}
+                      {Number(p.descuento_monto) > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: C.verde, fontWeight: 700 }}><span>🎁 Tu descuento ({Number(p.descuento_pct)}%)</span><span>-{pesos(p.descuento_monto)}</span></div>
+                      )}
                       <div style={{ display: 'flex', justifyContent: 'space-between', color: C.muted }}><span>Envío</span><span>{pesos(p.envio)}</span></div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: 17, paddingTop: 6, borderTop: '1px solid #EFEAE2' }}>
                         <span>{pesado ? 'Total a pagar' : 'Total aproximado'}</span><span>{pesado ? '' : '≈ '}{pesos(totalMostrar)}</span>
