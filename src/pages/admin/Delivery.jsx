@@ -19,7 +19,7 @@ import { parseNumero } from '../../lib/formatos'
 import { useEsMovil } from '../../lib/useEsMovil'
 import {
   ESTADOS, CATEGORIAS_DELIVERY, pesos, fmtCantidad, nombreLindo, TZ,
-  mensajeTotalFinal, mensajeEnCamino, mensajeSinStock, linkSeguimiento, textoHorarios, nombreRenglon,
+  URL_DELIVERY, mensajeTotalFinal, mensajeEnCamino, mensajeSinStock, linkSeguimiento, textoHorarios, nombreRenglon,
 } from '../../lib/delivery'
 import { limpiarNumero } from '../../lib/whatsapp'
 
@@ -75,7 +75,7 @@ export default function Delivery() {
 
 function Encabezado({ config, onPausar }) {
   const [copiado, setCopiado] = useState(false)
-  const link = `${window.location.origin}/pedir`
+  const link = URL_DELIVERY
   async function copiar() {
     try { await navigator.clipboard.writeText(link); setCopiado(true); setTimeout(() => setCopiado(false), 2500) } catch { /* el link queda a la vista */ }
   }
