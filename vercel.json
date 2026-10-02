@@ -8,6 +8,8 @@
     { "path": "/api/recordatorio-compras", "schedule": "0 21 * * *" }
   ],
   "rewrites": [
+    { "source": "/pedir", "destination": "/pedir.html" },
+    { "source": "/pedir/:path*", "destination": "/pedir.html" },
     { "source": "/((?!api/).*)", "destination": "/" }
   ]
 }
