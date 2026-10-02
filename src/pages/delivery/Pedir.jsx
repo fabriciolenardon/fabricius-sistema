@@ -195,7 +195,7 @@ function Cabecera({ chico }) {
           transparente, va sobre el fondo oscuro. */}
       <img src="/logo-delivery-sas.png" alt="Fabricius SAS — Premium Quality" width={chico ? 190 : 270} height={chico ? 34 : 49}
         style={{ display: 'block', width: chico ? 190 : 270, maxWidth: '100%', height: 'auto', marginBottom: 12 }} />
-      <div style={{ fontSize: 14, color: '#E9E2D8', marginTop: 4 }}>Delivery a tu casa</div>
+      <div style={{ fontSize: 14, color: '#E9E2D8', marginTop: 4 }}>Delivery de carnes</div>
     </div>
   )
 }
