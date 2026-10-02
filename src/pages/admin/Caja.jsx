@@ -237,12 +237,13 @@ export default function Caja() {
     if (ped.venta_id) { showMsg(`⚠️ El pedido N° ${ped.id} ya se cobró en la Caja`, 'error', 5000); return }
     if (ped.total_final == null) { showMsg(`❌ El pedido N° ${ped.id} todavía no está pesado`, 'error', 5000); return }
     const items = Array.isArray(ped.items) ? ped.items : []
-    const faltan = items.filter(it => !precios.find(p => p.id === it.producto_id))
+    const faltan = items.filter(it => !it.sin_stock && !precios.find(p => p.id === it.producto_id))
     if (faltan.length) {
       showMsg(`❌ Productos del pedido que no están en el catálogo: ${faltan.map(f => f.nombre).join(', ')}`, 'error', 6000)
       return
     }
     for (const it of items) {
+      if (it.sin_stock) continue   // no había: no se cobra ni descuenta
       const prod = precios.find(p => p.id === it.producto_id)
       const cant = it.pesable ? Number(it.kg_real) : Number(it.cantidad)
       if (!(cant > 0)) continue

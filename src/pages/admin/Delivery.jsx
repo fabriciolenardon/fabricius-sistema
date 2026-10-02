@@ -19,7 +19,7 @@ import { parseNumero } from '../../lib/formatos'
 import { useEsMovil } from '../../lib/useEsMovil'
 import {
   ESTADOS, CATEGORIAS_DELIVERY, pesos, fmtCantidad, nombreLindo, TZ,
-  mensajeTotalFinal, mensajeEnCamino, linkSeguimiento, textoHorarios,
+  mensajeTotalFinal, mensajeEnCamino, mensajeSinStock, linkSeguimiento, textoHorarios, nombreRenglon,
 } from '../../lib/delivery'
 import { limpiarNumero } from '../../lib/whatsapp'
 
@@ -213,9 +213,41 @@ function Chip({ estado }) {
 
 function Detalle({ pedido: p, config, onVolver }) {
   const navigate = useNavigate()
-  const items = Array.isArray(p.items) ? p.items : []
+  // Los renglones se editan acá (pesos, "no hay", cambio por otro producto)
+  // y se guardan todos juntos con "Guardar pesos".
+  const [items, setItems] = useState(() => Array.isArray(p.items) ? p.items : [])
   // Kilos reales tipeados (texto crudo: type=text + parseNumero, la coma no se pierde)
   const [kgTxt, setKgTxt] = useState(() => items.map(i => i.pesable ? (i.kg_real != null ? String(i.kg_real).replace('.', ',') : '') : String(i.cantidad)))
+  const [cambiando, setCambiando] = useState(null)   // índice del renglón que se está reemplazando
+  const [catalogo, setCatalogo] = useState(null)
+  const [busca, setBusca] = useState('')
+
+  async function abrirCambio(idx) {
+    setCambiando(cambiando === idx ? null : idx)
+    setBusca('')
+    if (!catalogo) {
+      const { data } = await supabase.rpc('delivery_productos')
+      setCatalogo(data || [])
+    }
+  }
+  function alternarSinStock(idx) {
+    setItems(xs => xs.map((x, j) => j === idx ? { ...x, sin_stock: !x.sin_stock } : x))
+    setMsg(null)
+  }
+  function reemplazar(idx, prod) {
+    setItems(xs => xs.map((x, j) => {
+      if (j !== idx) return x
+      const cantidad = prod.pesable === x.pesable ? Number(x.cantidad) : 1
+      return {
+        producto_id: prod.id, nombre: prod.nombre, categoria: prod.categoria, pesable: prod.pesable,
+        cantidad, precio: Number(prod.precio), oferta: prod.oferta, importe: Math.round(cantidad * Number(prod.precio)),
+        nota: x.nota || null, reemplaza: x.reemplaza || x.nombre,
+      }
+    }))
+    setKgTxt(v => v.map((t, j) => j === idx ? (prod.pesable ? '' : '1') : t))
+    setCambiando(null)
+    setMsg(null)
+  }
   const [editando, setEditando] = useState(p.estado === 'nuevo')
   const [msg, setMsg] = useState(null)
   const [guardando, setGuardando] = useState(false)
@@ -223,10 +255,12 @@ function Detalle({ pedido: p, config, onVolver }) {
   const [motivo, setMotivo] = useState('')
 
   const calc = items.map((it, idx) => {
+    if (it.sin_stock) return { ...it, kg_real: it.pesable ? 0 : null, importe_real: 0 }
     const kg = it.pesable ? parseNumero(kgTxt[idx]) : Number(it.cantidad)
     return { ...it, kg_real: it.pesable ? kg : null, importe_real: Math.round(kg * Number(it.precio)) }
   })
-  const faltanPesos = calc.some(i => i.pesable && !(i.kg_real > 0))
+  const faltanPesos = calc.some(i => !i.sin_stock && i.pesable && !(i.kg_real > 0))
+  const todoSinStock = calc.length > 0 && calc.every(i => i.sin_stock)
   const subtotalFinal = calc.reduce((s, i) => s + i.importe_real, 0)
   const envio = Number(p.envio) || 0
   const totalFinal = subtotalFinal + envio
@@ -244,7 +278,8 @@ function Detalle({ pedido: p, config, onVolver }) {
   }
 
   async function guardarPesos() {
-    if (faltanPesos) { setMsg({ tipo: 'error', texto: 'Cargá el peso real de cada producto.' }); return }
+    if (todoSinStock) { setMsg({ tipo: 'error', texto: 'No queda ningún producto: si no hay nada, cancelá el pedido.' }); return }
+    if (faltanPesos) { setMsg({ tipo: 'error', texto: 'Cargá el peso real de cada producto (o marcalo "No hay").' }); return }
     const raro = calc.find(i => i.pesable && (i.kg_real > Number(i.cantidad) * 2 + 0.5 || i.kg_real > 25))
     if (raro && !msg?.confirmarRaro) {
       setMsg({ tipo: 'error', texto: `Ojo: ${nombreLindo(raro.nombre)} pidió ${fmtCantidad(raro.cantidad, true)} y cargaste ${fmtCantidad(raro.kg_real, true)}. Si está bien, tocá de nuevo "Guardar".`, confirmarRaro: true })
@@ -296,24 +331,61 @@ function Detalle({ pedido: p, config, onVolver }) {
         <span>Producto</span><span>Pidió</span><span>Pesado</span><span style={{ textAlign: 'right' }}>Importe</span>
       </div>
       {calc.map((it, idx) => (
-        <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1.6fr 0.8fr 1fr 0.9fr', gap: 8, alignItems: 'center', fontSize: 13 }}>
-          <span style={{ minWidth: 0 }}>
-            {nombreLindo(it.nombre)}{it.oferta && <span style={{ color: 'var(--red-light)', fontSize: 10, fontWeight: 700 }}> OFERTA</span>}
+        <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 6, borderBottom: '1px dashed var(--border)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 0.8fr 1fr 0.9fr', gap: 8, alignItems: 'center', fontSize: 13, opacity: it.sin_stock ? 0.55 : 1 }}>
+          <span style={{ minWidth: 0, textDecoration: it.sin_stock ? 'line-through' : 'none' }}>
+            {nombreRenglon(it)}{it.oferta && <span style={{ color: 'var(--red-light)', fontSize: 10, fontWeight: 700 }}> OFERTA</span>}
             {it.nota && <span style={{ display: 'block', fontSize: 11, color: 'var(--amber)' }}>«{it.nota}»</span>}
           </span>
           <span style={{ color: 'var(--text2)' }}>{fmtCantidad(it.cantidad, it.pesable)}</span>
-          {it.pesable && editando && !terminado ? (
+          {it.sin_stock ? (
+            <span style={{ color: 'var(--red-light)', fontWeight: 700, fontSize: 12 }}>No hay</span>
+          ) : it.pesable && editando && !terminado ? (
             <input type="text" inputMode="decimal" value={kgTxt[idx]} placeholder="kg"
               onChange={e => { const v = [...kgTxt]; v[idx] = e.target.value; setKgTxt(v); setMsg(null) }}
               aria-label={`Kilos pesados de ${it.nombre}`} style={{ padding: '7px 8px', fontSize: 14 }} />
           ) : (
             <span>{it.pesable ? (it.kg_real > 0 ? fmtCantidad(it.kg_real, true) : '—') : fmtCantidad(it.cantidad, false)}</span>
           )}
-          <span style={{ textAlign: 'right' }}>{it.pesable && !(it.kg_real > 0) ? '—' : pesos(it.importe_real)}</span>
+          <span style={{ textAlign: 'right' }}>{it.sin_stock || (it.pesable && !(it.kg_real > 0)) ? '—' : pesos(it.importe_real)}</span>
+        </div>
+        {editando && !terminado && !p.venta_id && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <button onClick={() => alternarSinStock(idx)} className="btn btn-ghost btn-sm" style={{ color: it.sin_stock ? 'var(--green)' : 'var(--red-light)' }}>
+              {it.sin_stock ? '↩ Sí hay' : '✕ No hay'}
+            </button>
+            <button onClick={() => abrirCambio(idx)} className="btn btn-ghost btn-sm">⇄ Cambiar por otro</button>
+            <a href={waLink(p.telefono, mensajeSinStock(p, it))} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm" style={{ textDecoration: 'none', color: 'var(--green)' }}>
+              💬 Preguntarle
+            </a>
+          </div>
+        )}
+        {cambiando === idx && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: 8, border: '1px solid var(--border2)', borderRadius: 8 }}>
+            <input autoFocus value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar el producto que lo reemplaza" style={{ padding: '7px 9px', fontSize: 13 }} />
+            {!catalogo && <span style={{ fontSize: 12, color: 'var(--muted)' }}>Cargando productos…</span>}
+            {catalogo && (
+              <div style={{ maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+                {catalogo
+                  .filter(c => c.id !== it.producto_id && (!busca.trim() || c.nombre.toLowerCase().includes(busca.trim().toLowerCase())))
+                  .slice(0, 40)
+                  .map(c => (
+                    <button key={c.id} onClick={() => reemplazar(idx, c)} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '7px 6px', border: 0, borderBottom: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', cursor: 'pointer', fontSize: 13, textAlign: 'left', fontFamily: 'inherit' }}>
+                      <span>{nombreLindo(c.nombre)}</span>
+                      <span style={{ color: 'var(--text2)', whiteSpace: 'nowrap' }}>{pesos(c.precio)}{c.pesable ? '/kg' : ' c/u'}</span>
+                    </button>
+                  ))}
+              </div>
+            )}
+          </div>
+        )}
         </div>
       ))}
       <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8, display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13 }}>
         <Linea l="Carne" v={faltanPesos ? `≈ ${pesos(p.subtotal_aprox)} (pedido)` : pesos(subtotalFinal)} />
+        {!faltanPesos && subtotalFinal < Number(config?.minimo || 0) && (
+          <span style={{ fontSize: 11, color: 'var(--amber)' }}>Quedó abajo de la compra mínima ({pesos(config.minimo)}) por lo que no había. Igual se puede enviar.</span>
+        )}
         <Linea l="Envío" v={pesos(envio)} />
         <Linea l={faltanPesos ? 'Total aproximado' : 'Total final'} v={faltanPesos ? `≈ ${pesos(p.total_aprox)}` : pesos(totalFinal)} fuerte />
       </div>

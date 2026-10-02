@@ -132,10 +132,17 @@ export function mensajeError(error, config) {
 }
 
 // ── Mensajes de WhatsApp que manda el local (wa.me, desde su celular) ──
+// Cómo se nombra un renglón: si se cambió por otro producto, se aclara.
+export function nombreRenglon(i) {
+  const n = nombreLindo(i.nombre)
+  return i.reemplaza ? `${n} (en lugar de ${nombreLindo(i.reemplaza)})` : n
+}
+
 export function mensajeTotalFinal(p, config) {
   const lineas = (p.items || []).map(i => {
+    if (i.sin_stock) return `• ${nombreLindo(i.nombre)}: no había, no se cobra`
     const cant = i.pesable ? fmtCantidad(i.kg_real ?? i.cantidad, true) : fmtCantidad(i.cantidad, false)
-    return `• ${i.nombre} ${cant}: ${pesos(i.importe_real ?? i.importe)}`
+    return `• ${nombreRenglon(i)} ${cant}: ${pesos(i.importe_real ?? i.importe)}`
   })
   const pago = p.forma_pago === 'transferencia'
     ? `Transferí ${pesos(p.total_final)} al alias *${config?.alias || ''}* y mandanos el comprobante por acá. Apenas lo vemos, sale el pedido.`
@@ -150,6 +157,15 @@ export function mensajeTotalFinal(p, config) {
     pago,
     '',
     `Seguilo acá: ${linkSeguimiento(p.token)}`,
+  ].join('\n')
+}
+
+// Preguntarle al cliente qué hacer con un producto que no hay.
+export function mensajeSinStock(p, item) {
+  return [
+    `Hola ${p.cliente_nombre}! Te escribimos de Fabricius por tu pedido N° ${p.id}.`,
+    `Hoy no tenemos *${nombreLindo(item.reemplaza || item.nombre)}* 😕`,
+    '¿Te lo cambiamos por otro producto o lo sacamos del pedido?',
   ].join('\n')
 }
 

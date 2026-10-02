@@ -8,7 +8,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
-import { pesos, fmtCantidad, TZ, nombreLindo } from '../../lib/delivery'
+import { pesos, fmtCantidad, TZ, nombreLindo, nombreRenglon } from '../../lib/delivery'
 import { limpiarNumero } from '../../lib/whatsapp'
 import { C, F, btnPrimario, btnSecundario, useModoDelivery } from './estilo'
 
@@ -113,10 +113,17 @@ export default function Seguimiento() {
                   {s.detalle === 'pesado' && (
                     <div style={{ border: `1px solid ${C.line}`, borderRadius: 12, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 6, fontSize: 14 }}>
                       {(p.items || []).map((it, j) => (
-                        <div key={j} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                          <span style={{ minWidth: 0 }}>{nombreLindo(it.nombre)} <span style={{ color: C.muted }}>{fmtCantidad(pesado && it.pesable ? (it.kg_real ?? it.cantidad) : it.cantidad, it.pesable)}</span></span>
-                          <span style={{ whiteSpace: 'nowrap' }}>{pesado ? '' : '≈ '}{pesos(pesado ? (it.importe_real ?? it.importe) : it.importe)}</span>
-                        </div>
+                        it.sin_stock ? (
+                          <div key={j} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: C.muted }}>
+                            <span style={{ minWidth: 0, textDecoration: 'line-through' }}>{nombreLindo(it.nombre)}</span>
+                            <span style={{ whiteSpace: 'nowrap', fontSize: 13 }}>No había · no se cobra</span>
+                          </div>
+                        ) : (
+                          <div key={j} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                            <span style={{ minWidth: 0 }}>{nombreRenglon(it)} <span style={{ color: C.muted }}>{fmtCantidad(pesado && it.pesable ? (it.kg_real ?? it.cantidad) : it.cantidad, it.pesable)}</span></span>
+                            <span style={{ whiteSpace: 'nowrap' }}>{pesado ? '' : '≈ '}{pesos(pesado ? (it.importe_real ?? it.importe) : it.importe)}</span>
+                          </div>
+                        )
                       ))}
                       <div style={{ display: 'flex', justifyContent: 'space-between', color: C.muted }}><span>Envío</span><span>{pesos(p.envio)}</span></div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: 17, paddingTop: 6, borderTop: '1px solid #EFEAE2' }}>
