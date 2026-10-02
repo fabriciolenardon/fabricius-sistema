@@ -19,7 +19,8 @@ const kgDe = e => n(e.kg_real ?? e.kg)
 
 // Estas categorías se venden/manejan por UNIDAD / pack / bulto, no por kg.
 // No entran al control de kilos (ni suman ni restan).
-const SIN_KG = new Set(['almacen', 'bebidas', 'insumos'])
+// envio_delivery: la línea del envío del delivery (no es mercadería, kg 0).
+const SIN_KG = new Set(['almacen', 'bebidas', 'insumos', 'envio_delivery'])
 
 // Cajones: el campo `kg` guarda UNIDADES (cajones); los kg reales son
 // unidades × kg_por_cajón (ej. cada cajón pesa 20 kg → "X20KG" en el nombre).
