@@ -43,6 +43,13 @@ export default {
     // de 500 KB suele ser vendor (estables, no molestan).
     chunkSizeWarningLimit: 800,
     rollupOptions: {
+      // Dos páginas: el sistema (index.html) y la app pública de delivery
+      // (pedir.html, con su propio manifest para que el ícono abra /pedir).
+      // Las dos cargan el mismo main.jsx; el router decide por la URL.
+      input: {
+        main: 'index.html',
+        pedir: 'pedir.html',
+      },
       output: {
         manualChunks: {
           'vendor-react': ['react', 'react-dom', 'react-router-dom'],

@@ -2,6 +2,7 @@
   "name": "Fabricius Delivery",
   "short_name": "Fabricius",
   "description": "Pedí carne de Carnicerías Fabricius y te la llevamos a tu casa en Río Primero.",
+  "id": "/pedir",
   "start_url": "/pedir",
   "scope": "/pedir",
   "display": "standalone",
