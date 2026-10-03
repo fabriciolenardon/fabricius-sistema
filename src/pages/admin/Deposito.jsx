@@ -3981,7 +3981,7 @@ async function eliminar(entrada) {
 // ahí anular de verdad.
 async function confirmarAnulacion() {
   const c = confirmAnular
-  if (!c) return
+  if (!c || c.loading) return   // Enter repetido mientras verifica la clave
   if (c.hayClave) {
     setConfirmAnular(x => ({ ...x, loading: true, error: null }))
     const ok = await verificarClaveCaja(c.clave)
@@ -3997,6 +3997,23 @@ async function ejecutarAnulacion(entrada) {
   const { data: perfil } = await supabase.from('profiles').select('nombre').eq('id', user?.id).maybeSingle()
   const anuladoPor = perfil?.nombre || user?.email || 'admin'
   const ahora = new Date().toISOString()
+
+  // CANDADO EN LA BASE (bug 01/10/2026: un costillar de 20 kg quedó restado
+  // DOS veces del stock — la anulación se disparó dos veces, p. ej. Enter
+  // repetido mientras verificaba la clave). Antes la entrada se marcaba
+  // anulada recién al FINAL, así que dos ejecuciones en paralelo pasaban las
+  // dos. Ahora se marca PRIMERO y sólo si todavía no lo estaba: la segunda
+  // ejecución no actualiza ninguna fila y se corta acá, sin tocar el stock.
+  const { data: tomada } = await supabase.from('entradas_deposito')
+    .update({ eliminado: true, eliminado_por: anuladoPor, eliminado_en: ahora })
+    .eq('id', entrada.id)
+    .eq('eliminado', false)
+    .select('id')
+  if (!tomada || tomada.length === 0) {
+    showAlert({ type: 'error', msg: 'Este ingreso ya estaba anulado — no se tocó el stock.' })
+    cargarHistorial()
+    return
+  }
 
   if (entrada.despostada && entrada.desposte_id) {
     const { data: desposte } = await supabase.from('despostes').select('*').eq('id', entrada.desposte_id).single()
@@ -4080,10 +4097,7 @@ async function ejecutarAnulacion(entrada) {
   if (!entrada.despostada) {
     await actualizarStock(entrada.tipo, -(entrada.kg_real || entrada.kg))
   }
-  // Soft-delete: la entrada NO se borra, queda marcada ANULADA + por quién.
-  await supabase.from('entradas_deposito')
-    .update({ eliminado: true, eliminado_por: anuladoPor, eliminado_en: ahora })
-    .eq('id', entrada.id)
+  // (La entrada ya quedó marcada ANULADA + por quién al principio: el candado.)
   showAlert({ type: 'success', msg: `❌ Ingreso anulado por ${anuladoPor} — stock revertido${piezasNoRevert > 0 ? ` · ⚠️ ${piezasNoRevert} pieza(s) ya vendida(s)/despostada(s) no se revirtieron` : ''}` })
   cargarHistorial()
   onSaved()
@@ -4804,7 +4818,7 @@ async function ejecutarAnulacion(entrada) {
                 <label style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>Clave de caja</label>
                 <input type="password" autoFocus value={confirmAnular.clave}
                   onChange={ev => setConfirmAnular(c => ({ ...c, clave: ev.target.value, error: null }))}
-                  onKeyDown={ev => { if (ev.key === 'Enter') confirmarAnulacion() }}
+                  onKeyDown={ev => { if (ev.key === 'Enter' && !confirmAnular.loading) confirmarAnulacion() }}
                   style={{ width: '100%', boxSizing: 'border-box', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '10px 12px', fontSize: 14, fontFamily: "'DM Sans', sans-serif" }} />
               </div>
             )}
