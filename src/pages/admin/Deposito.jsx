@@ -3451,6 +3451,14 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
   // existe el cuadre (kg × precio = importe) además hacía saltar la alerta.
   const [form, setForm] = useState({ tipo: '', proveedor: '', descripcion: '', fecha: fechaHoyARG(), kg: '', precioKg: '', merma: '', destino: 'DEPOSITO', importe: '', cantidad: '1', cajaProductoId: '', polloProductoId: '', embutidoProductoId: '', brosaProductoId: '', hamburguesaProductoId: '' })
   const [historial, setHistorial] = useState([])
+  // INGRESO INTERNO (03/10/2026): en la CENTRAL, "proveedor FABRICIUS" no es
+  // una compra — es mercadería propia (las brosas que salen del desposte) que
+  // se cargaba a $1/kg y ensuciaba los costos y el "comprado". Va como
+  // interna (destino 'desposte'): suma al stock, sin precio y sin cta cte.
+  // En una SUCURSAL, FABRICIUS sí es un proveedor de verdad (le compra a la
+  // central), así que ahí no aplica.
+  const { isSucursal } = useAuth()
+  const esInternaPropia = !isSucursal && form.tipo !== 'bovino_mr' && /^\s*fabricius\b/i.test(form.proveedor || '')
   // Anular un ingreso pide la CLAVE DE CAJA (mig 102), que define el dueño en
   // Perfil → Contraseñas. Confirmación INLINE, nunca window.confirm: en
   // iPhone/PWA se suprime sin error y la acción se pierde (regla de oro N°4).
@@ -3823,11 +3831,15 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     // El resto usa el importe total. Así el capón nunca queda en $0 y suma al
     // debe del proveedor.
     const esPorKg = TIPOS_COMPRA_POR_KG.has(form.tipo)
-    const importe = esPorKg
+    const importe = esInternaPropia ? 0
+      : esPorKg
       ? kgTotal * parseNumero(form.precioKg)
       : parseNumero(form.importe)
-    // BLOQUEO: nada entra al depósito sin precio.
-    if (!(importe > 0)) {
+    if (esInternaPropia && !(kgTotal > 0)) {
+      showAlert({ type: 'error', msg: 'Cargá los kilos del ingreso.' }); return
+    }
+    // BLOQUEO: nada entra al depósito sin precio (salvo el ingreso interno).
+    if (!esInternaPropia && !(importe > 0)) {
       showAlert({ type: 'error', msg: esPorKg
         ? '⛔ Cargá el precio por kg — no se puede ingresar sin precio.'
         : '⛔ Cargá el importe (precio total) — no se puede ingresar al depósito sin precio.' })
@@ -3836,7 +3848,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     // BLOQUEO: los kg, el precio y el importe tienen que cerrar entre sí.
     // El panel del formulario ya lo muestra y ofrece corregirlo con un click;
     // esto es la red por si se llega igual al botón.
-    if (cuadre && !cuadre.cuadra) {
+    if (!esInternaPropia && cuadre && !cuadre.cuadra) {
       showAlert({ type: 'error', msg: `⛔ Los números no cuadran: ${fmtKg(cuadre.kgTotal)} × ${fmtPrecio(cuadre.precio)} = ${fmtPrecio(cuadre.esperado)}, pero el importe dice ${fmtPrecio(cuadre.importe)}. Corregí el importe o el precio antes de registrar.` })
       return
     }
@@ -3893,8 +3905,8 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
         descripcion: descripcionFinal, kg: kgTotal, kg_real: kgReal,
         // merma_tipo_id es de la media res, que ya no pasa por acá.
         merma_tipo_id: null,
-        merma_pct: parseNumero(form.merma), precio_kg: parseNumero(form.precioKg),
-        importe, destino: form.destino, cantidad
+        merma_pct: parseNumero(form.merma), precio_kg: esInternaPropia ? 0 : parseNumero(form.precioKg),
+        importe, destino: esInternaPropia ? 'desposte' : form.destino, cantidad
       }).select().single()
       if (error) { showAlert({ type: 'error', msg: error.message }); return }
       entradaInsertada = entradaNoMr
@@ -3940,7 +3952,7 @@ function EntradaForm({ onSaved, showAlert, proveedores }) {
     // carga de mercaderia, y una media res son 13 llamadas encadenadas.
     // (compras_proveedores alimenta el dashboard; la cta cte es el debe del
     // proveedor — ver las 3 tablas paralelas en CLAUDE.md.)
-    await Promise.all([
+    if (!esInternaPropia) await Promise.all([
       supabase.from('compras_proveedores').insert({
         fecha: form.fecha, proveedor_nombre: form.proveedor,
         producto: descripcionFinal,
@@ -4351,6 +4363,11 @@ async function ejecutarAnulacion(entrada) {
               <option value="">— Seleccioná —</option>
               {proveedores.map(p => <option key={p}>{p}</option>)}
             </select>
+            {esInternaPropia && (
+              <div style={{ marginTop: 6, fontSize: 12, color: 'var(--gold)', lineHeight: 1.4 }}>
+                🏭 Ingreso interno (mercadería propia): suma al stock, pero no lleva precio ni va a ninguna cuenta corriente.
+              </div>
+            )}
           </div>
           {/* La media res ya NO se nombra a mano ni con el tipo comercial:
               su nombre SALE de la clasificación de acá abajo. Este campo
@@ -4698,12 +4715,12 @@ async function ejecutarAnulacion(entrada) {
         )}
 
         <div style={{ fontSize: 12, color: 'var(--green)', marginBottom: 12 }}>
-          ✅ La entrada actualizará el stock y se registrará en Cuenta Proveedores
+          {esInternaPropia ? '🏭 Ingreso interno: actualiza el stock, sin precio y sin cuenta corriente' : '✅ La entrada actualizará el stock y se registrará en Cuenta Proveedores'}
         </div>
-        <button className="btn btn-gold" onClick={guardar} disabled={guardandoEntrada || (cuadre && !cuadre.cuadra)}
-          title={cuadre && !cuadre.cuadra ? 'Los kg, el precio y el importe no coinciden' : ''}
-          style={{ opacity: (guardandoEntrada || (cuadre && !cuadre.cuadra)) ? 0.5 : 1, cursor: (guardandoEntrada || (cuadre && !cuadre.cuadra)) ? 'not-allowed' : 'pointer' }}>
-          {guardandoEntrada ? '⏳ Registrando…' : (cuadre && !cuadre.cuadra) ? '⛔ Revisá los números' : '✅ Registrar entrada'}
+        <button className="btn btn-gold" onClick={guardar} disabled={guardandoEntrada || (!esInternaPropia && cuadre && !cuadre.cuadra)}
+          title={!esInternaPropia && cuadre && !cuadre.cuadra ? 'Los kg, el precio y el importe no coinciden' : ''}
+          style={{ opacity: (guardandoEntrada || (!esInternaPropia && cuadre && !cuadre.cuadra)) ? 0.5 : 1, cursor: (guardandoEntrada || (!esInternaPropia && cuadre && !cuadre.cuadra)) ? 'not-allowed' : 'pointer' }}>
+          {guardandoEntrada ? '⏳ Registrando…' : (!esInternaPropia && cuadre && !cuadre.cuadra) ? '⛔ Revisá los números' : '✅ Registrar entrada'}
         </button>
       </div>
 
